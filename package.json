@@ -1,0 +1,26 @@
+{
+  "name": "kavsak",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Kavşak — tüm mesajlaşma kanalların için yerel öncelikli, AI destekli tek gelen kutusu",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n core,web -c magenta,green \"npm run dev -w packages/core\" \"npm run dev -w apps/web\"",
+    "demo": "concurrently -n core,web -c magenta,green \"npm run demo -w packages/core\" \"npm run dev -w apps/web\"",
+    "build": "npm run build -w packages/core && npm run build -w apps/web",
+    "start": "npm run start -w packages/core",
+    "desktop": "concurrently -n core,desktop -c magenta,cyan \"npm run dev -w packages/core\" \"npm run dev -w apps/desktop\"",
+    "desktop:build": "npm run build -w apps/desktop",
+    "typecheck": "npm run typecheck -w packages/core && npm run typecheck -w apps/web",
+    "app": "npm run desktop:build && open \"apps/desktop/src-tauri/target/release/bundle/macos/Kavşak.app\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,249 @@
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { WebSocketServer, WebSocket } from 'ws';
+import type { Store } from './store.js';
+import type { Registry } from './registry.js';
+import type { Connector } from './connectors/base.js';
+import { resolveOAuth } from './connectors/mail.js';
+import { bus } from './bus.js';
+import { aiEnabled, draftReply } from './ai.js';
+import type { Platform } from './model.js';
+
+/**
+ * Yerel API: yalnızca 127.0.0.1'e bağlanır. Arayüz (ve ileride MCP/otomasyonlar) bunu kullanır.
+ * REST + tek bir WebSocket olay akışı (/ws).
+ */
+type Handler = (req: http.IncomingMessage, res: http.ServerResponse, params: Record<string, string>, body: unknown) => Promise<unknown> | unknown;
+
+const routes: Array<{ method: string; pattern: RegExp; keys: string[]; handler: Handler }> = [];
+
+function route(method: string, pathPattern: string, handler: Handler): void {
+  const keys: string[] = [];
+  const re = new RegExp('^' + pathPattern.replace(/:([a-zA-Z]+)/g, (_, k: string) => (keys.push(k), '([^/]+)')) + '$');
+  routes.push({ method, pattern: re, keys, handler });
+}
+
+class HttpError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+  }
+}
+
+export function createServer(store: Store, registry: Registry, port: number): http.Server {
+  // Bekleyen QR kodları: arayüz sonradan açılsa da eşleşme ekranı boş kalmasın
+  const pendingQr = new Map<string, string>();
+  bus.on((ev) => {
+    if (ev.type === 'account.qr') pendingQr.set(ev.accountId, ev.qrDataUrl);
+    if (ev.type === 'account.status' && ev.account.status !== 'pairing') pendingQr.delete(ev.account.id);
+  });
+
+  // ---------- routes ----------
+  route('GET', '/api/health', () => ({ ok: true, ai: aiEnabled(), stats: store.stats() }));
+
+  route('GET', '/api/accounts', () => registry.list().map((a) => ({ ...a, qrDataUrl: pendingQr.get(a.id) })));
+  route('POST', '/api/accounts', async (_r, _s, _p, body) => {
+    const b = body as { platform?: Platform; token?: string; label?: string };
+    if (!b.platform) throw new HttpError(400, 'platform gerekli');
+    return registry.add(b.platform, { token: b.token, label: b.label });
+  });
+  route('DELETE', '/api/accounts/:id', async (_r, _s, p) => {
+    await registry.remove(decodeURIComponent(p.id));
+    return { ok: true };
+  });
+  route('POST', '/api/accounts/:id/restart', async (_r, _s, p) => {
+    await registry.restart(decodeURIComponent(p.id));
+    return { ok: true };
+  });
+  route('POST', '/api/accounts/:id/input', (_r, _s, p, body) => {
+    const c = registry.get(decodeURIComponent(p.id));
+    const b = body as { kind: 'phone' | 'code' | 'password'; value: string };
+    if (!c?.provideInput) throw new HttpError(400, 'Bu hesap giriş beklemiyor');
+    c.provideInput(b.kind, String(b.value ?? '').trim());
+    return { ok: true };
+  });
+
+  route('GET', '/api/chats', () => store.listChats());
+  route('GET', '/api/chats/:id/messages', (req, _s, p) => {
+    const url = new URL(req.url ?? '/', 'http://x');
+    const limit = Number(url.searchParams.get('limit') ?? 100);
+    const before = url.searchParams.get('before');
+    return store.listMessages(decodeURIComponent(p.id), limit, before ? Number(before) : undefined);
+  });
+  route('POST', '/api/chats/:id/read', (_r, _s, p) => {
+    const id = decodeURIComponent(p.id);
+    store.markRead(id);
+    const chat = store.getChat(id);
+    if (chat) bus.emit({ type: 'chat.upsert', chat });
+    return { ok: true };
+  });
+  route('POST', '/api/chats/:id/tags', (_r, _s, p, body) => {
+    const id = decodeURIComponent(p.id);
+    store.setTags(id, ((body as { tags?: string[] }).tags ?? []).map((t) => String(t).trim()).filter(Boolean));
+    const chat = store.getChat(id);
+    if (chat) bus.emit({ type: 'chat.upsert', chat });
+    return chat;
+  });
+  route('POST', '/api/chats/:id/send', async (_r, _s, p, body) => {
+    const id = decodeURIComponent(p.id);
+    const chat = store.getChat(id);
+    if (!chat) throw new HttpError(404, 'Sohbet yok');
+    const text = String((body as { text?: string }).text ?? '').trim();
+    if (!text) throw new HttpError(400, 'Boş mesaj');
+    const c = registry.get(chat.accountId);
+    if (!c) throw new HttpError(409, 'Hesap bağlı değil');
+    return c.sendText(chat.remoteId, text);
+  });
+  route('POST', '/api/chats/open', async (_r, _s, _p, body) => {
+    const b = body as { accountId?: string; participant?: { id: string; name: string; handle?: string; avatarUrl?: string } };
+    if (!b.accountId || !b.participant?.id) throw new HttpError(400, 'accountId ve participant gerekli');
+    const c = registry.get(b.accountId) as (Connector & { openChatWith?: (p: { id: string; name: string }) => Promise<unknown> }) | undefined;
+    if (!c?.openChatWith) throw new HttpError(400, 'Hesap bağlı değil');
+    return c.openChatWith(b.participant);
+  });
+  route('POST', '/api/chats/:id/action', async (_r, _s, p, body) => {
+    const chat = store.getChat(decodeURIComponent(p.id));
+    if (!chat) throw new HttpError(404, 'Sohbet yok');
+    const c = registry.get(chat.accountId);
+    if (!c?.action) throw new HttpError(400, 'Bu platformda işlem desteklenmiyor');
+    await c.action(chat.remoteId, (body ?? {}) as Record<string, unknown>);
+    return store.getChat(chat.id);
+  });
+  route('POST', '/api/chats/:id/history', async (_r, _s, p, body) => {
+    const id = decodeURIComponent(p.id);
+    const chat = store.getChat(id);
+    if (!chat) throw new HttpError(404, 'Sohbet yok');
+    const c = registry.get(chat.accountId);
+    if (c?.loadHistory) await c.loadHistory(chat.remoteId, Number((body as { limit?: number }).limit ?? 50));
+    return { ok: true };
+  });
+  route('POST', '/api/chats/:id/draft', async (_r, _s, p, body) => {
+    const id = decodeURIComponent(p.id);
+    const chat = store.getChat(id);
+    if (!chat) throw new HttpError(404, 'Sohbet yok');
+    const tone = (body as { tone?: 'default' | 'short' | 'formal' | 'en' }).tone;
+    const result = await draftReply({ chat, messages: store.listMessages(id, 30), mySamples: store.myRecentMessages(id), tone });
+    if (!result) throw new HttpError(503, 'AI taslak kapalı: ANTHROPIC_API_KEY tanımlı değil');
+    return result;
+  });
+  route('GET', '/api/logs', () => bus.recent.slice(-200));
+  route('GET', '/api/search', (req) => {
+    const q = new URL(req.url ?? '/', 'http://x').searchParams.get('q') ?? '';
+    return q.trim() ? store.search(q) : [];
+  });
+
+  // ---------- static (derlenmiş arayüz varsa) ----------
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const distDir = [path.resolve(here, '../../../apps/web/dist'), path.resolve(here, '../../apps/web/dist')].find((d) => fs.existsSync(d));
+
+  const server = http.createServer(async (req, res) => {
+    const origin = req.headers.origin;
+    // Yerel arayüzler: Vite (localhost:5173), Tauri (tauri://localhost / http://tauri.localhost) ve WKWebView'ın
+    // özel şema sayfaları için gönderdiği "null" kaynağı. Sunucu yalnızca 127.0.0.1'e bağlıdır.
+    if (origin && (origin === 'null' || /^(https?:\/\/(localhost|127\.0\.0\.1|tauri\.localhost)(:\d+)?|tauri:\/\/localhost|asset:\/\/localhost)$/.test(origin))) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'content-type');
+    }
+    if (req.method === 'OPTIONS') return void res.writeHead(204).end();
+
+    const url = new URL(req.url ?? '/', 'http://x');
+    try {
+      if (req.method === 'GET' && url.pathname === '/oauth/callback') {
+        const ok = resolveOAuth(url.searchParams.get('state') ?? '', { code: url.searchParams.get('code') ?? undefined, error: url.searchParams.get('error') ?? undefined });
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        return void res.end(
+          `<!doctype html><meta charset="utf-8"><body style="font-family:-apple-system,Inter,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#f7f6fa;color:#111016"><div style="text-align:center"><div style="font-size:40px">${ok ? '✅' : '⚠️'}</div><h2 style="margin:8px 0">${ok ? 'Bağlandı' : 'Bekleyen giriş yok'}</h2><p style="color:#6b6878">Bu pencere kendiliğinden kapanır; kapanmazsa kapatabilirsin.</p></div><script>setTimeout(()=>window.close(),1200)</script>`,
+        );
+      }
+      // Medya vekili: /api/media/<hesap>?u=<uzak adres> — çerezli oturumla indirir, önbelleğe alır
+      if (req.method === 'GET' && url.pathname.startsWith('/api/media/')) {
+        const id = decodeURIComponent(url.pathname.slice('/api/media/'.length));
+        const u = url.searchParams.get('u') ?? '';
+        const c = registry.get(id);
+        if (!c?.fetchMedia) throw new HttpError(404, 'Bu hesap medya sunmuyor');
+        if (!u) throw new HttpError(400, 'u gerekli');
+        const m = await c.fetchMedia(u);
+        if (!m) throw new HttpError(503, 'Oturum açık değil');
+        res.writeHead(200, { 'content-type': m.type, 'content-length': m.body.length, 'cache-control': 'private, max-age=86400' });
+        return void res.end(m.body);
+      }
+      for (const r of routes) {
+        if (r.method !== req.method) continue;
+        const m = r.pattern.exec(url.pathname);
+        if (!m) continue;
+        const params = Object.fromEntries(r.keys.map((k, i) => [k, m[i + 1]]));
+        const body = req.method === 'POST' ? await readJson(req) : undefined;
+        const out = await r.handler(req, res, params, body);
+        res.writeHead(200, { 'content-type': 'application/json' });
+        return void res.end(JSON.stringify(out ?? null));
+      }
+      if (url.pathname.startsWith('/api/')) throw new HttpError(404, 'Yol yok');
+      if (distDir) return serveStatic(distDir, url.pathname, res);
+      res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
+      res.end('Kavşak çekirdeği çalışıyor. Arayüz için: npm run dev -w apps/web');
+    } catch (e) {
+      const status = e instanceof HttpError ? e.status : 500;
+      if (status === 500) bus.log('error', `API: ${(e as Error).stack ?? e}`);
+      res.writeHead(status, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: (e as Error).message }));
+    }
+  });
+
+  // WebKit (Tauri) bağlantıyı yeniden kullanırken sunucu keep-alive'ı erken kapatırsa "Load failed" oluşur
+  server.keepAliveTimeout = 120_000;
+  server.headersTimeout = 125_000;
+
+  // ---------- websocket ----------
+  const wss = new WebSocketServer({ server, path: '/ws' });
+  wss.on('connection', (client) => {
+    // Yeni bağlanan arayüze bekleyen QR'ları hemen gönder
+    for (const [accountId, qrDataUrl] of pendingQr) client.send(JSON.stringify({ type: 'account.qr', accountId, qrDataUrl }));
+  });
+  const unsub = bus.on((ev) => {
+    const payload = JSON.stringify(ev);
+    for (const client of wss.clients) if (client.readyState === WebSocket.OPEN) client.send(payload);
+  });
+  server.on('close', unsub);
+
+  server.listen(port, '127.0.0.1', () => bus.log('info', `Yerel API hazır: http://127.0.0.1:${port}  (ws: /ws)`));
+  return server;
+}
+
+function readJson(req: http.IncomingMessage): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.setEncoding('utf8');
+    req.on('data', (c) => (data += c));
+    req.on('end', () => {
+      if (!data) return resolve({});
+      try {
+        resolve(JSON.parse(data));
+      } catch {
+        reject(new HttpError(400, 'Geçersiz JSON'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+const MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript',
+  '.css': 'text/css',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.json': 'application/json',
+  '.woff2': 'font/woff2',
+};
+
+function serveStatic(dir: string, pathname: string, res: http.ServerResponse): void {
+  let file = path.join(dir, path.normalize(pathname).replace(/^(\.\.[/\\])+/, ''));
+  if (!file.startsWith(dir)) file = path.join(dir, 'index.html');
+  if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(dir, 'index.html');
+  res.writeHead(200, { 'content-type': MIME[path.extname(file)] ?? 'application/octet-stream' });
+  fs.createReadStream(file).pipe(res);
+}

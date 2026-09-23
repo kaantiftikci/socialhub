@@ -1,0 +1,327 @@
+import Database from 'better-sqlite3';
+import { DB_PATH } from './config.js';
+import type { Account, Chat, Message, Platform } from './model.js';
+
+/**
+ * Yerel SQLite deposu. Şema küçük tutuldu; FTS5 ile tam metin arama var.
+ * Üretimde SQLCipher ile şifrelenir (anahtar Keychain'de) — bu demo düz SQLite kullanır.
+ */
+export class Store {
+  private db: Database.Database;
+
+  constructor(path = DB_PATH) {
+    this.db = new Database(path);
+    this.db.pragma('journal_mode = WAL');
+    this.db.pragma('foreign_keys = ON');
+    this.migrate();
+  }
+
+  private migrate(): void {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS accounts (
+        id TEXT PRIMARY KEY,
+        platform TEXT NOT NULL,
+        label TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'disconnected',
+        detail TEXT,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS chats (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        platform TEXT NOT NULL,
+        remote_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'direct',
+        unread INTEGER NOT NULL DEFAULT 0,
+        last_message_at INTEGER NOT NULL DEFAULT 0,
+        last_preview TEXT NOT NULL DEFAULT '',
+        avatar_url TEXT,
+        tags TEXT NOT NULL DEFAULT '[]',
+        UNIQUE(account_id, remote_id)
+      );
+      CREATE INDEX IF NOT EXISTS chats_last ON chats(last_message_at DESC);
+      CREATE TABLE IF NOT EXISTS messages (
+        id TEXT PRIMARY KEY,
+        chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+        remote_id TEXT NOT NULL,
+        sender_id TEXT NOT NULL,
+        sender_name TEXT NOT NULL,
+        from_me INTEGER NOT NULL DEFAULT 0,
+        text TEXT NOT NULL DEFAULT '',
+        ts INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'sent',
+        attachments TEXT,
+        UNIQUE(chat_id, remote_id)
+      );
+      CREATE INDEX IF NOT EXISTS messages_chat_ts ON messages(chat_id, ts);
+      CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(text, content='messages', content_rowid='rowid');
+      CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+        INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text);
+      END;
+      CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+        INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+      END;
+      CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE OF text ON messages BEGIN
+        INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+        INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text);
+      END;
+    `);
+    // hafif göç: sonradan eklenen sütunlar
+    const cols = new Set((this.db.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>).map((c) => c.name));
+    if (!cols.has('sender_avatar')) this.db.exec('ALTER TABLE messages ADD COLUMN sender_avatar TEXT');
+    const ccols = new Set((this.db.prepare('PRAGMA table_info(chats)').all() as Array<{ name: string }>).map((c) => c.name));
+    if (!ccols.has('handle')) this.db.exec('ALTER TABLE chats ADD COLUMN handle TEXT');
+    if (!ccols.has('link')) this.db.exec('ALTER TABLE chats ADD COLUMN link TEXT');
+    if (!ccols.has('participants')) this.db.exec('ALTER TABLE chats ADD COLUMN participants TEXT');
+    if (!ccols.has('meta')) this.db.exec('ALTER TABLE chats ADD COLUMN meta TEXT');
+  }
+
+  // ---------- accounts ----------
+  upsertAccount(a: Account): void {
+    this.db
+      .prepare(
+        `INSERT INTO accounts (id, platform, label, status, detail, created_at) VALUES (@id, @platform, @label, @status, @detail, @createdAt)
+         ON CONFLICT(id) DO UPDATE SET label = excluded.label, status = excluded.status, detail = excluded.detail`,
+      )
+      .run({ ...a, detail: a.detail ?? null });
+  }
+
+  listAccounts(): Account[] {
+    return this.db.prepare('SELECT * FROM accounts ORDER BY created_at').all().map(rowToAccount);
+  }
+
+  getAccount(id: string): Account | undefined {
+    const r = this.db.prepare('SELECT * FROM accounts WHERE id = ?').get(id);
+    return r ? rowToAccount(r) : undefined;
+  }
+
+  deleteAccount(id: string): void {
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM messages WHERE chat_id IN (SELECT id FROM chats WHERE account_id = ?)').run(id);
+      this.db.prepare('DELETE FROM chats WHERE account_id = ?').run(id);
+      this.db.prepare('DELETE FROM accounts WHERE id = ?').run(id);
+    })();
+  }
+
+  // ---------- chats ----------
+  upsertChat(c: Chat): Chat {
+    this.db
+      .prepare(
+        `INSERT INTO chats (id, account_id, platform, remote_id, name, kind, unread, last_message_at, last_preview, avatar_url, tags, handle, link, participants, meta)
+         VALUES (@id, @accountId, @platform, @remoteId, @name, @kind, @unread, @lastMessageAt, @lastPreview, @avatarUrl, @tags, @handle, @link, @participants, @meta)
+         ON CONFLICT(id) DO UPDATE SET
+           name = CASE WHEN excluded.name <> '' THEN excluded.name ELSE chats.name END,
+           kind = excluded.kind,
+           unread = excluded.unread,
+           last_message_at = MAX(chats.last_message_at, excluded.last_message_at),
+           last_preview = CASE WHEN excluded.last_message_at >= chats.last_message_at THEN excluded.last_preview ELSE chats.last_preview END,
+           avatar_url = COALESCE(excluded.avatar_url, chats.avatar_url),
+           handle = COALESCE(excluded.handle, chats.handle),
+           link = COALESCE(excluded.link, chats.link),
+           participants = COALESCE(excluded.participants, chats.participants),
+           meta = COALESCE(excluded.meta, chats.meta)`,
+      )
+      .run({
+        ...c,
+        avatarUrl: c.avatarUrl ?? null,
+        tags: JSON.stringify(c.tags ?? []),
+        handle: c.handle ?? null,
+        link: c.link ?? null,
+        participants: c.participants ? JSON.stringify(c.participants) : null,
+        meta: c.meta ? JSON.stringify(c.meta) : null,
+      });
+    return this.getChat(c.id)!;
+  }
+
+  /** Bir sohbetin mesajlarını başka bir sohbete taşı ve kaynağı sil (aynı kişinin lid/numara kopyaları). */
+  mergeChats(fromId: string, toId: string): void {
+    if (fromId === toId) return;
+    this.db.transaction(() => {
+      const rows = this.db.prepare('SELECT id, remote_id FROM messages WHERE chat_id = ?').all(fromId) as Array<{ id: string; remote_id: string }>;
+      for (const r of rows) {
+        const newId = `${toId}#${r.remote_id}`;
+        if (this.hasMessage(newId)) this.db.prepare('DELETE FROM messages WHERE id = ?').run(r.id);
+        else this.db.prepare('UPDATE messages SET id = ?, chat_id = ? WHERE id = ?').run(newId, toId, r.id);
+      }
+      const from = this.getChat(fromId);
+      const to = this.getChat(toId);
+      if (from && to) {
+        this.db
+          .prepare('UPDATE chats SET unread = unread + ?, last_message_at = MAX(last_message_at, ?), last_preview = CASE WHEN ? > last_message_at THEN ? ELSE last_preview END, avatar_url = COALESCE(avatar_url, ?) WHERE id = ?')
+          .run(from.unread, from.lastMessageAt, from.lastMessageAt, from.lastPreview, from.avatarUrl ?? null, toId);
+      }
+      this.db.prepare('DELETE FROM chats WHERE id = ?').run(fromId);
+    })();
+  }
+
+  /** Bir gönderenin adını/fotoğrafını geçmiş mesajlarda güncelle (rehber adı sonradan öğrenilince). */
+  renameSender(accountId: string, senderId: string, name: string, avatar?: string): void {
+    this.db
+      .prepare(`UPDATE messages SET sender_name = ?, sender_avatar = COALESCE(?, sender_avatar) WHERE sender_id = ? AND chat_id LIKE ? AND from_me = 0 AND sender_name <> ?`)
+      .run(name, avatar ?? null, senderId, accountId + '/%', name);
+  }
+
+  getChat(id: string): Chat | undefined {
+    const r = this.db.prepare('SELECT * FROM chats WHERE id = ?').get(id);
+    return r ? rowToChat(r) : undefined;
+  }
+
+  listChats(limit = 600): Chat[] {
+    return this.db.prepare('SELECT * FROM chats ORDER BY last_message_at DESC LIMIT ?').all(limit).map(rowToChat);
+  }
+
+  markRead(id: string): void {
+    this.db.prepare('UPDATE chats SET unread = 0 WHERE id = ?').run(id);
+  }
+
+  setTags(id: string, tags: string[]): void {
+    this.db.prepare('UPDATE chats SET tags = ? WHERE id = ?').run(JSON.stringify(tags), id);
+  }
+
+  // ---------- messages ----------
+  /** Mesajı kaydeder; sohbetin özetini (son mesaj, okunmamış) günceller. Yeni eklendiyse true döner. */
+  upsertMessage(m: Message, opts: { bumpUnread?: boolean } = {}): boolean {
+    const existed = this.hasMessage(m.id);
+    this.db
+      .prepare(
+        `INSERT INTO messages (id, chat_id, remote_id, sender_id, sender_name, from_me, text, ts, status, attachments, sender_avatar)
+         VALUES (@id, @chatId, @remoteId, @senderId, @senderName, @fromMe, @text, @ts, @status, @attachments, @senderAvatar)
+         ON CONFLICT(id) DO UPDATE SET
+           status = excluded.status,
+           text = CASE WHEN excluded.text <> '' THEN excluded.text WHEN excluded.attachments IS NOT NULL THEN '' ELSE messages.text END,
+           attachments = COALESCE(excluded.attachments, messages.attachments),
+           sender_avatar = COALESCE(excluded.sender_avatar, messages.sender_avatar),
+           sender_name = CASE WHEN excluded.sender_name <> '' THEN excluded.sender_name ELSE messages.sender_name END`,
+      )
+      .run({ ...m, fromMe: m.fromMe ? 1 : 0, attachments: m.attachments ? JSON.stringify(m.attachments) : null, senderAvatar: m.senderAvatarUrl ?? null });
+    const inserted = !existed;
+    const chat = this.getChat(m.chatId);
+    if (chat) {
+      const preview = m.text || (m.attachments?.length ? `[${m.attachments[0].name ?? m.attachments[0].kind}]` : '');
+      const isNewer = m.ts >= chat.lastMessageAt;
+      this.db
+        .prepare('UPDATE chats SET last_message_at = ?, last_preview = ?, unread = ? WHERE id = ?')
+        .run(
+          Math.max(chat.lastMessageAt, m.ts),
+          isNewer ? preview : chat.lastPreview,
+          opts.bumpUnread && inserted && !m.fromMe ? chat.unread + 1 : chat.unread,
+          m.chatId,
+        );
+    }
+    return inserted;
+  }
+
+  hasMessage(id: string): boolean {
+    return !!this.db.prepare('SELECT 1 FROM messages WHERE id = ?').get(id);
+  }
+
+  listMessages(chatId: string, limit = 100, before?: number): Message[] {
+    const rows = before
+      ? this.db.prepare('SELECT * FROM messages WHERE chat_id = ? AND ts < ? ORDER BY ts DESC LIMIT ?').all(chatId, before, limit)
+      : this.db.prepare('SELECT * FROM messages WHERE chat_id = ? ORDER BY ts DESC LIMIT ?').all(chatId, limit);
+    return rows.map(rowToMessage).reverse();
+  }
+
+  /** Kullanıcının bu sohbette daha önce yazdığı mesajlar: AI taslağının "senin tarzın" örnekleri. */
+  myRecentMessages(chatId: string, limit = 8): string[] {
+    return this.db
+      .prepare('SELECT text FROM messages WHERE chat_id = ? AND from_me = 1 AND length(text) > 12 ORDER BY ts DESC LIMIT ?')
+      .all(chatId, limit)
+      .map((r) => (r as { text: string }).text);
+  }
+
+  search(q: string, limit = 50): Array<{ message: Message; chat: Chat }> {
+    const rows = this.db
+      .prepare(
+        `SELECT m.* FROM messages_fts f JOIN messages m ON m.rowid = f.rowid WHERE messages_fts MATCH ? ORDER BY m.ts DESC LIMIT ?`,
+      )
+      .all(ftsQuery(q), limit)
+      .map(rowToMessage);
+    return rows.flatMap((message) => {
+      const chat = this.getChat(message.chatId);
+      return chat ? [{ message, chat }] : [];
+    });
+  }
+
+  stats(): { accounts: number; chats: number; messages: number; unread: number } {
+    const one = (sql: string) => Number((this.db.prepare(sql).get() as { n: number }).n);
+    return {
+      accounts: one('SELECT COUNT(*) AS n FROM accounts'),
+      chats: one('SELECT COUNT(*) AS n FROM chats'),
+      messages: one('SELECT COUNT(*) AS n FROM messages'),
+      unread: one('SELECT COALESCE(SUM(unread),0) AS n FROM chats'),
+    };
+  }
+
+  close(): void {
+    this.db.close();
+  }
+}
+
+function ftsQuery(q: string): string {
+  // Her kelimeyi tırnaklayıp önek araması yap: "sözleş"* gibi
+  return q
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => `"${w.replace(/"/g, '""')}"*`)
+    .join(' ');
+}
+
+function rowToAccount(r: unknown): Account {
+  const x = r as Record<string, unknown>;
+  return {
+    id: String(x.id),
+    platform: x.platform as Platform,
+    label: String(x.label),
+    status: x.status as Account['status'],
+    detail: (x.detail as string | null) ?? undefined,
+    createdAt: Number(x.created_at),
+  };
+}
+
+function rowToChat(r: unknown): Chat {
+  const x = r as Record<string, unknown>;
+  return {
+    id: String(x.id),
+    accountId: String(x.account_id),
+    platform: x.platform as Platform,
+    remoteId: String(x.remote_id),
+    name: String(x.name),
+    kind: x.kind as Chat['kind'],
+    unread: Number(x.unread),
+    lastMessageAt: Number(x.last_message_at),
+    lastPreview: String(x.last_preview),
+    avatarUrl: (x.avatar_url as string | null) ?? undefined,
+    tags: safeJson<string[]>(x.tags as string, []),
+    handle: (x.handle as string | null) ?? undefined,
+    link: (x.link as string | null) ?? undefined,
+    participants: x.participants ? safeJson<Chat['participants']>(x.participants as string, undefined) : undefined,
+    meta: x.meta ? safeJson<Chat['meta']>(x.meta as string, undefined) : undefined,
+  };
+}
+
+function rowToMessage(r: unknown): Message {
+  const x = r as Record<string, unknown>;
+  return {
+    id: String(x.id),
+    chatId: String(x.chat_id),
+    remoteId: String(x.remote_id),
+    senderId: String(x.sender_id),
+    senderName: String(x.sender_name),
+    fromMe: Number(x.from_me) === 1,
+    text: String(x.text),
+    ts: Number(x.ts),
+    status: x.status as Message['status'],
+    attachments: x.attachments ? safeJson(x.attachments as string, undefined) : undefined,
+    senderAvatarUrl: x.sender_avatar ? String(x.sender_avatar) : undefined,
+  };
+}
+
+function safeJson<T>(s: string, fallback: T): T {
+  try {
+    return JSON.parse(s) as T;
+  } catch {
+    return fallback;
+  }
+}

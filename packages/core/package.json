@@ -1,0 +1,38 @@
+{
+  "name": "@kavsak/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "demo": "tsx src/index.ts --demo",
+    "start": "node dist/index.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@slack/web-api": "^7.9.1",
+    "@whiskeysockets/baileys": "^6.7.24",
+    "better-sqlite3": "^11.10.0",
+    "big-integer": "^1.6.52",
+    "imapflow": "^2.0.6",
+    "mailparser": "^3.9.28",
+    "nodemailer": "^10.0.10",
+    "pino": "^9.7.0",
+    "playwright": "^1.52.0",
+    "qrcode": "^1.5.4",
+    "telegram": "^2.26.22",
+    "ws": "^8.18.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/mailparser": "^3.4.6",
+    "@types/node": "^22.15.0",
+    "@types/nodemailer": "^8.0.2",
+    "@types/qrcode": "^1.5.5",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}
