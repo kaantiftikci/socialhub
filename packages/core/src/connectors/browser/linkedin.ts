@@ -53,7 +53,9 @@ function install(page: Page): void {
     if (u.includes('messengerConversations') && !u.includes('messengerConversationsBySyncToken')) captured.conversations = u;
     else if (u.includes('messengerConversations')) captured.conversations ??= u;
     if (u.includes('messengerMessages')) captured.messages = u;
-    // istemcinin gönderdiği başlıkları (x-li-track, page-instance vb.) aynen kullan
+    // istemcinin gönderdiği başlıkları (x-li-track, page-instance vb.) aynen kullan — yalnızca
+    // GET sohbet/mesaj sorgularından; POST'lar (seen-receipts vb.) farklı pem/page-instance taşır
+    if (req.method() !== 'GET' || !/messenger(Conversations|Messages)/.test(u)) return;
     const h: Record<string, string> = {};
     for (const [k, v] of Object.entries(req.headers())) if (/^(x-li-|x-restli|accept$|csrf-token)/i.test(k)) h[k] = v;
     captured.headers = h;
@@ -90,9 +92,11 @@ function withConversation(template: string, conversationUrn: string): string {
   }
   const original = template.slice(start, end);
   const rawParens = original.includes('(');
+  // encodeURIComponent parantezleri kodlamaz; istemci %28/%29 gönderiyor ve Rest.li ham parantezi
+  // kendi sözdizimi sanıp 400 döndürüyor → parantezler her zaman elle kodlanır.
   const encoded = rawParens
     ? conversationUrn.replace(/:/g, '%3A').replace(/,/g, '%2C').replace(/=/g, '%3D')
-    : encodeURIComponent(conversationUrn);
+    : encodeURIComponent(conversationUrn).replace(/\(/g, '%28').replace(/\)/g, '%29');
   return template.slice(0, start) + encoded + template.slice(end);
 }
 
@@ -106,6 +110,7 @@ const convId = (urn: string) => {
 
 let meId = '';
 let meUrn = '';
+let templateWarned = false;
 
 function memberOf(p: J | undefined): { id: string; name: string; avatar?: string; handle?: string } {
   const m = p?.participantType?.member ?? p?.participantType?.organization ?? p?.member ?? {};
@@ -227,7 +232,11 @@ export const linkedin: Strategy = {
       try {
         data = await voyager(page, cookies, url, { graphql: true });
       } catch (e) {
-        bus.log('warn', `LinkedIn mesaj sorgusu reddedildi; şablon: ${captured.messages.slice(0, 400)} → ${url.slice(0, 400)}`);
+        // şablon ayrıntısı yalnızca ilk kez basılır; köprü zaten yoklama başına tek özet uyarı verir
+        if (!templateWarned) {
+          templateWarned = true;
+          bus.log('warn', `LinkedIn mesaj sorgusu reddedildi; şablon: ${captured.messages.slice(0, 400)} → ${url.slice(0, 400)}`);
+        }
         throw e;
       }
       const els = findElements(data, 'messengerMessages');

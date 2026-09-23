@@ -23,6 +23,11 @@ export default function App() {
   const [platformFilter, setPlatformFilter] = useState<Platform | null>(null);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [smartSort, setSmartSort] = useState(false);
+  const [listSearch, setListSearch] = useState(false);
+  /** iMessage klasörü: Mesajlar uygulamasındaki Bilinmeyen / İstenmeyen / SMS filtresi / Son silinenler */
+  const [imFolder, setImFolder] = useState<'unknown' | 'junk' | 'sms' | 'deleted' | null>(null);
+  const [olderBusy, setOlderBusy] = useState(false);
+  const [noMoreOlder, setNoMoreOlder] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [booting, setBooting] = useState(false);
   const [sound, setSoundState] = useState<string>(() => getSound());
@@ -117,6 +122,30 @@ export default function App() {
       const info = isTauri ? await coreInfo() : '';
       notify(lastErr + (info ? '\n' + info : ''), true);
     })();
+    // Geçmiş eşitlemesinde saniyede binlerce chat/message olayı gelir; her biri için ayrı render yerine
+    // 150 ms'lik pencerede biriktirip tek seferde uygula.
+    const pendingChats = new Map<string, Chat>();
+    const pendingDeletes = new Set<string>();
+    let flushTimer: number | undefined;
+    const flushChats = () => {
+      flushTimer = undefined;
+      if (!pendingChats.size && !pendingDeletes.size) return;
+      const upserts = new Map(pendingChats);
+      const deletes = new Set(pendingDeletes);
+      pendingChats.clear();
+      pendingDeletes.clear();
+      setChats((prev) => {
+        const n = new Map(prev);
+        for (const id of deletes) n.delete(id);
+        for (const [id, c] of upserts) n.set(id, c);
+        return n;
+      });
+    };
+    const queueChat = (chat: Chat) => {
+      pendingDeletes.delete(chat.id);
+      pendingChats.set(chat.id, chat);
+      if (flushTimer === undefined) flushTimer = window.setTimeout(flushChats, 150);
+    };
     const onEvent = (ev: CoreEvent) => {
       switch (ev.type) {
         case 'account.status':
@@ -136,18 +165,16 @@ export default function App() {
           setPrompts((p) => ({ ...p, [ev.accountId]: { prompt: ev.prompt, message: ev.message } }));
           break;
         case 'chat.upsert':
-          setChats((prev) => new Map(prev).set(ev.chat.id, ev.chat));
+          queueChat(ev.chat);
           break;
         case 'chat.delete':
-          setChats((prev) => {
-            const n = new Map(prev);
-            n.delete(ev.chatId);
-            return n;
-          });
+          pendingChats.delete(ev.chatId);
+          pendingDeletes.add(ev.chatId);
+          if (flushTimer === undefined) flushTimer = window.setTimeout(flushChats, 150);
           setSelected((sel) => (sel === ev.chatId ? null : sel));
           break;
         case 'message.upsert':
-          setChats((prev) => new Map(prev).set(ev.chat.id, ev.chat));
+          queueChat(ev.chat);
           if (!ev.message.fromMe && Date.now() - ev.message.ts < 60_000) {
             void windowFocused().then((focused) => {
               if (!focused || ev.message.chatId !== selectedRef.current) {
@@ -180,6 +207,7 @@ export default function App() {
       cancelled = true;
       stop();
       clearInterval(t);
+      if (flushTimer !== undefined) clearTimeout(flushTimer);
     };
   }, [refresh, notify]);
 
@@ -242,6 +270,15 @@ export default function App() {
   const chatList = useMemo(() => {
     let list = [...activeChats];
     if (platformFilter) list = list.filter((c) => c.platform === platformFilter);
+    // iMessage klasörleri: filtrelenmiş sohbetler (bilinmeyen/istenmeyen/SMS) gelen kutusunda görünmez; klasör seçilince yalnızca o klasör
+    const imActive = platformFilter === 'imessage' ? imFolder : null;
+    list = list.filter((c) => {
+      if (c.platform !== 'imessage') return true;
+      const folder = c.meta?.folder as string | undefined;
+      if (imActive === 'deleted') return !!c.meta?.deleted;
+      if (imActive) return folder === imActive;
+      return !folder;
+    });
     if (tagFilter) list = list.filter((c) => c.tags.includes(tagFilter));
     if (filter === 'unread') list = list.filter((c) => c.unread > 0);
     if (filter === 'waiting') list = list.filter(isWaiting);
@@ -251,7 +288,7 @@ export default function App() {
     }
     list.sort((a, b) => (smartSort ? score(b) - score(a) : 0) || b.lastMessageAt - a.lastMessageAt);
     return list;
-  }, [activeChats, filter, platformFilter, tagFilter, query, smartSort]);
+  }, [activeChats, filter, platformFilter, tagFilter, query, smartSort, imFolder]);
 
   const totals = useMemo(() => {
     let unread = 0;
@@ -508,6 +545,9 @@ export default function App() {
                   <h1>{view === 'snoozed' ? 'Ertelenenler' : platformFilter ? PLATFORMS[platformFilter].name : tagFilter ? capitalize(tagFilter) : 'Gelen kutusu'}</h1>
                   {view !== 'snoozed' && scoped.unread > 0 && <span className="pill">{scoped.unread} yeni</span>}
                   <span style={{ flexGrow: 1 }} />
+                  <button className={`btn icon b b2 ${listSearch || query ? 'soft' : ''}`} aria-label="Sohbetlerde ara" title="Sohbetlerde ara" onClick={() => (setListSearch(!listSearch), listSearch && setQuery(''))}>
+                    <Icon name="search" size={15} sw={2} />
+                  </button>
                   <button className={`btn icon b b2 ${smartSort ? 'soft' : ''}`} aria-label="Akıllı sıralama" title={smartSort ? 'Akıllı sıralama açık' : 'Zamana göre'} onClick={() => setSmartSort(!smartSort)}>
                     <Icon name="sparkle" size={15} sw={2} />
                   </button>
@@ -516,6 +556,26 @@ export default function App() {
                   </button>
                 </div>
 
+                {listSearch && (
+                  <label className="search" style={{ margin: 0 }}>
+                    <Icon name="search" size={15} />
+                    <input autoFocus placeholder="Sohbetlerde ara (ad, son mesaj)" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && (setQuery(''), setListSearch(false))} />
+                    {query && (
+                      <button className="btn ghost xs icon b" aria-label="Temizle" onClick={() => setQuery('')}>
+                        <Icon name="x" size={13} sw={2} />
+                      </button>
+                    )}
+                  </label>
+                )}
+                {view === 'inbox' && platformFilter === 'imessage' && (
+                  <div className="tabs" role="tablist" aria-label="iMessage klasörleri">
+                    {([[null, 'Mesajlar'], ['unknown', 'Bilinmeyen'], ['junk', 'İstenmeyen'], ['sms', 'SMS'], ['deleted', 'Silinenler']] as Array<[typeof imFolder, string]>).map(([f, label]) => (
+                      <button key={String(f)} role="tab" aria-selected={imFolder === f} className={imFolder === f ? 'active' : ''} onClick={() => setImFolder(f)}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {view === 'inbox' && waitingChats.length > 0 && (
                   <>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: -6 }}>
@@ -654,6 +714,25 @@ export default function App() {
                 onTags={(tags) => api.setTags(current.id, tags).then((c) => setChats((p) => new Map(p).set(c.id, c))).catch((e) => notify(e.message, true))}
                 showDetails={showDetails}
                 onToggleDetails={() => setShowDetails(!showDetails)}
+                olderBusy={olderBusy}
+                hasOlder={noMoreOlder !== current.id && messages.length >= 100}
+                onLoadOlder={async () => {
+                  const oldest = messages[0];
+                  if (!oldest || olderBusy) return;
+                  setOlderBusy(true);
+                  try {
+                    const more = await api.messages(current.id, 100, oldest.ts);
+                    if (more.length === 0) setNoMoreOlder(current.id);
+                    setMessages((prev) => {
+                      const ids = new Set(prev.map((m) => m.id));
+                      return [...more.filter((m) => !ids.has(m.id)), ...prev];
+                    });
+                  } catch (e) {
+                    notify((e as Error).message, true);
+                  } finally {
+                    setOlderBusy(false);
+                  }
+                }}
                 onOpenChat={(c) => {
                   setChats((p) => new Map(p).set(c.id, c));
                   setSelected(c.id);

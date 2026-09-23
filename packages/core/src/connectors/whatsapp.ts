@@ -35,6 +35,48 @@ export class WhatsAppConnector extends BaseConnector {
   private failedBeforeOpen = 0;
   private opened = false;
   private retryTimer?: NodeJS.Timeout;
+  private refreshTimer?: NodeJS.Timeout;
+  private saveTimer?: NodeJS.Timeout;
+  private loadingNames = false;
+  /** Mesajlara en son uygulanan ad/fotoğraf (gönderen → imza); değişmediyse UPDATE atılmaz */
+  private appliedSender = new Map<string, string>();
+
+  /** Öğrenilen lid↔numara eşlemeleri ve adlar oturumlar arasında kaybolmasın (~/.kavsak/sessions/<hesap>/names.json) */
+  private namesFile(): string {
+    return path.join(sessionDir(this.account.id), 'names.json');
+  }
+
+  private loadNames(): void {
+    try {
+      const raw = JSON.parse(fs.readFileSync(this.namesFile(), 'utf8')) as { alias?: Array<[string, string]>; names?: Array<[string, string]> };
+      this.loadingNames = true;
+      for (const [k, v] of raw.names ?? []) this.nameCache.set(k, v);
+      this.store.transaction(() => {
+        for (const [lid, pn] of raw.alias ?? []) if (lid.endsWith('@lid') && pn.endsWith('@s.whatsapp.net')) this.link(lid, pn);
+      });
+      this.loadingNames = false;
+      bus.log('info', `WhatsApp: ${(raw.alias ?? []).length} lid eşlemesi, ${(raw.names ?? []).length} ad diskten yüklendi`);
+    } catch {
+      this.loadingNames = false; // dosya yok ya da bozuk
+    }
+  }
+
+  private scheduleSaveNames(): void {
+    if (this.loadingNames || this.saveTimer) return;
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = undefined;
+      this.saveNames();
+    }, 3000);
+  }
+
+  private saveNames(): void {
+    try {
+      const alias = [...this.alias.entries()].filter(([k]) => k.endsWith('@lid'));
+      fs.writeFileSync(this.namesFile(), JSON.stringify({ alias, names: [...this.nameCache.entries()] }));
+    } catch {
+      /* diske yazılamadı */
+    }
+  }
 
   private retry(ms: number): void {
     if (this.retryTimer) clearTimeout(this.retryTimer);
@@ -49,6 +91,7 @@ export class WhatsAppConnector extends BaseConnector {
     this.opened = false;
     this.account.label = 'WhatsApp';
     const dir = path.join(sessionDir(this.account.id), 'auth');
+    if (this.alias.size === 0 && this.nameCache.size === 0) this.loadNames();
     const { state, saveCreds } = await useMultiFileAuthState(dir);
     const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: undefined as number[] | undefined }));
 
@@ -140,37 +183,42 @@ export class WhatsAppConnector extends BaseConnector {
         this.learnContact(c.id, c.lid ?? undefined, n);
       }
       if (contacts?.length) bus.log('info', `WhatsApp: ${contacts.length} kişi geldi (${named} adlı)`);
-      for (const c of chats ?? []) {
-        if (!c.id || !isChatJid(c.id)) continue;
-        const cc = c as typeof c & { lidJid?: string | null; pnJid?: string | null };
-        if (cc.lidJid && cc.pnJid) this.link(cc.lidJid, cc.pnJid);
-        else if (cc.lidJid && c.id.endsWith('@s.whatsapp.net')) this.link(cc.lidJid, c.id);
-        else if (cc.pnJid && c.id.endsWith('@lid')) this.link(c.id, cc.pnJid);
-        const jid = this.canon(c.id);
-        if (c.name) this.nameCache.set(jid, c.name);
-        else this.ensureGroupMeta(jid);
-        this.upsertChat({
-          remoteId: jid,
-          name: this.nameOf(jid),
-          kind: jid.endsWith('@g.us') ? 'group' : 'direct',
-          unread: c.unreadCount ?? 0,
-          lastMessageAt: Number(c.conversationTimestamp ?? 0) * 1000,
-          handle: jid.endsWith('@s.whatsapp.net') ? '+' + jid.split('@')[0] : undefined,
-        });
-      }
-      for (const m of messages ?? []) this.ingest(m, false);
-      this.refreshNames();
+      // Binlerce satır tek işlemde: her satırda ayrı commit/fsync olmasın (olay döngüsü dakikalarca kilitleniyordu)
+      const t0 = Date.now();
+      this.store.transaction(() => {
+        for (const c of chats ?? []) {
+          if (!c.id || !isChatJid(c.id)) continue;
+          const cc = c as typeof c & { lidJid?: string | null; pnJid?: string | null };
+          if (cc.lidJid && cc.pnJid) this.link(cc.lidJid, cc.pnJid);
+          else if (cc.lidJid && c.id.endsWith('@s.whatsapp.net')) this.link(cc.lidJid, c.id);
+          else if (cc.pnJid && c.id.endsWith('@lid')) this.link(c.id, cc.pnJid);
+          const jid = this.canon(c.id);
+          if (c.name) this.nameCache.set(jid, c.name);
+          else this.ensureGroupMeta(jid);
+          this.upsertChat({
+            remoteId: jid,
+            name: this.nameOf(jid),
+            kind: jid.endsWith('@g.us') ? 'group' : 'direct',
+            unread: c.unreadCount ?? 0,
+            lastMessageAt: Number(c.conversationTimestamp ?? 0) * 1000,
+            handle: jid.endsWith('@s.whatsapp.net') ? '+' + jid.split('@')[0] : undefined,
+          });
+        }
+        for (const m of messages ?? []) this.ingest(m, false);
+      });
+      if (Date.now() - t0 > 1500) bus.log('info', `WhatsApp geçmiş paketi işlendi (${Date.now() - t0} ms)`);
+      this.scheduleRefresh();
       void this.fetchAvatars(sock, (chats ?? []).map((c) => c.id).filter((id): id is string => !!id && isChatJid(id)).map((id) => this.canon(id)).slice(0, 60));
     });
 
     sock.ev.on('contacts.upsert', (cs) => {
       for (const c of cs) this.learnContact(c.id, c.lid ?? undefined, c.name ?? c.notify ?? c.verifiedName ?? undefined);
       bus.log('info', `WhatsApp: rehberden ${cs.length} kişi (${cs.filter((c) => c.name).length} adlı)`);
-      this.refreshNames();
+      this.scheduleRefresh();
     });
     sock.ev.on('chats.phoneNumberShare', ({ lid, jid }) => {
       this.link(lid, jid);
-      this.refreshNames();
+      this.scheduleRefresh();
     });
     sock.ev.on('groups.upsert', (gs) => {
       for (const g of gs) this.applyGroup(g.id, g.subject, g.participants as Array<{ id: string; admin?: string | null }> | undefined);
@@ -180,7 +228,7 @@ export class WhatsAppConnector extends BaseConnector {
     });
     sock.ev.on('contacts.update', (cs) => {
       for (const c of cs) this.learnContact(c.id, c.lid ?? undefined, c.name ?? c.notify ?? c.verifiedName ?? undefined);
-      this.refreshNames();
+      this.scheduleRefresh();
     });
 
     sock.ev.on('chats.upsert', (cs) => {
@@ -193,7 +241,8 @@ export class WhatsAppConnector extends BaseConnector {
     });
 
     sock.ev.on('messages.upsert', ({ messages, type }) => {
-      for (const m of messages) this.ingest(m, type === 'notify');
+      if (messages.length > 1) this.store.transaction(() => messages.forEach((m) => this.ingest(m, type === 'notify')));
+      else for (const m of messages) this.ingest(m, type === 'notify');
     });
 
     sock.ev.on('messages.update', (updates) => {
@@ -221,6 +270,13 @@ export class WhatsAppConnector extends BaseConnector {
   async stop(): Promise<void> {
     this.stopping = true;
     if (this.retryTimer) clearTimeout(this.retryTimer);
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    this.refreshTimer = undefined;
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = undefined;
+      this.saveNames();
+    }
     this.sock?.end(undefined);
     this.sock = undefined;
     this.setStatus('disconnected');
@@ -297,7 +353,7 @@ export class WhatsAppConnector extends BaseConnector {
         const chat = this.store.getChat(chatIdOf(this.account.id, id));
         if (!chat?.participants) return;
         this.upsertChat({ remoteId: id, name: chat.name, participants: chat.participants.map((m) => ({ ...m, name: this.nameOf(m.id), avatarUrl: this.avatarCache.get(m.id) || m.avatarUrl })) });
-        this.refreshNames();
+        this.scheduleRefresh();
       });
     }
   }
@@ -325,6 +381,9 @@ export class WhatsAppConnector extends BaseConnector {
       this.nameCache.set(pn, n);
     }
     if (fresh) {
+      this.scheduleSaveNames();
+      // eski mesajlarda lid ile kayıtlı gönderen artık numarayla anılsın (ad/fotoğraf eşlemesi tek kimlikte toplanır)
+      this.store.rewriteSender(this.account.id, lid, pn);
       // aynı kişi iki sohbet olarak açıldıysa (lid + numara) birleştir
       const lidChat = this.store.getChat(chatIdOf(this.account.id, lid));
       if (lidChat) {
@@ -348,29 +407,54 @@ export class WhatsAppConnector extends BaseConnector {
     if (!id) return;
     if (lid) this.link(lid, id);
     if (name) {
+      if (this.nameCache.get(id) !== name) this.scheduleSaveNames();
       this.nameCache.set(id, name);
       const other = this.alias.get(id);
       if (other) this.nameCache.set(other, name);
     }
   }
 
+  /**
+   * Ad yenilemeyi ertele ve birleştir: kişi/grup olayları peş peşe geldiğinde (163 grubun avatarları vb.)
+   * tam tarama bir kez çalışsın. Eskiden her olayda anında çalışıp olay döngüsünü kilitliyordu.
+   */
+  private scheduleRefresh(): void {
+    if (this.refreshTimer || this.stopping) return;
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = undefined;
+      try {
+        this.refreshNames();
+      } catch (e) {
+        bus.log('warn', `WhatsApp ad yenileme: ${(e as Error).message}`);
+      }
+    }, 1500);
+  }
+
   /** Sonradan öğrenilen adları/eşlemeleri depodaki sohbetlere uygula (numara yerine isim görünsün) */
   private refreshNames(): void {
-    const renamed = new Set<string>();
-    for (const chat of this.store.listChats().filter((c) => c.accountId === this.account.id)) {
-      const better = this.nameOf(chat.remoteId);
-      if (better !== chat.name && !better.startsWith('+') && better !== 'WhatsApp kişisi' && chat.kind !== 'group') this.upsertChat({ remoteId: chat.remoteId, name: better });
-      if (chat.kind === 'group' && chat.participants?.length) {
-        const parts = chat.participants.map((m) => ({ ...m, name: this.nameOf(m.id), avatarUrl: this.avatarCache.get(m.id) || m.avatarUrl }));
-        if (JSON.stringify(parts) !== JSON.stringify(chat.participants)) this.upsertChat({ remoteId: chat.remoteId, name: chat.name, participants: parts });
-        for (const m of parts) {
-          if (renamed.has(m.id)) continue;
-          renamed.add(m.id);
-          const alt = this.alias.get(m.id);
-          for (const sid of [m.id, alt].filter((x): x is string => !!x)) this.store.renameSender(this.account.id, sid, m.name, m.avatarUrl);
+    const t0 = Date.now();
+    let renamed = 0;
+    this.store.transaction(() => {
+      for (const chat of this.store.listChatsOf(this.account.id)) {
+        const better = this.nameOf(chat.remoteId);
+        if (better !== chat.name && !better.startsWith('+') && better !== 'WhatsApp kişisi' && chat.kind !== 'group') this.upsertChat({ remoteId: chat.remoteId, name: better });
+        if (chat.kind === 'group' && chat.participants?.length) {
+          const parts = chat.participants.map((m) => ({ ...m, name: this.nameOf(m.id), avatarUrl: this.avatarCache.get(m.id) || m.avatarUrl }));
+          if (JSON.stringify(parts) !== JSON.stringify(chat.participants)) this.upsertChat({ remoteId: chat.remoteId, name: chat.name, participants: parts });
+          for (const m of parts) {
+            // aynı ad/fotoğraf daha önce uygulandıysa mesaj tablosuna dokunma
+            const sig = `${m.name}\u0000${m.avatarUrl ?? ''}`;
+            if (this.appliedSender.get(m.id) === sig) continue;
+            this.appliedSender.set(m.id, sig);
+            const alt = this.alias.get(m.id);
+            for (const sid of [m.id, alt].filter((x): x is string => !!x)) this.store.renameSender(this.account.id, sid, m.name, m.avatarUrl);
+            renamed++;
+          }
         }
       }
-    }
+    });
+    const ms = Date.now() - t0;
+    if (ms > 1000) bus.log('info', `WhatsApp: adlar yenilendi (${renamed} gönderen, ${ms} ms)`);
   }
 
   private nameOf(jid: string): string {
@@ -447,6 +531,14 @@ export class WhatsAppConnector extends BaseConnector {
   private ingest(m: WAMessage, live: boolean): void {
     const raw = m.key.remoteJid;
     if (!raw || !m.key.id || !isChatJid(raw)) return;
+    // Sunucu her mesajda karşı kimliği de verir (lid sohbette sender_pn, numaralı sohbette sender_lid;
+    // gruplarda participant_pn / participant_lid): en güvenilir lid↔numara kaynağı
+    const k = m.key as typeof m.key & { senderPn?: string | null; senderLid?: string | null; participantPn?: string | null; participantLid?: string | null };
+    if (raw.endsWith('@lid') && k.senderPn) this.link(raw, jidNormalizedUser(k.senderPn));
+    else if (raw.endsWith('@s.whatsapp.net') && k.senderLid) this.link(jidNormalizedUser(k.senderLid), raw);
+    const part = m.key.participant ? jidNormalizedUser(m.key.participant) : undefined;
+    if (part?.endsWith('@lid') && k.participantPn) this.link(part, jidNormalizedUser(k.participantPn));
+    else if (part?.endsWith('@s.whatsapp.net') && k.participantLid) this.link(jidNormalizedUser(k.participantLid), part);
     const jid = this.canon(raw);
     const content = unwrap(m.message);
     const text = textOf(content);

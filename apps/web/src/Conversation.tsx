@@ -17,6 +17,9 @@ export function Conversation({
   showDetails = true,
   onToggleDetails,
   onOpenChat,
+  onLoadOlder,
+  hasOlder = false,
+  olderBusy = false,
 }: {
   chat: Chat;
   messages: Message[];
@@ -28,6 +31,10 @@ export function Conversation({
   showDetails?: boolean;
   onToggleDetails?: () => void;
   onOpenChat?: (c: Chat) => void;
+  /** Depodaki daha eski mesajları (100'er) yükle */
+  onLoadOlder?: () => void | Promise<void>;
+  hasOlder?: boolean;
+  olderBusy?: boolean;
 }) {
   const [search, setSearch] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -162,6 +169,20 @@ export function Conversation({
         )}
 
         <div className="msgs">
+          {messages.length > 0 && !search && (hasOlder || chat.platform === 'telegram') && (
+            <div style={{ display: 'flex', justifyContent: 'center', margin: '4px 0 6px' }}>
+              <button
+                className="btn xs b b2"
+                disabled={olderBusy}
+                onClick={() => {
+                  if (chat.platform === 'telegram' && !hasOlder) api.loadHistory(chat.id).catch((e) => notify(e.message, true));
+                  else void onLoadOlder?.();
+                }}
+              >
+                <Icon name="history" size={13} /> {olderBusy ? 'Yükleniyor…' : 'Daha eski mesajlar'}
+              </button>
+            </div>
+          )}
           {messages.length === 0 && (
             <div className="empty">
               Bu sohbette henüz mesaj yok.

@@ -163,6 +163,7 @@ export class BrowserConnector extends BaseConnector {
    */
   private async waitForLogin(): Promise<boolean> {
     while (!this.stopping) {
+      this.adoptNewestPage();
       if (!this.page || this.page.isClosed()) return false;
       if (await this.isLoggedIn()) break;
       await sleep(2000);
@@ -172,6 +173,7 @@ export class BrowserConnector extends BaseConnector {
     let lastUrl = '';
     let stableFor = 0;
     for (let i = 0; i < 30 && !this.stopping; i++) {
+      this.adoptNewestPage();
       if (!this.page || this.page.isClosed()) return false;
       const url = this.page.url();
       const stillIn = await this.isLoggedIn();
@@ -182,6 +184,16 @@ export class BrowserConnector extends BaseConnector {
       await sleep(2000);
     }
     return !this.stopping;
+  }
+
+  /**
+   * Görünür giriş penceresinde site yeni sekme açtıysa (OAuth / "çalışma alanını aç" bağlantıları yeni sekmede
+   * açılabilir) girişi o sekmede izle; ilk sekme kapandıysa da kalan sekmeye geç.
+   */
+  private adoptNewestPage(): void {
+    const pages = this.ctx?.pages().filter((p) => !p.isClosed()) ?? [];
+    const newest = pages[pages.length - 1];
+    if (newest && newest !== this.page && (!this.page || this.page.isClosed() || newest.url() !== 'about:blank')) this.page = newest;
   }
 
   async stop(): Promise<void> {
@@ -250,21 +262,29 @@ export class BrowserConnector extends BaseConnector {
     this.polling = true;
     try {
       const cookies = await this.cookies();
-      const threads = await this.strategy.threads(this.page, cookies);
+      // Strateji çağrıları asılı kalmasın: sayfa donarsa uyarı düşsün, sonraki yoklama devam etsin
+      const threads = await withTimeout(this.strategy.threads(this.page, cookies), 120_000, 'sohbet listesi');
       const changed: Thread[] = [];
       for (const t of threads) {
-        this.upsertChat({ remoteId: t.id, name: t.name, kind: t.kind, unread: t.unread, lastMessageAt: t.lastTs, lastPreview: t.preview, avatarUrl: t.avatarUrl, handle: t.handle, link: t.link, participants: t.participants });
-        if ((this.known.get(t.id) ?? 0) < t.lastTs) changed.push(t);
+        // lastTs=0: strateji zaman bilgisi vermiyor (DOM okuyan Messenger) → depodaki değer korunur
+        this.upsertChat({ remoteId: t.id, name: t.name, kind: t.kind, unread: t.unread, lastMessageAt: t.lastTs || undefined, lastPreview: t.preview, avatarUrl: t.avatarUrl, handle: t.handle, link: t.link, participants: t.participants });
+        if (!this.known.has(t.id) || (this.known.get(t.id) ?? 0) < t.lastTs) changed.push(t);
       }
-      for (const t of changed.slice(0, first ? 12 : 6)) {
+      const batch = changed.slice(0, first ? 12 : 6);
+      const failed: string[] = [];
+      let firstErr = '';
+      for (const t of batch) {
         try {
-          const msgs = await this.strategy.messages(this.page, cookies, t.id, first ? 25 : 15);
+          const msgs = await withTimeout(this.strategy.messages(this.page, cookies, t.id, first ? 25 : 15), 60_000, 'mesajlar');
           for (const m of msgs) this.ingest(t.id, m, !first);
           this.known.set(t.id, t.lastTs);
         } catch (e) {
-          bus.log('warn', `${this.account.platform} mesajlar alınamadı (${t.id}): ${(e as Error).message}`);
+          failed.push(t.id);
+          firstErr ||= (e as Error).message;
         }
       }
+      // aynı hata her sohbet için ayrı satır basmasın: yoklama başına tek özet
+      if (failed.length) bus.log('warn', `${this.account.platform} mesajlar alınamadı: ${failed.length}/${batch.length} sohbet (ilk: ${failed[0]}): ${firstErr}`);
       if (first) bus.log('info', `${this.account.platform}: ${threads.length} sohbet yüklendi`);
     } catch (e) {
       bus.log('warn', `${this.account.platform} yoklama: ${(e as Error).message}`);
@@ -308,6 +328,15 @@ function isMediaFile(u: string | undefined): boolean {
 }
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Söz belirli sürede çözülmezse hata ver (Playwright çağrıları bazen sonsuza dek bekleyebiliyor). */
+export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const guard = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label}: ${Math.round(ms / 1000)} sn içinde yanıt gelmedi`)), ms);
+  });
+  return Promise.race([p, guard]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
 
 /** Basit, kararlı bir metin özeti — DOM'dan okunan mesajlara kimlik üretmek için. */
 export function hashId(s: string): string {

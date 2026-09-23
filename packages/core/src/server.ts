@@ -165,7 +165,11 @@ export function createServer(store: Store, registry: Registry, port: number): ht
         const c = registry.get(id);
         if (!c?.fetchMedia) throw new HttpError(404, 'Bu hesap medya sunmuyor');
         if (!u) throw new HttpError(400, 'u gerekli');
-        const m = await c.fetchMedia(u);
+        // Uzak sunucu hatası (süresi dolmuş CDN bağlantısı → 403 vb.) 500 gibi yığın dökmesin
+        const m = await c.fetchMedia(u).catch((e: Error) => {
+          const code = (e as { response?: { status?: number } }).response?.status;
+          throw new HttpError(502, `Medya indirilemedi${code ? ` (${code})` : ''}: ${e.message.split('\n')[0].slice(0, 160)}`);
+        });
         if (!m) throw new HttpError(503, 'Oturum açık değil');
         res.writeHead(200, { 'content-type': m.type, 'content-length': m.body.length, 'cache-control': 'private, max-age=86400' });
         return void res.end(m.body);

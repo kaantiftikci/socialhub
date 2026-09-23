@@ -10,8 +10,10 @@ export const DB_PATH = path.join(DATA_DIR, 'kavsak.db');
 export const PORT = Number(process.env.KAVSAK_PORT ?? 7788);
 
 /** Telegram için my.telegram.org'dan alınan ücretsiz kimlikler. */
-export const TELEGRAM_API_ID = Number(process.env.TELEGRAM_API_ID ?? 0);
-export const TELEGRAM_API_HASH = process.env.TELEGRAM_API_HASH ?? '';
+// Varsayılan: Telegram Desktop'ın açık kaynak kodunda yayımlanan herkese açık api_id/api_hash; kullanıcı isterse
+// Bağlan formundan kendi kimliğini verebilir (my.telegram.org). Böylece giriş WhatsApp gibi yalnızca QR ile olur.
+export const TELEGRAM_API_ID = Number(process.env.TELEGRAM_API_ID ?? 2040);
+export const TELEGRAM_API_HASH = process.env.TELEGRAM_API_HASH ?? 'b18441a1ff607e10a989891a5462e627';
 
 /** İsteğe bağlı: taslak üretimi için Anthropic API anahtarı. Yoksa taslak özelliği kapalı kalır. */
 export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? '';

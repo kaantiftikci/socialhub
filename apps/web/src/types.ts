@@ -79,7 +79,7 @@ export interface DraftResult {
 
 export const PLATFORMS: Record<Platform, { name: string; code: string; color: string; method: string; available: boolean; mode: 'native' | 'browser' | 'token' | 'mail' | 'demo'; experimental?: boolean; category?: Category }> = {
   whatsapp: { name: 'WhatsApp', code: 'WA', color: '#0E8A45', method: 'QR ile bağlı cihaz', available: true, mode: 'native' },
-  telegram: { name: 'Telegram', code: 'TG', color: '#1B7FB8', method: 'Resmi API · telefon ile giriş', available: true, mode: 'token' },
+  telegram: { name: 'Telegram', code: 'TG', color: '#1B7FB8', method: 'Resmi API · QR ile giriş', available: true, mode: 'token' },
   slack: { name: 'Slack', code: 'SL', color: '#4A154B', method: 'Tarayıcı oturumu', available: true, mode: 'browser' },
   imessage: { name: 'iMessage', code: 'IM', color: '#1C8C3A', method: 'Bu Mac’teki Mesajlar', available: true, mode: 'native' },
   linkedin: { name: 'LinkedIn', code: 'LI', color: '#0A66C2', method: 'Tarayıcı oturumu', available: true, mode: 'browser' },

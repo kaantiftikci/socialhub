@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process';
 import Database from 'better-sqlite3';
 import { BaseConnector } from './base.js';
 import { bus } from '../bus.js';
-import type { Attachment } from '../model.js';
+import { chatId as chatIdOf, type Attachment } from '../model.js';
 
 /**
  * iMessage (yalnızca macOS): Mesajlar uygulamasının yerel veritabanı
@@ -29,6 +29,18 @@ interface Row {
   display_name: string | null;
   cache_has_attachments: number;
   item_type: number;
+  /** 0 bilinen, 1 bilinmeyen gönderen, 2 istenmeyen ("(filtered)"), 4 filtrelenen SMS ("(smsft)") */
+  is_filtered: number | null;
+  /** Mesajlar'da "Son Silinenler"e taşınmışsa geri çekilme zamanı */
+  date_retracted: number | null;
+}
+
+/** Mesajlar uygulamasındaki klasör: chat.is_filtered değerinden */
+export function imessageFolder(isFiltered: number | null | undefined): 'unknown' | 'junk' | 'sms' | undefined {
+  if (isFiltered === 1) return 'unknown';
+  if (isFiltered === 2) return 'junk';
+  if (isFiltered === 4) return 'sms';
+  return undefined;
 }
 
 export class IMessageConnector extends BaseConnector {
@@ -36,6 +48,9 @@ export class IMessageConnector extends BaseConnector {
   private timer?: NodeJS.Timeout;
   private lastRowId = 0;
   private names = new Map<string, string>();
+  private retractedCol = 'NULL';
+  private filteredCol = 'NULL';
+  private ticks = 0;
 
   async start(): Promise<void> {
     if (process.platform !== 'darwin') {
@@ -50,6 +65,11 @@ export class IMessageConnector extends BaseConnector {
     try {
       this.db = new Database(DB, { readonly: true, fileMustExist: true });
       this.db.prepare('SELECT COUNT(*) FROM message').get();
+      // eski macOS sürümlerinde date_retracted / is_filtered sütunları olmayabilir
+      const mcols = new Set((this.db.prepare('PRAGMA table_info(message)').all() as Array<{ name: string }>).map((c) => c.name));
+      const ccols = new Set((this.db.prepare('PRAGMA table_info(chat)').all() as Array<{ name: string }>).map((c) => c.name));
+      this.retractedCol = mcols.has('date_retracted') ? 'm.date_retracted' : 'NULL';
+      this.filteredCol = ccols.has('is_filtered') ? 'c.is_filtered' : 'NULL';
     } catch (e) {
       // Sistem Ayarları → Gizlilik ve Güvenlik → Tam Disk Erişimi bölmesini doğrudan aç
       execFile('open', ['x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles'], () => undefined);
@@ -127,18 +147,24 @@ export class IMessageConnector extends BaseConnector {
     return chatId;
   }
 
-  private query(afterRowId: number, limit: number): Row[] {
+  private query(afterRowId: number, limit: number, onlyRetracted = false): Row[] {
     return this.db!
       .prepare(
         `SELECT m.ROWID AS rowid, m.guid, m.text, m.attributedBody, m.date, m.is_from_me, m.cache_has_attachments, m.item_type,
-                h.id AS handle, c.chat_identifier, c.guid AS chat_guid, c.display_name
+                ${this.retractedCol} AS date_retracted, h.id AS handle, c.chat_identifier, c.guid AS chat_guid, c.display_name, ${this.filteredCol} AS is_filtered
          FROM message m
          JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
          JOIN chat c ON c.ROWID = cmj.chat_id
          LEFT JOIN handle h ON h.ROWID = m.handle_id
-         WHERE m.ROWID > ? ORDER BY m.ROWID ASC LIMIT ?`,
+         WHERE m.ROWID > ? ${onlyRetracted ? `AND ${this.retractedCol} > 0` : ''} ORDER BY m.ROWID ASC LIMIT ?`,
       )
       .all(afterRowId, limit) as Row[];
+  }
+
+  /** Sonradan "Son Silinenler"e taşınan mesajlar ROWID'siyle yeniden gelmez; ara sıra tarayıp işaretle. */
+  private rescanRetracted(): void {
+    if (this.retractedCol === 'NULL' || !this.db) return;
+    for (const r of this.query(Math.max(0, this.lastRowId - 5000), 500, true)) this.ingest(r, false);
   }
 
   private backfill(): void {
@@ -159,6 +185,7 @@ export class IMessageConnector extends BaseConnector {
         this.ingest(r, true);
         this.lastRowId = Math.max(this.lastRowId, r.rowid);
       }
+      if (++this.ticks % 20 === 0) this.rescanRetracted(); // ~1 dk'da bir
     } catch (e) {
       bus.log('warn', `iMessage yoklama: ${(e as Error).message}`);
     }
@@ -166,12 +193,18 @@ export class IMessageConnector extends BaseConnector {
 
   private ingest(r: Row, live: boolean): void {
     if (r.item_type !== 0) return; // grup olayları, isim değişiklikleri vb.
-    const text = (r.text ?? '').trim() || decodeAttributedBody(r.attributedBody);
+    let text = (r.text ?? '').trim() || decodeAttributedBody(r.attributedBody);
     const attachments: Attachment[] | undefined = r.cache_has_attachments ? [{ kind: 'other', name: 'ek' }] : undefined;
     if (!text && !attachments) return;
+    const deleted = !!r.date_retracted;
+    if (deleted) text = `🗑 ${text || '(ek)'}`; // Mesajlar → Son Silinenler
     const isGroup = r.chat_identifier.startsWith('chat');
-    const chatName = this.nameOf(isGroup ? null : r.handle ?? r.chat_identifier, r.display_name, r.chat_identifier);
-    this.ensureChat(r.chat_guid, chatName, isGroup ? 'group' : 'direct');
+    const chatName = this.nameOf(isGroup ? null : r.handle ?? r.chat_identifier, r.display_name, r.chat_identifier.replace(/\((filtered|smsft)\)$/, ''));
+    const folder = imessageFolder(r.is_filtered);
+    const existing = this.store.getChat(chatIdOf(this.account.id, r.chat_guid));
+    const meta = { ...(existing?.meta ?? {}), ...(folder ? { folder } : {}), ...(deleted ? { deleted: true } : {}) };
+    if (!existing || JSON.stringify(meta) !== JSON.stringify(existing.meta ?? {}))
+      this.upsertChat({ remoteId: r.chat_guid, name: chatName, kind: isGroup ? 'group' : 'direct', meta });
     const ms = r.date > 1e12 ? Math.floor(r.date / 1e6) + APPLE_EPOCH_MS : r.date * 1000 + APPLE_EPOCH_MS;
     this.upsertMessage(
       {

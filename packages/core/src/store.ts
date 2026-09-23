@@ -12,8 +12,15 @@ export class Store {
   constructor(path = DB_PATH) {
     this.db = new Database(path);
     this.db.pragma('journal_mode = WAL');
+    // WAL + NORMAL: her yazımda fsync beklenmez (geçmiş eşitlemesinde on binlerce satır); çökme güvenliği korunur
+    this.db.pragma('synchronous = NORMAL');
     this.db.pragma('foreign_keys = ON');
     this.migrate();
+  }
+
+  /** Toplu yazımları tek işlemde çalıştır (geçmiş paketleri, ad yenileme) — çok daha hızlı. */
+  transaction<T>(fn: () => T): T {
+    return this.db.transaction(fn)();
   }
 
   private migrate(): void {
@@ -75,6 +82,8 @@ export class Store {
     if (!ccols.has('link')) this.db.exec('ALTER TABLE chats ADD COLUMN link TEXT');
     if (!ccols.has('participants')) this.db.exec('ALTER TABLE chats ADD COLUMN participants TEXT');
     if (!ccols.has('meta')) this.db.exec('ALTER TABLE chats ADD COLUMN meta TEXT');
+    // gönderen bazlı güncellemeler (ad/fotoğraf/lid→numara) tam tablo taraması yapmasın
+    this.db.exec('CREATE INDEX IF NOT EXISTS messages_sender ON messages(sender_id)');
   }
 
   // ---------- accounts ----------
@@ -162,6 +171,12 @@ export class Store {
       .run(name, avatar ?? null, senderId, accountId + '/%', name);
   }
 
+  /** Bir gönderen kimliğini başka bir kimliğe taşı (lid → telefon numarası öğrenilince). */
+  rewriteSender(accountId: string, fromId: string, toId: string): void {
+    if (fromId === toId) return;
+    this.db.prepare('UPDATE messages SET sender_id = ? WHERE sender_id = ? AND chat_id LIKE ?').run(toId, fromId, accountId + '/%');
+  }
+
   getChat(id: string): Chat | undefined {
     const r = this.db.prepare('SELECT * FROM chats WHERE id = ?').get(id);
     return r ? rowToChat(r) : undefined;
@@ -169,6 +184,11 @@ export class Store {
 
   listChats(limit = 600): Chat[] {
     return this.db.prepare('SELECT * FROM chats ORDER BY last_message_at DESC LIMIT ?').all(limit).map(rowToChat);
+  }
+
+  /** Bir hesabın tüm sohbetleri (sınırsız; connector içi toplu işlemler için). */
+  listChatsOf(accountId: string): Chat[] {
+    return this.db.prepare('SELECT * FROM chats WHERE account_id = ? ORDER BY last_message_at DESC').all(accountId).map(rowToChat);
   }
 
   markRead(id: string): void {

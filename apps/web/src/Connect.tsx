@@ -60,10 +60,6 @@ export function ConnectModal({
   async function add(platform: Platform) {
     setBusy(true);
     try {
-      if (platform === 'telegram' && (active !== 'telegram:new' || !tg.apiId.trim() || !tg.apiHash.trim())) {
-        setActive('telegram:new');
-        return;
-      }
       if (platform === 'shopier' && (active !== 'shopier:new' || !pat.trim())) {
         setActive('shopier:new');
         return;
@@ -74,7 +70,7 @@ export function ConnectModal({
         return;
       }
       let token: string | undefined;
-      if (platform === 'telegram') token = JSON.stringify({ apiId: Number(tg.apiId.trim()), apiHash: tg.apiHash.trim() });
+      if (platform === 'telegram' && tg.apiId.trim() && tg.apiHash.trim()) token = JSON.stringify({ apiId: Number(tg.apiId.trim()), apiHash: tg.apiHash.trim() });
       if (platform === 'shopier') token = pat.trim();
       if (isMail) {
         const oauth = platform === 'outlook' || (platform === 'gmail' && mail.useOAuth);
@@ -125,96 +121,9 @@ export function ConnectModal({
     }
   }
 
-  return (
-    <div className="overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Kanal bağla">
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-          <div style={{ flexGrow: 1 }}>
-            <h2>
-              Bütün sohbetlerin, <mark>tek bir yerde.</mark>
-            </h2>
-            <p style={{ margin: '8px 0 0', color: 'var(--text2)', fontSize: 14 }}>
-              Kanallarını bağla. Oturum anahtarları ve mesajlar yalnızca bu bilgisayarda saklanır.
-            </p>
-          </div>
-          <button className="btn icon b b2" onClick={onClose} aria-label="Kapat">
-            <Icon name="x" size={15} sw={2} />
-          </button>
-        </div>
-
-        <div className="grid3">
-          {[...ORDER, ...MAIL_ORDER, ...SHOP_ORDER].map((p) => {
-            const meta = PLATFORMS[p];
-            const acc = accounts.filter((a) => a.platform === p);
-            const isConn = connected.includes(p);
-            const isActive = acc.some((a) => a.id === active) || active === `${p}:new`;
-            void 0;
-            return (
-              <div key={p} style={{ display: 'contents' }}>
-                {p === 'gmail' && (
-                  <div className="grid-head">
-                    <Icon name="mail" size={14} /> E-posta
-                    <span style={{ fontWeight: 400, color: 'var(--text3)' }}> · IMAP/SMTP ile, ücretsiz</span>
-                  </div>
-                )}
-                {p === 'shopier' && (
-                  <div className="grid-head">
-                    <Icon name="bag" size={14} /> Alışveriş
-                    <span style={{ fontWeight: 400, color: 'var(--text3)' }}> · sipariş takibi; Shopier hazır, diğerleri sırada</span>
-                  </div>
-                )}
-              <div className={`pcard ${!meta.available ? 'soon' : ''} ${isActive ? 'active' : ''}`}>
-                <div className="top">
-                  <Chip platform={p} size={44} />
-                  <div style={{ minWidth: 0 }}>
-                    <div className="nm" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      {meta.name}
-                      {meta.experimental && <span className="pill" style={{ background: '#FFF3D6', color: '#8A5300' }}>deneysel</span>}
-                    </div>
-                    <div className="mt">{meta.method}</div>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  {!meta.available ? (
-                    <span className="st">Yakında</span>
-                  ) : acc.length ? (
-                    <span className="st" style={{ color: isConn ? '#15803d' : undefined }}>
-                      <span className={`dot ${acc[0].status === 'connected' ? 'on' : acc[0].status}`} />
-                      {statusText(acc[0])}
-                    </span>
-                  ) : (
-                    <span className="st">
-                      <span className="dot" /> Bağlı değil
-                    </span>
-                  )}
-                  <span style={{ flexGrow: 1 }} />
-                  {meta.available && acc.length > 0 && (
-                    <>
-                      <button className="btn sm b b2" onClick={() => setActive(acc[0].id)}>
-                        Ayrıntı
-                      </button>
-                      <button className={`btn sm icon b b2 ${confirmId === acc[0].id ? 'danger-solid' : ''}`} onClick={() => remove(acc[0].id)} aria-label="Kaldır" title={confirmId === acc[0].id ? 'Onaylamak için tekrar tıkla' : 'Kaldır'}>
-                        <Icon name="trash" size={13} />
-                      </button>
-                    </>
-                  )}
-                  {meta.available && acc.length === 0 && (
-                    <button className="btn sm primary b" onClick={() => add(p)} disabled={busy}>
-                      Bağlan
-                    </button>
-                  )}
-                  {!meta.available && (
-                    <button className="btn sm b b2" disabled>
-                      Yakında
-                    </button>
-                  )}
-                </div>
-              </div>
-              </div>
-            );
-          })}
-        </div>
-
+  // Etkin kartın hemen altında açılan panel (form / QR / durum) — kullanıcı aşağı kaydırmak zorunda kalmasın
+  const panel = (
+    <>
         {active?.endsWith(':new') && PLATFORMS[active.split(':')[0] as Platform]?.mode === 'mail' && (() => {
           const p = active.split(':')[0] as Platform;
           const isOutlook = p === 'outlook';
@@ -435,6 +344,100 @@ export function ConnectModal({
             </div>
           </div>
         )}
+
+    </>
+  );
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Kanal bağla">
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          <div style={{ flexGrow: 1 }}>
+            <h2>
+              Bütün sohbetlerin, <mark>tek bir yerde.</mark>
+            </h2>
+            <p style={{ margin: '8px 0 0', color: 'var(--text2)', fontSize: 14 }}>
+              Kanallarını bağla. Oturum anahtarları ve mesajlar yalnızca bu bilgisayarda saklanır.
+            </p>
+          </div>
+          <button className="btn icon b b2" onClick={onClose} aria-label="Kapat">
+            <Icon name="x" size={15} sw={2} />
+          </button>
+        </div>
+
+        <div className="grid3">
+          {[...ORDER, ...MAIL_ORDER, ...SHOP_ORDER].map((p) => {
+            const meta = PLATFORMS[p];
+            const acc = accounts.filter((a) => a.platform === p);
+            const isConn = connected.includes(p);
+            const isActive = acc.some((a) => a.id === active) || active === `${p}:new`;
+            void 0;
+            return (
+              <div key={p} style={{ display: 'contents' }}>
+                {p === 'gmail' && (
+                  <div className="grid-head">
+                    <Icon name="mail" size={14} /> E-posta
+                    <span style={{ fontWeight: 400, color: 'var(--text3)' }}> · IMAP/SMTP ile, ücretsiz</span>
+                  </div>
+                )}
+                {p === 'shopier' && (
+                  <div className="grid-head">
+                    <Icon name="bag" size={14} /> Alışveriş
+                    <span style={{ fontWeight: 400, color: 'var(--text3)' }}> · sipariş takibi; Shopier hazır, diğerleri sırada</span>
+                  </div>
+                )}
+              <div className={`pcard ${!meta.available ? 'soon' : ''} ${isActive ? 'active' : ''}`}>
+                <div className="top">
+                  <Chip platform={p} size={44} />
+                  <div style={{ minWidth: 0 }}>
+                    <div className="nm" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {meta.name}
+                      {meta.experimental && <span className="pill" style={{ background: '#FFF3D6', color: '#8A5300' }}>deneysel</span>}
+                    </div>
+                    <div className="mt">{meta.method}</div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {!meta.available ? (
+                    <span className="st">Yakında</span>
+                  ) : acc.length ? (
+                    <span className="st" style={{ color: isConn ? '#15803d' : undefined }}>
+                      <span className={`dot ${acc[0].status === 'connected' ? 'on' : acc[0].status}`} />
+                      {statusText(acc[0])}
+                    </span>
+                  ) : (
+                    <span className="st">
+                      <span className="dot" /> Bağlı değil
+                    </span>
+                  )}
+                  <span style={{ flexGrow: 1 }} />
+                  {meta.available && acc.length > 0 && (
+                    <>
+                      <button className="btn sm b b2" onClick={() => setActive(acc[0].id)}>
+                        Ayrıntı
+                      </button>
+                      <button className={`btn sm icon b b2 ${confirmId === acc[0].id ? 'danger-solid' : ''}`} onClick={() => remove(acc[0].id)} aria-label="Kaldır" title={confirmId === acc[0].id ? 'Onaylamak için tekrar tıkla' : 'Kaldır'}>
+                        <Icon name="trash" size={13} />
+                      </button>
+                    </>
+                  )}
+                  {meta.available && acc.length === 0 && (
+                    <button className="btn sm primary b" onClick={() => add(p)} disabled={busy}>
+                      Bağlan
+                    </button>
+                  )}
+                  {!meta.available && (
+                    <button className="btn sm b b2" disabled>
+                      Yakında
+                    </button>
+                  )}
+                </div>
+              </div>
+              {isActive && <div className="inline-panel" style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: 12 }}>{panel}</div>}
+              </div>
+            );
+          })}
+        </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, color: 'var(--text3)' }}>
           <Icon name="lock" size={14} />

@@ -2,11 +2,23 @@ import type { Page } from 'playwright';
 import type { Msg, Strategy, Thread } from './bridge.js';
 
 /**
- * Slack (tarayıcı oturumu): app.slack.com'a bir kez giriş yapılır; web istemcisinin
+ * Slack (tarayıcı oturumu): Slack'e bir kez giriş yapılır; web istemcisinin
  * localStorage'da tuttuğu xoxc- oturum anahtarı + "d" çerezi ile Slack Web API'si
  * sayfa bağlamından çağrılır. Uygulama oluşturmak / token üretmek gerekmez.
+ *
+ * Giriş akışı (gözlemlenen): app.slack.com/client oturum yokken "workspace-signin" (çalışma alanı URL'si sor)
+ * sayfasına düşer; oradaki "Find your workspaces" bağlantısı get-started (KAYIT) akışına gider — Google ile
+ * girildiğinde e-postaya bağlı çalışma alanı yoksa "yeni çalışma alanı oluştur" ekranında kalır, "d" çerezi
+ * hiç oluşmaz. Bu yüzden giriş penceresi slack.com/signin (GİRİŞ akışı: e-posta kodu / Google / Apple →
+ * çalışma alanı listesi → Aç) ile açılır. Bir çalışma alanı açılınca .slack.com'a "d" çerezi yazılır;
+ * app.slack.com/client → gantry/auth bu çerezden oturumu alıp localConfig_v2'yi (xoxc token) doldurur.
  */
 type J = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+/** Web istemcisi: localConfig_v2 yalnızca bu origin'in localStorage'ında bulunur. */
+const CLIENT = 'https://app.slack.com/client';
+/** Giriş sayfası; redir → gantry/auth: çalışma alanı seçilince doğrudan web istemcisine geçer ("uygulamada aç" ara sayfası atlanır). */
+const SIGNIN = 'https://slack.com/signin?redir=%2Fgantry%2Fauth%3Fapp%3Dclient%26return_to%3D%252Fclient';
 
 interface TeamCfg {
   token: string;
@@ -16,6 +28,7 @@ interface TeamCfg {
 }
 
 async function team(page: Page): Promise<TeamCfg | undefined> {
+  if (page.isClosed() || !page.url().startsWith('https://app.slack.com/')) return undefined;
   return page.evaluate(() => {
     try {
       const raw = localStorage.getItem('localConfig_v2');
@@ -31,8 +44,22 @@ async function team(page: Page): Promise<TeamCfg | undefined> {
   });
 }
 
+/**
+ * Web istemcisini yükle: app.slack.com/client → gantry/auth, "d" çerezindeki oturumu alıp localConfig_v2'yi
+ * doldurur ve /client/T… adresine geçer. Çalışma alanı alt alanında (<ws>.slack.com, "uygulamada aç" ekranı)
+ * ya da slack.com/signin'de kalınmışsa oturum bilgisi ancak böyle okunur.
+ */
+let lastNav = 0;
+async function openClient(page: Page): Promise<TeamCfg | undefined> {
+  lastNav = Date.now();
+  await page.goto(CLIENT, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+  await page.waitForURL(/^https:\/\/app\.slack\.com\/client\/[A-Z]/, { timeout: 15_000 }).catch(() => undefined);
+  await page.waitForTimeout(1000);
+  return team(page);
+}
+
 async function slack(page: Page, method: string, params: Record<string, string | number | boolean> = {}): Promise<J> {
-  const t = await team(page);
+  const t = (await team(page)) ?? (Date.now() - lastNav > 8000 ? await openClient(page) : undefined);
   if (!t) throw new Error('Slack oturumu bulunamadı');
   return page.evaluate(
     async ({ method, params, token }) => {
@@ -51,7 +78,6 @@ async function slack(page: Page, method: string, params: Record<string, string |
 const users = new Map<string, { name: string; avatar?: string; handle?: string }>();
 const chanNames = new Map<string, string>();
 let meId = '';
-let lastNav = 0;
 
 async function userInfo(page: Page, id: string): Promise<{ name: string; avatar?: string; handle?: string }> {
   const c = users.get(id);
@@ -68,26 +94,22 @@ async function userInfo(page: Page, id: string): Promise<{ name: string; avatar?
 }
 
 export const slackStrategy: Strategy = {
-  home: 'https://app.slack.com/client',
-  loginHint: 'Açılan pencerede Slack çalışma alanına giriş yap',
+  home: SIGNIN,
+  loginHint: 'Açılan pencerede Slack\'e giriş yap (e-posta kodu / Google), listeden çalışma alanını AÇ — giriş ancak çalışma alanı açılınca tamamlanır',
 
   async loggedIn(page, cookies) {
+    // "d": .slack.com oturum çerezi; yalnızca bir çalışma alanı gerçekten açıldığında yazılır.
+    // Google/e-posta doğrulaması bitmiş ama çalışma alanı seçilmemişse yoktur → giriş tamamlanmamıştır.
     if (!cookies.d) return false;
     if (await team(page)) return true;
-    // "d" çerezi var ama bu sayfa (çalışma alanı seçimi / "uygulamada aç" ekranı) oturum bilgisini taşımıyor:
-    // web istemcisini yükle; localConfig_v2 orada oluşur
-    const now = Date.now();
-    if (!page.url().startsWith('https://app.slack.com/client') && now - lastNav > 8000) {
-      lastNav = now;
-      await page.goto('https://app.slack.com/client', { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
-      await page.waitForTimeout(2500);
-      return !!(await team(page));
-    }
-    return false;
+    // "d" var ama bu sayfa (slack.com/signin listesi, <ws>.slack.com "uygulamada aç" ekranı) oturum bilgisini
+    // taşımıyor: web istemcisini yükle; localConfig_v2 orada oluşur (görünür pencerede en çok 8 sn'de bir)
+    if (Date.now() - lastNav < 8000) return false;
+    return !!(await openClient(page));
   },
 
   async me(page) {
-    const t = await team(page);
+    const t = (await team(page)) ?? (await openClient(page));
     meId = t?.userId ?? '';
     if (t && meId) {
       const u = await userInfo(page, meId);

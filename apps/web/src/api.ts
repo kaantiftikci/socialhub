@@ -36,7 +36,7 @@ export const api = {
   restartAccount: (id: string) => call('POST', `/accounts/${enc(id)}/restart`),
   accountInput: (id: string, kind: 'phone' | 'code' | 'password', value: string) => call('POST', `/accounts/${enc(id)}/input`, { kind, value }),
   chats: () => call<Chat[]>('GET', '/chats'),
-  messages: (chatId: string, limit = 100) => call<Message[]>('GET', `/chats/${enc(chatId)}/messages?limit=${limit}`),
+  messages: (chatId: string, limit = 100, before?: number) => call<Message[]>('GET', `/chats/${enc(chatId)}/messages?limit=${limit}${before ? `&before=${before}` : ''}`),
   send: (chatId: string, text: string) => call<{ remoteId: string }>('POST', `/chats/${enc(chatId)}/send`, { text }),
   markRead: (chatId: string) => call('POST', `/chats/${enc(chatId)}/read`),
   setTags: (chatId: string, tags: string[]) => call<Chat>('POST', `/chats/${enc(chatId)}/tags`, { tags }),
