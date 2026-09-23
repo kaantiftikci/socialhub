@@ -7,11 +7,21 @@ import { DEMO_MODE, PORT, ensureDirs, DATA_DIR } from './config.js';
 // libsignal (WhatsApp şifre kütüphanesi) çözülemeyen eski/yinelenen paketleri doğrudan console.error ile basar;
 // zararsızdır (WhatsApp Web de aynı paketleri sessizce atar). Terminali kirletmesin.
 const NOISE = [/Failed to decrypt message with any known session/, /Session error:\s*MessageCounterError/, /Bad MAC/, /Closing (open )?session/];
+let decryptFails = 0;
+setInterval(() => {
+  if (decryptFails > 0) {
+    bus.log('warn', `WhatsApp: son 1 dakikada ${decryptFails} mesaj çözülemedi (oturum anahtarı uyuşmazlığı; telefonda Bağlı cihazlar → cihazı kaldırıp yeniden eşleştirmek çözer)`);
+    decryptFails = 0;
+  }
+}, 60_000).unref();
 for (const k of ['error', 'log', 'warn'] as const) {
   const orig = console[k].bind(console);
   console[k] = (...args: unknown[]) => {
     const first = String(args[0] ?? '');
-    if (NOISE.some((re) => re.test(first))) return;
+    if (NOISE.some((re) => re.test(first))) {
+      if (/Failed to decrypt|Bad MAC/.test(first)) decryptFails++;
+      return;
+    }
     // libsignal oturum nesnesini (anahtarlarla birlikte!) ayrı bir çağrıyla döküyor: günlüğe yazma
     if (args.some((x) => x && typeof x === 'object' && ('ephemeralKeyPair' in (x as object) || 'indexInfo' in (x as object) || 'pendingPreKey' in (x as object)))) return;
     orig(...args);

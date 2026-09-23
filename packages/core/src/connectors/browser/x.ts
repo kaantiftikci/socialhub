@@ -159,6 +159,8 @@ function parseDayLabel(label: string): number | undefined {
 }
 /** Önceki yoklamada görülen DOM önizlemesi: değiştiyse sohbet "yeni etkinlik" sayılır */
 const domPreview = new Map<string, string>();
+/** 1.1 ucunda bulunmayan (yalnızca XChat) sohbetler */
+const apiMissing = new Set<string>();
 
 async function domInbox(page: Page): Promise<Array<{ id: string; name: string; preview: string; rel: string }>> {
   if (!page.url().startsWith(CHAT)) await page.goto(CHAT, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
@@ -297,10 +299,19 @@ export const x: Strategy = {
   },
 
   async messages(page, cookies, threadId, limit): Promise<Msg[]> {
-    const data = await xapi(page, cookies, `/1.1/dm/conversation/${encodeURIComponent(threadId)}.json?count=${limit}&include_ext_alt_text=false&tweet_mode=extended`);
-    const tl = data.conversation_timeline ?? {};
-    collectUsers(tl);
-    const api = fromEntries(tl.entries ?? [], threadId).reverse();
+    // XChat grup kimlikleri (g…) ve daha önce 404 veren sohbetler 1.1 ucunda yok → yalnızca DOM
+    let api: Msg[] = [];
+    if (!threadId.startsWith('g') && !apiMissing.has(threadId)) {
+      try {
+        const data = await xapi(page, cookies, `/1.1/dm/conversation/${encodeURIComponent(threadId)}.json?count=${limit}&include_ext_alt_text=false&tweet_mode=extended`);
+        const tl = data.conversation_timeline ?? {};
+        collectUsers(tl);
+        api = fromEntries(tl.entries ?? [], threadId).reverse();
+      } catch (e) {
+        if (/X 404/.test((e as Error).message)) apiMissing.add(threadId);
+        else throw e;
+      }
+    }
     let dom: Msg[] = [];
     try {
       dom = await domMessages(page, threadId);

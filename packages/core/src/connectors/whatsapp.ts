@@ -139,7 +139,8 @@ export class WhatsAppConnector extends BaseConnector {
             .catch((e) => bus.log('warn', `WhatsApp uygulama durumu eşitlenemedi: ${(e as Error).message}`));
         }, 8_000);
         setTimeout(() => {
-          if (!this.historySeen && !this.stopping && this.sock === sock)
+          // geçmiş yalnızca ilk eşleşmede gelir; depoda sohbet varsa uyarı gereksiz
+          if (!this.historySeen && !this.stopping && this.sock === sock && this.store.listChatsOf(this.account.id).length === 0)
             bus.log('warn', 'WhatsApp: 90 sn geçti, telefondan sohbet geçmişi gelmedi. Telefonda WhatsApp → Bağlı cihazlar → bu cihazı kaldır, sonra kanala sağ tık → Kaldır → yeniden bağlan.');
         }, 90_000);
       }
@@ -551,10 +552,11 @@ export class WhatsAppConnector extends BaseConnector {
     const attachments = attachmentsOf(content);
     if (!text && attachments.length === 0) {
       // protokol/sistem mesajları; tanınmayan içerik türlerini bir kez günlüğe yaz (tek seferlik medya vb. tanı)
-      const keys = Object.keys(m.message ?? {}).filter((k) => k !== 'messageContextInfo' && k !== 'senderKeyDistributionMessage').join(',');
-      if (keys && !seenUnknown.has(keys) && !/protocolMessage|reactionMessage|pollUpdateMessage|keepInChatMessage/.test(keys)) {
-        seenUnknown.add(keys);
-        bus.log('info', `WhatsApp: içeriği alınamayan mesaj türü: ${keys} (stub ${m.messageStubType ?? '-'})`);
+      const keys = Object.keys(m.message ?? {}).filter((k) => k !== 'messageContextInfo' && k !== 'senderKeyDistributionMessage').join(',') || '(boş)';
+      const sig = `${keys}#${m.messageStubType ?? '-'}`;
+      if (live && !seenUnknown.has(sig) && !/protocolMessage|reactionMessage|pollUpdateMessage|keepInChatMessage/.test(keys)) {
+        seenUnknown.add(sig);
+        bus.log('info', `WhatsApp: içeriği alınamayan mesaj: tür=${keys} stub=${m.messageStubType ?? '-'} sohbet=${jid} gönderen=${m.key.participant ?? '-'} fromMe=${!!m.key.fromMe}`);
       }
       return;
     }
