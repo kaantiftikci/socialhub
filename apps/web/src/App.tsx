@@ -227,20 +227,23 @@ export default function App() {
   // ---- seçili sohbetin mesajları ----
   // "Daha eski mesajlar" ile yüklenenler sohbet başına bellekte tutulur; geri dönünce yeniden 100'e düşmez
   const msgCache = useRef(new Map<string, Message[]>());
+  /** `messages` dizisinin hangi sohbete ait olduğu: seçim değiştiği anda eski mesajlar yeni kimlikle önbelleğe yazılmasın */
+  const msgOwner = useRef<string | null>(null);
   useEffect(() => {
-    if (selected && messages.length) msgCache.current.set(selected, messages);
+    if (selected && msgOwner.current === selected && messages.length) msgCache.current.set(selected, messages);
   }, [messages, selected]);
   useEffect(() => {
+    msgOwner.current = selected;
     if (!selected) return void setMessages([]);
     let alive = true;
     const cached = msgCache.current.get(selected);
-    if (cached?.length) setMessages(cached);
+    setMessages(cached?.length ? cached : []);
     api
       .messages(selected)
       .then((m) => {
         if (!alive) return;
         // yeni gelenleri önbellekteki daha eski mesajlarla birleştir
-        const prev = msgCache.current.get(selected) ?? [];
+        const prev = (msgCache.current.get(selected) ?? []).filter((x) => x.chatId === selected);
         const ids = new Set(m.map((x) => x.id));
         setMessages([...prev.filter((x) => !ids.has(x.id)), ...m].sort((x, y) => x.ts - y.ts));
         // hiç mesaj yoksa (örn. yalnızca sohbet listesinden geldi) platformdan geçmişi iste
@@ -713,7 +716,7 @@ export default function App() {
               <Conversation
                 key={current.id}
                 chat={current}
-                messages={messages}
+                messages={messages.filter((m) => m.chatId === current.id)}
                 ai={ai}
                 notify={notify}
                 onSnooze={() => snooze(current.id)}
