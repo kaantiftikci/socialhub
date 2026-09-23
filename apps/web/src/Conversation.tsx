@@ -53,17 +53,28 @@ export function Conversation({
   const endRef = useRef<HTMLDivElement>(null);
   const msgsRef = useRef<HTMLDivElement>(null);
   const firstIdRef = useRef<string | undefined>(undefined);
+  const lastIdRef = useRef<string | undefined>(undefined);
+  const chatRef = useRef<string | undefined>(undefined);
   const heightRef = useRef(0);
   const platform = PLATFORMS[chat.platform];
 
-  // Yeni mesajda en alta kaydır; "daha eski mesajlar" başa eklendiğinde ise okunan yer korunur
+  // Kaydırma: sohbet açılınca en alta; "daha eski mesajlar" başa eklenince okunan yer korunur; yeni mesaj gelince
+  // yalnızca zaten alttaysan en alta iner (yukarı kaydırırken sohbet durum/okundu güncellemeleriyle aşağı fırlamaz)
   useEffect(() => {
     const el = msgsRef.current;
     const first = messages[0]?.id;
+    const last = messages[messages.length - 1]?.id;
+    const chatChanged = chatRef.current !== chat.id;
+    chatRef.current = chat.id;
     const prepended = !!el && !!firstIdRef.current && first !== firstIdRef.current && messages.some((m) => m.id === firstIdRef.current);
-    if (prepended && el) el.scrollTop += el.scrollHeight - heightRef.current;
-    else endRef.current?.scrollIntoView({ block: 'end' });
+    if (chatChanged) endRef.current?.scrollIntoView({ block: 'end' });
+    else if (prepended && el) el.scrollTop += el.scrollHeight - heightRef.current;
+    else if (el && last !== lastIdRef.current) {
+      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 240;
+      if (nearBottom) endRef.current?.scrollIntoView({ block: 'end' });
+    }
     firstIdRef.current = first;
+    lastIdRef.current = last;
     heightRef.current = el?.scrollHeight ?? 0;
   }, [messages, chat.id]);
 
@@ -75,13 +86,14 @@ export function Conversation({
   const groups = useMemo(() => groupMessages(shown), [shown]);
   const lastIncoming = [...messages].reverse().find((m) => !m.fromMe);
   const needsReply = !!lastIncoming && messages[messages.length - 1]?.id === lastIncoming.id;
-  const [allFiles, setAllFiles] = useState(false);
+  const [mediaOpen, setMediaOpen] = useState(false);
+  useEffect(() => setMediaOpen(false), [chat.id]);
   const allShared = useMemo(() => {
     const out: Array<{ att: Attachment; m: Message }> = [];
     for (const m of [...messages].reverse()) for (const att of m.attachments ?? []) out.push({ att, m });
     return out;
   }, [messages]);
-  const files = useMemo(() => (allFiles ? allShared : allShared.slice(0, 4)), [allShared, allFiles]);
+  const files = useMemo(() => allShared.slice(0, 4), [allShared]);
 
   async function makeDraft(t: Tone = tone) {
     setTone(t);
@@ -500,7 +512,7 @@ export function Conversation({
               Paylaşılanlar
               <span style={{ color: 'var(--text3)', fontWeight: 400 }}>{allShared.length}</span>
               {allShared.length > 4 && (
-                <button className="btn ghost xs icon b" style={{ marginLeft: 'auto', transform: allFiles ? 'rotate(180deg)' : undefined }} onClick={() => setAllFiles(!allFiles)} title={allFiles ? 'Yalnızca son 4' : `Yüklenen tümünü göster (${allShared.length})`} aria-label="Tüm paylaşılanlar">
+                <button className="btn ghost xs icon b" style={{ marginLeft: 'auto', transform: 'rotate(-90deg)' }} onClick={() => setMediaOpen(true)} title={`Tümünü büyük göster (${allShared.length})`} aria-label="Tüm paylaşılanlar">
                   <Icon name="chev" size={13} sw={2} />
                 </button>
               )}
@@ -543,6 +555,47 @@ export function Conversation({
         )}
       </aside>
       </>
+      )}
+      {mediaOpen && (
+        <div className="overlay" onClick={() => setMediaOpen(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Paylaşılanlar" style={{ gap: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <h2 style={{ fontSize: 22 }}>Paylaşılanlar</h2>
+              <span className="pill">{allShared.length}</span>
+              <span style={{ fontSize: 12.5, color: 'var(--text3)' }}>Şu ana kadar yüklenen mesajlardaki ekler · {chat.name}</span>
+              <span style={{ flexGrow: 1 }} />
+              <button className="btn icon b b2" onClick={() => setMediaOpen(false)} aria-label="Kapat">
+                <Icon name="x" size={15} sw={2} />
+              </button>
+            </div>
+            <div className="media-grid">
+              {allShared.map(({ att, m }, i) => (
+                <div
+                  key={i}
+                  className="tile"
+                  role="button"
+                  tabIndex={0}
+                  title={att.name}
+                  onClick={() => {
+                    if (att.url || att.link) setLightbox(att);
+                    else notify('Bu ek indirilemedi (medya kaydı yok)', true);
+                  }}
+                  onKeyDown={(e) => e.key === 'Enter' && (e.currentTarget as HTMLElement).click()}
+                >
+                  {att.url ? (
+                    <img src={abs(att.url)} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(e) => (e.currentTarget.style.display = 'none')} />
+                  ) : (
+                    <span className="big">{att.kind === 'video' ? <Icon name="play" size={28} /> : att.mime?.includes('pdf') ? 'PDF' : <Icon name="file" size={28} />}</span>
+                  )}
+                  <span className="cap">
+                    <span className="nm">{att.name ?? attLabel(att.kind)}</span>
+                    <span className="sz">{fmtStamp(m.ts)}{att.size ? ` · ${fmtSize(att.size)}` : ''}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
       {lightbox && <Lightbox att={lightbox} onClose={() => setLightbox(null)} />}
     </>

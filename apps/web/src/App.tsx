@@ -53,6 +53,7 @@ export default function App() {
   };
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<Array<{ message: Message; chat: Chat }>>([]);
+  const currentMessages = useMemo(() => messages.filter((m) => m.chatId === selected), [messages, selected]);
   useEffect(() => loadPaneSizes(), []);
   // Tam metin arama (FTS5): 2+ karakterde mesaj içeriklerinde de ara
   useEffect(() => {
@@ -716,7 +717,7 @@ export default function App() {
               <Conversation
                 key={current.id}
                 chat={current}
-                messages={messages.filter((m) => m.chatId === current.id)}
+                messages={currentMessages}
                 ai={ai}
                 notify={notify}
                 onSnooze={() => snooze(current.id)}

@@ -549,7 +549,15 @@ export class WhatsAppConnector extends BaseConnector {
     const content = unwrap(m.message);
     const text = textOf(content);
     const attachments = attachmentsOf(content);
-    if (!text && attachments.length === 0) return; // protokol/sistem mesajları
+    if (!text && attachments.length === 0) {
+      // protokol/sistem mesajları; tanınmayan içerik türlerini bir kez günlüğe yaz (tek seferlik medya vb. tanı)
+      const keys = Object.keys(m.message ?? {}).filter((k) => k !== 'messageContextInfo' && k !== 'senderKeyDistributionMessage').join(',');
+      if (keys && !seenUnknown.has(keys) && !/protocolMessage|reactionMessage|pollUpdateMessage|keepInChatMessage/.test(keys)) {
+        seenUnknown.add(keys);
+        bus.log('info', `WhatsApp: içeriği alınamayan mesaj türü: ${keys} (stub ${m.messageStubType ?? '-'})`);
+      }
+      return;
+    }
     const bizName = (m as WAMessage & { verifiedBizName?: string | null }).verifiedBizName ?? undefined;
     if (!m.pushName && bizName) m.pushName = bizName;
     if (m.pushName && !m.key.fromMe) {
@@ -604,6 +612,7 @@ export class WhatsAppConnector extends BaseConnector {
   }
 }
 
+const seenUnknown = new Set<string>();
 let ffmpegOk: boolean | undefined;
 async function transcodeToMp3(input: Buffer): Promise<Buffer | undefined> {
   if (ffmpegOk === undefined) {
@@ -629,7 +638,8 @@ function isChatJid(jid: string): boolean {
 function unwrap(m: proto.IMessage | null | undefined): proto.IMessage | undefined {
   if (!m) return undefined;
   const x = m as proto.IMessage & { viewOnceMessageV2Extension?: { message?: proto.IMessage | null } | null; editedMessage?: { message?: proto.IMessage | null } | null };
-  const inner = m.ephemeralMessage?.message ?? m.viewOnceMessage?.message ?? m.viewOnceMessageV2?.message ?? x.viewOnceMessageV2Extension?.message ?? m.documentWithCaptionMessage?.message ?? x.editedMessage?.message;
+  const y = x as typeof x & { groupMentionedMessage?: { message?: proto.IMessage | null } | null; botInvokeMessage?: { message?: proto.IMessage | null } | null; lottieStickerMessage?: { message?: proto.IMessage | null } | null };
+  const inner = m.ephemeralMessage?.message ?? m.viewOnceMessage?.message ?? m.viewOnceMessageV2?.message ?? x.viewOnceMessageV2Extension?.message ?? m.documentWithCaptionMessage?.message ?? x.editedMessage?.message ?? y.groupMentionedMessage?.message ?? y.botInvokeMessage?.message ?? y.lottieStickerMessage?.message;
   // iç içe sarmalar (ör. ephemeral içinde viewOnce)
   return inner ? unwrap(inner) ?? inner : m;
 }
