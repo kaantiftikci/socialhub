@@ -129,6 +129,15 @@ export class WhatsAppConnector extends BaseConnector {
         bus.log('info', 'WhatsApp bağlandı; telefon geçmişi gönderiyor (ilk seferde 10-60 sn sürebilir)');
         void this.syncGroups(sock);
         setTimeout(() => void this.syncGroups(sock), 20_000);
+        // Rehber adları uygulama durumu (app state) eşitlemesindeki contactAction kayıtlarından gelir; bazı hesaplarda
+        // bağlantıda kendiliğinden gelmiyor — açıkça iste
+        setTimeout(() => {
+          if (this.sock !== sock || this.stopping) return;
+          sock
+            .resyncAppState(['critical_unblock_low', 'regular_low', 'regular_high', 'critical_block'], false)
+            .then(() => bus.log('info', 'WhatsApp: uygulama durumu (rehber/sohbet ayarları) eşitlendi'))
+            .catch((e) => bus.log('warn', `WhatsApp uygulama durumu eşitlenemedi: ${(e as Error).message}`));
+        }, 8_000);
         setTimeout(() => {
           if (!this.historySeen && !this.stopping && this.sock === sock)
             bus.log('warn', 'WhatsApp: 90 sn geçti, telefondan sohbet geçmişi gelmedi. Telefonda WhatsApp → Bağlı cihazlar → bu cihazı kaldır, sonra kanala sağ tık → Kaldır → yeniden bağlan.');
@@ -252,17 +261,14 @@ export class WhatsAppConnector extends BaseConnector {
         if (st === undefined || st === null) continue;
         const map: Record<number, 'pending' | 'sent' | 'delivered' | 'read'> = { 0: 'pending', 1: 'pending', 2: 'sent', 3: 'delivered', 4: 'read', 5: 'read' };
         const cj = this.canon(u.key.remoteJid);
-        if (!this.hasMessage(cj, u.key.id)) continue; // bilmediğimiz mesaj için boş kayıt açma
-        this.upsertMessage({
-          remoteChatId: cj,
-          remoteId: u.key.id,
-          senderId: 'me',
-          senderName: 'Ben',
-          fromMe: true,
-          text: '',
-          ts: Date.now(),
-          status: map[st] ?? 'sent',
-        });
+        const mid = `${chatIdOf(this.account.id, cj)}#${u.key.id}`;
+        const stored = this.store.getMessage(mid);
+        if (!stored) continue; // bilmediğimiz mesaj için boş kayıt açma
+        const next = map[st] ?? 'sent';
+        if (stored.status === next) continue;
+        this.store.updateStatus(mid, next);
+        const chat = this.store.getChat(stored.chatId);
+        if (chat) bus.emit({ type: 'message.upsert', message: { ...stored, status: next }, chat });
       }
     });
   }
@@ -544,6 +550,8 @@ export class WhatsAppConnector extends BaseConnector {
     const text = textOf(content);
     const attachments = attachmentsOf(content);
     if (!text && attachments.length === 0) return; // protokol/sistem mesajları
+    const bizName = (m as WAMessage & { verifiedBizName?: string | null }).verifiedBizName ?? undefined;
+    if (!m.pushName && bizName) m.pushName = bizName;
     if (m.pushName && !m.key.fromMe) {
       const senderJid = this.canon(m.key.participant ?? jid);
       if (!this.nameCache.has(senderJid)) this.nameCache.set(senderJid, m.pushName);
@@ -620,7 +628,10 @@ function isChatJid(jid: string): boolean {
 
 function unwrap(m: proto.IMessage | null | undefined): proto.IMessage | undefined {
   if (!m) return undefined;
-  return m.ephemeralMessage?.message ?? m.viewOnceMessage?.message ?? m.viewOnceMessageV2?.message ?? m.documentWithCaptionMessage?.message ?? m;
+  const x = m as proto.IMessage & { viewOnceMessageV2Extension?: { message?: proto.IMessage | null } | null; editedMessage?: { message?: proto.IMessage | null } | null };
+  const inner = m.ephemeralMessage?.message ?? m.viewOnceMessage?.message ?? m.viewOnceMessageV2?.message ?? x.viewOnceMessageV2Extension?.message ?? m.documentWithCaptionMessage?.message ?? x.editedMessage?.message;
+  // iç içe sarmalar (ör. ephemeral içinde viewOnce)
+  return inner ? unwrap(inner) ?? inner : m;
 }
 
 function textOf(m: proto.IMessage | undefined): string {

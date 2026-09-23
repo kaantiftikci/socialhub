@@ -1,6 +1,7 @@
 import type { Page } from 'playwright';
 import type { Msg, Strategy, Thread } from './bridge.js';
 import type { Attachment } from '../../model.js';
+import { bus } from '../../bus.js';
 
 /**
  * X (Twitter): web istemcisinin 1.1 DM uçları. Not: X, Kasım 2025'te uçtan uca şifreli
@@ -134,6 +135,95 @@ function fromEntries(entries: J[], convId?: string): Msg[] {
     });
 }
 
+const CHAT = 'https://x.com/i/chat';
+const TR_MONTHS: Record<string, number> = { oca: 0, şub: 1, mar: 2, nis: 3, may: 4, haz: 5, tem: 6, ağu: 7, eyl: 8, eki: 9, kas: 10, ara: 11, jan: 0, feb: 1, apr: 3, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+/** "3 g", "1 ha", "12 dk", "2 sa", "5 ay" → yaklaşık zaman damgası */
+function fromRelative(rel: string): number {
+  const m = rel.trim().match(/^(\d+)\s*(dk|sa|g|ha|ay|y|m|h|d|w|mo)$/i);
+  if (!m) return 0;
+  const n = Number(m[1]);
+  const unit = m[2].toLowerCase();
+  const ms = unit === 'dk' || unit === 'm' ? 60e3 : unit === 'sa' || unit === 'h' ? 3600e3 : unit === 'g' || unit === 'd' ? 86400e3 : unit === 'ha' || unit === 'w' ? 7 * 86400e3 : unit === 'ay' || unit === 'mo' ? 30 * 86400e3 : 365 * 86400e3;
+  return Date.now() - n * ms;
+}
+/** "15 Eyl Sal, 21:47" / "15 Eyl 2025 Sal, 21:47" → gün başlangıcı; saat ayrıca alınır */
+function parseDayLabel(label: string): number | undefined {
+  const m = label.match(/(\d{1,2})\s+([A-Za-zÇĞİÖŞÜçğıöşü]{3})\w*\.?\s*(\d{4})?/);
+  if (!m) return undefined;
+  const mon = TR_MONTHS[m[2].toLocaleLowerCase('tr')];
+  if (mon === undefined) return undefined;
+  const now = new Date();
+  let d = new Date(m[3] ? Number(m[3]) : now.getFullYear(), mon, Number(m[1]));
+  if (!m[3] && d.getTime() > now.getTime() + 86400e3) d = new Date(now.getFullYear() - 1, mon, Number(m[1]));
+  return d.getTime();
+}
+/** Önceki yoklamada görülen DOM önizlemesi: değiştiyse sohbet "yeni etkinlik" sayılır */
+const domPreview = new Map<string, string>();
+
+async function domInbox(page: Page): Promise<Array<{ id: string; name: string; preview: string; rel: string }>> {
+  if (!page.url().startsWith(CHAT)) await page.goto(CHAT, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+  await page.waitForSelector('[data-testid^="dm-conversation-item-"]', { timeout: 15_000 }).catch(() => undefined);
+  await page.waitForTimeout(800);
+  return page.evaluate(() => {
+    const out: Array<{ id: string; name: string; preview: string; rel: string }> = [];
+    for (const el of Array.from(document.querySelectorAll<HTMLElement>('[data-testid^="dm-conversation-item-"]'))) {
+      const raw = el.getAttribute('data-testid')!.slice('dm-conversation-item-'.length);
+      const id = raw.replace(':', '-');
+      const lines = el.innerText.split('\n').map((t) => t.trim()).filter(Boolean);
+      if (!lines.length) continue;
+      const relIdx = lines.findIndex((t, i) => i > 0 && /^\d+\s*(dk|sa|g|ha|ay|y|m|h|d|w|mo)$/i.test(t));
+      const name = lines[0];
+      const rel = relIdx > 0 ? lines[relIdx] : '';
+      const preview = lines.slice(relIdx > 0 ? relIdx + 1 : 1).join(' ').replace(/^(You|Sen):\s*/, '');
+      out.push({ id, name, preview, rel });
+    }
+    return out;
+  });
+}
+
+async function domMessages(page: Page, threadId: string): Promise<Msg[]> {
+  const url = `${CHAT}/${threadId}`;
+  if (!page.url().startsWith(url)) await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+  await page.waitForSelector('[data-testid="dm-message-list"]', { timeout: 15_000 }).catch(() => undefined);
+  await page.waitForTimeout(2500);
+  const rows = await page.evaluate(() => {
+    const scroller = document.querySelector<HTMLElement>('[data-testid="dm-message-scroller"]') ?? document.querySelector<HTMLElement>('[data-testid="dm-message-list"]');
+    if (!scroller) return [] as Array<{ id: string; text: string; time: string; day: string; me: boolean; media: boolean }>;
+    const pr = scroller.getBoundingClientRect();
+    const mid = pr.left + pr.width / 2;
+    const out: Array<{ id: string; text: string; time: string; day: string; me: boolean; media: boolean }> = [];
+    let day = '';
+    for (const el of Array.from(scroller.querySelectorAll<HTMLElement>('*'))) {
+      const tid = el.getAttribute('data-testid') ?? '';
+      if (tid.startsWith('message-') && !tid.startsWith('message-text-')) {
+        const textEl = el.querySelector<HTMLElement>('[data-testid^="message-text-"]');
+        // metin öğesi saati de içeriyor ("altlar 6000\n22:08"): sondaki saati at
+        const text = (textEl?.innerText ?? '')
+          .split('\n')
+          .map((t) => t.trim())
+          .filter((t) => t && !/^\d{2}:\d{2}$/.test(t) && !/^(Görüldü|Seen|Gönderildi|Sent|Yeni|New)$/i.test(t))
+          .join('\n');
+        const time = (el.innerText.match(/(^|\s)(\d{2}:\d{2})(\s|$)/) ?? [])[2] ?? '';
+        const r = (textEl ?? el).getBoundingClientRect();
+        out.push({ id: tid.slice('message-'.length), text, time, day, me: r.left + r.width / 2 > mid, media: !!el.querySelector('img[src*="pbs.twimg"], video') });
+      } else if (el.children.length === 0 && /^\d{1,2}\s+\S+.*,\s*\d{2}:\d{2}$/.test(el.innerText?.trim() ?? '')) {
+        day = el.innerText.trim();
+      }
+    }
+    return out;
+  });
+  const others = threadId.split('-').filter((p) => p !== meId);
+  const senderId = others[0] ?? threadId;
+  return rows
+    .filter((r) => r.text || r.media)
+    .map((r, i) => {
+      const dayTs = parseDayLabel(r.day);
+      const tm = r.time.match(/(\d{2}):(\d{2})/);
+      const ts = dayTs !== undefined && tm ? dayTs + Number(tm[1]) * 3600e3 + Number(tm[2]) * 60e3 : Date.now() - (rows.length - i) * 1000;
+      return { id: 'xc-' + r.id, text: r.text || '[medya]', ts, fromMe: r.me, senderId: r.me ? 'me' : senderId, senderName: r.me ? 'Ben' : (users.get(senderId) ?? 'X kullanıcısı'), senderAvatarUrl: r.me ? undefined : avatars.get(senderId) };
+    });
+}
+
 export const x: Strategy = {
   home: 'https://x.com/messages',
   loginHint: 'Açılan pencerede X hesabına giriş yap',
@@ -181,6 +271,28 @@ export const x: Strategy = {
         avatarUrl: c.type === 'GROUP_DM' ? c.avatar_image_https : avatars.get(others[0]),
       });
     }
+    // XChat (Kasım 2025 sonrası uçtan uca şifreli sohbetler) 1.1 uçlarında görünmez; /i/chat DOM'undan tamamla
+    try {
+      const dom = await domInbox(page);
+      for (const d of dom) {
+        const prev = domPreview.get(d.id);
+        domPreview.set(d.id, d.preview);
+        const changed = prev !== undefined && prev !== d.preview;
+        const approx = fromRelative(d.rel);
+        const ex = out.find((t) => t.id === d.id);
+        if (ex) {
+          // göreli süre ("3 g") kaba: var olan sohbetin zamanını yalnızca önizleme değiştiğinde (yeni mesaj) ilerlet
+          if (d.preview && d.preview !== ex.preview.replace(/^(You|Sen):\s*/, '')) {
+            ex.preview = d.preview;
+            if (changed) ex.lastTs = Math.max(ex.lastTs, Date.now());
+          }
+        } else {
+          out.push({ id: d.id, name: d.name || 'Sohbet', kind: d.id.startsWith('g') ? 'group' : 'direct', lastTs: changed ? Date.now() : approx || 0, preview: d.preview, unread: 0 });
+        }
+      }
+    } catch (e) {
+      bus.log('warn', `X sohbet listesi (DOM) okunamadı: ${(e as Error).message}`);
+    }
     return out;
   },
 
@@ -188,7 +300,16 @@ export const x: Strategy = {
     const data = await xapi(page, cookies, `/1.1/dm/conversation/${encodeURIComponent(threadId)}.json?count=${limit}&include_ext_alt_text=false&tweet_mode=extended`);
     const tl = data.conversation_timeline ?? {};
     collectUsers(tl);
-    return fromEntries(tl.entries ?? [], threadId).reverse();
+    const api = fromEntries(tl.entries ?? [], threadId).reverse();
+    let dom: Msg[] = [];
+    try {
+      dom = await domMessages(page, threadId);
+    } catch (e) {
+      bus.log('warn', `X mesajlar (DOM) okunamadı (${threadId}): ${(e as Error).message}`);
+    }
+    // aynı mesaj iki kaynakta da olabilir (eski DM'ler): metin + yön + ±3 dk eşleşiyorsa API kaydı kalsın
+    const dup = (m: Msg) => api.some((a) => a.fromMe === m.fromMe && a.text === m.text && Math.abs(a.ts - m.ts) < 180e3);
+    return [...api, ...dom.filter((m) => !dup(m))].sort((a, b) => a.ts - b.ts).slice(-Math.max(limit, 25));
   },
 
   async openDirect(_page, _cookies, p) {
@@ -199,7 +320,21 @@ export const x: Strategy = {
   },
 
   async send(page, cookies, threadId, text) {
-    const r = await xapi(page, cookies, '/1.1/dm/new2.json?ext=mediaColor,altText&include_ext_alt_text=true&supports_reactions=true', {
+    // Şifreli (XChat) sohbetlerde 1.1 gönderimi reddedilir → sayfadaki yazı kutusuna yaz
+    const domSend = async (): Promise<string | undefined> => {
+      const url = `${CHAT}/${threadId}`;
+      if (!page.url().startsWith(url)) await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      const box = page.locator('[data-testid="dm-composer-textarea"]').first();
+      await box.waitFor({ timeout: 15_000 });
+      await box.click();
+      await box.fill(text);
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(800);
+      return undefined;
+    };
+    let r: J;
+    try {
+      r = await xapi(page, cookies, '/1.1/dm/new2.json?ext=mediaColor,altText&include_ext_alt_text=true&supports_reactions=true', {
       conversation_id: threadId,
       recipient_ids: false,
       request_id: crypto.randomUUID(),
@@ -208,7 +343,10 @@ export const x: Strategy = {
       include_cards: 1,
       include_quote_count: true,
       dm_users: false,
-    });
-    return r?.entries?.[0]?.message?.id ? String(r.entries[0].message.id) : undefined;
+      });
+    } catch {
+      return domSend();
+    }
+    return r?.entries?.[0]?.message?.id ? String(r.entries[0].message.id) : domSend();
   },
 };

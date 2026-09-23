@@ -74,6 +74,7 @@ export abstract class BaseConnector implements Connector {
       kind: input.kind ?? existing?.kind ?? 'direct',
       unread: input.unread ?? existing?.unread ?? 0,
       lastMessageAt: input.lastMessageAt ?? existing?.lastMessageAt ?? 0,
+      lastFromMe: existing?.lastFromMe,
       lastPreview: input.lastPreview ?? existing?.lastPreview ?? '',
       avatarUrl: input.avatarUrl ?? existing?.avatarUrl,
       tags: existing?.tags ?? [],
@@ -97,10 +98,15 @@ export abstract class BaseConnector implements Connector {
     const { remoteChatId: _drop, ...rest } = input;
     const message: Message = { ...rest, id: messageId(cid, input.remoteId), chatId: cid };
     const inserted = this.store.upsertMessage(message, { bumpUnread: opts.live });
+    if (inserted && input.fromMe && !input.remoteId.startsWith('local-')) {
+      for (const id of this.store.dropLocalDuplicates(cid)) bus.emit({ type: 'message.delete', chatId: cid, messageId: id });
+    }
     const chat = this.store.getChat(cid)!;
-    if (inserted || opts.live) bus.emit({ type: 'message.upsert', message, chat });
+    // Depodaki satırı yayınla (durum güncellemesi gibi kısmi girdiler metni/zamanı ezmesin)
+    const stored = this.store.getMessage(message.id) ?? message;
+    if (inserted || opts.live) bus.emit({ type: 'message.upsert', message: stored, chat });
     else bus.emit({ type: 'chat.upsert', chat });
-    return message;
+    return stored;
   }
 
   /** Bir üyeyle birebir sohbeti aç (yoksa oluştur) ve depoya yaz. */

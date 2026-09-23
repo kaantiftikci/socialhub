@@ -100,7 +100,7 @@ export class IMessageConnector extends BaseConnector {
     const esc = (s: string) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     const script = isGroup
       ? `tell application "Messages"\n send "${esc(text)}" to chat id "${esc(remoteChatId)}"\nend tell`
-      : `tell application "Messages"\n set svc to 1st account whose service type = iMessage\n set tgt to participant "${esc(remoteChatId.split(';').pop() ?? '')}" of svc\n send "${esc(text)}" to tgt\nend tell`;
+      : `tell application "Messages"\n set svc to 1st account whose service type = ${remoteChatId.startsWith('SMS;') ? 'SMS' : 'iMessage'}\n set tgt to participant "${esc(remoteChatId.split(';').pop() ?? '')}" of svc\n send "${esc(text)}" to tgt\nend tell`;
     await new Promise<void>((resolve, reject) => {
       execFile('osascript', ['-e', script], (err, _out, stderr) => (err ? reject(new Error(stderr || err.message)) : resolve()));
     });

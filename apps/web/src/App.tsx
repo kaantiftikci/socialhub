@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, connectEvents } from './api';
 import { PLATFORMS, type Account, type Chat, type CoreEvent, type Message, type Platform, DEFAULT_TAGS } from './types';
-import { Avatar, Chip, Icon, Logo, Tag, ago, fmtTime } from './ui';
+import { Avatar, Chip, Icon, Logo, Resizer, Tag, ago, fmtTime, loadPaneSizes } from './ui';
 import { Conversation } from './Conversation';
 import { ConnectModal } from './Connect';
 import { Focus } from './Focus';
@@ -52,6 +52,15 @@ export default function App() {
     }
   };
   const [query, setQuery] = useState('');
+  const [hits, setHits] = useState<Array<{ message: Message; chat: Chat }>>([]);
+  useEffect(() => loadPaneSizes(), []);
+  // Tam metin arama (FTS5): 2+ karakterde mesaj içeriklerinde de ara
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) return void setHits([]);
+    const t = window.setTimeout(() => api.search(q).then(setHits).catch(() => setHits([])), 250);
+    return () => clearTimeout(t);
+  }, [query]);
   const [connectOpen, setConnectOpen] = useState(false);
   const [qr, setQr] = useState<Record<string, string>>({});
   const [prompts, setPrompts] = useState<Record<string, { prompt: 'phone' | 'code' | 'password'; message: string }>>({});
@@ -173,6 +182,9 @@ export default function App() {
           if (flushTimer === undefined) flushTimer = window.setTimeout(flushChats, 150);
           setSelected((sel) => (sel === ev.chatId ? null : sel));
           break;
+        case 'message.delete':
+          if (ev.chatId === selectedRef.current) setMessages((prev) => prev.filter((m) => m.id !== ev.messageId));
+          break;
         case 'message.upsert':
           queueChat(ev.chat);
           if (!ev.message.fromMe && Date.now() - ev.message.ts < 60_000) {
@@ -193,7 +205,8 @@ export default function App() {
               }
               return [...prev, ev.message].sort((x, y) => x.ts - y.ts);
             });
-            if (!ev.message.fromMe) api.markRead(ev.message.chatId).catch(() => undefined);
+            // pencere arka plandaysa okundu sayma (rozet/okunmamış sayacı korunur)
+            if (!ev.message.fromMe) void windowFocused().then((f) => f && api.markRead(ev.message.chatId)).catch(() => undefined);
           }
           break;
       }
@@ -212,14 +225,24 @@ export default function App() {
   }, [refresh, notify]);
 
   // ---- seçili sohbetin mesajları ----
+  // "Daha eski mesajlar" ile yüklenenler sohbet başına bellekte tutulur; geri dönünce yeniden 100'e düşmez
+  const msgCache = useRef(new Map<string, Message[]>());
+  useEffect(() => {
+    if (selected && messages.length) msgCache.current.set(selected, messages);
+  }, [messages, selected]);
   useEffect(() => {
     if (!selected) return void setMessages([]);
     let alive = true;
+    const cached = msgCache.current.get(selected);
+    if (cached?.length) setMessages(cached);
     api
       .messages(selected)
       .then((m) => {
         if (!alive) return;
-        setMessages(m);
+        // yeni gelenleri önbellekteki daha eski mesajlarla birleştir
+        const prev = msgCache.current.get(selected) ?? [];
+        const ids = new Set(m.map((x) => x.id));
+        setMessages([...prev.filter((x) => !ids.has(x.id)), ...m].sort((x, y) => x.ts - y.ts));
         // hiç mesaj yoksa (örn. yalnızca sohbet listesinden geldi) platformdan geçmişi iste
         if (m.length === 0) api.loadHistory(selected).then(() => api.messages(selected)).then((m2) => alive && m2.length && setMessages(m2)).catch(() => undefined);
       })
@@ -527,6 +550,7 @@ export default function App() {
           </div>
         )}
       </nav>
+      <Resizer pane="side" />
 
       {booting && (
         <div className="booting" role="status">
@@ -576,42 +600,6 @@ export default function App() {
                     ))}
                   </div>
                 )}
-                {view === 'inbox' && waitingChats.length > 0 && (
-                  <>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: -6 }}>
-                      <span className="label">Yanıt bekleyenler</span>
-                      {storyPlatforms.length > 1 && (
-                        <span className="story-filters">
-                          <button className={`b ${storyPlatform === null ? 'on' : ''}`} onClick={() => setStoryPlatform(null)} title="Tümü">
-                            Tümü
-                          </button>
-                          {storyPlatforms.map((pl) => (
-                            <button key={pl} className={`b ${storyPlatform === pl ? 'on' : ''}`} onClick={() => setStoryPlatform(storyPlatform === pl ? null : pl)} title={PLATFORMS[pl].name}>
-                              <Chip platform={pl} size={18} />
-                            </button>
-                          ))}
-                        </span>
-                      )}
-                      <span style={{ flexGrow: 1 }} />
-                      <a href="#focus" onClick={(e) => (e.preventDefault(), setView('focus'))} style={{ fontSize: 12, fontWeight: 500, textDecoration: 'none' }}>
-                        Tümünü gör
-                      </a>
-                    </div>
-                    <div className="stories">
-                      {storyChats.slice(0, 8).map((c) => (
-                        <button key={c.id} className="story" onClick={() => setSelected(c.id)} title={c.lastPreview}>
-                          <span className={`ring ${c.unread ? 'unread' : ''}`}>
-                            <Avatar name={c.name} size={50} url={c.avatarUrl} />
-                            <Chip platform={c.platform} size={17} ring="#f7f6fa" />
-                            {c.unread > 0 && <span className="n">{c.unread}</span>}
-                          </span>
-                          <span className="nm">{c.name.split(' ')[0]}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
-
                 {view === 'inbox' && (
                   <div className="tabs" role="tablist">
                     {(['all', 'unread', 'waiting'] as Filter[]).map((f) => (
@@ -684,6 +672,24 @@ export default function App() {
                     </div>
                   ))
                 )}
+                {query.trim().length >= 2 && hits.length > 0 && (
+                  <div className="group">
+                    <div className="label" style={{ padding: '10px 14px 4px' }}>Mesajlarda</div>
+                    {hits.slice(0, 40).map(({ message: m, chat: c }) => (
+                      <button key={m.id} className="row b" onClick={() => setSelected(c.id)} style={{ textAlign: 'left', width: '100%' }}>
+                        <Avatar name={c.name} size={34} url={c.avatarUrl} />
+                        <span style={{ minWidth: 0, flexGrow: 1 }}>
+                          <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                            <span style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+                            <Chip platform={c.platform} size={14} />
+                            <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text3)' }}>{fmtTime(m.ts)}</span>
+                          </span>
+                          <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.fromMe ? 'Sen: ' : ''}{m.text}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="hints">
                 <span>
@@ -701,6 +707,7 @@ export default function App() {
                 </span>
               </div>
             </section>
+            <Resizer pane="list" />
 
             {current ? (
               <Conversation
@@ -721,7 +728,7 @@ export default function App() {
                   if (!oldest || olderBusy) return;
                   setOlderBusy(true);
                   try {
-                    const more = await api.messages(current.id, 100, oldest.ts);
+                    const more = await api.messages(current.id, 300, oldest.ts);
                     if (more.length === 0) setNoMoreOlder(current.id);
                     setMessages((prev) => {
                       const ids = new Set(prev.map((m) => m.id));

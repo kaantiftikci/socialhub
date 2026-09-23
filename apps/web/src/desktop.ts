@@ -7,6 +7,22 @@ export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in
 /** Çekirdek API kökü: tarayıcıda Vite proxy'si (göreli), Tauri'de doğrudan yerel port. */
 export const API_BASE = isTauri ? 'http://127.0.0.1:7788' : '';
 
+/** Çekirdek API belirteci: paketli uygulamada Tauri komutundan okunur (çekirdek 1-3 sn geç kalkabilir; birkaç kez dene). */
+export const coreToken: Promise<string> = (async () => {
+  if (!isTauri) return '';
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    for (let i = 0; i < 30; i++) {
+      const t = await invoke<string>('core_token').catch(() => '');
+      if (t) return t;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  } catch {
+    /* tarayıcıda */
+  }
+  return '';
+})();
+
 export async function setBadge(count: number): Promise<void> {
   if (!isTauri) return;
   try {

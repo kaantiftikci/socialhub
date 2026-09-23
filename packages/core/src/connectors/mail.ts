@@ -369,8 +369,8 @@ export class MailConnector extends BaseConnector {
       to,
       subject: chat.name === '(konu yok)' ? '' : /^(re|ynt):/i.test(chat.name) ? chat.name : `Re: ${chat.name}`,
       text,
-      inReplyTo: last?.remoteId,
-      references: last?.remoteId,
+      inReplyTo: last?.remoteId.startsWith('<') ? last.remoteId : undefined,
+      references: last?.remoteId.startsWith('<') ? last.remoteId : undefined,
     });
     const id = info.messageId ?? `local-${Date.now()}`;
     if (id) this.threadOf.set(id, remoteChatId);

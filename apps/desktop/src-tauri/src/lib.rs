@@ -185,6 +185,12 @@ fn focus_window(app: AppHandle) {
     show_main(&app);
 }
 
+/// Çekirdeğin yerel API belirteci (~/.kavsak/token); WKWebView "null" kaynaklı olduğundan her istekte gönderilir.
+#[tauri::command]
+fn core_token() -> String {
+    std::fs::read_to_string(kavsak_dir().join("token")).map(|s| s.trim().to_string()).unwrap_or_default()
+}
+
 #[tauri::command]
 fn core_url() -> String {
     format!("http://127.0.0.1:{CORE_PORT}")
@@ -205,7 +211,7 @@ pub fn run() {
                 .build(),
         )
         .manage(CoreProcess(Mutex::new(None)))
-        .invoke_handler(tauri::generate_handler![set_badge, focus_window, core_url, core_info])
+        .invoke_handler(tauri::generate_handler![set_badge, focus_window, core_url, core_info, core_token])
         .setup(|app| {
             let handle = app.handle().clone();
 

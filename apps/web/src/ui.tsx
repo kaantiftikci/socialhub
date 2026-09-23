@@ -1,3 +1,4 @@
+import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import type { ReactNode } from 'react';
 import { PLATFORMS, TAG_COLORS, type Platform } from './types';
 import { siWhatsapp, siTelegram, siX, siInstagram, siMessenger, siGmail, siIcloud } from 'simple-icons';
@@ -120,7 +121,10 @@ const PALETTE: Array<[string, string]> = [
 ];
 
 export function Avatar({ name, size = 40, url }: { name: string; size?: number; url?: string }) {
-  if (url) return <img className="avatar" src={url} alt="" width={size} height={size} style={{ width: size, height: size }} />;
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [url]);
+  // süresi dolan CDN bağlantıları (WhatsApp/Instagram/X) kırık resim yerine baş harfe düşsün
+  if (url && !failed) return <img className="avatar" src={url} alt="" width={size} height={size} style={{ width: size, height: size }} onError={() => setFailed(true)} />;
   let h = 0;
   for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   const [bg, fg] = PALETTE[h % PALETTE.length];
@@ -168,6 +172,20 @@ export function fmtTime(ts: number): string {
   return d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
 }
 
+/** Mesaj balonu damgası: bugün → 14:32, dün → Dün 14:32, eski → 24 Eyl 14:32 */
+export function fmtStamp(ts: number): string {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const time = d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) return time;
+  const y = new Date(now);
+  y.setDate(now.getDate() - 1);
+  if (d.toDateString() === y.toDateString()) return `Dün ${time}`;
+  const day = d.toLocaleDateString('tr-TR', d.getFullYear() === now.getFullYear() ? { day: 'numeric', month: 'short' } : { day: 'numeric', month: 'short', year: 'numeric' });
+  return `${day} ${time}`;
+}
+
 export function fmtDay(ts: number): string {
   const d = new Date(ts);
   const now = new Date();
@@ -193,4 +211,56 @@ export function agoLong(ts: number): string {
   const h = Math.round(m / 60);
   if (h < 24) return `${h} saattir`;
   return `${Math.round(h / 24)} gündür`;
+}
+
+// ---------- yeniden boyutlanabilir paneller ----------
+type Pane = 'side' | 'list' | 'ctx';
+const PANE_DEFAULT: Record<Pane, number> = { side: 232, list: 340, ctx: 288 };
+const PANE_LIMIT: Record<Pane, [number, number]> = { side: [168, 380], list: [250, 600], ctx: [220, 520] };
+const PANE_KEY = 'kavsak.panes';
+
+/** Kaydedilmiş panel genişliklerini CSS değişkenlerine uygula (açılışta bir kez). */
+export function loadPaneSizes(): void {
+  try {
+    const s = JSON.parse(localStorage.getItem(PANE_KEY) ?? '{}') as Partial<Record<Pane, number>>;
+    for (const k of Object.keys(PANE_DEFAULT) as Pane[]) if (s[k]) document.documentElement.style.setProperty(`--w-${k}`, `${s[k]}px`);
+  } catch {
+    /* yok */
+  }
+}
+
+/** Paneller arasındaki dikey tutamaç: sürükleyince yanındaki paneli genişletir/daraltır, çift tık varsayılana döner. */
+export function Resizer({ pane, sign = 1 }: { pane: Pane; sign?: 1 | -1 }) {
+  const setW = (w: number) => document.documentElement.style.setProperty(`--w-${pane}`, `${Math.round(w)}px`);
+  const current = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue(`--w-${pane}`)) || PANE_DEFAULT[pane];
+  const save = () => {
+    try {
+      const s = JSON.parse(localStorage.getItem(PANE_KEY) ?? '{}') as Record<string, number>;
+      s[pane] = current();
+      localStorage.setItem(PANE_KEY, JSON.stringify(s));
+    } catch {
+      /* yok */
+    }
+  };
+  const onDown = (e: ReactMouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const el = e.currentTarget;
+    const startX = e.clientX;
+    const startW = current();
+    el.classList.add('active');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    const move = (ev: globalThis.MouseEvent) => setW(Math.min(PANE_LIMIT[pane][1], Math.max(PANE_LIMIT[pane][0], startW + sign * (ev.clientX - startX))));
+    const up = () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      el.classList.remove('active');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      save();
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  };
+  return <div className="resizer" role="separator" aria-orientation="vertical" title="Sürükleyerek boyutlandır · çift tık: varsayılan" onMouseDown={onDown} onDoubleClick={() => (setW(PANE_DEFAULT[pane]), save())} />;
 }

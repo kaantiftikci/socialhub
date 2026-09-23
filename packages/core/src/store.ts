@@ -82,6 +82,7 @@ export class Store {
     if (!ccols.has('link')) this.db.exec('ALTER TABLE chats ADD COLUMN link TEXT');
     if (!ccols.has('participants')) this.db.exec('ALTER TABLE chats ADD COLUMN participants TEXT');
     if (!ccols.has('meta')) this.db.exec('ALTER TABLE chats ADD COLUMN meta TEXT');
+    if (!ccols.has('last_from_me')) this.db.exec('ALTER TABLE chats ADD COLUMN last_from_me INTEGER NOT NULL DEFAULT 0');
     // gönderen bazlı güncellemeler (ad/fotoğraf/lid→numara) tam tablo taraması yapmasın
     this.db.exec('CREATE INDEX IF NOT EXISTS messages_sender ON messages(sender_id)');
   }
@@ -117,8 +118,8 @@ export class Store {
   upsertChat(c: Chat): Chat {
     this.db
       .prepare(
-        `INSERT INTO chats (id, account_id, platform, remote_id, name, kind, unread, last_message_at, last_preview, avatar_url, tags, handle, link, participants, meta)
-         VALUES (@id, @accountId, @platform, @remoteId, @name, @kind, @unread, @lastMessageAt, @lastPreview, @avatarUrl, @tags, @handle, @link, @participants, @meta)
+        `INSERT INTO chats (id, account_id, platform, remote_id, name, kind, unread, last_message_at, last_preview, avatar_url, tags, handle, link, participants, meta, last_from_me)
+         VALUES (@id, @accountId, @platform, @remoteId, @name, @kind, @unread, @lastMessageAt, @lastPreview, @avatarUrl, @tags, @handle, @link, @participants, @meta, @lastFromMe)
          ON CONFLICT(id) DO UPDATE SET
            name = CASE WHEN excluded.name <> '' THEN excluded.name ELSE chats.name END,
            kind = excluded.kind,
@@ -139,6 +140,7 @@ export class Store {
         link: c.link ?? null,
         participants: c.participants ? JSON.stringify(c.participants) : null,
         meta: c.meta ? JSON.stringify(c.meta) : null,
+        lastFromMe: c.lastFromMe ? 1 : 0,
       });
     return this.getChat(c.id)!;
   }
@@ -221,15 +223,41 @@ export class Store {
       const preview = m.text || (m.attachments?.length ? `[${m.attachments[0].name ?? m.attachments[0].kind}]` : '');
       const isNewer = m.ts >= chat.lastMessageAt;
       this.db
-        .prepare('UPDATE chats SET last_message_at = ?, last_preview = ?, unread = ? WHERE id = ?')
+        .prepare('UPDATE chats SET last_message_at = ?, last_preview = ?, unread = ?, last_from_me = ? WHERE id = ?')
         .run(
           Math.max(chat.lastMessageAt, m.ts),
           isNewer ? preview : chat.lastPreview,
           opts.bumpUnread && inserted && !m.fromMe ? chat.unread + 1 : chat.unread,
+          isNewer ? (m.fromMe ? 1 : 0) : (chat.lastFromMe ? 1 : 0),
           m.chatId,
         );
     }
     return inserted;
+  }
+
+  getMessage(id: string): Message | undefined {
+    const r = this.db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
+    return r ? rowToMessage(r) : undefined;
+  }
+
+  /** Yalnızca teslim/okundu durumunu güncelle (metin, zaman ve sohbet özetine dokunmadan). */
+  updateStatus(id: string, status: Message['status']): void {
+    this.db.prepare('UPDATE messages SET status = ? WHERE id = ?').run(status, id);
+  }
+
+  /**
+   * Gönderim sonrası yerel (local-…) kaydın gerçek kimlikli kopyası geldiyse yerel kaydı sil
+   * (iMessage yoklaması / Messenger DOM okuması aynı mesajı başka kimlikle getirir).
+   */
+  dropLocalDuplicates(chatId: string): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT l.id FROM messages l WHERE l.chat_id = ? AND l.remote_id LIKE 'local-%' AND l.from_me = 1
+           AND EXISTS (SELECT 1 FROM messages m WHERE m.chat_id = l.chat_id AND m.from_me = 1 AND m.remote_id NOT LIKE 'local-%' AND m.text = l.text AND ABS(m.ts - l.ts) < 600000)`,
+      )
+      .all(chatId) as Array<{ id: string }>;
+    for (const r of rows) this.db.prepare('DELETE FROM messages WHERE id = ?').run(r.id);
+    return rows.map((r) => r.id);
   }
 
   hasMessage(id: string): boolean {
@@ -238,8 +266,8 @@ export class Store {
 
   listMessages(chatId: string, limit = 100, before?: number): Message[] {
     const rows = before
-      ? this.db.prepare('SELECT * FROM messages WHERE chat_id = ? AND ts < ? ORDER BY ts DESC LIMIT ?').all(chatId, before, limit)
-      : this.db.prepare('SELECT * FROM messages WHERE chat_id = ? ORDER BY ts DESC LIMIT ?').all(chatId, limit);
+      ? this.db.prepare('SELECT * FROM messages WHERE chat_id = ? AND ts < ? ORDER BY ts DESC, rowid DESC LIMIT ?').all(chatId, before, limit)
+      : this.db.prepare('SELECT * FROM messages WHERE chat_id = ? ORDER BY ts DESC, rowid DESC LIMIT ?').all(chatId, limit);
     return rows.map(rowToMessage).reverse();
   }
 
@@ -312,6 +340,7 @@ function rowToChat(r: unknown): Chat {
     unread: Number(x.unread),
     lastMessageAt: Number(x.last_message_at),
     lastPreview: String(x.last_preview),
+    lastFromMe: Number(x.last_from_me ?? 0) === 1,
     avatarUrl: (x.avatar_url as string | null) ?? undefined,
     tags: safeJson<string[]>(x.tags as string, []),
     handle: (x.handle as string | null) ?? undefined,

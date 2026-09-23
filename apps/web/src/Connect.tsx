@@ -60,6 +60,10 @@ export function ConnectModal({
   async function add(platform: Platform) {
     setBusy(true);
     try {
+      if (platform === 'telegram' && active !== 'telegram:new') {
+        setActive('telegram:new');
+        return;
+      }
       if (platform === 'shopier' && (active !== 'shopier:new' || !pat.trim())) {
         setActive('shopier:new');
         return;
@@ -132,7 +136,7 @@ export function ConnectModal({
             <div className="pairbox">
               <div style={{ flexGrow: 1 }}>
                 <h3>{PLATFORMS[p].name} hesabını bağla</h3>
-                <p style={{ margin: '0 0 10px', fontSize: 13.5, color: '#c9c6d6', lineHeight: 1.5 }}>
+                <p style={{ margin: '0 0 10px', fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.5 }}>
                   {p === 'gmail' && !mail.useOAuth && (
                     <>
                       Google hesabında 2 adımlı doğrulama açık olmalı. <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer" style={{ color: 'var(--v-txt)' }}><b>Uygulama şifreleri sayfasını aç</b></a>, 16 haneli bir şifre üret ve buraya yapıştır (normal şifren
@@ -221,14 +225,14 @@ export function ConnectModal({
           <div className="pairbox">
             <div style={{ flexGrow: 1 }}>
               <h3>Telegram’ı bağla</h3>
-              <p style={{ margin: 0, fontSize: 13.5, color: '#c9c6d6', lineHeight: 1.5 }}>
-                Telegram, üçüncü parti istemciler için ücretsiz bir uygulama kimliği ister (bir kez): <b>my.telegram.org</b> → telefon numaranla giriş → <b>API development tools</b> → kısa bir uygulama adı yaz →
-                oluşan <b>api_id</b> ve <b>api_hash</b> değerlerini buraya gir. Sonra telefon numaran ve Telegram’a gelen kod sorulacak.
+              <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.5 }}>
+                WhatsApp gibi QR ile bağlanır: Bağlan deyince çıkan kodu telefondaki Telegram → <b>Ayarlar → Cihazlar → Masaüstü Cihazı Bağla</b> ile okut. Alanları boş bırakırsan Kavşak’ın
+                varsayılan uygulama kimliği kullanılır; istersen <b>my.telegram.org → API development tools</b>’dan kendi <b>api_id</b> / <b>api_hash</b>’ini gir.
               </p>
               <div className="field" style={{ marginTop: 12, gap: 8 }}>
-                <input value={tg.apiId} onChange={(e) => setTg({ ...tg, apiId: e.target.value })} placeholder="api_id (sayı)" style={{ flex: '0 0 160px' }} />
-                <input value={tg.apiHash} onChange={(e) => setTg({ ...tg, apiHash: e.target.value })} placeholder="api_hash" type="password" autoComplete="off" />
-                <button className="btn lime b" onClick={() => add('telegram')} disabled={busy || !tg.apiId.trim() || !tg.apiHash.trim()}>
+                <input value={tg.apiId} onChange={(e) => setTg({ ...tg, apiId: e.target.value })} placeholder="api_id (isteğe bağlı)" style={{ flex: '0 0 160px' }} />
+                <input value={tg.apiHash} onChange={(e) => setTg({ ...tg, apiHash: e.target.value })} placeholder="api_hash (isteğe bağlı)" type="password" autoComplete="off" />
+                <button className="btn lime b" onClick={() => add('telegram')} disabled={busy}>
                   Bağlan
                 </button>
               </div>
@@ -248,10 +252,10 @@ export function ConnectModal({
               <h3>
                 {PLATFORMS[activeAccount.platform].name} · {activeAccount.label}
               </h3>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#c9c6d6' }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text2)' }}>
                 <span className={`dot ${activeAccount.status === 'connected' ? 'on' : activeAccount.status}`} />
                 {statusText(activeAccount)}
-                {activeAccount.detail && <span style={{ color: '#a19db3' }}>— {activeAccount.detail}</span>}
+                {activeAccount.detail && <span style={{ color: 'var(--text3)' }}>— {activeAccount.detail}</span>}
               </div>
 
               {activeAccount.platform === 'whatsapp' && activeAccount.status === 'pairing' && (
@@ -339,7 +343,7 @@ export function ConnectModal({
                 </div>
               )}
               {activeAccount.status === 'connected' && (
-                <p style={{ margin: '10px 0 0', fontSize: 13.5, color: '#c9c6d6' }}>Bağlı. Sohbetler gelen kutusuna akıyor; tarayıcı arka planda görünmez çalışıyor.</p>
+                <p style={{ margin: '10px 0 0', fontSize: 13.5, color: 'var(--text2)' }}>Bağlı. Sohbetler gelen kutusuna akıyor; tarayıcı arka planda görünmez çalışıyor.</p>
               )}
             </div>
           </div>

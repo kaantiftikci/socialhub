@@ -30,6 +30,8 @@ export interface Chat {
   unread: number;
   lastMessageAt: number; // epoch ms
   lastPreview: string;
+  /** Son mesaj benden mi (Odak → "Senin beklediklerin") */
+  lastFromMe?: boolean;
   avatarUrl?: string;
   tags: string[];
   /** Platforma özel tanıtıcı: +numara, @kullanıcı, profil adı */
@@ -88,6 +90,7 @@ export type CoreEvent =
   | { type: 'chat.upsert'; chat: Chat }
   | { type: 'chat.delete'; chatId: string }
   | { type: 'message.upsert'; message: Message; chat: Chat }
+  | { type: 'message.delete'; chatId: string; messageId: string }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; text: string };
 
 export function chatId(accountId: string, remoteId: string): string {

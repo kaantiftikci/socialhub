@@ -1,12 +1,13 @@
 import type { Account, Chat, CoreEvent, DraftResult, Message, Platform } from './types';
-import { API_BASE } from './desktop';
+import { API_BASE, coreToken } from './desktop';
 
 const BASE = API_BASE + '/api';
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const token = await coreToken;
   const init: RequestInit = {
     method,
-    headers: body ? { 'content-type': 'application/json' } : undefined,
+    headers: { ...(body ? { 'content-type': 'application/json' } : {}), ...(token ? { 'x-kavsak-token': token } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   };
   let res: Response;
@@ -53,8 +54,11 @@ export function connectEvents(onEvent: (ev: CoreEvent) => void, onState?: (open:
   let ws: WebSocket | undefined;
   let closed = false;
   let timer: number | undefined;
-  const open = () => {
-    const url = API_BASE ? API_BASE.replace(/^http/, 'ws') + '/ws' : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
+  const open = async () => {
+    const token = await coreToken;
+    if (closed) return;
+    const base = API_BASE ? API_BASE.replace(/^http/, 'ws') + '/ws' : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
+    const url = token ? `${base}?token=${encodeURIComponent(token)}` : base;
     ws = new WebSocket(url);
     ws.onopen = () => onState?.(true);
     ws.onmessage = (m) => {
@@ -66,11 +70,11 @@ export function connectEvents(onEvent: (ev: CoreEvent) => void, onState?: (open:
     };
     ws.onclose = () => {
       onState?.(false);
-      if (!closed) timer = window.setTimeout(open, 1500);
+      if (!closed) timer = window.setTimeout(() => void open(), 1500);
     };
     ws.onerror = () => ws?.close();
   };
-  open();
+  void open();
   return () => {
     closed = true;
     if (timer) clearTimeout(timer);

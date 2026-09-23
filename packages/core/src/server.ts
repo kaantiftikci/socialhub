@@ -2,6 +2,8 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { randomBytes } from 'node:crypto';
+import { DATA_DIR } from './config.js';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Store } from './store.js';
 import type { Registry } from './registry.js';
@@ -31,7 +33,34 @@ class HttpError extends Error {
   }
 }
 
+/** Yerel API belirteci: tarayıcıdaki rastgele bir sayfa (Origin: null / yabancı origin) API'ye erişemesin. Tauri kabuğu dosyadan okur. */
+function loadToken(): string {
+  const file = path.join(DATA_DIR, 'token');
+  try {
+    const t = fs.readFileSync(file, 'utf8').trim();
+    if (t.length >= 32) return t;
+  } catch {
+    /* yok */
+  }
+  const t = randomBytes(24).toString('hex');
+  fs.writeFileSync(file, t, { mode: 0o600 });
+  return t;
+}
+
+const LOCAL_ORIGIN = /^(https?:\/\/(localhost|127\.0\.0\.1|tauri\.localhost)(:\d+)?|tauri:\/\/localhost|asset:\/\/localhost)$/;
+/** Vekilden indirilebilecek uzak medya sunucuları (oturum çerezleriyle istek yapıldığı için sınırlı) */
+const MEDIA_HOSTS = /(^|\.)(twimg\.com|twitter\.com|x\.com|cdninstagram\.com|fbcdn\.net|facebook\.com|messenger\.com|licdn\.com|linkedin\.com|slack-edge\.com|slack-files\.com|files\.slack\.com|whatsapp\.net|telegram\.org|shopier\.com)$/i;
+
 export function createServer(store: Store, registry: Registry, port: number): http.Server {
+  const token = loadToken();
+  /** Origin yoksa (curl, aynı süreç) ya da yerel origin ise serbest; diğer her origin (null dahil) belirteç ister */
+  const authorized = (req: http.IncomingMessage): boolean => {
+    const origin = req.headers.origin;
+    if (!origin || LOCAL_ORIGIN.test(origin)) return true;
+    const u = new URL(req.url ?? '/', 'http://x');
+    const given = (req.headers['x-kavsak-token'] as string | undefined) ?? u.searchParams.get('token') ?? '';
+    return given === token;
+  };
   // Bekleyen QR kodları: arayüz sonradan açılsa da eşleşme ekranı boş kalmasın
   const pendingQr = new Map<string, string>();
   bus.on((ev) => {
@@ -59,6 +88,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   route('POST', '/api/accounts/:id/input', (_r, _s, p, body) => {
     const c = registry.get(decodeURIComponent(p.id));
     const b = body as { kind: 'phone' | 'code' | 'password'; value: string };
+    if (!['phone', 'code', 'password'].includes(b.kind)) throw new HttpError(400, 'Geçersiz giriş türü');
     if (!c?.provideInput) throw new HttpError(400, 'Bu hesap giriş beklemiyor');
     c.provideInput(b.kind, String(b.value ?? '').trim());
     return { ok: true };
@@ -67,9 +97,9 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   route('GET', '/api/chats', () => store.listChats());
   route('GET', '/api/chats/:id/messages', (req, _s, p) => {
     const url = new URL(req.url ?? '/', 'http://x');
-    const limit = Number(url.searchParams.get('limit') ?? 100);
-    const before = url.searchParams.get('before');
-    return store.listMessages(decodeURIComponent(p.id), limit, before ? Number(before) : undefined);
+    const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit')) || 100));
+    const before = Number(url.searchParams.get('before'));
+    return store.listMessages(decodeURIComponent(p.id), limit, Number.isFinite(before) && before > 0 ? before : undefined);
   });
   route('POST', '/api/chats/:id/read', (_r, _s, p) => {
     const id = decodeURIComponent(p.id);
@@ -80,7 +110,9 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   });
   route('POST', '/api/chats/:id/tags', (_r, _s, p, body) => {
     const id = decodeURIComponent(p.id);
-    store.setTags(id, ((body as { tags?: string[] }).tags ?? []).map((t) => String(t).trim()).filter(Boolean));
+    const tags = (body as { tags?: unknown }).tags ?? [];
+    if (!Array.isArray(tags)) throw new HttpError(400, 'tags bir dizi olmalı');
+    store.setTags(id, tags.map((t) => String(t).trim()).filter(Boolean).slice(0, 20));
     const chat = store.getChat(id);
     if (chat) bus.emit({ type: 'chat.upsert', chat });
     return chat;
@@ -140,14 +172,18 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   const server = http.createServer(async (req, res) => {
     const origin = req.headers.origin;
     // Yerel arayüzler: Vite (localhost:5173), Tauri (tauri://localhost / http://tauri.localhost) ve WKWebView'ın
-    // özel şema sayfaları için gönderdiği "null" kaynağı. Sunucu yalnızca 127.0.0.1'e bağlıdır.
-    if (origin && (origin === 'null' || /^(https?:\/\/(localhost|127\.0\.0\.1|tauri\.localhost)(:\d+)?|tauri:\/\/localhost|asset:\/\/localhost)$/.test(origin))) {
+    // özel şema sayfaları için gönderdiği "null" kaynağı (yalnızca belirteçle). Sunucu yalnızca 127.0.0.1'e bağlıdır.
+    if (origin && (LOCAL_ORIGIN.test(origin) || origin === 'null')) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'content-type');
+      res.setHeader('Access-Control-Allow-Headers', 'content-type, x-kavsak-token');
     }
     if (req.method === 'OPTIONS') return void res.writeHead(204).end();
+    if (!authorized(req)) {
+      res.writeHead(403, { 'content-type': 'application/json' });
+      return void res.end(JSON.stringify({ error: 'Yetkisiz kaynak' }));
+    }
 
     const url = new URL(req.url ?? '/', 'http://x');
     try {
@@ -165,6 +201,10 @@ export function createServer(store: Store, registry: Registry, port: number): ht
         const c = registry.get(id);
         if (!c?.fetchMedia) throw new HttpError(404, 'Bu hesap medya sunmuyor');
         if (!u) throw new HttpError(400, 'u gerekli');
+        if (/^https?:\/\//.test(u)) {
+          const host = new URL(u).hostname;
+          if (!MEDIA_HOSTS.test(host)) throw new HttpError(403, `Bu sunucudan medya indirilmez: ${host}`);
+        }
         // Uzak sunucu hatası (süresi dolmuş CDN bağlantısı → 403 vb.) 500 gibi yığın dökmesin
         const m = await c.fetchMedia(u).catch((e: Error) => {
           const code = (e as { response?: { status?: number } }).response?.status;
@@ -201,7 +241,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   server.headersTimeout = 125_000;
 
   // ---------- websocket ----------
-  const wss = new WebSocketServer({ server, path: '/ws' });
+  const wss = new WebSocketServer({ server, path: '/ws', verifyClient: (info: { req: http.IncomingMessage }) => authorized(info.req) });
   wss.on('connection', (client) => {
     // Yeni bağlanan arayüze bekleyen QR'ları hemen gönder
     for (const [accountId, qrDataUrl] of pendingQr) client.send(JSON.stringify({ type: 'account.qr', accountId, qrDataUrl }));
@@ -220,7 +260,13 @@ function readJson(req: http.IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     let data = '';
     req.setEncoding('utf8');
-    req.on('data', (c) => (data += c));
+    req.on('data', (c) => {
+      data += c;
+      if (data.length > 1_000_000) {
+        reject(new HttpError(413, 'İstek gövdesi çok büyük'));
+        req.destroy();
+      }
+    });
     req.on('end', () => {
       if (!data) return resolve({});
       try {

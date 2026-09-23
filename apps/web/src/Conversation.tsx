@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
 import { API_BASE } from './desktop';
 import { DEFAULT_TAGS, PLATFORMS, type Attachment, type Chat, type DraftResult, type Message, type Participant } from './types';
-import { Avatar, Chip, Icon, Tag, fmtDay, fmtTime } from './ui';
+import { Avatar, Chip, Icon, Resizer, Tag, fmtDay, fmtStamp, fmtTime } from './ui';
 
 type Tone = 'default' | 'short' | 'formal' | 'en';
 
@@ -51,11 +51,21 @@ export function Conversation({
   const [lightbox, setLightbox] = useState<Attachment | null>(null);
   useEffect(() => setLightbox(null), [chat.id]);
   const endRef = useRef<HTMLDivElement>(null);
+  const msgsRef = useRef<HTMLDivElement>(null);
+  const firstIdRef = useRef<string | undefined>(undefined);
+  const heightRef = useRef(0);
   const platform = PLATFORMS[chat.platform];
 
+  // Yeni mesajda en alta kaydır; "daha eski mesajlar" başa eklendiğinde ise okunan yer korunur
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: 'end' });
-  }, [messages.length, chat.id]);
+    const el = msgsRef.current;
+    const first = messages[0]?.id;
+    const prepended = !!el && !!firstIdRef.current && first !== firstIdRef.current && messages.some((m) => m.id === firstIdRef.current);
+    if (prepended && el) el.scrollTop += el.scrollHeight - heightRef.current;
+    else endRef.current?.scrollIntoView({ block: 'end' });
+    firstIdRef.current = first;
+    heightRef.current = el?.scrollHeight ?? 0;
+  }, [messages, chat.id]);
 
   const shown = useMemo(() => {
     const q = (search ?? '').trim().toLocaleLowerCase('tr-TR');
@@ -65,11 +75,13 @@ export function Conversation({
   const groups = useMemo(() => groupMessages(shown), [shown]);
   const lastIncoming = [...messages].reverse().find((m) => !m.fromMe);
   const needsReply = !!lastIncoming && messages[messages.length - 1]?.id === lastIncoming.id;
-  const files = useMemo(() => {
+  const [allFiles, setAllFiles] = useState(false);
+  const allShared = useMemo(() => {
     const out: Array<{ att: Attachment; m: Message }> = [];
     for (const m of [...messages].reverse()) for (const att of m.attachments ?? []) out.push({ att, m });
-    return out.slice(0, 4);
+    return out;
   }, [messages]);
+  const files = useMemo(() => (allFiles ? allShared : allShared.slice(0, 4)), [allShared, allFiles]);
 
   async function makeDraft(t: Tone = tone) {
     setTone(t);
@@ -116,7 +128,6 @@ export function Conversation({
         <header className="conv-head">
           <span className="avwrap">
             <Avatar name={chat.name} size={40} url={chat.avatarUrl} />
-            <span className="dot on" style={{ position: 'absolute', right: 0, top: 0, width: 11, height: 11, boxShadow: '0 0 0 2px #fff' }} />
           </span>
           <div style={{ flexGrow: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
@@ -168,7 +179,7 @@ export function Conversation({
           </div>
         )}
 
-        <div className="msgs">
+        <div className="msgs" ref={msgsRef}>
           {messages.length > 0 && !search && (hasOlder || chat.platform === 'telegram') && (
             <div style={{ display: 'flex', justifyContent: 'center', margin: '4px 0 6px' }}>
               <button
@@ -240,7 +251,7 @@ export function Conversation({
                     </div>
                   ))}
                   <span className="meta">
-                    {fmtTime(g.items[g.items.length - 1].ts)}
+                    {fmtStamp(g.items[g.items.length - 1].ts)}
                     {g.fromMe && statusLabel(g.items[g.items.length - 1].status)}
                   </span>
                 </div>
@@ -259,7 +270,7 @@ export function Conversation({
                 <div key={i} className="it">
                   <Icon name="calendar" size={15} color="#4A4757" />
                   <span style={{ flexGrow: 1 }}>{a}</span>
-                  <button className="btn soft xs b b2">Göreve ekle</button>
+                  <button className="btn soft xs b b2" disabled title="Yakında">Göreve ekle</button>
                 </div>
               ))}
             </div>
@@ -330,6 +341,8 @@ export function Conversation({
       </section>
 
       {showDetails && (
+      <>
+      <Resizer pane="ctx" sign={-1} />
       <aside className="ctx" aria-label="Kişi ayrıntıları">
         {onToggleDetails && (
           <button className="btn ghost xs icon b ctx-close" onClick={onToggleDetails} title="Ayrıntı panelini gizle" aria-label="Paneli kapat">
@@ -429,7 +442,7 @@ export function Conversation({
         <div className="card" style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <Icon name="bell" size={16} color="#4A4757" />
           <span style={{ flexGrow: 1, fontSize: 12.5, lineHeight: 1.35 }}>2 gün yanıt yoksa hatırlat</span>
-          <button type="button" role="switch" aria-checked={remind} aria-label="Takip hatırlatıcısı" className={`sw ${remind ? 'on' : ''}`} onClick={() => setRemind(!remind)}>
+          <button type="button" role="switch" aria-checked={remind} aria-label="Takip hatırlatıcısı" className={`sw ${remind ? 'on' : ''}`} onClick={() => setRemind(!remind)} disabled title="Yakında">
             <span />
           </button>
         </div>
@@ -483,7 +496,15 @@ export function Conversation({
         )}
         {files.length > 0 && (
           <div>
-            <span className="label">Paylaşılanlar</span>
+            <span className="label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              Paylaşılanlar
+              <span style={{ color: 'var(--text3)', fontWeight: 400 }}>{allShared.length}</span>
+              {allShared.length > 4 && (
+                <button className="btn ghost xs icon b" style={{ marginLeft: 'auto', transform: allFiles ? 'rotate(180deg)' : undefined }} onClick={() => setAllFiles(!allFiles)} title={allFiles ? 'Yalnızca son 4' : `Yüklenen tümünü göster (${allShared.length})`} aria-label="Tüm paylaşılanlar">
+                  <Icon name="chev" size={13} sw={2} />
+                </button>
+              )}
+            </span>
             <div className="files" style={{ marginTop: 8 }}>
               {files.map(({ att, m }, i) => (
                 <div
@@ -521,6 +542,7 @@ export function Conversation({
           </div>
         )}
       </aside>
+      </>
       )}
       {lightbox && <Lightbox att={lightbox} onClose={() => setLightbox(null)} />}
     </>

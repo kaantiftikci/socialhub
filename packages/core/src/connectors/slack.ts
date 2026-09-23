@@ -16,6 +16,7 @@ export class SlackConnector extends BaseConnector {
   private users = new Map<string, string>();
   private meId = '';
   private lastTs = new Map<string, string>();
+  private polling = false;
 
   constructor(account: Account, store: Store, private token: string) {
     super(account, store);
@@ -65,6 +66,8 @@ export class SlackConnector extends BaseConnector {
   }
 
   private async poll(first: boolean): Promise<void> {
+    if (this.polling) return; // önceki yoklama sürüyorsa üst üste binme (rate limit)
+    this.polling = true;
     try {
       const list = await this.web.conversations.list({ types: 'im,mpim,private_channel,public_channel', limit: 200, exclude_archived: true });
       for (const c of list.channels ?? []) {
@@ -103,6 +106,8 @@ export class SlackConnector extends BaseConnector {
       }
     } catch (e) {
       bus.log('warn', `Slack yoklama hatası: ${(e as Error).message}`);
+    } finally {
+      this.polling = false;
     }
   }
 }

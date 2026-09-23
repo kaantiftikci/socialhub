@@ -22,6 +22,7 @@ export interface Chat {
   unread: number;
   lastMessageAt: number;
   lastPreview: string;
+  lastFromMe?: boolean;
   avatarUrl?: string;
   tags: string[];
   handle?: string;
@@ -69,6 +70,7 @@ export type CoreEvent =
   | { type: 'chat.upsert'; chat: Chat }
   | { type: 'chat.delete'; chatId: string }
   | { type: 'message.upsert'; message: Message; chat: Chat }
+  | { type: 'message.delete'; chatId: string; messageId: string }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; text: string };
 
 export interface DraftResult {

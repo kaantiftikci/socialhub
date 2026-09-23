@@ -53,7 +53,21 @@ Dil: arayüz ve yorumlar Türkçe.
 - Tauri'de `confirm()`/`alert()` çalışmaz; onaylar arayüz içinde.
 
 ## Bilinen açık konular
-- Messenger: görünmez modda sohbet listesi bazen boş (Günlük'te "sohbet listesi bulunamadı" satırı var); seçiciler kırılgan.
+- Slack (tarayıcı): giriş penceresinde Google/e-posta girişi yetmez; kullanıcı listeden **çalışma alanını açmalı** (`d` çerezi ancak o zaman
+  yazılır). Bağlantı akışı `slack.com/signin?redir=/gantry/auth…` üzerinden.
+- iMessage: Tam Disk Erişimi ad-hoc imzalı pakette her derlemede düşebilir (cdhash değişir); kalıcı çözüm sabit imza kimliği.
+- WhatsApp: rehberde olmayan LID kişileri ("WhatsApp kişisi") ancak canlı mesaj (sender_pn/pushName) gelince ad kazanır; eşlemeler
+  `sessions/<hesap>/names.json`'da kalıcı. 45 grup adı gelmiyor (muhtemelen ayrılınan gruplar).
+- Telegram: varsayılan api_id/api_hash Telegram Desktop'ın açık kimliği (config.ts); kullanıcı isterse Bağlan formundan kendi kimliğini verir.
 - WhatsApp sesli mesaj ffmpeg yoksa ogg (WebKit oynatmayabilir).
 - Yol haritası: Node'suz tek dosya paketleme (sidecar), ⌘K komut paleti, SQLCipher, kişi birleştirme (aynı kişi farklı
   platformlarda), Trendyol/Hepsiburada/Etsy/Shopify connector'ları, Shopier panel mesajları (DOM üzerinden).
+
+## Performans notları (Eylül 2026'da öğrenildi)
+- `messages` tablosu 150 bin+ satır: gönderen bazlı UPDATE'ler için `messages_sender` indeksi şart; toplu yazımlar
+  `store.transaction()` içinde. WhatsApp `refreshNames` debounce'lu (1.5 sn) ve gönderen imzası önbellekli; her olayda
+  anında tam tarama olay döngüsünü dakikalarca kilitliyordu (REST yanıt vermiyordu, arayüz "Load failed").
+- Arayüz WS olaylarını 150 ms pencerede toplulaştırır (App.tsx queueChat); geçmiş eşitlemesinde binlerce olay gelir.
+- Messenger: messenger.com çerezler olsa da "<Ad> Olarak Devam Et" ara sayfasında kalır; strateji bunu tıklar. Mesajlar
+  `[role=main] [role=log] [data-scope=messages_table]` ve aria-label "tarih, Gönderen: metin" ile okunur.
+- LinkedIn: Rest.li `variables=(...)` içinde URN'deki parantezler %28/%29 olmalı (encodeURIComponent bunları kodlamaz → 400).

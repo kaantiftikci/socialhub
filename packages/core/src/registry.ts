@@ -47,6 +47,14 @@ export class Registry {
   }
 
   async add(platform: Platform, opts: { token?: string; label?: string } = {}): Promise<Account> {
+    // Tek hesaplı platformlar: ikinci kez "Bağlan" denirse kopya hesap açma, var olanı yeniden başlat
+    const SINGLE: Platform[] = ['whatsapp', 'telegram', 'slack', 'imessage', 'linkedin', 'x', 'instagram', 'messenger', 'shopier'];
+    const existing = SINGLE.includes(platform) ? this.list().find((a) => a.platform === platform) : undefined;
+    if (existing) {
+      if (opts.token) fs.writeFileSync(path.join(sessionDir(existing.id), 'token'), opts.token, { mode: 0o600 });
+      await this.restart(existing.id);
+      return existing;
+    }
     const account: Account = {
       id: `${platform}:${randomBytes(4).toString('hex')}`,
       platform,

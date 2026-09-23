@@ -35,7 +35,7 @@ export function Focus({
   const dateStr = new Date().toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' });
 
   // Senin beklediklerin: son mesajı sen atmışsın, 2 gündür cevap yok (lastPreview senin mesajın → unread 0 ve eski)
-  const awaiting = useMemo(() => chats.filter((c) => c.unread === 0 && c.kind === 'direct' && Date.now() - c.lastMessageAt > 2 * 86_400_000 && c.lastMessageAt > 0).sort((a, b) => a.lastMessageAt - b.lastMessageAt).slice(0, 4), [chats]);
+  const awaiting = useMemo(() => chats.filter((c) => c.lastFromMe && c.unread === 0 && c.kind === 'direct' && Date.now() - c.lastMessageAt > 2 * 86_400_000 && c.lastMessageAt > 0).sort((a, b) => a.lastMessageAt - b.lastMessageAt).slice(0, 4), [chats]);
   // Sessize alınanlar: grup/kanallar ve "sessiz" etiketliler
   const muted = useMemo(() => chats.filter((c) => c.kind !== 'direct' || c.tags.includes('sessiz')), [chats]);
   const mutedGroups = muted.filter((c) => c.kind === 'group').length;

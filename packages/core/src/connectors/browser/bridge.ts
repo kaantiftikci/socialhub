@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import type { BrowserContext, Page } from 'playwright';
 import { BaseConnector, type StartOptions } from '../base.js';
+import { chatId } from '../../model.js';
 import { bus } from '../../bus.js';
 import { sessionDir } from '../../config.js';
 import type { Account, Attachment, ChatKind, Participant } from '../../model.js';
@@ -203,9 +204,17 @@ export class BrowserConnector extends BaseConnector {
     this.setStatus('disconnected');
   }
 
+  /** Strateji çağrıları tek sayfayı paylaşır: yoklama, gönderme ve geçmiş isteği sırayla çalışsın (sayfa gezintisi çakışmasın). */
+  private queue: Promise<unknown> = Promise.resolve();
+  private serial<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.queue.then(fn, fn);
+    this.queue = next.catch(() => undefined);
+    return next;
+  }
+
   async sendText(remoteChatId: string, text: string): Promise<{ remoteId: string }> {
     if (!this.page || this.page.isClosed()) throw new Error('Tarayıcı oturumu açık değil');
-    const id = (await this.strategy.send(this.page, await this.cookies(), remoteChatId, text)) ?? `local-${Date.now()}`;
+    const id = (await this.serial(async () => this.strategy.send(this.page!, await this.cookies(), remoteChatId, text))) ?? `local-${Date.now()}`;
     this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent' });
     return { remoteId: id };
   }
@@ -213,12 +222,12 @@ export class BrowserConnector extends BaseConnector {
   async openDirect(p: Participant): Promise<string> {
     if (!this.strategy.openDirect) throw new Error('Bu platformda doğrudan sohbet açma desteklenmiyor');
     if (!this.page || this.page.isClosed()) throw new Error('Tarayıcı oturumu açık değil');
-    return this.strategy.openDirect(this.page, await this.cookies(), p);
+    return this.serial(async () => this.strategy.openDirect!(this.page!, await this.cookies(), p));
   }
 
   async loadHistory(remoteChatId: string, limit = 50): Promise<void> {
     if (!this.page) return;
-    const msgs = await this.strategy.messages(this.page, await this.cookies(), remoteChatId, limit);
+    const msgs = await this.serial(async () => this.strategy.messages(this.page!, await this.cookies(), remoteChatId, limit));
     for (const m of msgs) this.ingest(remoteChatId, m, false);
   }
 
@@ -261,13 +270,26 @@ export class BrowserConnector extends BaseConnector {
     if (this.polling || !this.page || this.page.isClosed()) return;
     this.polling = true;
     try {
+      await this.serial(() => this.pollInner(first));
+    } finally {
+      this.polling = false;
+    }
+  }
+
+  private async pollInner(first: boolean): Promise<void> {
+    if (!this.page || this.page.isClosed()) return;
+    const page = this.page;
+    try {
       const cookies = await this.cookies();
       // Strateji çağrıları asılı kalmasın: sayfa donarsa uyarı düşsün, sonraki yoklama devam etsin
-      const threads = await withTimeout(this.strategy.threads(this.page, cookies), 120_000, 'sohbet listesi');
+      const threads = await withTimeout(this.strategy.threads(page, cookies), 120_000, 'sohbet listesi');
       const changed: Thread[] = [];
       for (const t of threads) {
         // lastTs=0: strateji zaman bilgisi vermiyor (DOM okuyan Messenger) → depodaki değer korunur
-        this.upsertChat({ remoteId: t.id, name: t.name, kind: t.kind, unread: t.unread, lastMessageAt: t.lastTs || undefined, lastPreview: t.preview, avatarUrl: t.avatarUrl, handle: t.handle, link: t.link, participants: t.participants });
+        // Kavşak'ta okunan sohbeti platformun eski 'okunmamış' değeri geri açmasın: yalnızca yeni etkinlikte aktar
+        const ex = this.store.getChat(chatId(this.account.id, t.id));
+        const fresh = !ex || t.lastTs > ex.lastMessageAt || !ex.lastPreview;
+        this.upsertChat({ remoteId: t.id, name: t.name, kind: t.kind, unread: fresh ? t.unread : undefined, lastMessageAt: t.lastTs || undefined, lastPreview: fresh ? t.preview || undefined : undefined, avatarUrl: t.avatarUrl, handle: t.handle, link: t.link, participants: t.participants });
         if (!this.known.has(t.id) || (this.known.get(t.id) ?? 0) < t.lastTs) changed.push(t);
       }
       const batch = changed.slice(0, first ? 12 : 6);
@@ -275,8 +297,8 @@ export class BrowserConnector extends BaseConnector {
       let firstErr = '';
       for (const t of batch) {
         try {
-          const msgs = await withTimeout(this.strategy.messages(this.page, cookies, t.id, first ? 25 : 15), 60_000, 'mesajlar');
-          for (const m of msgs) this.ingest(t.id, m, !first);
+          const msgs = await withTimeout(this.strategy.messages(page, cookies, t.id, first ? 25 : 15), 60_000, 'mesajlar');
+          for (const m of msgs) this.ingest(t.id, m, !first && !this.hasMessage(t.id, m.id));
           this.known.set(t.id, t.lastTs);
         } catch (e) {
           failed.push(t.id);
@@ -296,8 +318,6 @@ export class BrowserConnector extends BaseConnector {
         this.setStatus('pairing', 'Oturum düştü — kanala sağ tıklayıp "Yeniden bağlan" de');
         return;
       }
-    } finally {
-      this.polling = false;
     }
   }
 

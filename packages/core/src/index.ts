@@ -12,6 +12,8 @@ for (const k of ['error', 'log', 'warn'] as const) {
   console[k] = (...args: unknown[]) => {
     const first = String(args[0] ?? '');
     if (NOISE.some((re) => re.test(first))) return;
+    // libsignal oturum nesnesini (anahtarlarla birlikte!) ayrı bir çağrıyla döküyor: günlüğe yazma
+    if (args.some((x) => x && typeof x === 'object' && ('ephemeralKeyPair' in (x as object) || 'indexInfo' in (x as object) || 'pendingPreKey' in (x as object)))) return;
     orig(...args);
   };
 }
