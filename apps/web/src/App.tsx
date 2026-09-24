@@ -1347,16 +1347,6 @@ function ChatRow({
           )}
           {chat.unread > 0 && <span className="badge" aria-label={`${chat.unread} okunmamış`}>{fmtBadge(chat)}</span>}
         </span>
-        {waiting && (
-          <span className="tags">
-            {waiting && (
-              <span className="wait">
-                <Icon name="clock" size={12} sw={2} />
-                {ago(chat.lastMessageAt)}
-              </span>
-            )}
-          </span>
-        )}
       </span>
       <span className="qa" onClick={(e) => e.stopPropagation()}>
         {onUnsnooze ? (
