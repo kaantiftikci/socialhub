@@ -16,7 +16,10 @@ import { macContacts } from '../contacts-mac.js';
 // Baileys CJS olarak yayınlanıyor; ESM'den yüklenince default export iç içe gelebilir.
 const B = Baileys as unknown as Record<string, unknown>;
 const makeWASocket = ((B.default as { default?: unknown })?.default ?? B.default ?? B.makeWASocket) as typeof Baileys.default;
-const { useMultiFileAuthState, fetchLatestBaileysVersion, DisconnectReason, jidNormalizedUser, downloadMediaMessage, BufferJSON } = Baileys;
+const { useMultiFileAuthState, fetchLatestBaileysVersion, DisconnectReason, jidNormalizedUser, downloadMediaMessage, BufferJSON, generateMessageID } = Baileys;
+const WAProto = (B.proto ?? (B.default as { proto?: unknown })?.proto) as typeof Baileys.proto;
+/** Baileys günlüğünden yakalanan, elimizde olmayan uygulama durumu anahtarları (telefondan istenecek) */
+const missingSyncKeys = new Set<string>();
 const execFileP = promisify(execFile);
 
 /**
@@ -131,18 +134,33 @@ export class WhatsAppConnector extends BaseConnector {
         setTimeout(() => void this.syncGroups(sock), 20_000);
         // Rehber adları uygulama durumu (app state) eşitlemesindeki contactAction kayıtlarından gelir; bazı hesaplarda
         // bağlantıda kendiliğinden gelmiyor — açıkça iste
-        setTimeout(async () => {
+        const resync = async (attempt: number): Promise<void> => {
           if (this.sock !== sock || this.stopping) return;
           try {
             // Kayıtlı sürüm varsa Baileys yalnızca yeni yamaları ister ve rehber (contactAction) hiç gelmez;
             // sürümü sıfırla → tam anlık görüntü iner → contacts.upsert ile adlar gelir
+            missingSyncKeys.clear();
             await state.keys.set({ 'app-state-sync-version': { critical_unblock_low: null, regular_low: null, regular_high: null } });
             await sock.resyncAppState(['critical_unblock_low', 'regular_low', 'regular_high'], false);
-            bus.log('info', 'WhatsApp: uygulama durumu (rehber/sohbet ayarları) baştan eşitlendi');
+            if (missingSyncKeys.size && attempt < 4) {
+              // Anahtarlar eşleşmede paylaşılmamış (ya da çözülemeyen bir mesajda kaldı): telefondan iste, sonra yeniden dene
+              const keyIds = [...missingSyncKeys].map((k) => ({ keyId: Buffer.from(k, 'base64') }));
+              const me = jidNormalizedUser(sock.user?.id ?? '');
+              await sock.relayMessage(
+                me,
+                { protocolMessage: { type: WAProto.Message.ProtocolMessage.Type.APP_STATE_SYNC_KEY_REQUEST, appStateSyncKeyRequest: { keyIds } } },
+                { messageId: generateMessageID() },
+              );
+              bus.log('info', `WhatsApp: ${keyIds.length} uygulama durumu anahtarı telefondan istendi (deneme ${attempt}); 20 sn sonra yeniden eşitlenecek`);
+              setTimeout(() => void resync(attempt + 1), 20_000);
+              return;
+            }
+            bus.log('info', `WhatsApp: uygulama durumu (rehber/sohbet ayarları) baştan eşitlendi${missingSyncKeys.size ? ' (eksik anahtar kaldı)' : ''}`);
           } catch (e) {
             bus.log('warn', `WhatsApp uygulama durumu eşitlenemedi: ${(e as Error).message}`);
           }
-        }, 8_000);
+        };
+        setTimeout(() => void resync(1), 8_000);
         setTimeout(() => {
           // geçmiş yalnızca ilk eşleşmede gelir; depoda sohbet varsa uyarı gereksiz
           if (!this.historySeen && !this.stopping && this.sock === sock && this.store.listChatsOf(this.account.id).length === 0)
@@ -637,6 +655,8 @@ function baileysLogger(): ReturnType<typeof pino> {
       try {
         const j = JSON.parse(line) as { level?: number; msg?: string; name?: string; error?: string };
         const msg = String(j.msg ?? '');
+        const mk = String(j.error ?? '').match(/failed to find key "([^"]+)"/);
+        if (mk) missingSyncKeys.add(mk[1]);
         if ((j.level ?? 0) >= 40 || /sync|snapshot|patch|mutation/i.test(msg)) bus.log((j.level ?? 0) >= 40 ? 'warn' : 'info', `Baileys: ${msg}${j.name ? ` [${j.name}]` : ''}${j.error ? ` ${String(j.error).split('\n')[0].slice(0, 160)}` : ''}`);
       } catch {
         /* yok say */

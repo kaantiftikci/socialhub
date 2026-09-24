@@ -194,9 +194,30 @@ export class IMessageConnector extends BaseConnector {
     const max = (this.db.prepare('SELECT MAX(ROWID) AS m FROM message').get() as { m: number | null }).m ?? 0;
     const from = Math.max(0, max - 2000); // son ~2000 mesaj
     const rows = this.query(from, 2500);
-    for (const r of rows) this.ingest(r, false);
+    this.store.transaction(() => rows.forEach((r) => this.ingest(r, false)));
     this.lastRowId = max;
-    bus.log('info', `iMessage geçmişi: ${rows.length} mesaj yüklendi`);
+    // Son 2000 satırın dışında kalan sohbetler (eski, filtrelenmiş SMS'ler, bilinmeyen gönderenler…) de birer mesajla gelsin:
+    // her sohbetin son 20 mesajı — klasör bilgisi (is_filtered) ancak mesajla birlikte öğreniliyor
+    let extra = 0;
+    try {
+      const chatRows = this.db.prepare('SELECT ROWID AS id FROM chat ORDER BY ROWID DESC LIMIT 1500').all() as Array<{ id: number }>;
+      const perChat = this.db.prepare(
+        `SELECT m.ROWID AS rowid, m.guid, m.text, m.attributedBody, m.date, m.is_from_me, m.cache_has_attachments, m.item_type,
+                ${this.retractedCol} AS date_retracted, h.id AS handle, c.chat_identifier, c.guid AS chat_guid, c.display_name, ${this.filteredCol} AS is_filtered
+           FROM message m JOIN chat_message_join cmj ON cmj.message_id = m.ROWID JOIN chat c ON c.ROWID = cmj.chat_id
+           LEFT JOIN handle h ON h.ROWID = m.handle_id
+          WHERE cmj.chat_id = ? AND m.ROWID <= ? ORDER BY m.ROWID DESC LIMIT 20`,
+      );
+      this.store.transaction(() => {
+        for (const c of chatRows) for (const r of (perChat.all(c.id, from) as Row[]).reverse()) {
+          this.ingest(r, false);
+          extra++;
+        }
+      });
+    } catch (e) {
+      bus.log('warn', `iMessage sohbet geçmişi: ${(e as Error).message}`);
+    }
+    bus.log('info', `iMessage geçmişi: ${rows.length} mesaj + ${extra} eski sohbet mesajı yüklendi`);
   }
 
   private poll(): void {

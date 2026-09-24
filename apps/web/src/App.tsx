@@ -597,13 +597,13 @@ export default function App() {
                   <div className="tabs" role="tablist">
                     {(['all', 'unread', 'waiting'] as Filter[]).map((f) => (
                       <button key={f} role="tab" aria-selected={filter === f && !imFolder} className={filter === f && !imFolder ? 'active' : ''} onClick={() => (setFilter(f), setImFolder(null))}>
-                        {f === 'all' ? 'Tümü' : f === 'unread' ? 'Okunmamış ' : 'Bekleyen '}
+                        {f === 'all' ? (platformFilter === 'imessage' ? 'Mesajlar' : 'Tümü') : f === 'unread' ? 'Okunmamış ' : 'Bekleyen '}
                         {f === 'unread' && scoped.unread > 0 && <span className="c">{scoped.unread}</span>}
                         {f === 'waiting' && scoped.waiting > 0 && <span className="c amber">{scoped.waiting}</span>}
                       </button>
                     ))}
                     {platformFilter === 'imessage' &&
-                      ([['unknown', 'Bilinmeyen'], ['junk', 'İstenmeyen'], ['deleted', 'Silinenler']] as Array<[typeof imFolder, string]>).map(([fo, label]) => (
+                      ([['unknown', 'Bilinmeyen gönderenler'], ['junk', 'İstenmeyen'], ['deleted', 'Son silinenler']] as Array<[typeof imFolder, string]>).map(([fo, label]) => (
                         <button key={String(fo)} role="tab" aria-selected={imFolder === fo} className={imFolder === fo ? 'active' : ''} onClick={() => (setImFolder(fo), setFilter('all'))}>
                           {label}
                         </button>
