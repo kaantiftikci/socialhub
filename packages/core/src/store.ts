@@ -85,11 +85,32 @@ export class Store {
     if (!ccols.has('last_from_me')) this.db.exec('ALTER TABLE chats ADD COLUMN last_from_me INTEGER NOT NULL DEFAULT 0');
     // gönderen bazlı güncellemeler (ad/fotoğraf/lid→numara) tam tablo taraması yapmasın
     this.db.exec('CREATE INDEX IF NOT EXISTS messages_sender ON messages(sender_id)');
+    this.db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    // Tek seferlik onarım: Messenger mesajları ilk sürümde eşitleme saatiyle yazılmıştı (kimlik aynı kaldığı için üstüne
+    // yazılmıyor); sil → yoklama gerçek zamanlarıyla yeniden getirir
+    if (!this.flag('fix_messenger_ts_v1')) {
+      this.db.exec("DELETE FROM messages WHERE chat_id LIKE 'messenger:%'");
+      this.setFlag('fix_messenger_ts_v1');
+    }
     // Onarım: tarayıcı kanallarında sohbet zamanı olarak yoklama saati yazılmıştı; mesajı olan sohbetleri son mesaj zamanına çek
     this.db.exec(`UPDATE chats SET last_message_at = (SELECT MAX(ts) FROM messages m WHERE m.chat_id = chats.id)
       WHERE platform IN ('messenger','x','instagram','linkedin','slack')
         AND EXISTS (SELECT 1 FROM messages m WHERE m.chat_id = chats.id)
         AND last_message_at > (SELECT MAX(ts) FROM messages m WHERE m.chat_id = chats.id) + 600000`);
+  }
+
+  flag(key: string): boolean {
+    return !!this.db.prepare('SELECT 1 FROM meta WHERE key = ?').get(key);
+  }
+
+  setFlag(key: string, value = '1'): void {
+    this.db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
+  }
+
+  /** Sohbetteki en eski mesajın zamanı (yoksa undefined) */
+  oldestTs(chatId: string): number | undefined {
+    const r = this.db.prepare('SELECT MIN(ts) AS t FROM messages WHERE chat_id = ?').get(chatId) as { t: number | null };
+    return r?.t ?? undefined;
   }
 
   // ---------- accounts ----------

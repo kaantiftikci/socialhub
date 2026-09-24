@@ -154,11 +154,6 @@ export function Conversation({
               {chat.kind !== 'direct' ? ` · ${chat.kind === 'group' ? 'grup' : 'kanal'}` : ' · sohbet'}
             </span>
           </div>
-          {chat.platform === 'telegram' && (
-            <button className="btn icon b b2" onClick={() => api.loadHistory(chat.id).catch((e) => notify(e.message, true))} title="Daha eski mesajları getir" aria-label="Geçmiş">
-              <Icon name="history" size={15} />
-            </button>
-          )}
           <button className={`btn icon b b2 ${search !== null ? 'on' : ''}`} onClick={() => setSearch(search === null ? '' : null)} title="Sohbette ara" aria-label="Ara">
             <Icon name="search" size={15} />
           </button>
@@ -192,15 +187,12 @@ export function Conversation({
         )}
 
         <div className="msgs" ref={msgsRef}>
-          {messages.length > 0 && !search && (hasOlder || chat.platform === 'telegram') && (
+          {messages.length > 0 && !search && hasOlder && (
             <div style={{ display: 'flex', justifyContent: 'center', margin: '4px 0 6px' }}>
               <button
                 className="btn xs b b2"
                 disabled={olderBusy}
-                onClick={() => {
-                  if (chat.platform === 'telegram' && !hasOlder) api.loadHistory(chat.id).catch((e) => notify(e.message, true));
-                  else void onLoadOlder?.();
-                }}
+                onClick={() => void onLoadOlder?.()}
               >
                 <Icon name="history" size={13} /> {olderBusy ? 'Yükleniyor…' : 'Daha eski mesajlar'}
               </button>

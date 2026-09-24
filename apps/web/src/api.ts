@@ -41,7 +41,7 @@ export const api = {
   send: (chatId: string, text: string) => call<{ remoteId: string }>('POST', `/chats/${enc(chatId)}/send`, { text }),
   markRead: (chatId: string) => call('POST', `/chats/${enc(chatId)}/read`),
   setTags: (chatId: string, tags: string[]) => call<Chat>('POST', `/chats/${enc(chatId)}/tags`, { tags }),
-  loadHistory: (chatId: string) => call('POST', `/chats/${enc(chatId)}/history`, { limit: 50 }),
+  loadHistory: (chatId: string, before?: number, limit = 50) => call('POST', `/chats/${enc(chatId)}/history`, { limit, before }),
   draft: (chatId: string, tone?: string) => call<DraftResult>('POST', `/chats/${enc(chatId)}/draft`, { tone }),
   openChat: (accountId: string, participant: { id: string; name: string; handle?: string; avatarUrl?: string }) => call<Chat>('POST', '/chats/open', { accountId, participant }),
   action: (chatId: string, payload: Record<string, unknown>) => call<Chat>('POST', `/chats/${enc(chatId)}/action`, payload),

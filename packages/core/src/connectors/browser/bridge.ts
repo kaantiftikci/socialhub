@@ -49,7 +49,10 @@ export interface Strategy {
   /** Kendi kimliğini ve görünen adını döndür */
   me(page: Page, cookies: Record<string, string>): Promise<{ id: string; label: string }>;
   threads(page: Page, cookies: Record<string, string>): Promise<Thread[]>;
-  messages(page: Page, cookies: Record<string, string>, threadId: string, limit: number): Promise<Msg[]>;
+  /** `before`: verilirse bu zamandan (ms) eski mesajlar (eski mesaj yükleme) */
+  messages(page: Page, cookies: Record<string, string>, threadId: string, limit: number, before?: number): Promise<Msg[]>;
+  /** true: API tabanlı strateji, mesaj çağrıları paralel yapılabilir (DOM okuyanlar tek sayfayı paylaştığı için sıralı) */
+  parallel?: boolean;
   send(page: Page, cookies: Record<string, string>, threadId: string, text: string): Promise<string | undefined>;
   /** Bir üyeyle birebir sohbet kimliği (yoksa oluştur) */
   openDirect?(page: Page, cookies: Record<string, string>, participant: Participant): Promise<string>;
@@ -233,9 +236,9 @@ export class BrowserConnector extends BaseConnector {
     return this.serial(async () => this.strategy.openDirect!(this.page!, await this.cookies(), p));
   }
 
-  async loadHistory(remoteChatId: string, limit = 50): Promise<void> {
+  async loadHistory(remoteChatId: string, limit = 50, before?: number): Promise<void> {
     if (!this.page) return;
-    const msgs = await this.serial(async () => this.strategy.messages(this.page!, await this.cookies(), remoteChatId, limit));
+    const msgs = await this.serial(async () => this.strategy.messages(this.page!, await this.cookies(), remoteChatId, limit, before));
     for (const m of msgs) this.ingest(remoteChatId, m, false);
   }
 
@@ -300,18 +303,24 @@ export class BrowserConnector extends BaseConnector {
         this.upsertChat({ remoteId: t.id, name: t.name, kind: t.kind, unread: fresh ? t.unread : undefined, lastMessageAt: t.lastTs || undefined, lastPreview: fresh ? t.preview || undefined : undefined, avatarUrl: t.avatarUrl, handle: t.handle, link: t.link, participants: t.participants });
         if (!this.known.has(t.id) || (this.known.get(t.id) ?? 0) < t.lastTs) changed.push(t);
       }
-      const batch = changed.slice(0, first ? 12 : 6);
+      const batch = changed.slice(0, first ? 16 : 8);
       const failed: string[] = [];
       let firstErr = '';
-      for (const t of batch) {
-        try {
-          const msgs = await withTimeout(this.strategy.messages(page, cookies, t.id, first ? 25 : 15), 60_000, 'mesajlar');
-          for (const m of msgs) this.ingest(t.id, m, !first && !this.hasMessage(t.id, m.id));
-          this.known.set(t.id, t.lastTs);
-        } catch (e) {
-          failed.push(t.id);
-          firstErr ||= (e as Error).message;
-        }
+      // API stratejileri 4'lü paralel; DOM okuyanlar sıralı (tek sayfayı paylaşır)
+      const width = this.strategy.parallel ? 4 : 1;
+      for (let i = 0; i < batch.length; i += width) {
+        await Promise.all(
+          batch.slice(i, i + width).map(async (t) => {
+            try {
+              const msgs = await withTimeout(this.strategy.messages(page, cookies, t.id, first ? 25 : 15), 60_000, 'mesajlar');
+              for (const m of msgs) this.ingest(t.id, m, !first && !this.hasMessage(t.id, m.id));
+              this.known.set(t.id, t.lastTs);
+            } catch (e) {
+              failed.push(t.id);
+              firstErr ||= (e as Error).message;
+            }
+          }),
+        );
       }
       // aynı hata her sohbet için ayrı satır basmasın: yoklama başına tek özet
       if (failed.length) bus.log('warn', `${this.account.platform} mesajlar alınamadı: ${failed.length}/${batch.length} sohbet (ilk: ${failed[0]}): ${firstErr}`);

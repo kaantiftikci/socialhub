@@ -20,7 +20,8 @@ export interface Connector {
   /** Telegram gibi etkileşimli girişlerde (telefon, kod, 2FA) arayüzden gelen değeri iletir. */
   provideInput?(kind: 'phone' | 'code' | 'password', value: string): void;
   /** Belirli bir sohbetin geçmişini (daha eski mesajları) ister. */
-  loadHistory?(remoteChatId: string, limit: number): Promise<void>;
+  /** `before`: yüklü en eski mesajın zaman damgası (ms); platformdan bundan eski mesajlar istenir */
+  loadHistory?(remoteChatId: string, limit: number, before?: number): Promise<void>;
   /** Oturum çerezleri gerektiren medyayı (DM fotoğrafı/videosu) platformdan indirir. */
   fetchMedia?(url: string): Promise<{ body: Buffer; type: string } | undefined>;
   /** Bir grup üyesiyle birebir sohbet aç/bul; sohbetin remoteId'sini döndürür. */
@@ -106,7 +107,7 @@ export abstract class BaseConnector implements Connector {
     const chat = this.store.getChat(cid)!;
     // Depodaki satırı yayınla (durum güncellemesi gibi kısmi girdiler metni/zamanı ezmesin)
     const stored = this.store.getMessage(message.id) ?? message;
-    if (inserted || opts.live) bus.emit({ type: 'message.upsert', message: stored, chat });
+    if (inserted || opts.live) bus.emit({ type: 'message.upsert', message: stored, chat, live: !!opts.live });
     else bus.emit({ type: 'chat.upsert', chat });
     return stored;
   }

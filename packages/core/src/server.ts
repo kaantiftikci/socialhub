@@ -152,7 +152,9 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     const chat = store.getChat(id);
     if (!chat) throw new HttpError(404, 'Sohbet yok');
     const c = registry.get(chat.accountId);
-    if (c?.loadHistory) await c.loadHistory(chat.remoteId, Number((body as { limit?: number }).limit ?? 50));
+    const b = body as { limit?: number; before?: number };
+    const before = Number(b.before);
+    if (c?.loadHistory) await c.loadHistory(chat.remoteId, Math.min(500, Math.max(1, Number(b.limit) || 50)), Number.isFinite(before) && before > 0 ? before : undefined);
     return { ok: true };
   });
   route('POST', '/api/chats/:id/draft', async (_r, _s, p, body) => {

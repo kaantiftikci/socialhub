@@ -111,16 +111,16 @@ export class Registry {
         c = new IMessageConnector(account, this.store);
         break;
       case 'linkedin':
-        c = new BrowserConnector(account, this.store, linkedin, 20_000);
+        c = new BrowserConnector(account, this.store, linkedin, 15_000);
         break;
       case 'instagram':
-        c = new BrowserConnector(account, this.store, instagram, 20_000);
+        c = new BrowserConnector(account, this.store, instagram, 15_000);
         break;
       case 'x':
-        c = new BrowserConnector(account, this.store, x, 25_000);
+        c = new BrowserConnector(account, this.store, x, 20_000);
         break;
       case 'messenger':
-        c = new BrowserConnector(account, this.store, messenger, 30_000);
+        c = new BrowserConnector(account, this.store, messenger, 20_000);
         break;
       case 'shopier': {
         const tokenFile = path.join(sessionDir(account.id), 'token');

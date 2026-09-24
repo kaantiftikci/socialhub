@@ -69,7 +69,7 @@ export type CoreEvent =
   | { type: 'account.prompt'; accountId: string; prompt: 'phone' | 'code' | 'password'; message: string }
   | { type: 'chat.upsert'; chat: Chat }
   | { type: 'chat.delete'; chatId: string }
-  | { type: 'message.upsert'; message: Message; chat: Chat }
+  | { type: 'message.upsert'; message: Message; chat: Chat; live?: boolean }
   | { type: 'message.delete'; chatId: string; messageId: string }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; text: string };
 

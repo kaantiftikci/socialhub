@@ -188,7 +188,8 @@ export default function App() {
           break;
         case 'message.upsert':
           queueChat(ev.chat);
-          if (!ev.message.fromMe && Date.now() - ev.message.ts < 60_000) {
+          // yalnızca canlı gelen (eşitleme/geçmiş değil) ve yeni mesajlar bildirim çalsın
+          if (ev.live && !ev.message.fromMe && Date.now() - ev.message.ts < 120_000) {
             void windowFocused().then((focused) => {
               if (!focused || ev.message.chatId !== selectedRef.current) {
                 desktopNotify(ev.chat.name, (ev.message.text || ev.message.attachments?.[0]?.name || 'Yeni mesaj').slice(0, 140));
@@ -714,14 +715,22 @@ export default function App() {
                 showDetails={showDetails}
                 onToggleDetails={() => setShowDetails(!showDetails)}
                 olderBusy={olderBusy}
-                hasOlder={noMoreOlder !== current.id && messages.length >= 100}
+                hasOlder={noMoreOlder !== current.id}
                 onLoadOlder={async () => {
                   const oldest = messages[0];
                   if (!oldest || olderBusy) return;
                   setOlderBusy(true);
                   try {
-                    const more = await api.messages(current.id, 300, oldest.ts);
-                    if (more.length === 0) setNoMoreOlder(current.id);
+                    // önce depodaki daha eski mesajlar; depoda yoksa platformdan iste (WhatsApp/Telegram/Instagram/…)
+                    let more = await api.messages(current.id, 300, oldest.ts);
+                    if (more.length === 0) {
+                      await api.loadHistory(current.id, oldest.ts, 100);
+                      more = await api.messages(current.id, 300, oldest.ts);
+                    }
+                    if (more.length === 0) {
+                      setNoMoreOlder(current.id);
+                      notify('Daha eski mesaj yok');
+                    }
                     setMessages((prev) => {
                       const ids = new Set(prev.map((m) => m.id));
                       return [...more.filter((m) => !ids.has(m.id)), ...prev];
