@@ -1,6 +1,6 @@
 import type { Page } from 'playwright';
 import type { Attachment } from '../../model.js';
-import type { Msg, Strategy, Thread } from './bridge.js';
+import { apiOf, needsPage, type Msg, type Strategy, type Thread } from './bridge.js';
 
 /**
  * Slack (tarayıcı oturumu): Slack'e bir kez giriş yapılır; web istemcisinin
@@ -75,22 +75,37 @@ export function apiUrls(t: Pick<TeamCfg, 'domain' | 'url'>, method: string, lear
   return [`${base}${method}?${q}`, sameOrigin];
 }
 
+/** localStorage'daki localConfig_v2 → etkin çalışma alanı (sayfada ve sayfasız modda ortak) */
+export function parseTeam(raw: string | null | undefined): TeamCfg | undefined {
+  try {
+    if (!raw) return undefined;
+    const cfg = JSON.parse(raw) as { teams?: Record<string, { token?: string; domain?: string; name?: string; user_id?: string; url?: string }>; lastActiveTeamId?: string };
+    const teams = Object.values(cfg.teams ?? {});
+    const t = (cfg.lastActiveTeamId && cfg.teams?.[cfg.lastActiveTeamId]) || teams.find((x) => x.token?.startsWith('xoxc'));
+    if (!t?.token) return undefined;
+    return { token: t.token, domain: t.domain ?? '', name: t.name ?? 'Slack', userId: t.user_id ?? '', url: t.url ?? '' };
+  } catch {
+    return undefined;
+  }
+}
+
 async function team(page: Page): Promise<TeamCfg | undefined> {
+  const h = apiOf(page);
+  if (h) {
+    const o = h.state.origins.find((x) => x.origin === 'https://app.slack.com');
+    return parseTeam(o?.localStorage.find((e) => e.name === 'localConfig_v2')?.value);
+  }
   if (page.isClosed() || !page.url().startsWith('https://app.slack.com/')) return undefined;
   watchClientRequests(page);
-  return page.evaluate(() => {
+  const raw = await page.evaluate(() => {
     try {
-      const raw = localStorage.getItem('localConfig_v2');
-      if (!raw) return undefined;
-      const cfg = JSON.parse(raw) as { teams?: Record<string, { token?: string; domain?: string; name?: string; user_id?: string; url?: string }>; lastActiveTeamId?: string };
-      const teams = Object.values(cfg.teams ?? {});
-      const t = (cfg.lastActiveTeamId && cfg.teams?.[cfg.lastActiveTeamId]) || teams.find((x) => x.token?.startsWith('xoxc'));
-      if (!t?.token) return undefined;
-      return { token: t.token, domain: t.domain ?? '', name: t.name ?? 'Slack', userId: t.user_id ?? '', url: t.url ?? '' };
+      return localStorage.getItem('localConfig_v2');
     } catch {
-      return undefined;
+      return null;
     }
   });
+  // testlerdeki sahte sayfa doğrudan ayrıştırılmış nesne döndürür
+  return typeof raw === 'string' || raw == null ? parseTeam(raw) : (raw as TeamCfg);
 }
 
 /**
@@ -100,6 +115,7 @@ async function team(page: Page): Promise<TeamCfg | undefined> {
  */
 let lastNav = 0;
 async function openClient(page: Page): Promise<TeamCfg | undefined> {
+  needsPage(page);
   lastNav = Date.now();
   await page.goto(CLIENT, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
   await page.waitForURL(/^https:\/\/app\.slack\.com\/client\/[A-Z]/, { timeout: 15_000 }).catch(() => undefined);
@@ -111,6 +127,27 @@ async function slack(page: Page, method: string, params: Record<string, string |
   const t = (await team(page)) ?? (Date.now() - lastNav > 8000 ? await openClient(page) : undefined);
   if (!t) throw new Error('Slack oturumu bulunamadı');
   const urls = apiUrls(t, method);
+  const h = apiOf(page);
+  if (h) {
+    // Sayfasız: aynı çok parçalı POST Node'dan (profil kopyasıyla doğrulandı: client.counts ok)
+    let netErr = '';
+    for (let i = 0; i < urls.length; i++) {
+      const multipart: Record<string, string> = { token: t.token };
+      for (const [k, v] of Object.entries(params)) multipart[k] = String(v);
+      let res: Awaited<ReturnType<typeof h.api.post>>;
+      try {
+        res = await h.api.post(urls[i], { multipart, timeout: 45_000 });
+      } catch (e) {
+        netErr = (e as Error).message;
+        continue;
+      }
+      const j = (await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status()}` }))) as J;
+      if (!j.ok) throw new Error(`Slack ${method}: ${j.error ?? res.status()}`);
+      if (i > 0 && urls.length > 1) sameOriginOnly = true;
+      return j;
+    }
+    throw new Error(`Slack ${method}: ağ hatası (${netErr})`);
+  }
   const r = await page.evaluate(
     async ({ method, params, token, urls }) => {
       let netErr = '';
@@ -246,6 +283,8 @@ export const slackStrategy: Strategy = {
   loginHint: 'Açılan pencerede Slack\'e giriş yap (e-posta kodu / Google), listeden çalışma alanını AÇ — giriş ancak çalışma alanı açılınca tamamlanır',
   parallel: true,
 
+  pageless: true,
+
   async loggedIn(page, cookies, passive) {
     // "d": .slack.com oturum çerezi; yalnızca bir çalışma alanı gerçekten açıldığında yazılır.
     // Google/e-posta doğrulaması bitmiş ama çalışma alanı seçilmemişse yoktur → giriş tamamlanmamıştır.
@@ -359,6 +398,7 @@ export const slackStrategy: Strategy = {
    * kanala paylaşır. Dönen kimlik: paylaşımın ts'si (yoksa dosya kimliği).
    */
   async sendFile(page, _cookies, threadId, file, caption) {
+    needsPage(page);
     const r = await slack(page, 'files.getUploadURLExternal', { filename: file.name, length: file.size });
     const uploadUrl = String(r.upload_url ?? '');
     const fileId = String(r.file_id ?? '');

@@ -2,7 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import type { BrowserContext, Page } from 'playwright';
+import type { APIRequestContext, BrowserContext, Page } from 'playwright';
 import { BaseConnector, type StartOptions } from '../base.js';
 import { chatId } from '../../model.js';
 import { persistSessionCookies } from './outlook.js';
@@ -49,9 +49,26 @@ export interface Msg {
   status?: 'sent' | 'delivered' | 'read';
 }
 
+/** Sayfasız (tarayıcısız) modda stratejiye verilen sahte sayfanın taşıdığı istek bağlamı */
+export interface ApiHandle {
+  api: APIRequestContext;
+  state: StorageState;
+}
+export type StorageState = Awaited<ReturnType<BrowserContext['storageState']>>;
+/** Strateji bir DOM işlemi için gerçek sayfaya ihtiyaç duyduğunda fırlatır; köprü tarayıcıyı açıp yeniden dener */
+export const NEEDS_PAGE = 'NEEDS_PAGE';
+export function apiOf(page: Page): ApiHandle | undefined {
+  return (page as unknown as { __api?: ApiHandle }).__api;
+}
+export function needsPage(page: Page): void {
+  if (apiOf(page)) throw new Error(NEEDS_PAGE);
+}
+
 export interface Strategy {
   home: string;
   loginHint: string;
+  /** API tabanlı: giriş sonrası tarayıcı kapanır, istekler Node'dan (Playwright request bağlamı, kayıtlı çerezler) atılır */
+  pageless?: boolean;
   /** Yoklama bitince sayfayı about:blank'e al (ağır siteler boşta bellek tutmasın); strateji her çağrıda kendi sayfasına döner */
   unloadWhenIdle?: boolean;
   /** Giriş yapılmış mı? (çerezler Node tarafında okunur, sayfa da verilir) */
@@ -86,6 +103,10 @@ export class BrowserConnector extends BaseConnector {
   private ctx?: BrowserContext;
   private page?: Page;
   private timer?: NodeJS.Timeout;
+  /** sayfasız mod: tarayıcı kapalı, istekler bu bağlamdan */
+  private api?: APIRequestContext;
+  private state?: StorageState;
+  private pageless = false;
   private stopping = false;
   private polling = false;
   /** unloadWhenIdle: yoklamalar arasında tarayıcı kapalı (bellek); bir sonraki yoklama/işlem yeniden açar */
@@ -105,7 +126,7 @@ export class BrowserConnector extends BaseConnector {
     const interactive = opts.interactive !== false;
     this.stopping = false;
     try {
-      ({ chromium: this.chromium } = await import('playwright'));
+      ({ chromium: this.chromium, request: this.request } = await import('playwright'));
     } catch {
       this.setStatus('error', 'playwright paketi yok: npm i playwright && npx playwright install chromium');
       return;
@@ -113,6 +134,21 @@ export class BrowserConnector extends BaseConnector {
     this.setStatus('connecting');
 
     // 1) Kayıtlı oturum var mı? Önce görünmez pencerede dene.
+    // 0) API tabanlı kanal ve kayıtlı oturum durumu varsa tarayıcısız başla (bellek: Chromium hiç açılmaz)
+    if (this.strategy.pageless && !interactive && fs.existsSync(this.stateFile)) {
+      try {
+        await this.openApi(JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) as StorageState);
+        this.syncProgress(45, 'oturum (sayfasız)');
+        await this.finishStart();
+        if (this.account.status === 'connected') return;
+      } catch (e) {
+        bus.log('info', `${this.account.platform}: sayfasız açılış olmadı (${(e as Error).message.slice(0, 80)}); tarayıcıyla deneniyor`);
+      }
+      await this.api?.dispose().catch(() => undefined);
+      this.api = undefined;
+      this.pageless = false;
+      if (this.stopping) return;
+    }
     if (!(await this.launch(true))) return;
     this.syncProgress(20, 'tarayıcı açıldı');
     let loggedIn = await this.isLoggedIn();
@@ -151,7 +187,12 @@ export class BrowserConnector extends BaseConnector {
     }
     if (this.stopping) return;
     try {
-      const me = await this.strategy.me(this.page!, await this.cookies());
+    this.syncProgress(45, 'oturum doğrulandı');
+    await this.finishStart();
+  }
+
+  private async finishStart(): Promise<void> {
+      const me = await this.strategy.me(this.target(), await this.cookies());
       this.account.label = me.label;
     } catch {
       /* etiket kalsın */
@@ -165,6 +206,71 @@ export class BrowserConnector extends BaseConnector {
 
   /** Kalıcı profille Chromium aç. headless=true: arka planda çalışan görünmez pencere. */
   private async launch(headless: boolean, retried = false): Promise<boolean> {
+  private get stateFile(): string {
+    return path.join(sessionDir(this.account.id), 'state.json');
+  }
+
+  /** Sayfasız istek bağlamını aç (kayıtlı çerezler + gerçek Chrome kimliği) */
+  private async openApi(state: StorageState): Promise<void> {
+    await this.api?.dispose().catch(() => undefined);
+    this.state = state;
+    this.api = await this.request!.newContext({ storageState: state, userAgent: await realUserAgent(this.chromium!), timeout: 45_000 });
+    this.pageless = true;
+  }
+
+  /** Tarayıcıdan sayfasız moda geç: durumu kaydet, tarayıcıyı kapat */
+  private async goPageless(): Promise<void> {
+    if (!this.ctx || !this.request) return;
+    const state = await this.ctx.storageState();
+    this.saveState(state);
+    await this.closeCtx();
+    await this.openApi(state);
+  }
+
+  private saveState(state: StorageState): void {
+    try {
+      fs.mkdirSync(sessionDir(this.account.id), { recursive: true });
+      fs.writeFileSync(this.stateFile, JSON.stringify(state), { mode: 0o600 });
+    } catch {
+      /* yazılamadı */
+    }
+  }
+
+  /** Stratejiye verilecek "sayfa": gerçek sayfa ya da sayfasız modda API taşıyan vekil (DOM çağrıları NEEDS_PAGE fırlatır) */
+  private target(): Page {
+    if (this.page && !this.page.isClosed()) return this.page;
+    const handle: ApiHandle = { api: this.api!, state: this.state! };
+    return new Proxy(
+      {},
+      {
+        get: (_t, k) => {
+          if (k === '__api') return handle;
+          if (k === 'isClosed') return () => false;
+          if (k === 'url') return () => 'pageless:';
+          if (k === 'then') return undefined;
+          return () => {
+            throw new Error(NEEDS_PAGE);
+          };
+        },
+      },
+    ) as unknown as Page;
+  }
+
+  /** Strateji çağrısı: sayfasız modda DOM gerekirse tarayıcıyı açıp gerçek sayfayla yeniden dener, sonra sayfasıza döner */
+  private async run<T>(fn: (page: Page, cookies: Record<string, string>) => Promise<T>): Promise<T> {
+    try {
+      return await fn(this.target(), await this.cookies());
+    } catch (e) {
+      if ((e as Error).message !== NEEDS_PAGE) throw e;
+    }
+    if (!(await this.ensureOpen())) throw new Error('Tarayıcı açılamadı');
+    try {
+      return await fn(this.page!, await this.cookies());
+    } finally {
+      if (this.strategy.pageless && this.account.status === 'connected' && !this.stopping) await this.goPageless().catch(() => undefined);
+    }
+  }
+
     const profile = path.join(sessionDir(this.account.id), 'profile');
     try {
       const hidden = headless || process.env.KAVSAK_HEADLESS === '1';
@@ -222,7 +328,12 @@ export class BrowserConnector extends BaseConnector {
   /** Sayfa yoksa ve kanal boşta kapatılmışsa tarayıcıyı yeniden aç (Gmail/Outlook: yoklamalar arasında kapalı tutulur) */
   private async ensureOpen(): Promise<boolean> {
     if (this.page && !this.page.isClosed()) return true;
-    if (!this.idleClosed || this.stopping || this.account.status !== 'connected' || !this.chromium) return false;
+    if (!(this.idleClosed || this.pageless) || this.stopping || !this.chromium) return false;
+    if (this.pageless) {
+      await this.api?.dispose().catch(() => undefined);
+      this.api = undefined;
+      this.pageless = false;
+    }
     const ok = await this.launch(true);
     if (ok) this.idleClosed = false;
     return ok;
@@ -238,6 +349,7 @@ export class BrowserConnector extends BaseConnector {
   private async isLoggedIn(passive = false): Promise<boolean> {
     if (!this.page || this.page.isClosed()) return false;
     try {
+    if (this.pageless && !passive) await this.ensureOpen();
       return await this.strategy.loggedIn(this.page, await this.cookies(), passive);
     } catch {
       return false;
@@ -295,6 +407,9 @@ export class BrowserConnector extends BaseConnector {
     this.stopping = true;
     if (this.timer) clearInterval(this.timer);
     await this.closeCtx();
+    await this.api?.dispose().catch(() => undefined);
+    this.api = undefined;
+    this.pageless = false;
     this.setStatus('disconnected');
   }
 
@@ -307,16 +422,16 @@ export class BrowserConnector extends BaseConnector {
   }
 
   async sendText(remoteChatId: string, text: string): Promise<{ remoteId: string }> {
-    if (!(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
-    const id = (await this.serial(async () => this.strategy.send(this.page!, await this.cookies(), remoteChatId, text))) ?? `local-${Date.now()}`;
+    if (!this.pageless && !(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
+    const id = (await this.serial(async () => this.run((p, c) => this.strategy.send(p, c, remoteChatId, text)))) ?? `local-${Date.now()}`;
     this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent' });
     return { remoteId: id };
   }
 
   async sendMedia(remoteChatId: string, file: { path: string; name: string; mime: string; size: number }, caption?: string): Promise<{ remoteId: string }> {
     if (!this.strategy.sendFile) throw new Error('Bu platformda dosya gönderme desteklenmiyor');
-    if (!(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
-    const id = (await this.serial(async () => this.strategy.sendFile!(this.page!, await this.cookies(), remoteChatId, file, caption))) ?? `local-${Date.now()}`;
+    if (!this.pageless && !(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
+    const id = (await this.serial(async () => this.run((p, c) => this.strategy.sendFile!(p, c, remoteChatId, file, caption)))) ?? `local-${Date.now()}`;
     const kind = file.mime.startsWith('image/') ? 'image' : file.mime.startsWith('video/') ? 'video' : file.mime.startsWith('audio/') ? 'audio' : 'file';
     this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text: caption ?? '', ts: Date.now(), status: 'sent', attachments: [{ kind, name: file.name, mime: file.mime, size: file.size }] });
     return { remoteId: id };
@@ -325,9 +440,9 @@ export class BrowserConnector extends BaseConnector {
   private morePage = 0;
   async loadMoreChats(): Promise<number> {
     if (!this.strategy.moreThreads) throw new Error('Bu platformda daha eski sohbet listesi desteklenmiyor');
-    if (!(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
+    if (!this.pageless && !(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
     const idx = this.morePage + 1;
-    const threads = await this.serial(async () => this.strategy.moreThreads!(this.page!, await this.cookies(), idx));
+    const threads = await this.serial(async () => this.run((p, c) => this.strategy.moreThreads!(p, c, idx)));
     let added = 0;
     for (const t of threads) {
       if (!this.store.getChat(chatId(this.account.id, t.id))) added++;
@@ -338,20 +453,20 @@ export class BrowserConnector extends BaseConnector {
   }
 
   async markRead(remoteChatId: string): Promise<void> {
-    if (!this.strategy.markRead || !(await this.ensureOpen())) return;
+    if (!this.strategy.markRead || (!this.pageless && !(await this.ensureOpen()))) return;
     const last = this.store.listMessages(chatId(this.account.id, remoteChatId), 30).filter((m) => !m.fromMe).pop();
-    await this.serial(async () => this.strategy.markRead!(this.page!, await this.cookies(), remoteChatId, last?.remoteId));
+    await this.serial(async () => this.run((p, c) => this.strategy.markRead!(p, c, remoteChatId, last?.remoteId)));
   }
 
   async openDirect(p: Participant): Promise<string> {
     if (!this.strategy.openDirect) throw new Error('Bu platformda doğrudan sohbet açma desteklenmiyor');
-    if (!(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
-    return this.serial(async () => this.strategy.openDirect!(this.page!, await this.cookies(), p));
+    if (!this.pageless && !(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
+    return this.serial(async () => this.run((pg, c) => this.strategy.openDirect!(pg, c, p)));
   }
 
   async loadHistory(remoteChatId: string, limit = 50, before?: number): Promise<void> {
     if (!this.page) return;
-    const msgs = await this.serial(async () => this.strategy.messages(this.page!, await this.cookies(), remoteChatId, limit, before));
+    const msgs = await this.serial(async () => this.run((p, c) => this.strategy.messages(p, c, remoteChatId, limit, before)));
     for (const m of msgs) this.ingest(remoteChatId, m, false);
   }
 
@@ -367,17 +482,17 @@ export class BrowserConnector extends BaseConnector {
     if (fs.existsSync(file) && fs.existsSync(file + '.type')) {
       return { body: fs.readFileSync(file), type: fs.readFileSync(file + '.type', 'utf8') };
     }
-    if (!this.ctx) return undefined;
+    if (!this.ctx && !this.api) return undefined;
     let body: Buffer;
     let type: string;
     if (!/^https?:\/\//.test(url)) {
       // özel şema: stratejinin kancası (sayfa bağlamından okur; tek sayfayı paylaştığı için sırayla)
-      if (!this.strategy.fetchMedia || !(await this.ensureOpen())) return undefined;
-      const r = await this.serial(async () => this.strategy.fetchMedia!(this.page!, await this.cookies(), url));
+      if (!this.strategy.fetchMedia || (!this.pageless && !(await this.ensureOpen()))) return undefined;
+      const r = await this.serial(async () => this.run((p, c) => this.strategy.fetchMedia!(p, c, url)));
       if (!r) return undefined;
       ({ body, type } = r);
     } else {
-      const r = await this.ctx.request.get(url, { timeout: 25_000, headers: { referer: new URL(this.strategy.home).origin + '/' } });
+      const r = await (this.api ?? this.ctx!.request).get(url, { timeout: 25_000, headers: { referer: new URL(this.strategy.home).origin + '/' } });
       if (!r.ok()) throw new Error(`medya ${r.status()}`);
       body = await r.body();
       type = r.headers()['content-type'] ?? 'application/octet-stream';
@@ -399,16 +514,26 @@ export class BrowserConnector extends BaseConnector {
     const out: Record<string, string> = {};
     for (const c of (await this.ctx?.cookies()) ?? []) out[c.name] = c.value;
     return out;
+    if (this.pageless && this.api) {
+      this.state = await this.api.storageState().catch(() => this.state);
+      for (const c of this.state?.cookies ?? []) out[c.name] = c.value;
+      return out;
+    }
   }
 
   private async poll(first: boolean): Promise<void> {
     if (this.polling) return;
-    if ((!this.page || this.page.isClosed()) && !(await this.ensureOpen())) return;
+    if ((!this.page || this.page.isClosed()) && !this.pageless && !(await this.ensureOpen())) return;
     this.polling = true;
     try {
       await this.serial(() => this.pollInner(first));
       // Boşta boşaltma: sekme kapatmak/about:blank render sürecini bırakmıyor (service worker, site izolasyonu); tarayıcıyı
       // tamamen kapat, sonraki yoklama/işlem yeniden açar (kalıcı profil oturumu korur; açılış ~3-5 sn)
+      // API tabanlı kanal: ilk başarılı yoklamadan sonra tarayıcı kapanır; sayfasızda çerezler her yoklamada diske
+      if (this.strategy.pageless && this.account.status === 'connected' && !this.stopping) {
+        if (this.ctx) await this.serial(() => this.goPageless()).catch((e) => bus.log('warn', `${this.account.platform}: sayfasız moda geçilemedi: ${(e as Error).message}`));
+        else if (this.api) this.saveState(await this.api.storageState().catch(() => this.state!));
+      }
       if (this.strategy.unloadWhenIdle && this.ctx && this.account.status === 'connected' && !this.stopping) {
         await this.serial(() => this.closeCtx()).catch(() => undefined);
         this.idleClosed = true;
@@ -419,8 +544,8 @@ export class BrowserConnector extends BaseConnector {
   }
 
   private async pollInner(first: boolean): Promise<void> {
-    if (!this.page || this.page.isClosed()) return;
-    const page = this.page;
+    if (!this.pageless && (!this.page || this.page.isClosed())) return;
+    const page = this.target();
     try {
       const cookies = await this.cookies();
       // Strateji çağrıları asılı kalmasın: sayfa donarsa uyarı düşsün, sonraki yoklama devam etsin

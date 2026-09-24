@@ -1,5 +1,5 @@
 import type { Page } from 'playwright';
-import type { Msg, Strategy, Thread } from './bridge.js';
+import { apiOf, needsPage, type Msg, type Strategy, type Thread } from './bridge.js';
 import { pickFileInput } from './outlook.js';
 import type { Attachment } from '../../model.js';
 import { bus } from '../../bus.js';
@@ -9,6 +9,31 @@ type J = Record<string, any>; // eslint-disable-line @typescript-eslint/no-expli
 const APP_ID = '936619743392459';
 
 async function ig(page: Page, cookies: Record<string, string>, path: string, form?: Record<string, string>): Promise<J> {
+  // Sayfasız mod: aynı istek Node'dan (Playwright request bağlamı; çerezler + gerçek Chrome kimliği). Profil kopyasıyla doğrulandı (200).
+  const h = apiOf(page);
+  if (h) {
+    const r = await h.api.fetch('https://www.instagram.com' + path, {
+      method: form ? 'POST' : 'GET',
+      headers: {
+        'x-ig-app-id': APP_ID,
+        'x-requested-with': 'XMLHttpRequest',
+        'x-csrftoken': cookies.csrftoken ?? '',
+        'x-asbd-id': '129477',
+        referer: 'https://www.instagram.com/direct/inbox/',
+        origin: 'https://www.instagram.com',
+        ...(form ? { 'content-type': 'application/x-www-form-urlencoded' } : {}),
+      },
+      data: form ? new URLSearchParams(form).toString() : undefined,
+      timeout: 45_000,
+    });
+    const text = await r.text();
+    if (!r.ok()) throw new Error(`Instagram ${r.status()} ${path}: ${text.slice(0, 120)}`);
+    try {
+      return JSON.parse(text) as J;
+    } catch {
+      throw new Error(`Instagram beklenmeyen yanıt ${path}: ${text.slice(0, 80)}`);
+    }
+  }
   return page.evaluate(
     async ({ path, form, csrf, appId }) => {
       const r = await fetch('https://www.instagram.com' + path, {
@@ -316,6 +341,8 @@ export const instagram: Strategy = {
   home: 'https://www.instagram.com/direct/inbox/',
   loginHint: 'Açılan pencerede Instagram hesabına giriş yap',
 
+  pageless: true,
+
   async loggedIn(_page, cookies) {
     return Boolean(cookies.ds_user_id && cookies.sessionid);
   },
@@ -339,6 +366,7 @@ export const instagram: Strategy = {
   },
 
   async markRead(page, _cookies, threadId) {
+    needsPage(page);
     // /items/<id>/seen/ ucu web'de 404; web istemcisi okunduyu useIGDMarkThreadAsReadMutation ile gönderiyor.
     // Sohbet sayfasını açmak bu mutation'ı tetikliyor (profil kopyasıyla doğrulandı: read_state 1 → 0).
     await page.goto(`https://www.instagram.com/direct/t/${threadId}/`, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
@@ -380,6 +408,7 @@ export const instagram: Strategy = {
    * olarak API ile gider (Instagram DM'de medyaya altyazı yok). Kabul edilmeyen türde hata. (Gönderim canlı denenmedi.)
    */
   async sendFile(page, cookies, threadId, file, caption) {
+    needsPage(page);
     const url = `https://www.instagram.com/direct/t/${threadId}/`;
     if (!page.url().startsWith(url)) await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     const box = page.locator('[role="main"] div[role="textbox"][contenteditable="true"], div[role="textbox"][contenteditable="true"], textarea').first();
