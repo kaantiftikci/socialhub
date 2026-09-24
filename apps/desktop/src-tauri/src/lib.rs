@@ -230,6 +230,14 @@ pub fn run() {
                 let mut guard = state.0.lock().unwrap();
                 let owned = guard.is_some();
                 let exited = guard.as_mut().map(|c| matches!(c.try_wait(), Ok(Some(_)))).unwrap_or(false);
+                // Açılışta başka bir çekirdek (önceki sürüm vb.) çalışıyordu ve biz başlatmamıştık: o kapanınca kendimizinkini başlat
+                if !owned {
+                    if !core_is_up() {
+                        log(&wd, "dışarıdaki çekirdek kapanmış; kendi çekirdeğimiz başlatılıyor");
+                        *guard = spawn_core(&wd);
+                    }
+                    continue;
+                }
                 if owned && (exited || !core_is_up()) {
                     if exited {
                         log(&wd, "çekirdek süreci sonlanmış; yeniden başlatılıyor");
