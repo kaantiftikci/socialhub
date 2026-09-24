@@ -61,12 +61,6 @@ export function ConnectModal({
   async function add(platform: Platform) {
     setBusy(true);
     try {
-      if (STATIC_DEMO) {
-        const a = await api.addAccount(platform);
-        setActive(a.id);
-        await onChanged();
-        return;
-      }
       if (platform === 'telegram' && active !== 'telegram:new') {
         setActive('telegram:new');
         return;
@@ -84,6 +78,15 @@ export function ConnectModal({
       const isMail = PLATFORMS[platform].mode === 'mail';
       if (isMail && (active !== `${platform}:new` || !mail.user.trim())) {
         setActive(`${platform}:new`);
+        return;
+      }
+      // Demo sitesi: formlar gerçek uygulamadaki gibi açılır, doldurulunca hesap örnek veriyle bağlanır (girilenler saklanmaz)
+      if (STATIC_DEMO) {
+        const a = await api.addAccount(platform);
+        setActive(a.id);
+        setShop({});
+        setPat('');
+        await onChanged();
         return;
       }
       let token: string | undefined;
