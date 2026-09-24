@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
 import { API_BASE, mediaUrl } from './desktop';
 import { DEFAULT_TAGS, PLATFORMS, type Attachment, type Chat, type DraftResult, type Message, type Participant } from './types';
-import { Avatar, Chip, Icon, Resizer, Tag, fmtDay, fmtStamp, fmtTime } from './ui';
+import { useClosing, Avatar, Chip, Icon, Resizer, Tag, fmtDay, fmtStamp, fmtTime } from './ui';
 
 type Tone = 'default' | 'short' | 'formal' | 'en';
 
@@ -55,6 +55,7 @@ export function Conversation({
   const [tagInput, setTagInput] = useState('');
   const [remind, setRemind] = useState(true);
   const [lightbox, setLightbox] = useState<Attachment | null>(null);
+  const lightboxP = useClosing(lightbox);
   useEffect(() => setLightbox(null), [chat.id]);
   const endRef = useRef<HTMLDivElement>(null);
   const msgsRef = useRef<HTMLDivElement>(null);
@@ -110,6 +111,7 @@ export function Conversation({
   const stickRef = useRef(true);
   /** Yukarı çıkınca görünen "en alta in" oku */
   const [showDown, setShowDown] = useState(false);
+  const downP = useClosing(showDown || null, 140);
   useEffect(() => {
     const el = msgsRef.current;
     if (!el) return;
@@ -143,6 +145,8 @@ export function Conversation({
   const lastIncoming = [...messages].reverse().find((m) => !m.fromMe);
   const needsReply = !!lastIncoming && messages[messages.length - 1]?.id === lastIncoming.id;
   const [mediaOpen, setMediaOpen] = useState(false);
+  const mediaP = useClosing(mediaOpen || null);
+  const detailsP = useClosing(showDetails || null);
   useEffect(() => setMediaOpen(false), [chat.id]);
   const allShared = useMemo(() => {
     const out: Array<{ att: Attachment; m: Message }> = [];
@@ -356,8 +360,8 @@ export function Conversation({
             </div>
           )}
           <div ref={endRef} />
-          {showDown && (
-            <div className="downwrap">
+          {downP.value && (
+            <div className={`downwrap ${downP.closing ? 'closing' : ''}`}>
               <button
                 className="downbtn b"
                 aria-label="En alta in"
@@ -450,10 +454,10 @@ export function Conversation({
         </div>
       </section>
 
-      {showDetails && (
+      {detailsP.value && (
       <>
       <Resizer pane="ctx" sign={-1} />
-      <aside className="ctx" aria-label="Kişi ayrıntıları">
+      <aside className={`ctx ${detailsP.closing ? 'closing' : ''}`} aria-label="Kişi ayrıntıları">
         {onToggleDetails && (
           <button className="btn ghost xs icon b ctx-close" onClick={onToggleDetails} title="Ayrıntı panelini gizle" aria-label="Paneli kapat">
             <Icon name="panel" size={15} />
@@ -654,8 +658,8 @@ export function Conversation({
       </aside>
       </>
       )}
-      {mediaOpen && (
-        <div className="overlay" onClick={() => setMediaOpen(false)}>
+      {mediaP.value && (
+        <div className={`overlay ${mediaP.closing ? 'closing' : ''}`} onClick={() => setMediaOpen(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Paylaşılanlar" style={{ gap: 14 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <h2 style={{ fontSize: 22 }}>Paylaşılanlar</h2>
@@ -695,7 +699,7 @@ export function Conversation({
           </div>
         </div>
       )}
-      {lightbox && <Lightbox att={lightbox} onClose={() => setLightbox(null)} />}
+      {lightboxP.value && <Lightbox att={lightboxP.value} closing={lightboxP.closing} onClose={() => setLightbox(null)} />}
     </>
   );
 }
@@ -854,7 +858,7 @@ function PlatformFacts({ chat }: { chat: Chat }) {
 }
 
 /** Medya penceresi: görsel/video doğrudan, Instagram/X gönderileri gömülü (embed) sayfayla, diğerleri bağlantıyla. */
-function Lightbox({ att, onClose }: { att: Attachment; onClose: () => void }) {
+function Lightbox({ att, onClose, closing }: { att: Attachment; onClose: () => void; closing?: boolean }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
@@ -865,7 +869,7 @@ function Lightbox({ att, onClose }: { att: Attachment; onClose: () => void }) {
   const embed = page ? embedUrl(page) : undefined;
   const isFile = isMediaFile(att.link);
   return (
-    <div className="lightbox" onClick={onClose} role="dialog" aria-label={att.name ?? 'Medya'}>
+    <div className={`lightbox ${closing ? 'closing' : ''}`} onClick={onClose} role="dialog" aria-label={att.name ?? 'Medya'}>
       <div className="box" onClick={(e) => e.stopPropagation()}>
         {att.kind === 'video' && isFile && link ? (
           <video src={link} poster={abs(att.url)} controls autoPlay playsInline />

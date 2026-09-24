@@ -1094,14 +1094,15 @@ export class WhatsAppConnector extends BaseConnector {
         bus.log('info', `WhatsApp: içeriği alınamayan mesaj: tür=${keys}${ctxOnly ? ' (yalnız messageContextInfo)' : ''} stub=${m.messageStubType ?? '-'} sohbet=${jid} gönderen=${m.key.participant ?? '-'} fromMe=${!!m.key.fromMe}`);
         // tanı: protobuf'ta tanınmayan sarmal alanlar düşer; elde kalan ne varsa bir kez günlüğe
         try {
-          bus.log('info', `WhatsApp ham: ${JSON.stringify({ message: m.message, stubParams: m.messageStubParameters, type: (m as { messageType?: string }).messageType }).slice(0, 700)}`);
+          bus.log('info', `WhatsApp ham: ${JSON.stringify({ alanlar: Object.keys(m), message: m.message, stubParams: m.messageStubParameters, type: (m as { messageType?: string }).messageType }).slice(0, 700)}`);
         } catch {
           /* yok */
         }
       }
       // Yalnız messageContextInfo taşıyan mesaj (stub yok): WhatsApp tek seferlik fotoğraf/videoyu bağlı cihazlara içeriksiz
       // gönderir. Hiç görünmemesi "mesaj kayboldu" hissi veriyordu; WhatsApp Web gibi yer tutucu göster.
-      const ctxOnlyMsg = keys === '(boş)' && !!m.message?.messageContextInfo && !m.messageStubType;
+      // (Baileys 7 bu mesajları çoğu kez message alanı hiç olmadan verir: tanınmayan sarmal düşmüş)
+      const ctxOnlyMsg = keys === '(boş)' && !m.messageStubType;
       if (ctxOnlyMsg && m.key.id) {
         const senderJid = m.key.fromMe ? 'me' : this.canon(m.key.participant ? jidNormalizedUser(m.key.participant) : jid);
         this.ensureWaChat(jid);

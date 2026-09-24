@@ -236,7 +236,12 @@ function readInboxRows(page: Page): Promise<GmailRawRow[]> {
       const countTxt = tr.querySelector<HTMLElement>('.bA4 .bx0')?.innerText ?? '';
       out.push({
         id,
-        name: last?.getAttribute('name') ?? last?.innerText ?? '',
+        // name özniteliği bozuk kodlanmış olabilir ("Tiftik?i"): görünen metin daha güvenilir
+        name: (() => {
+          const attr = last?.getAttribute('name') ?? '';
+          const shown = last?.innerText?.trim() ?? '';
+          return attr && !attr.includes('?') ? attr : shown || attr;
+        })(),
         email: (last?.getAttribute('email') ?? '').toLowerCase(),
         subject: tr.querySelector<HTMLElement>('span.bog')?.innerText?.trim() ?? '(konu yok)',
         snippet: tr.querySelector<HTMLElement>('span.y2')?.innerText?.replace(/^\s*-\s*/, '').trim() ?? '',

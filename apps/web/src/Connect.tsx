@@ -27,6 +27,7 @@ export function ConnectModal({
   prompts,
   connected,
   onClose,
+  closing,
   notify,
   onChanged,
   sync = {},
@@ -38,6 +39,8 @@ export function ConnectModal({
   prompts: Record<string, { prompt: 'phone' | 'code' | 'password'; message: string }>;
   connected: Platform[];
   onClose: () => void;
+  /** kapanış animasyonu (useClosing) */
+  closing?: boolean;
   notify: (t: string, err?: boolean) => void;
   onChanged: () => Promise<void>;
 }) {
@@ -356,7 +359,7 @@ export function ConnectModal({
   );
 
   return (
-    <div className="overlay" onClick={onClose}>
+    <div className={`overlay ${closing ? 'closing' : ''}`} onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Kanal bağla">
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
           <div style={{ flexGrow: 1 }}>

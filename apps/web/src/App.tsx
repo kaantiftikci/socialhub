@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, connectEvents } from './api';
 import { PLATFORMS, type Account, type Chat, type CoreEvent, type Message, type Platform, DEFAULT_TAGS } from './types';
-import { Avatar, Chip, Icon, Logo, Resizer, SyncBar, Tag, ago, fmtTime, loadPaneSizes } from './ui';
+import { Avatar, Chip, Icon, Logo, Resizer, SyncBar, Tag, ago, fmtTime, loadPaneSizes, useClosing } from './ui';
 import { Conversation } from './Conversation';
 import { ConnectModal } from './Connect';
 import { Focus } from './Focus';
@@ -37,6 +37,7 @@ export default function App() {
   const [olderBusy, setOlderBusy] = useState(false);
   const [noMoreOlder, setNoMoreOlder] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsP = useClosing(settingsOpen || null);
   const [lan, setLanState] = useState<{ enabled: boolean; urls: string[]; qr?: string } | null>(null);
   useEffect(() => {
     if (settingsOpen) api.lan().then(setLanState).catch(() => setLanState(null));
@@ -52,6 +53,13 @@ export default function App() {
   const [bootSince] = useState(() => Date.now());
   const [sound, setSoundState] = useState<string>(() => getSound());
   const [pSounds, setPSounds] = useState<Record<string, string>>({});
+  const [appSoundsOpen, setAppSoundsOpen] = useState(false);
+  const soundPlatforms = useMemo(() => [...new Set(accounts.map((a) => a.platform))], [accounts]);
+  const [soundApp, setSoundAppState] = useState('');
+  const setSoundApp = (p: string) => setSoundAppState(p);
+  useEffect(() => {
+    if (appSoundsOpen && !soundApp && soundPlatforms[0]) setSoundAppState(soundPlatforms[0]);
+  }, [appSoundsOpen, soundApp, soundPlatforms]);
   const changePlatformSound = (platform: string, id: string) => {
     setPlatformSound(platform, id);
     setPSounds((p) => ({ ...p, [platform]: id }));
@@ -139,6 +147,8 @@ export default function App() {
   const [online, setOnline] = useState(false);
   const [toast, setToast] = useState<{ text: string; err?: boolean } | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; account: Account; confirm?: boolean } | null>(null);
+  const menuP = useClosing(menu);
+  const connectP = useClosing(connectOpen || null);
   const [snoozes, setSnoozes] = useState<Snoozes>(() => {
     try {
       return JSON.parse(localStorage.getItem(SNOOZE_KEY) ?? '{}') as Snoozes;
@@ -677,8 +687,8 @@ export default function App() {
             <Icon name="sliders" size={16} />
           </button>
         </div>
-        {settingsOpen && (
-          <div className="settings" role="dialog" aria-label="Ayarlar">
+        {settingsP.value && (
+          <div className={`settings ${settingsP.closing ? 'closing' : ''}`} role="dialog" aria-label="Ayarlar">
             <div className="section-head" style={{ marginBottom: 6 }}>
               <span className="label">Bildirim sesi</span>
               <button className="btn ghost xs icon b" onClick={() => setSettingsOpen(false)} aria-label="Kapat">
@@ -706,27 +716,45 @@ export default function App() {
                 </button>
               ))}
             </div>
-            <div className="section-head" style={{ margin: '10px 0 6px' }}>
-              <span className="label">Uygulama başına ses</span>
-            </div>
-            <div className="psounds">
-              {[...new Set(accounts.map((a) => a.platform))].map((p) => (
-                <label key={p} className="row-toggle" style={{ gap: 8 }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                    <Chip platform={p} size={16} /> {PLATFORMS[p].name}
-                  </span>
-                  <select value={pSounds[p] ?? getPlatformSound(p)} onChange={(e) => changePlatformSound(p, e.target.value)} disabled={sound === 'off'}>
-                    <option value="">Varsayılan</option>
-                    {SOUNDS.map((sn) => (
-                      <option key={sn.id} value={sn.id}>
-                        {sn.name}
-                      </option>
-                    ))}
-                    <option value="off">Sessiz</option>
-                  </select>
-                </label>
-              ))}
-            </div>
+            <button className="row-toggle b psounds-head" onClick={() => setAppSoundsOpen(!appSoundsOpen)} aria-expanded={appSoundsOpen}>
+              <span>Uygulama bildirimleri</span>
+              <Icon name={appSoundsOpen ? 'chevup' : 'chev'} size={14} sw={2} />
+            </button>
+            {appSoundsOpen && (
+              <div className="psounds">
+                <select className="psel" value={soundApp} onChange={(e) => setSoundApp(e.target.value)}>
+                  {soundPlatforms.map((p) => (
+                    <option key={p} value={p}>
+                      {PLATFORMS[p].name}
+                    </option>
+                  ))}
+                </select>
+                {soundApp && (
+                  <div className="sound-list">
+                    {[{ id: '', name: 'Varsayılan (genel ses)' }, ...SOUNDS, { id: 'off', name: 'Sessiz' }].map((sn) => {
+                      const cur = pSounds[soundApp] ?? getPlatformSound(soundApp);
+                      return (
+                        <button key={sn.id || 'default'} className={`b ${cur === sn.id ? 'on' : ''}`} onClick={() => changePlatformSound(soundApp, sn.id)} disabled={sound === 'off'}>
+                          <Icon name={sn.id === 'off' ? 'eyeoff' : 'volume'} size={13} /> {sn.name}
+                          {sn.id && sn.id !== 'off' && (
+                            <span
+                              className="try"
+                              role="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                playPing(sn.id, true);
+                              }}
+                            >
+                              Dene
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
             <div className="section-head" style={{ margin: '10px 0 6px' }}>
               <span className="label">Telefondan erişim</span>
             </div>
@@ -997,14 +1025,15 @@ export default function App() {
         )}
       </div>
 
-      {connectOpen && (
+      {connectP.value && (
         <ConnectModal
+          closing={connectP.closing}
           sync={sync}
           accounts={accounts} qr={qr} prompts={prompts} connected={connectedPlatforms} onClose={() => setConnectOpen(false)} notify={notify} onChanged={refresh} />
       )}
-      {menu && (
-        <div className="menu-backdrop" onClick={() => setMenu(null)} onContextMenu={(e) => (e.preventDefault(), setMenu(null))}>
-          <div className="menu" style={{ left: Math.min(menu.x, window.innerWidth - 230), top: Math.min(menu.y, window.innerHeight - 170) }} onClick={(e) => e.stopPropagation()}>
+      {menuP.value && ((menu: NonNullable<typeof menuP.value>) => (
+        <div className={`menu-backdrop ${menuP.closing ? 'closing' : ''}`} onClick={() => setMenu(null)} onContextMenu={(e) => (e.preventDefault(), setMenu(null))}>
+          <div className={`menu ${menuP.closing ? 'closing' : ''}`} style={{ left: Math.min(menu.x, window.innerWidth - 230), top: Math.min(menu.y, window.innerHeight - 170) }} onClick={(e) => e.stopPropagation()}>
             <div className="menu-head">
               <Chip platform={menu.account.platform} size={18} />
               <span style={{ fontWeight: 600 }}>{PLATFORMS[menu.account.platform].name}</span>
@@ -1060,7 +1089,7 @@ export default function App() {
             )}
           </div>
         </div>
-      )}
+      ))(menuP.value)}
       {toast && (
         <div className={`toast ${toast.err ? 'err' : ''}`} role="status" aria-live="polite">
           {toast.text}

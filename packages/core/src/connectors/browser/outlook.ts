@@ -190,13 +190,30 @@ async function openThread(page: Page, id: string): Promise<boolean> {
   if ((await inboxState(page)) !== 'ok') return false;
   const row = page.locator(`${LIST}[data-convid="${id}"]`).first();
   if (!(await row.count().catch(() => 0))) return false;
+  // Tıklama bölmeyi değiştirmezse (satır bulunamadı/tık yutuldu) eski iletiyi bu sohbete yazmayalım:
+  // satır zaten seçili değilse gövde metninin değişmesini bekle
+  const paneText = () => page.evaluate((sel) => Array.from(document.querySelectorAll<HTMLElement>(sel)).map((b) => b.innerText.slice(0, 400)).join('|'), BODY).catch(() => '');
+  const wasSelected = (await row.getAttribute('aria-selected').catch(() => null)) === 'true';
+  const before = await paneText();
   await row.click({ timeout: 8000 }).catch(() => undefined);
   const ok = await page
     .waitForSelector(BODY, { timeout: 15_000 })
     .then(() => true)
     .catch(() => false);
+  if (!ok) return false;
+  if (!wasSelected && before) {
+    let changed = false;
+    for (let i = 0; i < 16 && !changed; i++) {
+      await page.waitForTimeout(500);
+      changed = (await paneText()) !== before;
+    }
+    if (!changed) {
+      bus.log('warn', `Outlook: ileti bölmesi satıra geçmedi (${id.slice(0, 12)}…); içerik atlandı`);
+      return false;
+    }
+  }
   await page.waitForTimeout(800);
-  return ok;
+  return true;
 }
 
 const BODY = 'div[aria-label*="Message body"], div[aria-label*="İleti gövdesi"], div[aria-label*="ileti gövdesi"]';
@@ -224,7 +241,10 @@ export function outlookRow(r: OutlookRawRow, now = new Date()): { subject: strin
   // zaman: önce title (tam tarih), sonra görünen satırlar, sonra aria-label'ın sonu
   const timeText = [...r.titles, ...r.lines, labelBody[labelBody.length - 1] ?? ''].find((x) => x && !/@/.test(x) && parseOutlookDate(x, now) !== undefined && /\d{1,2}[:.]\d{2}|\d{1,2}\/\d{1,2}/.test(x)) ?? '';
   const ts = parseOutlookDate(timeText, now) ?? 0;
-  const rest = r.lines.filter((l) => l !== sender && l !== email && l !== timeText && !noise.test(l) && !(l.length <= 24 && parseOutlookDate(l, now) !== undefined));
+  // satırın ilk metni avatar baş harfleri ("RG", "M"): konu sanılmasın
+  const initials = sender.split(/\s+/).filter(Boolean).map((w) => w[0]).join('').toUpperCase();
+  const isInitials = (l: string) => l.length <= 3 && l === l.toUpperCase() && /^[A-ZÇĞİÖŞÜ0-9]+$/.test(l) && (l === initials || initials.startsWith(l));
+  const rest = r.lines.filter((l) => l !== sender && l !== email && l !== timeText && !noise.test(l) && !isInitials(l) && !(l.length <= 24 && parseOutlookDate(l, now) !== undefined));
   const subject = rest[0] || labelBody[1] || '(konu yok)';
   const preview = rest.slice(1).join(' ') || labelBody.slice(2, -1).join(', ');
   return { subject, sender, email, preview, ts, unread: r.unread };
@@ -349,9 +369,13 @@ export const outlook: Strategy = {
         const files = Array.from(box?.querySelectorAll<HTMLElement>('[data-testid*="ttachment"] [title], [role="listitem"][aria-label], [role="option"][aria-label]:not([data-convid])') ?? [])
           .map((a) => (a.getAttribute('title') || a.getAttribute('aria-label') || '').split(/,\s*/)[0].trim())
           .filter((n) => /\.[a-z0-9]{2,5}$/i.test(n));
-        const clone = body.cloneNode(true) as HTMLElement;
-        for (const q of Array.from(clone.querySelectorAll('blockquote, #divRplyFwdMsg, [id^="divRplyFwdMsg"], [id*="appendonsend"]'))) q.remove();
-        out.push({ email: email.toLowerCase(), name, time: timeEl?.getAttribute('title') || timeEl?.innerText || '', text: clone.innerText?.trim() ?? '', files: Array.from(new Set(files)) });
+        // canlı öğenin innerText'i <style>/<script> metnini içermez (kopyada içeriyordu); alıntılanan önceki iletiler metinden çıkarılır
+        let text = body.innerText ?? '';
+        for (const q of Array.from(body.querySelectorAll<HTMLElement>('blockquote, #divRplyFwdMsg, [id^="divRplyFwdMsg"], [id*="appendonsend"]'))) {
+          const qt = q.innerText?.trim();
+          if (qt) text = text.replace(qt, '');
+        }
+        out.push({ email: email.toLowerCase(), name, time: timeEl?.getAttribute('title') || timeEl?.innerText || '', text: text.trim(), files: Array.from(new Set(files)) });
       }
       return out;
     }, BODY);

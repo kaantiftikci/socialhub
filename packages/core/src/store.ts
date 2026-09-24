@@ -97,6 +97,13 @@ export class Store {
       this.db.exec("DELETE FROM messages WHERE remote_id LIKE 'xc-%' AND chat_id IN (SELECT id FROM chats WHERE platform = 'x')");
       this.setFlag('fix_x_xc_v1');
     }
+    // Onarım: Outlook okuma bölmesi satıra geçmeden okunup aynı ileti onlarca sohbete yazılmıştı (aynı metin+zaman+gönderen
+    // ≥3 sohbette): sil, son önizlemeyi kalan mesajdan türet (yoklama gerçek önizlemeyi yeniden yazar)
+    if (!this.flag('fix_outlook_dup_v1')) {
+      this.db.exec("DELETE FROM messages WHERE chat_id LIKE 'outlook:%' AND (text, ts, sender_id) IN (SELECT text, ts, sender_id FROM messages WHERE chat_id LIKE 'outlook:%' GROUP BY text, ts, sender_id HAVING COUNT(DISTINCT chat_id) >= 3)");
+      this.db.exec("UPDATE chats SET last_preview = COALESCE((SELECT text FROM messages m WHERE m.chat_id = chats.id ORDER BY m.ts DESC LIMIT 1), '') WHERE id LIKE 'outlook:%'");
+      this.setFlag('fix_outlook_dup_v1');
+    }
     // Onarım: tarayıcı kanallarında sohbet zamanı olarak yoklama saati yazılmıştı; mesajı olan sohbetleri son mesaj zamanına çek
     this.db.exec(`UPDATE chats SET last_message_at = (SELECT MAX(ts) FROM messages m WHERE m.chat_id = chats.id)
       WHERE platform IN ('messenger','x','instagram','linkedin','slack')

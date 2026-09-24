@@ -374,7 +374,7 @@ button.att-card { padding: 0; text-align: left; font: inherit; }
 .grid-head { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; letter-spacing: .3px; text-transform: uppercase; color: var(--text2); margin-top: 6px; }
 
 /* ---------- ayarlar ---------- */
-.settings { position: absolute; left: 12px; bottom: 74px; width: 260px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px; box-shadow: 0 1px 2px rgba(17,16,22,.06), 0 18px 40px -16px rgba(17,16,22,.35); z-index: 30; }
+.settings { position: absolute; left: 12px; bottom: 74px; width: 260px; max-height: calc(100vh - 110px); overflow-y: auto; overscroll-behavior: contain; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px; box-shadow: 0 1px 2px rgba(17,16,22,.06), 0 18px 40px -16px rgba(17,16,22,.35); z-index: 30; }
 .row-toggle { display: flex; align-items: center; justify-content: space-between; font-size: 13px; padding: 6px 2px; }
 .row-toggle input { accent-color: var(--v); width: 16px; height: 16px; }
 .sound-list { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; }
@@ -479,7 +479,7 @@ nav.side { position: relative; }
 .synctop .syncbar { flex-grow: 1; }
 .synclbl { font-size: 11px; color: var(--text3); white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) {
-  .grp, .row, .ctx, .settings, .menu, .overlay, .overlay .modal, .lightbox .box, .toast { animation: none; }
+  .grp, .row, .ctx, .settings, .menu, .overlay, .overlay .modal, .lightbox .box, .toast, .bub, .mail-card, .closing, .closing * { animation: none !important; }
   .tdots i { animation-duration: 0s; }
 }
 
@@ -517,3 +517,24 @@ nav.side { position: relative; }
 /* e-posta satırı */
 .row.mailrow .subj { display: block; font-size: 13px; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 1px 0; }
 .row.mailrow.unread .subj { font-weight: 700; }
+
+.psounds-head { width: 100%; border: 0; background: transparent; padding: 6px 0; cursor: pointer; }
+.psounds .psel { width: 100%; font: inherit; font-size: 13px; border: 1px solid var(--line); border-radius: 9px; padding: 6px 8px; background: var(--surface); color: var(--text); margin: 4px 0 8px; }
+
+/* mesaj balonları: gelen soldan, gönderilen sağdan süzülür */
+@keyframes bubInThem { from { opacity: 0; transform: translate(-14px, 6px) scale(.94); } to { opacity: 1; transform: none; } }
+@keyframes bubInMe { from { opacity: 0; transform: translate(14px, 6px) scale(.94); } to { opacity: 1; transform: none; } }
+.bub { animation: bubInThem .28s cubic-bezier(.2,.8,.2,1) both; transform-origin: bottom left; }
+.grp.me .bub { animation-name: bubInMe; transform-origin: bottom right; }
+.grp { animation: none; }
+.composer .btn:active, .b:active { transform: scale(.96); transition: transform .08s ease-out; }
+/* kapanış animasyonları (useClosing) */
+@keyframes modalOut { to { opacity: 0; transform: translateY(8px) scale(.98); } }
+@keyframes fadeOut { to { opacity: 0; } }
+@keyframes panelOut { to { opacity: 0; transform: translateX(16px); } }
+.settings.closing, .menu.closing { animation: modalOut .14s ease-in both; pointer-events: none; }
+.overlay.closing, .lightbox.closing { animation: fadeOut .16s ease-in both; pointer-events: none; }
+.overlay.closing .modal, .lightbox.closing .box { animation: modalOut .16s ease-in both; }
+.ctx.closing { animation: panelOut .18s ease-in both; pointer-events: none; }
+.downwrap.closing .downbtn { animation: modalOut .14s ease-in both; }
+.psounds { animation: rowIn .16s ease-out both; }

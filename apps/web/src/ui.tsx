@@ -44,6 +44,30 @@ const PATHS: Record<string, ReactNode> = {
   history: (<><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></>),
 };
 
+/**
+ * Kapanış animasyonu için: değer null olunca öğe hemen kalkmaz, `closing` ile ms kadar daha çizilir (son değer korunur).
+ */
+export function useClosing<T>(value: T | null | undefined | false, ms = 160): { value: T | null; closing: boolean } {
+  const [cached, setCached] = useState<T | null>(value || null);
+  const [closing, setClosing] = useState(false);
+  useEffect(() => {
+    if (value) {
+      setCached(value);
+      setClosing(false);
+      return;
+    }
+    if (!cached) return;
+    setClosing(true);
+    const t = setTimeout(() => {
+      setCached(null);
+      setClosing(false);
+    }, ms);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  return { value: value || cached, closing: !value && closing };
+}
+
 export function Icon({ name, size = 16, color = 'currentColor', sw = 1.8 }: { name: string; size?: number; color?: string; sw?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0 }}>
