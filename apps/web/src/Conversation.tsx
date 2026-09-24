@@ -515,7 +515,7 @@ export function Conversation({
                 <div className="col">
                   {!g.fromMe && chat.kind !== 'direct' && <span className="sender">{g.senderName}</span>}
                   {g.items.map((m, i) => (
-                    <div key={m.id} className={`bub ${g.items.length === 1 ? 'first last' : i === 0 ? 'first' : i === g.items.length - 1 ? 'last' : 'mid'}`}>
+                    <div key={m.id} className={`bub ${g.items.length === 1 ? 'first last' : i === 0 ? 'first' : i === g.items.length - 1 ? 'last' : 'mid'} ${/^(👍|❤️|😂|🔥|👏|😮) .+ (bir mesajı beğendi|mesajına tepki verdi)$/.test(m.text) ? 'react' : ''}`}>
                       {m.text}
                       {m.attachments?.map((a, j) => (
                         <AttachmentView key={j} a={a} onOpen={setLightbox} />

@@ -2,6 +2,7 @@ import type { Account, Attachment, Chat, CoreEvent, DraftResult, Message, Platfo
 import { PLATFORMS } from './types';
 import { authSaveAccounts } from './auth-api';
 import { DEMO_APPS, SCRIPTS } from './demo-scripts';
+import { STATIC_DEMO } from './profile';
 
 /**
  * Herkese açık site. Uygulama listesi kullanıcının oturumunda saklanır;
@@ -23,6 +24,25 @@ function demoAccount(platform: Platform): Account {
   return { id: `demo:${platform}`, platform, label: PLATFORMS[platform].name, status: 'connected', createdAt: 1_750_000_000_000 };
 }
 
+/** public/demo/avatars içindeki dosyalar: grup üyesinin adı eşleşirse avatarı, yoksa baş harfleri */
+const AVATAR_FILES = new Set(['ayse', 'burak', 'can', 'deniz', 'duyuru', 'ece', 'ekip', 'elif', 'emre', 'fatura', 'kerem', 'melis', 'mert', 'nisa', 'pinar', 'selin']);
+const slug = (name: string) =>
+  name
+    .split(/\s+/)[0]
+    .toLocaleLowerCase('tr-TR')
+    .replace(/ş/g, 's')
+    .replace(/ı/g, 'i')
+    .replace(/ö/g, 'o')
+    .replace(/ü/g, 'u')
+    .replace(/ç/g, 'c')
+    .replace(/ğ/g, 'g')
+    .replace(/[^a-z0-9]/g, '');
+const memberAvatar = (name: string): string | undefined => (AVATAR_FILES.has(slug(name)) ? `/demo/avatars/${slug(name)}.jpg` : undefined);
+/** Beğeni/tepki olayı olan platformlar (e-posta ve alışveriş kanallarında yok) */
+const REACT_PLATFORMS = new Set<Platform>(['whatsapp', 'instagram', 'messenger', 'imessage', 'telegram', 'slack']);
+const REACT_EMOJI = ['👍', '❤️', '😂', '🔥', '👏'];
+export const isReactionText = (t: string) => /^(👍|❤️|😂|🔥|👏|😮) .+ (bir mesajı beğendi|mesajına tepki verdi)$/.test(t);
+
 function seed(): void {
   const now = Date.now();
   chats = [];
@@ -35,13 +55,18 @@ function seed(): void {
       k += 1;
       const id = `${acc.id}/${s.remoteId}`;
       const lastAt = now - k * 4 * 3_600_000 - i * 25 * 60_000;
+      const members = new Set<string>();
       s.lines.forEach(([fromMe, text, attachments], j) => {
+        // grupta gönderen "Ad: metin" ön ekinden; her üyenin kendi kimliği ve (dosyası varsa) avatarı
+        const who = fromMe ? 'Ben' : s.kind === 'direct' ? s.name : (text.split(':')[0] ?? s.name);
+        if (!fromMe && s.kind !== 'direct') members.add(who);
         messages.push({
           id: `${id}#${j}`,
           chatId: id,
           remoteId: `m-${j}`,
-          senderId: fromMe ? 'me' : s.remoteId,
-          senderName: fromMe ? 'Ben' : s.kind === 'direct' ? s.name : (text.split(':')[0] ?? s.name),
+          senderId: fromMe ? 'me' : s.kind === 'direct' ? s.remoteId : slug(who) || s.remoteId,
+          senderName: who,
+          senderAvatarUrl: fromMe ? undefined : s.kind === 'direct' ? `/demo/avatars/${s.avatar}` : memberAvatar(who),
           fromMe,
           text: s.kind === 'direct' || fromMe ? text : text.replace(/^[^:]+:\s*/, ''),
           ts: lastAt - (s.lines.length - 1 - j) * 18 * 60_000,
@@ -49,8 +74,16 @@ function seed(): void {
           attachments,
         });
       });
-      const last = s.lines[s.lines.length - 1];
-      const lastText = last?.[1] ?? '';
+      let last = s.lines[s.lines.length - 1];
+      let lastText = last?.[1] ?? '';
+      // uygun platformlarda her ikinci sohbette son olay bir beğeni: "Ayşe bir mesajı beğendi"
+      if (REACT_PLATFORMS.has(acc.platform) && k % 2 === 0) {
+        const who = s.kind === 'direct' ? s.name.split(' ')[0] : ([...members][0] ?? s.name);
+        const text = `${REACT_EMOJI[k % REACT_EMOJI.length]} ${who} bir mesajı beğendi`;
+        messages.push({ id: `${id}#react`, chatId: id, remoteId: 'react', senderId: s.kind === 'direct' ? s.remoteId : slug(who), senderName: who, fromMe: false, text, ts: lastAt + 90_000, status: 'delivered' });
+        last = [false, text];
+        lastText = text;
+      }
       chats.push({
         id,
         accountId: acc.id,
@@ -59,8 +92,8 @@ function seed(): void {
         name: s.name,
         kind: s.kind,
         unread: s.unread,
-        lastMessageAt: lastAt,
-        lastPreview: (s.kind === 'direct' ? lastText : last?.[0] ? `Sen: ${lastText}` : lastText).replace(/\s+/g, ' ').trim(),
+        lastMessageAt: isReactionText(lastText) ? lastAt + 90_000 : lastAt,
+        lastPreview: (s.kind === 'direct' || isReactionText(lastText) ? lastText : last?.[0] ? `Sen: ${lastText}` : lastText).replace(/\s+/g, ' ').trim(),
         lastFromMe: last?.[0] ?? false,
         tags: s.tags,
         handle: s.handle,
@@ -119,6 +152,25 @@ export function clearDemoAccounts(): void {
   accounts = [];
   chats = [];
   messages = [];
+}
+
+// Canlı beğeni akışı: 70 sn'de bir uygun bir sohbete "X bir mesajı beğendi" düşer (önizleme ve bildirim canlı kalsın)
+let reactTick = 0;
+if (STATIC_DEMO) {
+  setInterval(() => {
+    const pool = chats.filter((c) => REACT_PLATFORMS.has(c.platform));
+    if (!pool.length) return;
+    const chat = pool[reactTick++ % pool.length];
+    const who = chat.kind === 'direct' ? chat.name.split(' ')[0] : (messages.find((m) => m.chatId === chat.id && !m.fromMe)?.senderName ?? chat.name);
+    const ts = Date.now();
+    const text = `${REACT_EMOJI[reactTick % REACT_EMOJI.length]} ${who} bir mesajı beğendi`;
+    const message: Message = { id: `${chat.id}#react-${ts}`, chatId: chat.id, remoteId: `react-${ts}`, senderId: chat.remoteId, senderName: who, fromMe: false, text, ts, status: 'delivered' };
+    messages.push(message);
+    const next = { ...touch(chat, text, false, ts), unread: chat.unread + 1 };
+    chats = chats.map((c) => (c.id === chat.id ? next : c));
+    emit({ type: 'chat.upsert', chat: next });
+    emit({ type: 'message.upsert', message, chat: next, live: true });
+  }, 70_000);
 }
 
 export const staticApi = {

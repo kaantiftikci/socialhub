@@ -185,10 +185,10 @@ export function Avatar({ name, size = 40, url }: { name: string; size?: number; 
   );
 }
 
-export function Tag({ name, onRemove }: { name: string; onRemove?: () => void }) {
+export function Tag({ name, onRemove, mini = false }: { name: string; onRemove?: () => void; mini?: boolean }) {
   const [bg, fg] = TAG_COLORS[name.toLowerCase()] ?? ['#efeee9', '#3f3e3a'];
   return (
-    <span className="tag" style={{ background: bg, color: fg }}>
+    <span className={`tag ${mini ? 'mini' : ''}`} style={{ background: bg, color: fg }}>
       {name}
       {onRemove && (
         <span className="x" onClick={onRemove} role="button" aria-label={`${name} etiketini kaldır`}>

@@ -1330,6 +1330,9 @@ function ChatRow({
       <span className="body">
         <span className="top">
           <span className="name">{isMail && mailSender ? mailSender : chat.name}</span>
+          {chat.tags.slice(0, 2).map((t) => (
+            <Tag key={t} name={t} mini />
+          ))}
           <span className="time">{snoozedUntil ? `⏰ ${fmtTime(snoozedUntil)}` : fmtTime(chat.lastMessageAt)}</span>
         </span>
         {isMail && mailSender && <span className="subj">{chat.name}</span>}
@@ -1344,11 +1347,8 @@ function ChatRow({
           )}
           {chat.unread > 0 && <span className="badge" aria-label={`${chat.unread} okunmamış`}>{fmtBadge(chat)}</span>}
         </span>
-        {(chat.tags.length > 0 || waiting) && (
+        {waiting && (
           <span className="tags">
-            {chat.tags.slice(0, 2).map((t) => (
-              <Tag key={t} name={t} />
-            ))}
             {waiting && (
               <span className="wait">
                 <Icon name="clock" size={12} sw={2} />

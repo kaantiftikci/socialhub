@@ -757,3 +757,12 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .pend-att .pend-file { width: 44px; height: 44px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); display: inline-flex; align-items: center; justify-content: center; color: var(--text2); flex: none; }
 .pend-att .pend-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; font-size: 12px; color: var(--text3); }
 .pend-att .pend-meta b { font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* beğeni/tepki olayı: balon yerine küçük not */
+.bub.react { background: transparent !important; color: var(--text3) !important; box-shadow: none !important; font-size: 12.5px; padding: 2px 6px; }
+
+/* liste satırında etiket: ismin sağında küçük rozet */
+.tag.mini { font-size: 10px; padding: 0 6px; line-height: 15px; flex: none; }
+.row .top .name { flex-grow: 0; max-width: 100%; }
+.row .top .name + .tag.mini, .row .top .tag.mini + .tag.mini { margin-left: 4px; }
+.row .top .time { margin-left: auto; }
