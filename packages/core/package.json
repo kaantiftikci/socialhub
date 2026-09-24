@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@slack/web-api": "^7.9.1",
-    "@whiskeysockets/baileys": "^6.7.24",
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
     "better-sqlite3": "^11.10.0",
     "big-integer": "^1.6.52",
     "imapflow": "^2.0.6",

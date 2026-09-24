@@ -245,7 +245,9 @@ export class WhatsAppConnector extends BaseConnector {
       }
     });
 
-    sock.ev.on('messaging-history.set', ({ chats, contacts, messages, isLatest, progress, syncType }) => {
+    sock.ev.on('messaging-history.set', ({ chats, contacts, messages, isLatest, progress, syncType, lidPnMappings }) => {
+      // Baileys 7: geçmiş paketi LID↔numara eşlemelerini de taşır
+      for (const mp of lidPnMappings ?? []) if (mp.lid && mp.pn) this.link(jidNormalizedUser(mp.lid), jidNormalizedUser(mp.pn));
       this.historySeen = true;
       // Kullanıcı görsün: geçmiş alınırken uygulama kapatılırsa kalan paketler bir daha gelmez
       if (syncType !== WAProto.HistorySync.HistorySyncType.ON_DEMAND && typeof progress === 'number' && this.account.status === 'connected') {
@@ -315,8 +317,9 @@ export class WhatsAppConnector extends BaseConnector {
       bus.log('info', `WhatsApp: rehberden ${cs.length} kişi (${cs.filter((c) => c.name).length} adlı)`);
       this.scheduleRefresh();
     });
-    sock.ev.on('chats.phoneNumberShare', ({ lid, jid }) => {
-      this.link(lid, jid);
+    // Baileys 7: LID↔numara eşlemeleri tek olaydan gelir (eskiden chats.phoneNumberShare)
+    sock.ev.on('lid-mapping.update', ({ lid, pn }) => {
+      if (lid && pn) this.link(jidNormalizedUser(lid), jidNormalizedUser(pn));
       this.scheduleRefresh();
     });
     sock.ev.on('groups.upsert', (gs) => {
@@ -819,11 +822,18 @@ export class WhatsAppConnector extends BaseConnector {
     if (!raw || !m.key.id || !isChatJid(raw)) return;
     // Sunucu her mesajda karşı kimliği de verir (lid sohbette sender_pn, numaralı sohbette sender_lid;
     // gruplarda participant_pn / participant_lid): en güvenilir lid↔numara kaynağı
-    const k = m.key as typeof m.key & { senderPn?: string | null; senderLid?: string | null; participantPn?: string | null; participantLid?: string | null };
-    if (raw.endsWith('@lid') && k.senderPn) this.link(raw, jidNormalizedUser(k.senderPn));
+    // Baileys 7: karşı kimlik key.remoteJidAlt / key.participantAlt'ta (6.x: senderPn/senderLid/participantPn/participantLid)
+    const k = m.key as typeof m.key & { senderPn?: string | null; senderLid?: string | null; participantPn?: string | null; participantLid?: string | null; remoteJidAlt?: string | null; participantAlt?: string | null };
+    const rAlt = k.remoteJidAlt ? jidNormalizedUser(k.remoteJidAlt) : undefined;
+    if (raw.endsWith('@lid') && rAlt?.endsWith('@s.whatsapp.net')) this.link(raw, rAlt);
+    else if (raw.endsWith('@s.whatsapp.net') && rAlt?.endsWith('@lid')) this.link(rAlt, raw);
+    else if (raw.endsWith('@lid') && k.senderPn) this.link(raw, jidNormalizedUser(k.senderPn));
     else if (raw.endsWith('@s.whatsapp.net') && k.senderLid) this.link(jidNormalizedUser(k.senderLid), raw);
     const part = m.key.participant ? jidNormalizedUser(m.key.participant) : undefined;
-    if (part?.endsWith('@lid') && k.participantPn) this.link(part, jidNormalizedUser(k.participantPn));
+    const pAlt = k.participantAlt ? jidNormalizedUser(k.participantAlt) : undefined;
+    if (part?.endsWith('@lid') && pAlt?.endsWith('@s.whatsapp.net')) this.link(part, pAlt);
+    else if (part?.endsWith('@s.whatsapp.net') && pAlt?.endsWith('@lid')) this.link(pAlt, part);
+    else if (part?.endsWith('@lid') && k.participantPn) this.link(part, jidNormalizedUser(k.participantPn));
     else if (part?.endsWith('@s.whatsapp.net') && k.participantLid) this.link(jidNormalizedUser(k.participantLid), part);
     const jid = this.canon(raw);
     const content = unwrap(m.message);

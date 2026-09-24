@@ -32,7 +32,7 @@ Dil: arayüz ve yorumlar Türkçe.
 - Komutlar: `npm run dev` (çekirdek+Vite), `npm run demo`, `npm run desktop` (Tauri dev), `npm run app` (paketle + aç).
 
 ## Connector'lar ve kritik bilgiler
-- **WhatsApp** (`connectors/whatsapp.ts`, Baileys 6.7.24): `browser: ['Mac','Kavşak','1.0']` + `syncFullHistory: true`.
+- **WhatsApp** (`connectors/whatsapp.ts`, Baileys 7.0.0-rc14): `browser: ['Mac','Kavşak','1.0']` + `syncFullHistory: true`.
   ASLA `Browsers.macOS(...)` + syncFullHistory birlikte kullanma (DARWIN kimliği → sunucu 428 ile anında kapatır).
   LID↔numara eşlemesi grup üyeliklerinden ve `chats.phoneNumberShare`'dan öğrenilir; kopya sohbetler `store.mergeChats` ile
   birleşir. Rehber adları geç gelirse macOS Kişiler (`contacts-mac.ts`) yedek. Medya istek üzerine indirilir
