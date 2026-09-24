@@ -239,6 +239,7 @@ export interface OutlookRawRow {
 /** Gövde metnine sızan HTML yorumu / CSS kuralları (bazı pazarlama e-postalarında <style> içeriği metin olarak geliyor) temizlenir */
 export function cleanMailText(t: string): string {
   return t
+    .replace(/[\u200b-\u200f\u2060\ufeff]/g, '')
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/@media[^{]*\{[\s\S]*?\}\s*\}/g, '')
     .replace(/(?:^|\n)\s*[.#@][\w.\-#:>, \[\]="']*\{[^}]*\}/g, '')
@@ -251,13 +252,17 @@ export function outlookRow(r: OutlookRawRow, now = new Date()): { subject: strin
   const parts = r.label.split(/,\s*/).map((x) => x.trim()).filter(Boolean);
   const labelBody = /^(Okunmamış|Unread)$/i.test(parts[0] ?? '') ? parts.slice(1) : parts;
   const email = (r.senderEmail.match(/[\w.+-]+@[\w.-]+/) ?? [])[0]?.toLowerCase() ?? '';
-  const sender = r.senderName || labelBody[0] || email;
+  const initialsOf = (n: string) => n.split(/\s+/).filter(Boolean).map((w) => w[0]).join('').toUpperCase();
+  // Gönderen: adres span'ı yoksa (açık ileti listeyi örtünce satır sadeleşiyor) aria-label virgülsüz tek parça olabilir;
+  // o zaman satır metninden: ilk satır avatar baş harfleri ise ikincisi, değilse ilki
+  const fromLines = r.lines[0] && r.lines[1] && r.lines[0].length <= 3 && r.lines[0] === initialsOf(r.lines[1]) ? r.lines[1] : r.lines[0] ?? '';
+  const sender = r.senderName || (labelBody.length > 1 ? labelBody[0] : '') || (fromLines.length <= 60 ? fromLines : '') || email;
   const noise = /^(Okunmamış|Unread|Okundu|Read|Sabitlenmiş|Pinned|Bayrak(lı)?|Flagged|Ek(ler)?|Has attachments?|Önemli|Important)$/i;
   // zaman: önce title (tam tarih), sonra görünen satırlar, sonra aria-label'ın sonu
   const timeText = [...r.titles, ...r.lines, labelBody[labelBody.length - 1] ?? ''].find((x) => x && !/@/.test(x) && parseOutlookDate(x, now) !== undefined && /\d{1,2}[:.]\d{2}|\d{1,2}\/\d{1,2}/.test(x)) ?? '';
   const ts = parseOutlookDate(timeText, now) ?? 0;
   // satırın ilk metni avatar baş harfleri ("RG", "M"): konu sanılmasın
-  const initials = sender.split(/\s+/).filter(Boolean).map((w) => w[0]).join('').toUpperCase();
+  const initials = initialsOf(sender);
   const isInitials = (l: string) => l.length <= 3 && l === l.toUpperCase() && /^[A-ZÇĞİÖŞÜ0-9]+$/.test(l) && (l === initials || initials.startsWith(l));
   const rest = r.lines.filter((l) => l !== sender && l !== email && l !== timeText && !noise.test(l) && !isInitials(l) && !(l.length <= 24 && parseOutlookDate(l, now) !== undefined));
   const subject = rest[0] || labelBody[1] || '(konu yok)';

@@ -65,3 +65,18 @@ test('outlookRow: DOM satırı yoksa aria-label yedeği', () => {
   assert.equal(r.ts, at(2026, 8, 19));
   assert.equal(r.unread, false);
 });
+
+test('outlookRow: adres span\'ı yok, aria-label virgülsüz → gönderen/konu satır metninden', () => {
+  const now = new Date(2026, 8, 24, 15, 0);
+  const r = outlookRow(
+    { id: 'y', label: "X X'e Mac işletim sisteminde yeni giriş 03:34 @kaan hesabına yeni bir cihazdan giriş Öğe seçilmedi", unread: false, senderName: '', senderEmail: '', titles: [], lines: ['X', 'X', "X'e Mac işletim sisteminde yeni giriş", '@kaan hesabına yeni bir cihazdan giriş', '03:34'] },
+    now,
+  );
+  assert.equal(r.sender, 'X');
+  assert.equal(r.subject, "X'e Mac işletim sisteminde yeni giriş");
+  assert.match(r.preview, /@kaan hesabına/);
+  const k = outlookRow({ id: 'z', label: 'Kaan Tiftikçi hk 14:23 denemee Öğe seçilmedi', unread: true, senderName: '', senderEmail: '', titles: [], lines: ['KT', 'Kaan Tiftikçi', 'hk', 'denemee', '14:23'] }, now);
+  assert.equal(k.sender, 'Kaan Tiftikçi');
+  assert.equal(k.subject, 'hk');
+  assert.equal(k.preview, 'denemee');
+});
