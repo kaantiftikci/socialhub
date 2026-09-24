@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { BaseConnector, type StartOptions } from './base.js';
+import { ordersFlag, BaseConnector, type StartOptions } from './base.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
 import type { Participant } from '../model.js';
@@ -99,6 +99,8 @@ export function parseConfig(raw: string): TrendyolConfig | undefined {
 }
 
 export class TrendyolConnector extends BaseConnector {
+  /** sipariş sohbetleri açık mı (token JSON orders:true); kapalıysa yalnız müşteri soruları/mesajları */
+  private ordersOn = false;
   private timer?: NodeJS.Timeout;
   private polling = false;
   private stopping = false;
@@ -111,6 +113,7 @@ export class TrendyolConnector extends BaseConnector {
   constructor(account: BaseConnector['account'], store: BaseConnector['store'], config: string) {
     super(account, store);
     this.cfg = parseConfig(config);
+    this.ordersOn = ordersFlag(config);
     this.stateFile = path.join(sessionDir(account.id), 'trendyol-state.json');
     try {
       const st = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) as { seen?: Record<string, string>; gw?: number };
@@ -194,7 +197,8 @@ export class TrendyolConnector extends BaseConnector {
       const now = Date.now();
       const startDate = now - (first ? FIRST_WINDOW : NEXT_WINDOW);
       // İki servis ayrı hız sınırına sahip: biri 429 verirse öteki yine işlensin
-      const [ro, rq] = await Promise.allSettled([this.fetchOrders(startDate, now, first ? 50 : 5), this.fetchQuestions(startDate, now, first ? 50 : 5)]);
+      // sipariş sohbetleri isteğe bağlı (varsayılan kapalı: yalnız müşteri soruları)
+      const [ro, rq] = await Promise.allSettled([this.ordersOn ? this.fetchOrders(startDate, now, first ? 50 : 5) : Promise.resolve(new Map<string, J[]>()), this.fetchQuestions(startDate, now, first ? 50 : 5)]);
       for (const r of [ro, rq]) if (r.status === 'rejected' && r.reason instanceof TrendyolAuthError) throw r.reason;
       const orders = ro.status === 'fulfilled' ? ro.value : new Map<string, J[]>();
       const questions = rq.status === 'fulfilled' ? rq.value : [];

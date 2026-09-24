@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { BaseConnector, type StartOptions } from './base.js';
+import { ordersFlag, BaseConnector, type StartOptions } from './base.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
 import type { Participant } from '../model.js';
@@ -150,6 +150,8 @@ interface State {
 }
 
 export class N11Connector extends BaseConnector {
+  /** sipariş sohbetleri açık mı (token JSON orders:true); kapalıysa yalnız müşteri soruları/mesajları */
+  private ordersOn = false;
   private timer?: NodeJS.Timeout;
   private polling = false;
   private stopping = false;
@@ -161,6 +163,7 @@ export class N11Connector extends BaseConnector {
   constructor(account: BaseConnector['account'], store: BaseConnector['store'], config: string) {
     super(account, store);
     this.cfg = parseConfig(config);
+    this.ordersOn = ordersFlag(config);
     this.stateFile = path.join(sessionDir(account.id), 'n11-state.json');
     try {
       const st = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) as Partial<State>;
@@ -261,7 +264,8 @@ export class N11Connector extends BaseConnector {
     try {
       const now = Date.now();
       // REST ve SOAP ayrı servisler: biri çökerse öteki yine işlensin
-      const [ro, rq] = await Promise.allSettled([this.fetchOrders(now - WINDOW, now, first ? 50 : 5), this.fetchQuestions(first ? 10 : 2)]);
+      // sipariş sohbetleri isteğe bağlı (varsayılan kapalı: yalnız müşteri soruları)
+      const [ro, rq] = await Promise.allSettled([this.ordersOn ? this.fetchOrders(now - WINDOW, now, first ? 50 : 5) : Promise.resolve(new Map<string, J[]>()), this.fetchQuestions(first ? 10 : 2)]);
       for (const r of [ro, rq]) if (r.status === 'rejected' && r.reason instanceof N11AuthError) throw r.reason;
       const orders = ro.status === 'fulfilled' ? ro.value : new Map<string, J[]>();
       const questions = rq.status === 'fulfilled' ? rq.value : [];

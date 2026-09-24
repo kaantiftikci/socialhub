@@ -170,3 +170,15 @@ export abstract class BaseConnector implements Connector {
     return this.store.getChat(chatId(this.account.id, remoteId)) ?? this.upsertChat({ remoteId, name, kind });
   }
 }
+
+/**
+ * Alışveriş kanalları yalnızca müşteri soruları/mesajları için kullanılır; sipariş sohbetleri isteğe bağlıdır
+ * (Bağlan formunda "Siparişleri de göster" → token JSON'ında orders:true).
+ */
+export function ordersFlag(raw: string): boolean {
+  try {
+    return (JSON.parse(raw) as { orders?: unknown }).orders === true;
+  } catch {
+    return false;
+  }
+}

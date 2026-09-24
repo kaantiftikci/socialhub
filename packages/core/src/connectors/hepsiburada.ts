@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { BaseConnector, type StartOptions } from './base.js';
+import { ordersFlag, BaseConnector, type StartOptions } from './base.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
 import type { Attachment, Participant } from '../model.js';
@@ -118,6 +118,8 @@ function issueStatus(v: unknown): 'WaitingForAnswer' | 'Answered' | 'Rejected' |
 }
 
 export class HepsiburadaConnector extends BaseConnector {
+  /** sipariş sohbetleri açık mı (token JSON orders:true); kapalıysa yalnız müşteri soruları/mesajları */
+  private ordersOn = false;
   private timer?: NodeJS.Timeout;
   private polling = false;
   private stopping = false;
@@ -135,6 +137,7 @@ export class HepsiburadaConnector extends BaseConnector {
       /* bozuk JSON → start() hata verir */
     }
     this.cfg = { merchantId: String(cfg.merchantId ?? '').trim(), username: String(cfg.username ?? '').trim(), password: String(cfg.password ?? '') };
+    this.ordersOn = ordersFlag(config);
     this.stateFile = path.join(sessionDir(account.id), 'hepsiburada-state.json');
     try {
       const st = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) as Partial<State>;
@@ -215,7 +218,8 @@ export class HepsiburadaConnector extends BaseConnector {
     if (this.polling || this.stopping) return;
     this.polling = true;
     try {
-      const o = await this.pollOrders(first);
+      // sipariş sohbetleri isteğe bağlı (varsayılan kapalı: yalnız müşteri soruları)
+      const o = this.ordersOn ? await this.pollOrders(first) : 0;
       const q = await this.pollQuestions(first);
       if (o || q) bus.log('info', `Hepsiburada: ${o} sipariş, ${q} soru güncellendi`);
       this.saveState();

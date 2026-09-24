@@ -13,7 +13,7 @@ const { Store } = await import('../src/store.js');
 const { TrendyolConnector, parseConfig } = await import('../src/connectors/trendyol.js');
 
 const SELLER = '123';
-const CONFIG = JSON.stringify({ sellerId: SELLER, apiKey: 'key', apiSecret: 'secret' });
+const CONFIG = JSON.stringify({ orders: true, sellerId: SELLER, apiKey: 'key', apiSecret: 'secret' });
 const NOW = Date.now();
 
 // ---- Trendyol dokümanındaki örneklere benzer sahte yanıtlar ----
@@ -86,7 +86,7 @@ function setup(config = CONFIG) {
 test('parseConfig: eksik alan → undefined; supplierId takma adı kabul', () => {
   assert.equal(parseConfig('{}'), undefined);
   assert.equal(parseConfig('bozuk'), undefined);
-  assert.deepEqual(parseConfig(JSON.stringify({ supplierId: 5, apiKey: 'a', apiSecret: 'b' })), { sellerId: '5', apiKey: 'a', apiSecret: 'b' });
+  assert.deepEqual(parseConfig(JSON.stringify({ orders: true, supplierId: 5, apiKey: 'a', apiSecret: 'b' })), { sellerId: '5', apiKey: 'a', apiSecret: 'b' });
 });
 
 test('bozuk yapılandırma → error durumu, ağ isteği yok', async () => {

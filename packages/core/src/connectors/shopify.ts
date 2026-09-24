@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { BaseConnector, type StartOptions } from './base.js';
+import { ordersFlag, BaseConnector, type StartOptions } from './base.js';
 import { BrowserConnector } from './browser/bridge.js';
 import { makeShopifyInbox } from './browser/shopify.js';
 import { bus } from '../bus.js';
@@ -116,6 +116,8 @@ class InboxBridge extends BrowserConnector {
 }
 
 export class ShopifyConnector extends BaseConnector {
+  /** sipariş sohbetleri açık mı (token JSON orders:true); kapalıysa yalnız müşteri soruları/mesajları */
+  private ordersOn = false;
   private timer?: NodeJS.Timeout;
   private polling = false;
   private stopping = false;
@@ -135,6 +137,7 @@ export class ShopifyConnector extends BaseConnector {
   constructor(account: BaseConnector['account'], store: Store, config: string) {
     super(account, store);
     ({ handle: this.handle, host: this.host, token: this.token, inbox: this.inboxEnabled } = parseShopifyConfig(config));
+    this.ordersOn = ordersFlag(config);
     this.stateFile = path.join(sessionDir(account.id), 'shopify-state.json');
     try {
       const st = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) as { seen?: Record<string, string>; since?: string };
@@ -221,6 +224,10 @@ export class ShopifyConnector extends BaseConnector {
   private async poll(first: boolean): Promise<void> {
     if (this.polling || this.stopping) return;
     this.polling = true;
+    if (!this.ordersOn) {
+      this.polling = false;
+      return; // sipariş sohbetleri kapalı: yalnız mesajlaşma köprüsü çalışır
+    }
     const startedAt = new Date(Date.now() - 2 * 60_000).toISOString(); // saat kayması payı
     try {
       const orders: J[] = [];

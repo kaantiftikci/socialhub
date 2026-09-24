@@ -12,7 +12,7 @@ after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 const { Store } = await import('../src/store.js');
 const { N11Connector, parseConfig, parseDate, xmlBlocks, xmlText } = await import('../src/connectors/n11.js');
 
-const CONFIG = JSON.stringify({ appKey: 'my-app-key-1234', appSecret: 'my-secret' });
+const CONFIG = JSON.stringify({ orders: true, appKey: 'my-app-key-1234', appSecret: 'my-secret' });
 const NOW = Date.now();
 
 // ---- n11 dokümanındaki örneklere benzer sahte yanıtlar ----
@@ -85,7 +85,7 @@ test('parseConfig / parseDate / xml yardımcıları', () => {
   assert.equal(parseConfig('{}'), undefined);
   assert.equal(parseConfig('bozuk'), undefined);
   assert.equal(parseConfig('{"appKey":"a"}'), undefined);
-  assert.deepEqual(parseConfig(JSON.stringify({ appkey: ' a ', appsecret: 'b' })), { appKey: 'a', appSecret: 'b' });
+  assert.deepEqual(parseConfig(JSON.stringify({ orders: true, appkey: ' a ', appsecret: 'b' })), { appKey: 'a', appSecret: 'b' });
   assert.equal(parseDate('24/08/2026 14:05'), new Date(2026, 7, 24, 14, 5).getTime());
   assert.equal(parseDate('24/08/2026'), new Date(2026, 7, 24).getTime());
   assert.equal(parseDate(1724323386203), 1724323386203);

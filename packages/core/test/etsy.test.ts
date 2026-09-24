@@ -63,7 +63,7 @@ const receipt = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-const cfg = (over: Record<string, unknown> = {}) => JSON.stringify({ keystring: 'KEY123', shopId: '777', accessToken: '55.tok', refreshToken: 'ref', expiresAt: Date.now() + 3_600_000, ...over });
+const cfg = (over: Record<string, unknown> = {}) => JSON.stringify({ orders: true, keystring: 'KEY123', shopId: '777', accessToken: '55.tok', refreshToken: 'ref', expiresAt: Date.now() + 3_600_000, ...over });
 
 test('etsy siparişler: receipt → sipariş sohbeti, yeni sipariş + alıcı notu mesajları; kargo olayı sonraki yoklamada', async () => {
   const { store, account } = setup();
@@ -187,7 +187,7 @@ test('etsy: keystring yoksa hata; erişim belirteci yok + etkileşimsiz açılı
   assert.equal(account.status, 'error');
   assert.match(account.detail ?? '', /keystring/);
 
-  const c1 = new EtsyConnector(account, store, JSON.stringify({ keystring: 'KEY123' }), false);
+  const c1 = new EtsyConnector(account, store, JSON.stringify({ orders: true, keystring: 'KEY123' }), false);
   await c1.start({ interactive: false });
   assert.equal(account.status, 'pairing');
   assert.match(account.detail ?? '', /Yeniden bağlan/);
@@ -227,7 +227,7 @@ test('etsy OAuth akışı: pencere kapanınca code belirtece çevrilir, dükkân
     return undefined;
   });
   try {
-    const c = new EtsyConnector(account, store, JSON.stringify({ keystring: 'KEY123' }), false);
+    const c = new EtsyConnector(account, store, JSON.stringify({ orders: true, keystring: 'KEY123' }), false);
     let opened = '';
     // giriş penceresi yerine: adresi kaydet, geri dönüş bekleyicisini (waitOAuth) atlayıp code'u doğrudan ver
     (c as unknown as { authWindow: (url: string, done: Promise<string>) => Promise<string> }).authWindow = async (url, done) => {

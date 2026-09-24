@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
-import { BaseConnector, type StartOptions } from './base.js';
+import { ordersFlag, BaseConnector, type StartOptions } from './base.js';
 import { BrowserConnector } from './browser/bridge.js';
 import { etsy as etsyStrategy } from './browser/etsy.js';
 import { OAUTH_CALLBACK, waitOAuth, withAuthWindow } from './mail.js';
@@ -89,6 +89,8 @@ class EtsyBridge extends BrowserConnector {
 }
 
 export class EtsyConnector extends BaseConnector {
+  /** sipariş sohbetleri açık mı (token JSON orders:true); kapalıysa yalnız müşteri soruları/mesajları */
+  private ordersOn = false;
   private cfg: EtsyConfig;
   private timer?: NodeJS.Timeout;
   private polling = false;
@@ -119,6 +121,7 @@ export class EtsyConnector extends BaseConnector {
       cfg = { keystring: (config ?? '').trim() }; // düz metin: yalnızca keystring
     }
     this.cfg = cfg;
+    this.ordersOn = ordersFlag(config);
     const dir = sessionDir(account.id);
     this.stateFile = path.join(dir, 'etsy-state.json');
     this.tokenFile = path.join(dir, 'token');
@@ -296,6 +299,10 @@ export class EtsyConnector extends BaseConnector {
   private async poll(first: boolean): Promise<void> {
     if (this.polling || this.stopping) return;
     this.polling = true;
+    if (!this.ordersOn) {
+      this.polling = false;
+      return; // sipariş sohbetleri kapalı: yalnız mesajlaşma köprüsü çalışır
+    }
     try {
       const receipts: J[] = [];
       const pages = first ? 3 : 1;

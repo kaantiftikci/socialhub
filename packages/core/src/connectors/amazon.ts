@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { BaseConnector, type StartOptions } from './base.js';
+import { ordersFlag, BaseConnector, type StartOptions } from './base.js';
 import { BrowserConnector } from './browser/bridge.js';
 import { makeAmazonMessaging, marketplaceOf, DEFAULT_MARKETPLACE, type Marketplace } from './browser/amazon.js';
 import { bus } from '../bus.js';
@@ -154,6 +154,8 @@ class MessagingBridge extends BrowserConnector {
 }
 
 export class AmazonConnector extends BaseConnector {
+  /** sipariş sohbetleri açık mı (token JSON orders:true); kapalıysa yalnız müşteri soruları/mesajları */
+  private ordersOn = false;
   private timer?: NodeJS.Timeout;
   private polling = false;
   private stopping = false;
@@ -177,6 +179,7 @@ export class AmazonConnector extends BaseConnector {
   constructor(account: BaseConnector['account'], store: Store, config: string) {
     super(account, store);
     const cfg = parseAmazonConfig(config);
+    this.ordersOn = ordersFlag(config);
     this.clientId = cfg.clientId;
     this.clientSecret = cfg.clientSecret;
     this.refreshToken = cfg.refreshToken;
@@ -341,6 +344,10 @@ export class AmazonConnector extends BaseConnector {
   private async poll(first: boolean): Promise<void> {
     if (this.polling || this.stopping) return;
     this.polling = true;
+    if (!this.ordersOn) {
+      this.polling = false;
+      return; // sipariş sohbetleri kapalı: yalnız mesajlaşma köprüsü çalışır
+    }
     const startedAt = new Date().toISOString();
     try {
       const orders: J[] = [];

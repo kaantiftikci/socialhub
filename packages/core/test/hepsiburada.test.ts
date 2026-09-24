@@ -12,7 +12,7 @@ after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 const { Store } = await import('../src/store.js');
 const { HepsiburadaConnector } = await import('../src/connectors/hepsiburada.js');
 
-const CFG = JSON.stringify({ merchantId: 'b2910839-83b9-4d45-adb6-86bad457edcb', username: 'magaza_dev', password: 'gizli' });
+const CFG = JSON.stringify({ orders: true, merchantId: 'b2910839-83b9-4d45-adb6-86bad457edcb', username: 'magaza_dev', password: 'gizli' });
 
 let n = 0;
 function setup() {
@@ -220,7 +220,7 @@ test('Hepsiburada: 401 → kimlik hatası; eksik yapılandırma → hata', async
     await c.stop();
 
     const s2 = setup();
-    const c2 = new HepsiburadaConnector(s2.account, s2.store, JSON.stringify({ merchantId: 'x' }));
+    const c2 = new HepsiburadaConnector(s2.account, s2.store, JSON.stringify({ orders: true, merchantId: 'x' }));
     await c2.start();
     assert.equal(s2.account.status, 'error');
     assert.match(s2.account.detail ?? '', /merchant ID \/ kullanıcı adı \/ şifre/);

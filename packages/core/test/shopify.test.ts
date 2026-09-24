@@ -21,7 +21,7 @@ function setup(config: J = { shop: 'mivelo-test', accessToken: 'shpat_x', inbox:
   const store = new Store(path.join(tmp, `t${++n}.db`));
   const account = { id: `shopify:t${n}`, platform: 'shopify' as const, label: 'x', status: 'disconnected' as const, createdAt: Date.now() };
   store.upsertAccount(account);
-  const c = new ShopifyConnector(account, store, JSON.stringify(config));
+  const c = new ShopifyConnector(account, store, JSON.stringify({ orders: true, ...config }));
   return { store, account, c, priv: c as unknown as { poll(first: boolean): Promise<void> } };
 }
 
@@ -162,7 +162,7 @@ test('siparişler: sayfalama (Link), sipariş sohbeti + mesajı, fulfillment mes
   assert.equal((store.getChat(cid)!.meta?.order as J).status, 'cancelled');
 
   // durum dosyası: yeni bağlayıcı aynı siparişleri yeniden mesajlamaz
-  const c2 = new ShopifyConnector(account, store, JSON.stringify({ shop: 'mivelo-test', accessToken: 'shpat_x', inbox: false }));
+  const c2 = new ShopifyConnector(account, store, JSON.stringify({ orders: true, shop: 'mivelo-test', accessToken: 'shpat_x', inbox: false }));
   await c2.start({ interactive: false });
   assert.equal(store.listMessages(cid).length, 3);
   await c2.stop();

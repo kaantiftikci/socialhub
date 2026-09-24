@@ -94,8 +94,9 @@ export function ConnectModal({
       if (platform === 'telegram' && tg.apiId.trim() && tg.apiHash.trim()) token = JSON.stringify({ apiId: Number(tg.apiId.trim()), apiHash: tg.apiHash.trim() });
       if (platform === 'shopier') token = pat.trim();
       if (shopFields) {
-        const cfg: Record<string, string> = {};
+        const cfg: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(shop)) if (v.trim()) cfg[k] = v.trim();
+        cfg.orders = shop.orders === 'true'; // varsayılan kapalı: alışveriş kanalları yalnız müşteri soruları/mesajları
         token = JSON.stringify(cfg);
       }
       if (isMail) {
@@ -325,6 +326,10 @@ export function ConnectModal({
                     Bağlan
                   </button>
                 </div>
+                <label className="row-toggle" style={{ marginTop: 10, gap: 8 }}>
+                  <span style={{ fontSize: 12.5, color: 'var(--text2)' }}>Siparişleri de sohbet olarak göster (varsayılan: yalnız müşteri soruları/mesajları)</span>
+                  <input type="checkbox" checked={sf('orders') === 'true'} onChange={(e) => setSf('orders', e.target.checked ? 'true' : '')} />
+                </label>
               </div>
             </div>
           ) : null,

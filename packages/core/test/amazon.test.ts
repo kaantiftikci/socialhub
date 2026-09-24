@@ -17,12 +17,12 @@ const { makeAmazonMessaging, sellerCentralHost, toMessages, _resetAmazonMessagin
 type J = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 let n = 0;
-const CFG = { clientId: 'amzn1.application-oa2-client.x', clientSecret: 'sec', refreshToken: 'Atzr|x', messaging: false };
+const CFG = { orders: true, clientId: 'amzn1.application-oa2-client.x', clientSecret: 'sec', refreshToken: 'Atzr|x', messaging: false };
 function setup(config: J = CFG) {
   const store = new Store(path.join(tmp, `t${++n}.db`));
   const account = { id: `amazon:t${n}`, platform: 'amazon' as const, label: 'Amazon', status: 'disconnected' as const, createdAt: Date.now() };
   store.upsertAccount(account);
-  const c = new AmazonConnector(account, store, JSON.stringify(config));
+  const c = new AmazonConnector(account, store, JSON.stringify({ orders: true, ...config }));
   return { store, account, c, priv: c as unknown as { poll(first: boolean): Promise<void> } };
 }
 
@@ -74,8 +74,8 @@ test('parseAmazonConfig: varsayılan Türkiye pazar yeri, bölge pazar yerinden 
   assert.equal(p.marketplace.host, 'sellercentral.amazon.com.tr');
   assert.equal(p.region, 'eu');
   assert.equal(p.messaging, false);
-  assert.equal(parseAmazonConfig(JSON.stringify({ ...CFG, marketplaceId: 'ATVPDKIKX0DER' })).region, 'na');
-  assert.equal(parseAmazonConfig(JSON.stringify({ ...CFG, marketplaceId: 'A1VC38T7YXB528', region: 'eu' })).region, 'eu', 'açık bölge baskın');
+  assert.equal(parseAmazonConfig(JSON.stringify({ orders: true, ...CFG, marketplaceId: 'ATVPDKIKX0DER' })).region, 'na');
+  assert.equal(parseAmazonConfig(JSON.stringify({ orders: true, ...CFG, marketplaceId: 'A1VC38T7YXB528', region: 'eu' })).region, 'eu', 'açık bölge baskın');
   assert.equal(parseAmazonConfig('{}').messaging, true);
   assert.equal(parseAmazonConfig('bozuk').clientId, '');
   assert.equal(sellerCentralHost('A1PA6795UKMFR9'), 'sellercentral-europe.amazon.com');
