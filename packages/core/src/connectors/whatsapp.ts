@@ -131,12 +131,17 @@ export class WhatsAppConnector extends BaseConnector {
         setTimeout(() => void this.syncGroups(sock), 20_000);
         // Rehber adları uygulama durumu (app state) eşitlemesindeki contactAction kayıtlarından gelir; bazı hesaplarda
         // bağlantıda kendiliğinden gelmiyor — açıkça iste
-        setTimeout(() => {
+        setTimeout(async () => {
           if (this.sock !== sock || this.stopping) return;
-          sock
-            .resyncAppState(['critical_unblock_low', 'regular_low', 'regular_high', 'critical_block'], false)
-            .then(() => bus.log('info', 'WhatsApp: uygulama durumu (rehber/sohbet ayarları) eşitlendi'))
-            .catch((e) => bus.log('warn', `WhatsApp uygulama durumu eşitlenemedi: ${(e as Error).message}`));
+          try {
+            // Kayıtlı sürüm varsa Baileys yalnızca yeni yamaları ister ve rehber (contactAction) hiç gelmez;
+            // sürümü sıfırla → tam anlık görüntü iner → contacts.upsert ile adlar gelir
+            await state.keys.set({ 'app-state-sync-version': { critical_unblock_low: null, regular_low: null, regular_high: null } });
+            await sock.resyncAppState(['critical_unblock_low', 'regular_low', 'regular_high'], false);
+            bus.log('info', 'WhatsApp: uygulama durumu (rehber/sohbet ayarları) baştan eşitlendi');
+          } catch (e) {
+            bus.log('warn', `WhatsApp uygulama durumu eşitlenemedi: ${(e as Error).message}`);
+          }
         }, 8_000);
         setTimeout(() => {
           // geçmiş yalnızca ilk eşleşmede gelir; depoda sohbet varsa uyarı gereksiz

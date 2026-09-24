@@ -95,7 +95,8 @@ export const messenger: Strategy = {
       const prev = lastPreview.get(r.id);
       lastPreview.set(r.id, r.preview);
       // ilk görüşte ya da önizleme değiştiyse "şimdi"; yoksa 0 → depodaki zaman kalır (sohbet üste fırlamaz)
-      const lastTs = prev === undefined || prev !== r.preview ? now : 0;
+      // ilk görüşte 0 → mesajlar çekilince gerçek zaman yazılır; sonraki yoklamada önizleme değiştiyse yeni mesaj (şimdi)
+      const lastTs = prev !== undefined && prev !== r.preview ? now : 0;
       return { id: r.id, name: r.name, kind: 'direct' as const, lastTs, preview: r.preview, unread: r.unread ? 1 : 0 };
     });
   },

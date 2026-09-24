@@ -22,7 +22,7 @@ export default function App() {
   const [filter, setFilter] = useState<Filter>('all');
   const [platformFilter, setPlatformFilter] = useState<Platform | null>(null);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
-  const [smartSort, setSmartSort] = useState(false);
+  const smartSort = false; // akıllı sıralama kaldırıldı: her zaman son mesaja göre
   const [listSearch, setListSearch] = useState(false);
   /** iMessage klasörü: Mesajlar uygulamasındaki Bilinmeyen / İstenmeyen / SMS filtresi / Son silinenler */
   const [imFolder, setImFolder] = useState<'unknown' | 'junk' | 'sms' | 'deleted' | null>(null);
@@ -303,6 +303,7 @@ export default function App() {
       if (c.platform !== 'imessage') return true;
       const folder = c.meta?.folder as string | undefined;
       if (imActive === 'deleted') return !!c.meta?.deleted;
+      if (imActive === 'junk') return folder === 'junk' || folder === 'sms'; // istenmeyen + filtrelenen SMS
       if (imActive) return folder === imActive;
       return !folder;
     });
@@ -576,9 +577,6 @@ export default function App() {
                   <button className={`btn icon b b2 ${listSearch || query ? 'soft' : ''}`} aria-label="Sohbetlerde ara" title="Sohbetlerde ara" onClick={() => (setListSearch(!listSearch), listSearch && setQuery(''))}>
                     <Icon name="search" size={15} sw={2} />
                   </button>
-                  <button className={`btn icon b b2 ${smartSort ? 'soft' : ''}`} aria-label="Akıllı sıralama" title={smartSort ? 'Akıllı sıralama açık' : 'Zamana göre'} onClick={() => setSmartSort(!smartSort)}>
-                    <Icon name="sparkle" size={15} sw={2} />
-                  </button>
                   <button className="btn icon primary b" aria-label="Kanal bağla" onClick={() => setConnectOpen(true)}>
                     <Icon name="plus" size={16} sw={2} />
                   </button>
@@ -595,24 +593,21 @@ export default function App() {
                     )}
                   </label>
                 )}
-                {view === 'inbox' && platformFilter === 'imessage' && (
-                  <div className="tabs" role="tablist" aria-label="iMessage klasörleri">
-                    {([[null, 'Mesajlar'], ['unknown', 'Bilinmeyen'], ['junk', 'İstenmeyen'], ['sms', 'SMS'], ['deleted', 'Silinenler']] as Array<[typeof imFolder, string]>).map(([f, label]) => (
-                      <button key={String(f)} role="tab" aria-selected={imFolder === f} className={imFolder === f ? 'active' : ''} onClick={() => setImFolder(f)}>
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                )}
                 {view === 'inbox' && (
                   <div className="tabs" role="tablist">
                     {(['all', 'unread', 'waiting'] as Filter[]).map((f) => (
-                      <button key={f} role="tab" aria-selected={filter === f} className={filter === f ? 'active' : ''} onClick={() => setFilter(f)}>
+                      <button key={f} role="tab" aria-selected={filter === f && !imFolder} className={filter === f && !imFolder ? 'active' : ''} onClick={() => (setFilter(f), setImFolder(null))}>
                         {f === 'all' ? 'Tümü' : f === 'unread' ? 'Okunmamış ' : 'Bekleyen '}
                         {f === 'unread' && scoped.unread > 0 && <span className="c">{scoped.unread}</span>}
                         {f === 'waiting' && scoped.waiting > 0 && <span className="c amber">{scoped.waiting}</span>}
                       </button>
                     ))}
+                    {platformFilter === 'imessage' &&
+                      ([['unknown', 'Bilinmeyen'], ['junk', 'İstenmeyen'], ['deleted', 'Silinenler']] as Array<[typeof imFolder, string]>).map(([fo, label]) => (
+                        <button key={String(fo)} role="tab" aria-selected={imFolder === fo} className={imFolder === fo ? 'active' : ''} onClick={() => (setImFolder(fo), setFilter('all'))}>
+                          {label}
+                        </button>
+                      ))}
                   </div>
                 )}
 
@@ -658,17 +653,10 @@ export default function App() {
                     )}
                   </div>
                 ) : (
-                  groupByDay(chatList).map(([day, items], gi) => (
+                  groupByDay(chatList).map(([day, items]) => (
                     <div key={day} style={{ display: 'contents' }}>
                       <div className="group-label">
                         <span className="label">{day}</span>
-                        {gi === 0 && (
-                          <button className="chip outline b b2" onClick={() => setSmartSort(!smartSort)}>
-                            <Icon name="sparkle" size={12} color="#6C47FF" sw={2} />
-                            {smartSort ? 'Akıllı sıralama' : 'Zamana göre'}
-                            <Icon name="chev" size={11} color="#6B6878" sw={2} />
-                          </button>
-                        )}
                       </div>
                       {items.map((c) => (
                         <ChatRow key={c.id} chat={c} selected={c.id === selected} onClick={() => setSelected(c.id)} onComplete={() => complete(c.id)} onSnooze={() => snooze(c.id)} />

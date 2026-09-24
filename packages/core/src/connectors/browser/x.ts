@@ -159,6 +159,7 @@ function parseDayLabel(label: string): number | undefined {
 }
 /** Önceki yoklamada görülen DOM önizlemesi: değiştiyse sohbet "yeni etkinlik" sayılır */
 const domPreview = new Map<string, string>();
+void fromRelative;
 /** 1.1 ucunda bulunmayan (yalnızca XChat) sohbetler */
 const apiMissing = new Set<string>();
 
@@ -280,7 +281,6 @@ export const x: Strategy = {
         const prev = domPreview.get(d.id);
         domPreview.set(d.id, d.preview);
         const changed = prev !== undefined && prev !== d.preview;
-        const approx = fromRelative(d.rel);
         const ex = out.find((t) => t.id === d.id);
         if (ex) {
           // göreli süre ("3 g") kaba: var olan sohbetin zamanını yalnızca önizleme değiştiğinde (yeni mesaj) ilerlet
@@ -289,7 +289,8 @@ export const x: Strategy = {
             if (changed) ex.lastTs = Math.max(ex.lastTs, Date.now());
           }
         } else {
-          out.push({ id: d.id, name: d.name || 'Sohbet', kind: d.id.startsWith('g') ? 'group' : 'direct', lastTs: changed ? Date.now() : approx || 0, preview: d.preview, unread: 0 });
+          // göreli süre kaba; zaman mesajlar okununca gerçek değerini alır (ilk görüşte 0), önizleme değişince "şimdi"
+          out.push({ id: d.id, name: d.name || 'Sohbet', kind: d.id.startsWith('g') ? 'group' : 'direct', lastTs: changed ? Date.now() : 0, preview: d.preview, unread: 0 });
         }
       }
     } catch (e) {

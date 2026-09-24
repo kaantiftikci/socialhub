@@ -67,7 +67,7 @@ export function Conversation({
     const chatChanged = chatRef.current !== chat.id;
     chatRef.current = chat.id;
     const prepended = !!el && !!firstIdRef.current && first !== firstIdRef.current && messages.some((m) => m.id === firstIdRef.current);
-    if (chatChanged) endRef.current?.scrollIntoView({ block: 'end' });
+    if (chatChanged || (lastIdRef.current === undefined && last !== undefined)) endRef.current?.scrollIntoView({ block: 'end' });
     else if (prepended && el) el.scrollTop += el.scrollHeight - heightRef.current;
     else if (el && last !== lastIdRef.current) {
       const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 240;
@@ -163,13 +163,13 @@ export function Conversation({
             <Icon name="search" size={15} />
           </button>
           <button className="btn b b2" onClick={onSnooze} title="Yarına ertele">
-            <Icon name="clock" size={15} /> Ertele <span className="kbd">H</span>
+            <Icon name="clock" size={15} /> <span className="lbl">Ertele</span> <span className="kbd lbl">H</span>
           </button>
           <button className="btn soft b b2" onClick={onComplete} title="Okundu olarak işaretle">
-            <Icon name="check" size={15} sw={2} /> Tamamla <span className="kbd">E</span>
+            <Icon name="check" size={15} sw={2} /> <span className="lbl">Tamamla</span> <span className="kbd lbl">E</span>
           </button>
-          {onToggleDetails && (
-            <button className="btn icon b b2" onClick={onToggleDetails} title={showDetails ? 'Ayrıntı panelini gizle' : 'Ayrıntı panelini göster'} aria-label="Ayrıntı paneli">
+          {onToggleDetails && !showDetails && (
+            <button className="btn icon b b2" onClick={onToggleDetails} title="Ayrıntı panelini göster" aria-label="Ayrıntı paneli">
               <Icon name="panel" size={15} />
             </button>
           )}
