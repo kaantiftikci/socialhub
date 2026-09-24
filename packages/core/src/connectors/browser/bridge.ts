@@ -136,8 +136,12 @@ export class BrowserConnector extends BaseConnector {
   private async launch(headless: boolean, retried = false): Promise<boolean> {
     const profile = path.join(sessionDir(this.account.id), 'profile');
     try {
+      const hidden = headless || process.env.KAVSAK_HEADLESS === '1';
       this.ctx = await this.chromium!.launchPersistentContext(profile, {
-        headless: headless || process.env.KAVSAK_HEADLESS === '1',
+        headless: hidden,
+        // Görünmez modda Chromium kimliği "HeadlessChrome" içerir; Microsoft/Google bazı oturumları bu yüzden reddeder
+        // (Outlook görünmezde login.microsoftonline.com'a düşüyordu). Görünür pencereyle aynı gerçek kimlik kullanılır.
+        userAgent: hidden ? await realUserAgent(this.chromium!) : undefined,
         // tam Chromium (headless-shell değil): siteler "yeni headless" modu normal tarayıcı gibi görür
         channel: process.env.KAVSAK_CHROMIUM ? undefined : 'chromium',
         executablePath: process.env.KAVSAK_CHROMIUM || undefined,
@@ -410,6 +414,22 @@ function isMediaFile(u: string | undefined): boolean {
 }
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Gerçek (görünür) Chromium'un kullanıcı-aracısı: görünmez modda "HeadlessChrome" yerine bu gönderilir. Bir kez hesaplanır. */
+let cachedUA: string | undefined;
+async function realUserAgent(chromium: (typeof import('playwright'))['chromium']): Promise<string | undefined> {
+  if (cachedUA) return cachedUA;
+  try {
+    const b = await chromium.launch({ headless: true, channel: process.env.KAVSAK_CHROMIUM ? undefined : 'chromium', executablePath: process.env.KAVSAK_CHROMIUM || undefined });
+    const p = await b.newPage();
+    const ua = await p.evaluate(() => navigator.userAgent);
+    await b.close();
+    cachedUA = ua.replace(/HeadlessChrome/g, 'Chrome');
+  } catch {
+    cachedUA = undefined;
+  }
+  return cachedUA;
+}
 
 /** Söz belirli sürede çözülmezse hata ver (Playwright çağrıları bazen sonsuza dek bekleyebiliyor). */
 export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
