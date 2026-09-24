@@ -104,6 +104,11 @@ export class Store {
       this.db.exec("UPDATE chats SET last_preview = COALESCE((SELECT text FROM messages m WHERE m.chat_id = chats.id ORDER BY m.ts DESC LIMIT 1), '') WHERE id LIKE 'outlook:%'");
       this.setFlag('fix_outlook_dup_v1');
     }
+    // Onarım: kopya öğeden okunan gövdeye <style>/yorum metni sızmıştı; bu mesajlar silinir, yoklama temiz metinle yeniden yazar
+    if (!this.flag('fix_outlook_css_v1')) {
+      this.db.exec("DELETE FROM messages WHERE chat_id LIKE 'outlook:%' AND (text LIKE '<!--%' OR text LIKE '%@media only screen%' OR text LIKE '%!important%')");
+      this.setFlag('fix_outlook_css_v1');
+    }
     // Onarım: tarayıcı kanallarında sohbet zamanı olarak yoklama saati yazılmıştı; mesajı olan sohbetleri son mesaj zamanına çek
     this.db.exec(`UPDATE chats SET last_message_at = (SELECT MAX(ts) FROM messages m WHERE m.chat_id = chats.id)
       WHERE platform IN ('messenger','x','instagram','linkedin','slack')

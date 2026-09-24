@@ -201,11 +201,12 @@ async function openThread(page: Page, id: string): Promise<boolean> {
     .then(() => true)
     .catch(() => false);
   if (!ok) return false;
-  if (!wasSelected && before) {
+  if (!wasSelected) {
+    // Asıl kanıt satırın seçili olması (aria-selected); art arda aynı içerikli iletilerde gövde metni değişmeyebilir
     let changed = false;
     for (let i = 0; i < 16 && !changed; i++) {
       await page.waitForTimeout(500);
-      changed = (await paneText()) !== before;
+      changed = (await row.getAttribute('aria-selected').catch(() => null)) === 'true' || (!!before && (await paneText()) !== before);
     }
     if (!changed) {
       bus.log('warn', `Outlook: ileti bölmesi satıra geçmedi (${id.slice(0, 12)}…); içerik atlandı`);
@@ -232,6 +233,17 @@ export interface OutlookRawRow {
 }
 
 /** Ham satırı sohbet alanlarına çevir (DOM'dan bağımsız; birim testli). */
+/** Gövde metnine sızan HTML yorumu / CSS kuralları (bazı pazarlama e-postalarında <style> içeriği metin olarak geliyor) temizlenir */
+export function cleanMailText(t: string): string {
+  return t
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/@media[^{]*\{[\s\S]*?\}\s*\}/g, '')
+    .replace(/(?:^|\n)\s*[.#@][\w.\-#:>, \[\]="']*\{[^}]*\}/g, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 export function outlookRow(r: OutlookRawRow, now = new Date()): { subject: string; sender: string; email: string; preview: string; ts: number; unread: boolean } {
   const parts = r.label.split(/,\s*/).map((x) => x.trim()).filter(Boolean);
   const labelBody = /^(Okunmamış|Unread)$/i.test(parts[0] ?? '') ? parts.slice(1) : parts;
@@ -380,6 +392,7 @@ export const outlook: Strategy = {
       return out;
     }, BODY);
     const msgs: Msg[] = rows
+      .map((r) => ({ ...r, text: cleanMailText(r.text) }))
       .filter((r) => r.text || r.files.length)
       .map((r, i) => {
         const fromMe = !!meEmail && r.email === meEmail;
