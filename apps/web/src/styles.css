@@ -510,7 +510,10 @@ nav.side { position: relative; }
 .psounds select { font: inherit; font-size: 12px; border: 1px solid var(--line); border-radius: 8px; padding: 3px 6px; background: var(--surface); color: var(--text); }
 
 /* kanal sürükle-bırak */
-.chan[draggable] { cursor: grab; }
+.chan .grip { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 22px; margin-left: -4px; color: var(--text3); opacity: 0; cursor: grab; border-radius: 6px; flex: none; transition: opacity .12s; }
+.chan:hover .grip, .chan.dragging .grip { opacity: .8; }
+.chan .grip:active { cursor: grabbing; }
+.chan .grip:hover { color: var(--text); background: var(--bg2); }
 .chan.dragging { opacity: .45; }
 .chan.dragover { box-shadow: inset 0 2px 0 var(--purple); }
 /* en alta in oku */

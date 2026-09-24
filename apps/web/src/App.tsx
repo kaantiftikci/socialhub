@@ -544,24 +544,12 @@ export default function App() {
       /* yok */
     }
   };
-  const nudgeChan = (a: Account, dir: -1 | 1) => {
-    const group = PLATFORMS[a.platform].category === 'mail' ? mailAccounts : PLATFORMS[a.platform].category === 'shop' ? shopAccounts : chatAccounts;
-    const i = group.findIndex((x) => x.id === a.id);
-    const target = group[i + dir];
-    if (target) moveChan(a.id, target.id, dir === 1);
-  };
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<string | null>(null);
   const renderChan = (a: Account) => (
         <button
           key={a.id}
           className={`chan b ${platformFilter === a.platform ? 'active' : ''} ${dragOver === a.id && dragId !== a.id ? 'dragover' : ''} ${dragId === a.id ? 'dragging' : ''}`}
-          draggable
-          onDragStart={(e) => {
-            setDragId(a.id);
-            e.dataTransfer.effectAllowed = 'move';
-            e.dataTransfer.setData('text/plain', a.id);
-          }}
           onDragOver={(e) => {
             if (!dragId || dragId === a.id) return;
             e.preventDefault();
@@ -584,6 +572,24 @@ export default function App() {
           }}
           title={`${PLATFORMS[a.platform].name} · ${statusText(a.status)}${a.detail ? ' — ' + a.detail : ''}  (sağ tık: seçenekler)`}
         >
+          <span
+            className="grip"
+            title="Sürükleyip sırala"
+            aria-label="Sırala"
+            draggable
+            onClick={(e) => e.stopPropagation()}
+            onDragStart={(e) => {
+              e.stopPropagation();
+              setDragId(a.id);
+              e.dataTransfer.effectAllowed = 'move';
+              e.dataTransfer.setData('text/plain', a.id);
+              // sürükleme görüntüsü olarak satırın tamamı
+              const row = (e.currentTarget as HTMLElement).closest('.chan') as HTMLElement | null;
+              if (row) e.dataTransfer.setDragImage(row, 20, 15);
+            }}
+          >
+            <Icon name="grip" size={13} sw={2} />
+          </span>
           <Chip platform={a.platform} />
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
             {PLATFORMS[a.platform].name}
@@ -1046,14 +1052,6 @@ export default function App() {
             <button onClick={() => (setMenu(null), api.restartAccount(menu.account.id).then(() => notify('Yeniden bağlanılıyor')).catch((e) => notify(e.message, true)))}>
               <Icon name="refresh" size={14} sw={2} /> Yeniden bağlan
             </button>
-            <div style={{ display: 'flex', gap: 4 }}>
-              <button style={{ flex: 1 }} onClick={() => (nudgeChan(menu.account, -1), setMenu(null))}>
-                <Icon name="chevup" size={14} sw={2} /> Yukarı taşı
-              </button>
-              <button style={{ flex: 1 }} onClick={() => (nudgeChan(menu.account, 1), setMenu(null))}>
-                <Icon name="chev" size={14} sw={2} /> Aşağı taşı
-              </button>
-            </div>
             {menu.confirm ? (
               <div className="menu-confirm">
                 <div>Bağlantı ve bu kanala ait yerel mesaj kayıtları silinecek.</div>

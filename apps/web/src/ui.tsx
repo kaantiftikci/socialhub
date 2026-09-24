@@ -39,6 +39,7 @@ const PATHS: Record<string, ReactNode> = {
   calendar: (<><rect x="3.5" y="5" width="17" height="15.5" rx="2.5" /><path d="M3.5 10h17M8 3v4M16 3v4" /></>),
   chev: <path d="M6 9l6 6 6-6" />,
   chevup: <path d="M6 15l6-6 6 6" />,
+  grip: <path d="M4 7h16M4 12h16M4 17h16" />,
   back: <path d="M15 6l-6 6 6 6" />,
   eyeoff: (<><path d="M3 3l18 18" /><path d="M10.6 5.1A10 10 0 0 1 12 5c6 0 9.5 7 9.5 7a17 17 0 0 1-2.6 3.4M6.4 6.5A16 16 0 0 0 2.5 12S6 19 12 19a9.6 9.6 0 0 0 4.2-1" /><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" /></>),
   history: (<><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></>),
