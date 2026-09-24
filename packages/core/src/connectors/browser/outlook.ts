@@ -492,7 +492,10 @@ function readListRows(page: Page): Promise<OutlookRawRow[]> {
       if (!id || seen.has(id)) continue;
       seen.add(id);
       const label = el.getAttribute('aria-label') ?? '';
-      const unread = /^(Okunmamış|Unread)\b/i.test(label) || !!el.querySelector('[aria-label="Okunmamış"], [aria-label="Unread"]');
+      // yeni OWA: aria-label "Okunmamış" ile başlamıyor; satırdaki düğme okunmamışta "Okundu olarak işaretle" (okunmuşta "Okunmadı olarak işaretle")
+      const unread =
+        /^(Okunmamış|Unread)\b/i.test(label) ||
+        !!el.querySelector('[aria-label="Okunmamış"], [aria-label="Unread"], [title="Okundu olarak işaretle"], [aria-label="Okundu olarak işaretle"], [title="Mark as read"], [aria-label="Mark as read"]');
       const from = el.querySelector<HTMLElement>('span[title*="@"]');
       const titles = Array.from(el.querySelectorAll<HTMLElement>('[title]')).map((s) => s.getAttribute('title') ?? '').filter(Boolean);
       // Açık ileti listeyi örtünce satırlar visibility:hidden olur ve innerText boş döner; o zaman yaprak öğelerin

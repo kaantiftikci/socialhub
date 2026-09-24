@@ -515,7 +515,8 @@ nav.side { position: relative; }
 .chan:hover .grip, .chan.dragging .grip { opacity: .8; }
 .chan .grip:active { cursor: grabbing; }
 .chan .grip:hover { color: var(--text); background: var(--bg2); }
-.chan.dragging { opacity: .45; }
+.chan.dragging { opacity: .95; pointer-events: none; transition: none; }
+.chan { transition: transform .12s ease-out; }
 .chan.dragover { box-shadow: inset 0 2px 0 var(--purple); }
 .chan.dragover-after { box-shadow: inset 0 -2px 0 var(--purple); }
 .chan .grip { touch-action: none; user-select: none; -webkit-user-select: none; }
@@ -548,3 +549,16 @@ nav.side { position: relative; }
 .ctx.closing { animation: panelOut .18s ease-in both; pointer-events: none; }
 .downwrap.closing .downbtn { animation: modalOut .14s ease-in both; }
 .psounds { animation: rowIn .16s ease-out both; }
+
+/* uygulama içi gelen mesaj kartları (sağ üst) */
+.msgtoasts { position: fixed; top: 14px; right: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 40; width: 320px; max-width: calc(100vw - 32px); }
+.msgtoast { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-3); text-align: left; cursor: pointer; animation: toastInR .22s cubic-bezier(.2,.8,.2,1) both; position: relative; }
+.msgtoast:hover { background: var(--bg2); }
+.msgtoast .body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.msgtoast .top { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.msgtoast .top b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msgtoast .plat { font-size: 11px; color: var(--v-txt); background: var(--v-soft); padding: 0 6px; border-radius: 6px; line-height: 16px; flex: none; }
+.msgtoast .txt { font-size: 12.5px; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msgtoast .x { position: absolute; top: 6px; right: 8px; color: var(--text3); display: inline-flex; padding: 2px; border-radius: 6px; }
+.msgtoast .x:hover { color: var(--text); background: var(--bg2); }
+@keyframes toastInR { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }

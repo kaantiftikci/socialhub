@@ -146,6 +146,14 @@ export default function App() {
   const [ai, setAi] = useState(false);
   const [online, setOnline] = useState(false);
   const [toast, setToast] = useState<{ text: string; err?: boolean } | null>(null);
+  /** Pencere öndeyken başka sohbete gelen mesaj: sağ üstte platform rozetli küçük kart (sistem bildirimi kapalı olabilir) */
+  const [inToasts, setInToasts] = useState<Array<{ id: number; chat: Chat; text: string }>>([]);
+  const inToastSeq = useRef(0);
+  const pushInToast = useCallback((chat: Chat, text: string) => {
+    const id = ++inToastSeq.current;
+    setInToasts((prev) => [...prev.slice(-2), { id, chat, text }]);
+    window.setTimeout(() => setInToasts((prev) => prev.filter((t) => t.id !== id)), 6000);
+  }, []);
   const [menu, setMenu] = useState<{ x: number; y: number; account: Account; confirm?: boolean } | null>(null);
   const menuP = useClosing(menu);
   const connectP = useClosing(connectOpen || null);
@@ -300,7 +308,10 @@ export default function App() {
           if (ev.live && !ev.message.fromMe && Date.now() - bootTs > 60_000 && Date.now() - ev.message.ts < 120_000) {
             void windowFocused().then((focused) => {
               if (!focused || ev.message.chatId !== selectedRef.current) {
-                desktopNotify(ev.chat.name, (ev.message.text || ev.message.attachments?.[0]?.name || 'Yeni mesaj').slice(0, 140));
+                const body = (ev.message.text || ev.message.attachments?.[0]?.name || 'Yeni mesaj').slice(0, 140);
+                // pencere öndeyse sistem bildirimi yerine uygulama içi kart (hangi platformdan geldiği belli olsun)
+                if (focused) pushInToast(ev.chat, body);
+                else desktopNotify(ev.chat.name, body);
                 // uygulama başına ses ('' → genel ayar, 'off' → sessiz)
                 const ps = getPlatformSound(ev.chat.platform);
                 playPing(ps || undefined);
@@ -546,11 +557,14 @@ export default function App() {
   };
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<{ id: string; after: boolean } | null>(null);
+  const [dragDy, setDragDy] = useState(0);
+  const dragStartY = useRef(0);
   const renderChan = (a: Account) => (
         <button
           key={a.id}
           className={`chan b ${platformFilter === a.platform ? 'active' : ''} ${dragOver?.id === a.id && dragId !== a.id ? (dragOver.after ? 'dragover-after' : 'dragover') : ''} ${dragId === a.id ? 'dragging' : ''}`}
           data-acc={a.id}
+          style={dragId === a.id ? { transform: `translateY(${dragDy}px)`, zIndex: 5, boxShadow: 'var(--shadow-3)', background: 'var(--surface)' } : undefined}
           onClick={() => (setView('inbox'), selectPlatform(platformFilter === a.platform ? null : a.platform), setFilter('all'))}
           onContextMenu={(e) => {
             e.preventDefault();
@@ -568,10 +582,13 @@ export default function App() {
               e.preventDefault();
               e.stopPropagation();
               (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+              dragStartY.current = e.clientY;
+              setDragDy(0);
               setDragId(a.id);
             }}
             onPointerMove={(e) => {
               if (dragId !== a.id) return;
+              setDragDy(e.clientY - dragStartY.current);
               const el = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('.chan[data-acc]');
               const id = el?.dataset.acc;
               if (!el || !id || id === a.id) {
@@ -587,8 +604,9 @@ export default function App() {
               if (dragId === a.id && dragOver && dragOver.id !== a.id) moveChan(a.id, dragOver.id, dragOver.after);
               setDragId(null);
               setDragOver(null);
+              setDragDy(0);
             }}
-            onPointerCancel={() => (setDragId(null), setDragOver(null))}
+            onPointerCancel={() => (setDragId(null), setDragOver(null), setDragDy(0))}
           >
             <Icon name="grip" size={13} sw={2} />
           </span>
@@ -1093,6 +1111,44 @@ export default function App() {
       {toast && (
         <div className={`toast ${toast.err ? 'err' : ''}`} role="status" aria-live="polite">
           {toast.text}
+        </div>
+      )}
+      {inToasts.length > 0 && (
+        <div className="msgtoasts" aria-live="polite">
+          {inToasts.map((t) => (
+            <button
+              key={t.id}
+              className="msgtoast b"
+              onClick={() => {
+                setInToasts((prev) => prev.filter((x) => x.id !== t.id));
+                setView('inbox');
+                setSelected(t.chat.id);
+              }}
+            >
+              <span className="avwrap">
+                <Avatar name={t.chat.name} size={34} url={t.chat.avatarUrl} />
+                <Chip platform={t.chat.platform} size={16} ring="#fff" />
+              </span>
+              <span className="body">
+                <span className="top">
+                  <b>{t.chat.name}</b>
+                  <span className="plat">{PLATFORMS[t.chat.platform].name}</span>
+                </span>
+                <span className="txt">{t.text}</span>
+              </span>
+              <span
+                className="x"
+                role="button"
+                aria-label="Kapat"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setInToasts((prev) => prev.filter((x) => x.id !== t.id));
+                }}
+              >
+                <Icon name="x" size={12} sw={2} />
+              </span>
+            </button>
+          ))}
         </div>
       )}
     </div>
