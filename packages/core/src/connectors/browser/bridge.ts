@@ -394,8 +394,13 @@ export class BrowserConnector extends BaseConnector {
     try {
       await this.serial(() => this.pollInner(first));
       // boşta boşaltma: ağır siteler (Gmail/Outlook) açık dururken 1 GB'ı aşıyor; bir sonraki çağrı sayfayı yeniden yükler
-      if (this.strategy.unloadWhenIdle && this.page && !this.page.isClosed() && this.account.status === 'connected') {
-        await this.serial(() => this.page!.goto('about:blank', { timeout: 10_000 }).then(() => undefined)).catch(() => undefined);
+      // about:blank'e gitmek render sürecini ve sitenin belleğini bırakmıyor; boş yeni sekme açıp eskisini kapatmak süreci öldürür
+      if (this.strategy.unloadWhenIdle && this.ctx && this.page && !this.page.isClosed() && this.account.status === 'connected') {
+        await this.serial(async () => {
+          const old = this.page!;
+          this.page = await this.ctx!.newPage();
+          await old.close().catch(() => undefined);
+        }).catch(() => undefined);
       }
     } finally {
       this.polling = false;

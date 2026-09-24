@@ -161,6 +161,11 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     if (chat) bus.emit({ type: 'chat.upsert', chat });
     return chat;
   });
+  // Sağlık/bellek: arayüz ve tanı için (rss/heap MB)
+  route('GET', '/api/health', () => {
+    const m = process.memoryUsage();
+    return { ok: true, pid: process.pid, uptimeSec: Math.round(process.uptime()), memoryMb: { rss: Math.round(m.rss / 1048576), heapUsed: Math.round(m.heapUsed / 1048576), heapTotal: Math.round(m.heapTotal / 1048576), external: Math.round(m.external / 1048576) } };
+  });
   // Dosya gönderme: JSON {name, mime, data(base64), caption} → ~/.kavsak/outbox/<zaman>-<ad> → connector.sendMedia
   route('POST', '/api/chats/:id/send-file', async (_r, _s, p, body) => {
     const id = decodeURIComponent(p.id);
