@@ -319,26 +319,30 @@ export const outlook: Strategy = {
       .evaluate(() => {
         const pick = (s: string | null | undefined) => (s?.match(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/i) ?? [])[0] ?? '';
         // OWA hesabın adresini localStorage'da tutar (olk-login_hint, olk-mail_LAST_SELECTED_PIVOT<adres>)
+        const btn = document.querySelector<HTMLElement>('#O365_MainLink_Me, button[aria-label*="Hesap yöneticisi"], button[aria-label*="Account manager"]');
+        const label = btn?.getAttribute('aria-label') ?? btn?.innerText ?? '';
+        // Sıra: OWA'nın giriş ipucu → hesap düğmesi → sayfadaki outlook/hotmail/live adresi → localStorage anahtarları
+        // (anahtarlar "olk-…Enabled_adres", "olk-mail_LAST_SELECTED_PIVOTadres" gibi ön ekle yapışık: bilinen ön ekler atılır)
         let email = '';
         try {
           email = pick(localStorage.getItem('olk-login_hint'));
-          // anahtar adları "olk-…Enabled_adres" / "…PIVOTadres" gibi ön ekle yapışık: tüm anahtarlardan adayları topla,
-          // en kısa ortak sonek gerçek adres (diğerleri onun ön ekli hâli)
-          if (!email) {
-            const cands: string[] = [];
-            for (let i = 0; i < localStorage.length; i++) {
-              const c = pick(localStorage.key(i));
-              if (c) cands.push(c.toLowerCase());
-            }
-            cands.sort((x, y) => x.length - y.length);
-            email = cands.find((c) => cands.every((d) => d === c || d.endsWith(c) || !c.endsWith(d))) ?? cands[0] ?? '';
-          }
         } catch {
           /* yok */
         }
-        const btn = document.querySelector<HTMLElement>('#O365_MainLink_Me, button[aria-label*="Hesap yöneticisi"], button[aria-label*="Account manager"]');
-        const label = btn?.getAttribute('aria-label') ?? btn?.innerText ?? '';
         email ||= pick(label) || (document.body.innerText.match(/[\w.+-]+@(outlook|hotmail|live|msn)\.[a-z.]+/i) ?? [])[0] || '';
+        if (!email) {
+          try {
+            const cands: string[] = [];
+            for (let i = 0; i < localStorage.length; i++) {
+              const c = pick(localStorage.key(i)).toLowerCase().replace(/^.*?(?:enabled_|pivot|hint_|selected_)/, '');
+              if (c && c.includes('@')) cands.push(c);
+            }
+            cands.sort((x, y) => x.length - y.length);
+            email = cands[0] ?? '';
+          } catch {
+            /* yok */
+          }
+        }
         return { email, name: label.replace(/[\w.+-]+@[\w.-]+/, '').replace(/^(Hesap yöneticisi|Account manager)( for)?:?/i, '').trim() };
       })
       .catch(() => ({ email: '', name: '' }));
