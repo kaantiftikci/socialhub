@@ -1175,7 +1175,7 @@ export class WhatsAppConnector extends BaseConnector {
       // protokol/sistem mesajları; tanınmayan içerik türlerini bir kez günlüğe yaz (tek seferlik medya vb. tanı)
       const keys = Object.keys(m.message ?? {}).filter((k) => k !== 'messageContextInfo' && k !== 'senderKeyDistributionMessage').join(',') || '(boş)';
       const sig = `${keys}#${m.messageStubType ?? '-'}`;
-      if (live && !seenUnknown.has(sig) && !/protocolMessage|reactionMessage|pollUpdateMessage|keepInChatMessage/.test(keys)) {
+      if (live && !seenUnknown.has(sig) && !/protocolMessage|reactionMessage|pollUpdateMessage|keepInChatMessage|secretEncryptedMessage/.test(keys)) {
         seenUnknown.add(sig);
         // Yalnızca messageContextInfo taşıyan (içeriği boş) mesaj: telefonun çözümü olmayan bir yer tutucusu; stub yoksa yeniden isteme de olmaz
         const ctxOnly = keys === '(boş)' && !!m.message?.messageContextInfo;
@@ -1190,8 +1190,10 @@ export class WhatsAppConnector extends BaseConnector {
       // Yalnız messageContextInfo taşıyan mesaj (stub yok): WhatsApp tek seferlik fotoğraf/videoyu bağlı cihazlara içeriksiz
       // gönderir. Hiç görünmemesi "mesaj kayboldu" hissi veriyordu; WhatsApp Web gibi yer tutucu göster.
       // (Baileys 7 bu mesajları çoğu kez message alanı hiç olmadan verir: tanınmayan sarmal düşmüş)
-      const ctxOnlyMsg = keys === '(boş)' && !m.messageStubType;
+      const edit = !!(m.message as { secretEncryptedMessage?: unknown } | null | undefined)?.secretEncryptedMessage;
+      const ctxOnlyMsg = keys === '(boş)' && !m.messageStubType && !edit;
       if (ctxOnlyMsg && m.key.id) {
+        this.tryPlaceholderResend(m);
         const senderJid = m.key.fromMe ? 'me' : this.canon(m.key.participant ? jidNormalizedUser(m.key.participant) : jid);
         this.ensureWaChat(jid);
         this.upsertMessage(
@@ -1201,7 +1203,7 @@ export class WhatsAppConnector extends BaseConnector {
             senderId: senderJid,
             senderName: m.key.fromMe ? 'Ben' : this.nameOf(senderJid),
             fromMe: !!m.key.fromMe,
-            text: m.key.fromMe ? '🔒 Tek seferlik fotoğraf/video gönderildi (yalnızca telefonda görüntülenir)' : '🔒 Tek seferlik fotoğraf/video — telefonda aç',
+            text: '🔒 Tek seferlik fotoğraf/video — WhatsApp içeriğini bağlı cihazlara göndermiyor; telefonda aç',
             ts: toMs(m.messageTimestamp) || Date.now(),
             status: m.key.fromMe ? 'sent' : 'delivered',
           },
@@ -1279,6 +1281,15 @@ export class WhatsAppConnector extends BaseConnector {
    * Telefondan (fromMe) gelenlerin sürekli çözülememesi telefon↔cihaz oturumunun bozulduğunu gösterir (aynı kimlikle iki
    * çekirdek çalışınca olur); tek kalıcı çare cihazı Bağlı cihazlar'dan kaldırıp yeniden eşleştirmek.
    */
+  /** İçeriği gelmeyen mesaj için telefondan yeniden gönderim iste (Baileys'in eş cihaz PDO isteği); sonuç günlüğe */
+  private tryPlaceholderResend(m: WAMessage): void {
+    const f = (this.sock as unknown as { requestPlaceholderResend?: (k: WAMessage['key']) => Promise<string | undefined> } | undefined)?.requestPlaceholderResend;
+    if (typeof f !== 'function' || !m.key.id) return;
+    f(m.key)
+      .then((id) => bus.log('info', `WhatsApp: içeriksiz mesaj için telefondan yeniden gönderim istendi (${m.key.id?.slice(0, 8)}… → ${id ?? 'istek yok'})`))
+      .catch((e) => bus.log('info', `WhatsApp: yeniden gönderim istenemedi: ${(e as Error).message}`));
+  }
+
   private onCiphertext(m: WAMessage, jid: string): void {
     const reason = m.messageStubParameters?.[0] ?? '';
     const sender = m.key.fromMe ? 'me' : this.canon(m.key.participant ?? jid);
@@ -1300,8 +1311,28 @@ export class WhatsAppConnector extends BaseConnector {
           : `WhatsApp: ${this.nameOf(sender)} kişisinden gelen mesajlar çözülemiyor (${hits.length} kez / 5 dk); Bağlı cihazlar'dan Kavşak'ı kaldırıp yeniden eşleştir`,
       );
     }
-    // 'Message absent from node': sunucu içeriği hiç vermedi (unavailable) → yeniden isteme de yok, yer tutucu açma
-    if (/absent/i.test(reason) || !m.key.id) return;
+    if (!m.key.id) return;
+    // 'Message absent from node': sunucu içeriği hiç vermedi (<unavailable type="view_once_unavailable_fanout">): WhatsApp tek
+    // seferlik fotoğraf/videoyu bağlı cihazlara göndermiyor (WhatsApp Web de "telefonda aç" der). Mesaj yok olmasın: yer tutucu
+    // yaz, yine de telefondan bir kez iste (yanıt gelirse aynı kimlikle üstüne yazılır)
+    if (/absent/i.test(reason)) {
+      this.ensureWaChat(jid);
+      this.upsertMessage(
+        {
+          remoteChatId: jid,
+          remoteId: m.key.id,
+          senderId: sender,
+          senderName: m.key.fromMe ? 'Ben' : (this.nameCache.get(sender) ?? m.pushName ?? this.nameOf(sender)),
+          fromMe: !!m.key.fromMe,
+          text: '🔒 Tek seferlik fotoğraf/video — WhatsApp içeriğini bağlı cihazlara göndermiyor; telefonda aç',
+          ts: toMs(m.messageTimestamp) || Date.now(),
+          status: m.key.fromMe ? 'sent' : 'delivered',
+        },
+        { live: true },
+      );
+      this.tryPlaceholderResend(m);
+      return;
+    }
     this.ensureWaChat(jid);
     this.upsertMessage(
       {
