@@ -330,7 +330,8 @@ export class BrowserConnector extends BaseConnector {
         // Kavşak'ta okunan sohbeti platformun eski 'okunmamış' değeri geri açmasın: yalnızca yeni etkinlikte aktar
         const ex = this.store.getChat(chatId(this.account.id, t.id));
         // lastTs=0 (DOM okuyan Messenger): çekirdek yeniden başladıysa platformun okunmamış durumu depoya aktarılsın
-        const fresh = !ex || t.lastTs > ex.lastMessageAt || !ex.lastPreview || (t.lastTs === 0 && first && t.unread > 0 && !ex.unread);
+        // ilk yoklamada (açılış) platformun okunmamış/önizleme değeri yetkili; sonra yalnızca yeni etkinlikte
+        const fresh = first || !ex || t.lastTs > ex.lastMessageAt || !ex.lastPreview;
         this.upsertChat({ remoteId: t.id, name: t.name, kind: t.kind, unread: fresh ? t.unread : undefined, lastMessageAt: t.lastTs || undefined, lastPreview: fresh ? t.preview || undefined : undefined, avatarUrl: t.avatarUrl, handle: t.handle, link: t.link, participants: t.participants });
         if (!this.known.has(t.id) || (this.known.get(t.id) ?? 0) < t.lastTs) changed.push(t);
       }
