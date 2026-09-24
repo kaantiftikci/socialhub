@@ -247,6 +247,12 @@ export class WhatsAppConnector extends BaseConnector {
 
     sock.ev.on('messaging-history.set', ({ chats, contacts, messages, isLatest, progress, syncType }) => {
       this.historySeen = true;
+      // Kullanıcı görsün: geçmiş alınırken uygulama kapatılırsa kalan paketler bir daha gelmez
+      if (syncType !== WAProto.HistorySync.HistorySyncType.ON_DEMAND && typeof progress === 'number' && this.account.status === 'connected') {
+        this.account.detail = progress >= 100 || isLatest ? this.account.detail?.replace(/ · geçmiş.*$/, '') : `${(this.account.detail ?? '').replace(/ · geçmiş.*$/, '')} · geçmiş alınıyor %${progress} — uygulamayı kapatma`;
+        this.store.upsertAccount(this.account);
+        bus.emit({ type: 'account.status', account: { ...this.account } });
+      }
       // ON_DEMAND (6): loadHistory ile telefondan istenen eski dilim; ilk eşleşmedeki INITIAL_BOOTSTRAP/RECENT/FULL paketleriyle aynı yoldan işlenir
       const onDemand = syncType === WAProto.HistorySync.HistorySyncType.ON_DEMAND;
       bus.log('info', `WhatsApp geçmiş paketi: ${chats?.length ?? 0} sohbet, ${messages?.length ?? 0} mesaj (tür ${onDemand ? 'istek üzerine' : String(syncType)}, %${progress ?? '?'}${isLatest ? ', son' : ''})`);
@@ -372,6 +378,9 @@ export class WhatsAppConnector extends BaseConnector {
         const stored = this.store.getMessage(mid);
         if (!stored) continue; // bilmediğimiz mesaj için boş kayıt açma
         const next = map[st] ?? 'sent';
+        // alındılar sırasız gelebilir (2 sonra 1): durum hiç geri gitmesin (gönderildi → bekleniyor olmasın)
+        const RANK: Record<string, number> = { pending: 0, sent: 1, delivered: 2, read: 3 };
+        if ((RANK[next] ?? 0) < (RANK[stored.status] ?? 0)) continue;
         // Karşı tarafın mesajı "okundu" olduysa bunu yalnızca biz yapmış olabiliriz (telefondaki 'read-self' alındısı) → sayaç sıfır
         if (next === 'read' && !stored.fromMe) this.clearUnread(cj);
         if (stored.status === next) continue;

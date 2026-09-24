@@ -228,9 +228,11 @@ export const instagram: Strategy = {
     }
   },
 
-  async markRead(page, cookies, threadId, lastIncomingId) {
-    if (!lastIncomingId) return;
-    await ig(page, cookies, `/api/v1/direct_v2/threads/${threadId}/items/${lastIncomingId}/seen/`, {});
+  async markRead(page, _cookies, threadId) {
+    // /items/<id>/seen/ ucu web'de 404; web istemcisi okunduyu useIGDMarkThreadAsReadMutation ile gönderiyor.
+    // Sohbet sayfasını açmak bu mutation'ı tetikliyor (profil kopyasıyla doğrulandı: read_state 1 → 0).
+    await page.goto(`https://www.instagram.com/direct/t/${threadId}/`, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+    await page.waitForTimeout(6000);
   },
 
   /** API tabanlı: mesaj çağrıları paralel yapılabilir (köprü 4'lü paralel çağırır) */
@@ -240,9 +242,10 @@ export const instagram: Strategy = {
     // thread_message_limit=10: her sohbetin son mesajları da gelir → okunmamış sayısı gerçekten hesaplanır
     // (inbox yanıtında unseen_count yok; read_state yalnızca 0/1 veriyor)
     // Instagram bazen geniş isteğe (limit=40, thread_message_limit=10) 500 'Oops' döndürüyor: eski dar parametrelerle yedek
-    const data = await ig(page, cookies, '/api/v1/direct_v2/inbox/?persistentBadging=true&folder=&limit=40&thread_message_limit=10').catch(async (e: Error) => {
+    // limit=40 sunucuda 500 veriyor; 20 sohbet × 10 mesaj okunmamış sayısı için yeterli (yedek: tek mesaj)
+    const data = await ig(page, cookies, '/api/v1/direct_v2/inbox/?persistentBadging=true&folder=&limit=20&thread_message_limit=10').catch(async (e: Error) => {
       if (!/Instagram 5\d\d/.test(e.message)) throw e;
-      return ig(page, cookies, '/api/v1/direct_v2/inbox/?persistentBadging=true&folder=&limit=30&thread_message_limit=1');
+      return ig(page, cookies, '/api/v1/direct_v2/inbox/?persistentBadging=true&folder=&limit=20&thread_message_limit=1');
     });
     if (data.viewer?.pk) viewerId = String(data.viewer.pk);
     const out: Thread[] = [];

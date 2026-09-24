@@ -17,6 +17,8 @@ import { instagram } from './connectors/browser/instagram.js';
 import { x } from './connectors/browser/x.js';
 import { messenger } from './connectors/browser/messenger.js';
 import { gmail } from './connectors/browser/gmail.js';
+import { outlook } from './connectors/browser/outlook.js';
+import { icloud } from './connectors/browser/icloud.js';
 import { slackStrategy } from './connectors/browser/slack.js';
 import { MailConnector, type MailConfig } from './connectors/mail.js';
 import { ShopierConnector } from './connectors/shopier.js';
@@ -146,8 +148,23 @@ export class Registry {
         break;
       }
       case 'outlook':
+      case 'icloud': {
+        // Outlook.com / iCloud Mail: varsayılan tarayıcı girişi; IMAP yapılandırması (token) verildiyse eski yol
+        const tokenFile = path.join(sessionDir(account.id), 'token');
+        if (!fs.existsSync(tokenFile)) {
+          c = new BrowserConnector(account, this.store, account.platform === 'outlook' ? outlook : icloud, 30_000);
+          break;
+        }
+        let cfg: MailConfig = { user: '' };
+        try {
+          cfg = JSON.parse(fs.readFileSync(tokenFile, 'utf8')) as MailConfig;
+        } catch {
+          /* yapılandırma yok */
+        }
+        c = new MailConnector(account, this.store, cfg);
+        break;
+      }
       case 'yahoo':
-      case 'icloud':
       case 'imap': {
         const tokenFile = path.join(sessionDir(account.id), 'token');
         let cfg: MailConfig = { user: '' };

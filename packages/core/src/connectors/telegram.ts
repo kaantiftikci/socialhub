@@ -96,7 +96,7 @@ export class TelegramConnector extends BaseConnector {
 
     client.addEventHandler((ev: NewMessageEvent) => void this.onNew(ev), new NewMessage({}));
     // Telefonda/başka istemcide okununca okunmamış sayacı burada da düşsün
-    client.addEventHandler((u: Api.TypeUpdate) => this.onRead(u), new Raw({ types: [Api.UpdateReadHistoryInbox, Api.UpdateReadChannelInbox] }));
+    client.addEventHandler((u: Api.TypeUpdate) => this.onRead(u), new Raw({ types: [Api.UpdateReadHistoryInbox, Api.UpdateReadChannelInbox, Api.UpdateFolderPeers] }));
     await this.backfill(client);
   }
 
@@ -165,6 +165,21 @@ export class TelegramConnector extends BaseConnector {
    * Sesli mesajlar (ogg/opus) ffmpeg varsa mp3'e çevrilir (WebKit ogg oynatamaz).
    */
   async fetchMedia(u: string): Promise<{ body: Buffer; type: string } | undefined> {
+    // "tg-avatar:<sohbet>": profil fotoğrafı (küçük boy), 1 gün önbellek
+    const av = u.match(/^tg-avatar:(-?\d+)$/);
+    if (av) {
+      const dir = path.join(sessionDir(this.account.id), 'media');
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, `${av[1]}_avatar`);
+      if (fs.existsSync(file) && Date.now() - fs.statSync(file).mtimeMs < 86400e3) return { body: fs.readFileSync(file), type: 'image/jpeg' };
+      if (!this.client) throw new Error('Telegram bağlı değil');
+      const entity = await this.entityOf(av[1]);
+      const res = await this.client.downloadProfilePhoto(entity, { isBig: false });
+      const body = Buffer.isBuffer(res) ? res : typeof res === 'string' ? fs.readFileSync(res) : undefined;
+      if (!body || !body.length) return undefined;
+      fs.writeFileSync(file, body);
+      return { body, type: 'image/jpeg' };
+    }
     const m = u.match(/^(tg|tg-thumb):(-?\d+)\/(\d+)$/);
     if (!m) throw new Error('geçersiz Telegram medya adresi');
     const [, kind, rid, idStr] = m;
@@ -211,6 +226,15 @@ export class TelegramConnector extends BaseConnector {
 
   /** UpdateReadHistoryInbox / UpdateReadChannelInbox: başka istemcide okundu → platformun verdiği kalan sayıyı yaz */
   private onRead(u: Api.TypeUpdate): void {
+    // Arşive alma / arşivden çıkarma anında yansısın
+    if (u instanceof Api.UpdateFolderPeers) {
+      for (const fp of u.folderPeers) {
+        const id = getPeerId(fp.peer);
+        const chat = id ? this.store.getChat(`${this.account.id}/${id}`) : undefined;
+        if (chat) this.upsertChat({ remoteId: id!, name: chat.name, meta: { ...(chat.meta ?? {}), archived: fp.folderId === 1 } });
+      }
+      return;
+    }
     let rid: string | undefined;
     let still = 0;
     if (u instanceof Api.UpdateReadHistoryInbox) {
@@ -258,10 +282,13 @@ export class TelegramConnector extends BaseConnector {
       const last = d.message;
       const archived = !!(d.archived || d.folderId === 1);
       const existing = this.store.getChat(`${this.account.id}/${rid}`);
+      const photo = (d.entity as { photo?: unknown }).photo;
+      const hasPhoto = !!photo && !(photo instanceof Api.UserProfilePhotoEmpty) && !(photo instanceof Api.ChatPhotoEmpty);
       this.upsertChat({
         remoteId: rid,
         name,
         kind,
+        avatarUrl: hasPhoto ? `/api/media/${encodeURIComponent(this.account.id)}?u=${encodeURIComponent(`tg-avatar:${rid}`)}` : undefined,
         unread: d.unreadCount ?? 0,
         lastMessageAt: last?.date ? last.date * 1000 : undefined,
         lastPreview: last ? previewOf(last) : undefined,

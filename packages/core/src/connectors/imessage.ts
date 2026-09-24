@@ -371,6 +371,16 @@ export class IMessageConnector extends BaseConnector {
       bus.log('warn', `iMessage sohbet geçmişi: ${(e as Error).message}`);
     }
     bus.log('info', `iMessage geçmişi: ${rows.length} mesaj + ${extra} eski sohbet mesajı yüklendi (${Date.now() - t0} ms)`);
+    try {
+      const newest = (this.db.prepare('SELECT MAX(date) AS d FROM message').get() as { d: number | null }).d ?? 0;
+      const ms = newest > 1e12 ? Math.floor(newest / 1e6) + APPLE_EPOCH_MS : newest * 1000 + APPLE_EPOCH_MS;
+      if (ms && Date.now() - ms > 7 * 86400e3) {
+        const days = Math.round((Date.now() - ms) / 86400e3);
+        this.setStatus('connected', `Mesajlar uygulamasına ${days} gündür yeni mesaj düşmüyor — iPhone: Ayarlar → Mesajlar → Metin Mesajı Yönlendirme'de bu Mac'i aç; Mac: Mesajlar → Ayarlar → iMessage → iCloud'da Mesajlar → Şimdi Eşzamanla`);
+      }
+    } catch {
+      /* tarih okunamadı */
+    }
   }
 
   private poll(): void {

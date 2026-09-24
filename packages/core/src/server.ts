@@ -52,7 +52,7 @@ function loadToken(): string {
 const LOCAL_ORIGIN = /^(https?:\/\/(localhost|127\.0\.0\.1|tauri\.localhost)(:\d+)?|tauri:\/\/localhost|asset:\/\/localhost)$/;
 /** Vekilden indirilebilecek uzak medya sunucuları (oturum çerezleriyle istek yapıldığı için sınırlı) */
 // fbsbx.com: Instagram/Messenger sesli mesaj ve dosyaları; giphy/tenor: DM GIF'leri
-const MEDIA_HOSTS = /(^|\.)(twimg\.com|twitter\.com|x\.com|cdninstagram\.com|fbcdn\.net|fbsbx\.com|facebook\.com|messenger\.com|licdn\.com|linkedin\.com|slack-edge\.com|slack-files\.com|files\.slack\.com|whatsapp\.net|telegram\.org|shopier\.com|giphy\.com|tenor\.com|mail\.google\.com|googleusercontent\.com)$/i;
+const MEDIA_HOSTS = /(^|\.)(twimg\.com|twitter\.com|x\.com|cdninstagram\.com|fbcdn\.net|fbsbx\.com|facebook\.com|messenger\.com|licdn\.com|linkedin\.com|slack-edge\.com|slack-files\.com|files\.slack\.com|whatsapp\.net|telegram\.org|shopier\.com|giphy\.com|tenor\.com|mail\.google\.com|googleusercontent\.com|outlook\.live\.com|outlook\.office\.com|icloud\.com|icloud-content\.com)$/i;
 
 /** ~/.kavsak/settings.json: { lan: boolean } — telefondan (aynı Wi‑Fi) erişim */
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
