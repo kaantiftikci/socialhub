@@ -515,8 +515,11 @@ nav.side { position: relative; }
 .chan:hover .grip, .chan.dragging .grip { opacity: .8; }
 .chan .grip:active { cursor: grabbing; }
 .chan .grip:hover { color: var(--text); background: var(--bg2); }
-.chan.dragging { opacity: .95; pointer-events: none; transition: none; }
-.chan { transition: transform .12s ease-out; }
+.chan.dragging { opacity: .35; }
+.chan-ghost { position: fixed; z-index: 60; pointer-events: none; background: var(--surface); box-shadow: var(--shadow-3); border: 1px solid var(--line); color: var(--text); opacity: .96; }
+body:has(.chan-ghost) .chan:hover { background: transparent; }
+body:has(.chan-ghost) .chan.active:hover { background: var(--bg2); }
+body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select: none; }
 .chan.dragover { box-shadow: inset 0 2px 0 var(--purple); }
 .chan.dragover-after { box-shadow: inset 0 -2px 0 var(--purple); }
 .chan .grip { touch-action: none; user-select: none; -webkit-user-select: none; }

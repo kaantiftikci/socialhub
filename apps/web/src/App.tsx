@@ -557,14 +557,15 @@ export default function App() {
   };
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<{ id: string; after: boolean } | null>(null);
-  const [dragDy, setDragDy] = useState(0);
-  const dragStartY = useRef(0);
+  /** Sürüklenen satırın sabit konumlu hayaleti: satırı yerinde dönüştürmek kaydırma alanını büyütüp titretiyordu */
+  const [ghost, setGhost] = useState<{ top: number; left: number; width: number } | null>(null);
+  const dragStart = useRef({ y: 0, top: 0, left: 0, width: 0 });
+  const dragRaf = useRef(0);
   const renderChan = (a: Account) => (
         <button
           key={a.id}
           className={`chan b ${platformFilter === a.platform ? 'active' : ''} ${dragOver?.id === a.id && dragId !== a.id ? (dragOver.after ? 'dragover-after' : 'dragover') : ''} ${dragId === a.id ? 'dragging' : ''}`}
           data-acc={a.id}
-          style={dragId === a.id ? { transform: `translateY(${dragDy}px)`, zIndex: 5, boxShadow: 'var(--shadow-3)', background: 'var(--surface)' } : undefined}
           onClick={() => (setView('inbox'), selectPlatform(platformFilter === a.platform ? null : a.platform), setFilter('all'))}
           onContextMenu={(e) => {
             e.preventDefault();
@@ -582,31 +583,43 @@ export default function App() {
               e.preventDefault();
               e.stopPropagation();
               (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-              dragStartY.current = e.clientY;
-              setDragDy(0);
+              const row = (e.currentTarget as HTMLElement).closest('.chan') as HTMLElement | null;
+              const rr = row?.getBoundingClientRect();
+              dragStart.current = { y: e.clientY, top: rr?.top ?? e.clientY, left: rr?.left ?? e.clientX, width: rr?.width ?? 200 };
+              setGhost({ top: dragStart.current.top, left: dragStart.current.left, width: dragStart.current.width });
               setDragId(a.id);
             }}
             onPointerMove={(e) => {
               if (dragId !== a.id) return;
-              setDragDy(e.clientY - dragStartY.current);
-              const el = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('.chan[data-acc]');
-              const id = el?.dataset.acc;
-              if (!el || !id || id === a.id) {
-                if (dragOver) setDragOver(null);
-                return;
-              }
-              const r = el.getBoundingClientRect();
-              const after = e.clientY > r.top + r.height / 2;
-              if (dragOver?.id !== id || dragOver.after !== after) setDragOver({ id, after });
+              const { clientX, clientY } = e;
+              cancelAnimationFrame(dragRaf.current);
+              dragRaf.current = requestAnimationFrame(() => {
+                const st = dragStart.current;
+                setGhost({ top: st.top + (clientY - st.y), left: st.left, width: st.width });
+                const el = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>('.chan[data-acc]');
+                const id = el?.dataset.acc;
+                if (!el || !id || id === a.id) {
+                  setDragOver((cur) => (cur ? null : cur));
+                  return;
+                }
+                const r = el.getBoundingClientRect();
+                // orta çizgide ±5 px histerezis: aynı satır içinde üst/alt arasında titremesin
+                const mid = r.top + r.height / 2;
+                setDragOver((cur) => {
+                  const after = cur?.id === id ? (clientY > mid + 5 ? true : clientY < mid - 5 ? false : cur.after) : clientY > mid;
+                  return cur?.id === id && cur.after === after ? cur : { id, after };
+                });
+              });
             }}
             onPointerUp={(e) => {
               (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
               if (dragId === a.id && dragOver && dragOver.id !== a.id) moveChan(a.id, dragOver.id, dragOver.after);
+              cancelAnimationFrame(dragRaf.current);
               setDragId(null);
               setDragOver(null);
-              setDragDy(0);
+              setGhost(null);
             }}
-            onPointerCancel={() => (setDragId(null), setDragOver(null), setDragDy(0))}
+            onPointerCancel={() => (setDragId(null), setDragOver(null), setGhost(null))}
           >
             <Icon name="grip" size={13} sw={2} />
           </span>
@@ -1113,6 +1126,15 @@ export default function App() {
           {toast.text}
         </div>
       )}
+      {ghost && dragId && (() => {
+        const acc = accounts.find((x) => x.id === dragId);
+        return acc ? (
+          <div className="chan chan-ghost" style={{ top: ghost.top, left: ghost.left, width: ghost.width }} aria-hidden>
+            <Chip platform={acc.platform} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{PLATFORMS[acc.platform].name}</span>
+          </div>
+        ) : null;
+      })()}
       {inToasts.length > 0 && (
         <div className="msgtoasts" aria-live="polite">
           {inToasts.map((t) => (
