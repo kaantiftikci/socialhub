@@ -622,7 +622,7 @@ export class WhatsAppConnector extends BaseConnector {
    * Geçmiş boşlukları: telefonun ilk eşitlemesi son günleri ve çok eski dilimleri getirip aradakileri (aylar) atlayabiliyor.
    * Son 14 günde etkin sohbetlerde en yeni blok ile ondan önceki mesaj arasında 3 günden uzun boşluk varsa (ya da sohbetin
    * yalnızca son günleri varsa) sınırdaki mesajdan geriye istek üzerine geçmiş (200'lük dilimler) istenir; boşluk kapanana,
-   * telefon boş dönene ya da sohbet başına 12 dilime kadar. Telefon iki kez yanıt vermezse 30 dk sonra yeniden denenir.
+   * telefon boş dönene ya da sohbet başına 40 dilime kadar (telefon dilim başına ~50 mesaj veriyor). Telefon iki kez yanıt vermezse 30 dk sonra yeniden denenir.
    */
   private async fillGaps(): Promise<void> {
     if (this.gapBusy || this.stopping || !this.sock?.ws.isOpen) return;
@@ -641,7 +641,7 @@ export class WhatsAppConnector extends BaseConnector {
       let touched = 0;
       for (const chat of chats) {
         if (this.stopping) break;
-        for (let round = 0; round < 12; round++) {
+        for (let round = 0; round < 40; round++) {
           const msgs = this.store.listMessages(chat.id, 1500); // artan sırada, en yeni 1500
           if (!msgs.length) break;
           let boundary = -1;
@@ -669,7 +669,7 @@ export class WhatsAppConnector extends BaseConnector {
           const got = this.store.listMessages(chat.id, 1500).length - msgs.length;
           total += Math.max(0, got);
           if (got <= 0) break;
-          await new Promise((r) => setTimeout(r, 1500));
+          await new Promise((r) => setTimeout(r, 800));
         }
       }
       if (touched) bus.log('info', `WhatsApp: boşluk doldurma — ${touched} sohbet denetlendi, ${total} eski mesaj telefondan alındı`);

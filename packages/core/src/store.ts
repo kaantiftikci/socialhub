@@ -121,6 +121,19 @@ export class Store {
       this.db.exec("UPDATE chats SET last_message_at = 0, last_preview = '' WHERE id LIKE 'outlook:%'");
       this.setFlag('fix_outlook_ts_v2');
     }
+    // Onarım: grup/kanal önizlemelerine gönderen adı (son mesajdan)
+    if (!this.flag('fix_group_preview_v1')) {
+      const rows = this.db.prepare("SELECT c.id, m.from_me, m.sender_name, m.text, m.attachments FROM chats c JOIN messages m ON m.id = (SELECT id FROM messages WHERE chat_id = c.id ORDER BY ts DESC, rowid DESC LIMIT 1) WHERE c.kind IN ('group','channel')").all() as Array<{ id: string; from_me: number; sender_name: string; text: string; attachments: string | null }>;
+      const upd = this.db.prepare('UPDATE chats SET last_preview = ? WHERE id = ?');
+      this.transaction(() => {
+        for (const r of rows) {
+          const body = r.text || (r.attachments ? '[ek]' : '');
+          if (!body) continue;
+          upd.run(`${r.from_me ? 'Sen' : (r.sender_name || '').split(/\s+/)[0] || '?'}: ${body}`, r.id);
+        }
+      });
+      this.setFlag('fix_group_preview_v1');
+    }
     // Onarım: tarayıcı kanallarında sohbet zamanı olarak yoklama saati yazılmıştı; mesajı olan sohbetleri son mesaj zamanına çek
     this.db.exec(`UPDATE chats SET last_message_at = (SELECT MAX(ts) FROM messages m WHERE m.chat_id = chats.id)
       WHERE platform IN ('messenger','x','instagram','linkedin','slack')
@@ -288,7 +301,9 @@ export class Store {
     const inserted = !existed;
     const chat = this.getChat(m.chatId);
     if (chat) {
-      const preview = m.text || (m.attachments?.length ? `[${m.attachments[0].name ?? m.attachments[0].kind}]` : '');
+      const body = m.text || (m.attachments?.length ? `[${m.attachments[0].name ?? m.attachments[0].kind}]` : '');
+      // grup/kanalda önizlemede kim yazdı görünsün: "Ali: mesaj" / "Sen: mesaj"
+      const preview = chat.kind !== 'direct' && body ? `${m.fromMe ? 'Sen' : (m.senderName || '').split(/\s+/)[0] || '?'}: ${body}` : body;
       const isNewer = m.ts >= chat.lastMessageAt;
       this.db
         .prepare('UPDATE chats SET last_message_at = ?, last_preview = ?, unread = ?, last_from_me = ? WHERE id = ?')
