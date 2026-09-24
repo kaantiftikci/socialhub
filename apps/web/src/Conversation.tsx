@@ -22,6 +22,8 @@ export function Conversation({
   olderBusy = false,
   onBack,
   typing,
+  snoozedUntil,
+  onUnsnooze,
 }: {
   chat: Chat;
   messages: Message[];
@@ -30,6 +32,9 @@ export function Conversation({
   onTags: (tags: string[]) => void;
   onSnooze: () => void;
   onComplete: () => void;
+  /** Ertelenmişse ne zamana kadar; geri alma */
+  snoozedUntil?: number;
+  onUnsnooze?: () => void;
   showDetails?: boolean;
   onToggleDetails?: () => void;
   onOpenChat?: (c: Chat) => void;
@@ -222,9 +227,15 @@ export function Conversation({
           <button className={`btn icon b b2 ${search !== null ? 'on' : ''}`} onClick={() => setSearch(search === null ? '' : null)} title="Sohbette ara" aria-label="Ara">
             <Icon name="search" size={15} />
           </button>
-          <button className="btn b b2" onClick={onSnooze} title="Yarına ertele">
-            <Icon name="clock" size={15} /> <span className="lbl">Ertele</span> <span className="kbd lbl">H</span>
-          </button>
+          {snoozedUntil && onUnsnooze ? (
+            <button className="btn b b2 on" onClick={onUnsnooze} title={`${fmtStamp(snoozedUntil)} tarihine ertelendi — geri al`}>
+              <Icon name="bell" size={15} /> <span className="lbl">Ertelendi · geri al</span>
+            </button>
+          ) : (
+            <button className="btn b b2" onClick={onSnooze} title="Yarına ertele">
+              <Icon name="clock" size={15} /> <span className="lbl">Ertele</span> <span className="kbd lbl">H</span>
+            </button>
+          )}
           <button className="btn soft b b2" onClick={onComplete} title="Okundu olarak işaretle">
             <Icon name="check" size={15} sw={2} /> <span className="lbl">Tamamla</span> <span className="kbd lbl">E</span>
           </button>
@@ -234,6 +245,17 @@ export function Conversation({
             </button>
           )}
         </header>
+        {snoozedUntil && onUnsnooze && (
+          <div className="snooze-banner" role="status">
+            <Icon name="bell" size={14} sw={2} />
+            <span>
+              Bu sohbet <b>{fmtStamp(snoozedUntil)}</b> tarihine ertelendi; o zamana kadar gelen kutusunda görünmez.
+            </span>
+            <button className="btn xs b b2" onClick={onUnsnooze}>
+              Ertelemeyi kaldır
+            </button>
+          </div>
+        )}
         {search !== null && (
           <div className="chat-search">
             <Icon name="search" size={14} />

@@ -995,6 +995,8 @@ export default function App() {
                 notify={notify}
                 onSnooze={() => snooze(current.id)}
                 onComplete={() => complete(current.id)}
+                snoozedUntil={snoozes[current.id]}
+                onUnsnooze={() => unsnooze(current.id)}
                 onTags={(tags) => api.setTags(current.id, tags).then((c) => setChats((p) => new Map(p).set(c.id, c))).catch((e) => notify(e.message, true))}
                 showDetails={isMobile ? false : showDetails}
                 onToggleDetails={() => setShowDetails(!showDetails)}

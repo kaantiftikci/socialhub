@@ -565,3 +565,7 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .msgtoast .x { position: absolute; top: 6px; right: 8px; color: var(--text3); display: inline-flex; padding: 2px; border-radius: 6px; }
 .msgtoast .x:hover { color: var(--text); background: var(--bg2); }
 @keyframes toastInR { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
+
+/* ertelenmiş sohbet uyarısı */
+.snooze-banner { display: flex; align-items: center; gap: 10px; padding: 8px 20px; background: var(--lime-soft, #f4ffd0); color: var(--text); font-size: 12.5px; border-bottom: 1px solid var(--line2); }
+.snooze-banner > span { flex: 1; min-width: 0; }
