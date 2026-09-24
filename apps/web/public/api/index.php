@@ -37,23 +37,31 @@ const SEED_USERS = [
     ['username' => 'editor', 'name' => 'Editör', 'pass' => '$2y$12$D3SKU5xbB5nDTIFmxA82bem7YHqBPD0dzi3KJCLyAEr65l.9j5x/u'],
     ['username' => 'misafir', 'name' => 'Misafir', 'pass' => '$2y$12$q0j8FuH7YcxzBLye9Vxtg.RDgao05rMFlL3B/UIkR0JfPhU02Svk6'],
 ];
-/** Yeni demo kullanıcısının başlangıçta bağlı görünen uygulamaları */
-const SEED_ACCOUNTS = ['whatsapp', 'telegram', 'instagram', 'linkedin', 'slack', 'gmail', 'shopier'];
+/** Demo kullanıcıları boş başlar; uygulamaları kendileri "Uygulama bağla" ile ekler. Sürüm artınca mevcut listeleri de sıfırlanır. */
+const SEED_ACCOUNTS = [];
+const SEED_VERSION = 2;
 
 function seed_users(array &$data): bool
 {
     $changed = false;
     foreach (SEED_USERS as $i => $su) {
         $found = false;
-        foreach ($data['users'] as $u) {
+        foreach ($data['users'] as &$u) {
             if (($u['username'] ?? '') === $su['username']) {
                 $found = true;
+                if ((int) ($u['seedVersion'] ?? 1) < SEED_VERSION) {
+                    $u['accounts'] = [];
+                    $u['seedVersion'] = SEED_VERSION;
+                    $changed = true;
+                }
                 break;
             }
         }
+        unset($u);
         if ($found) {
             continue;
         }
+        // (aşağıda eklenir)
         $accounts = [];
         foreach (SEED_ACCOUNTS as $j => $platform) {
             $accounts[] = ['id' => $platform . ':demo' . ($i + 1) . $j, 'platform' => $platform, 'label' => '', 'status' => 'connected', 'createdAt' => (int) (microtime(true) * 1000)];
@@ -65,6 +73,7 @@ function seed_users(array &$data): bool
             'email' => $su['username'] . '@demo',
             'pass' => $su['pass'],
             'accounts' => $accounts,
+            'seedVersion' => SEED_VERSION,
             'createdAt' => (int) (microtime(true) * 1000),
         ];
         $changed = true;
