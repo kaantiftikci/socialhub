@@ -472,8 +472,12 @@ nav.side { position: relative; }
 .syncbar { position: relative; display: block; width: 100%; height: 6px; border-radius: 6px; background: var(--v-soft); overflow: visible; }
 .syncbar .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 6px; background: var(--lime); transition: width .5s cubic-bezier(.2,.8,.2,1); box-shadow: 0 0 0 1px rgba(180,220,0,.35) inset; }
 .syncbar .pct { position: absolute; top: -15px; font-size: 10px; font-weight: 700; color: var(--lime-txt); background: var(--lime); padding: 0 5px; border-radius: 6px; line-height: 14px; transition: left .5s cubic-bezier(.2,.8,.2,1); white-space: nowrap; }
-.syncbar.compact { position: absolute; left: 10px; right: 10px; bottom: 1px; height: 3px; }
-.syncbar.compact .pct { top: -13px; font-size: 9px; line-height: 12px; padding: 0 4px; }
+/* kanal satırında: çubuk satırın içinde, yüzde hemen yanında (adın üstünü örtmez) */
+.syncbar.compact { position: relative; display: inline-flex; align-items: center; width: 40px; height: 4px; margin-left: 6px; flex: none; overflow: visible; }
+.syncbar.compact .pct { position: absolute; left: 100% !important; top: 50%; transform: translateY(-50%); margin-left: 5px; font-size: 9px; line-height: 12px; padding: 0 4px; transition: none; }
+.chan:has(.syncbar.compact) { padding-right: 36px; }
+.chan:has(.syncbar.compact) .count { display: none; }
+.chan:has(.syncbar.compact) .dot { margin-left: auto !important; }
 .chan { position: relative; }
 .synctop { display: flex; align-items: center; gap: 10px; padding: 12px 14px 0; }
 .synctop .syncbar { flex-grow: 1; }
