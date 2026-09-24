@@ -1,0 +1,30 @@
+# Herkese açık demoyu (apps/web, VITE_STATIC_DEMO=1) cPanel FTP'sine yükler.
+# Gizli: FTP_PASSWORD (GitHub → Settings → Secrets and variables → Actions). Sunucuda SSH/SFTP kapalı, FTP+TLS açık.
+name: deploy-demo
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['apps/web/**', '.github/workflows/deploy-demo.yml']
+concurrency: deploy-demo
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: VITE_STATIC_DEMO=1 npm run build -w apps/web
+      - name: FTP (TLS) ile yükle
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: kaantiftikci.com
+          username: kaa300ftikcicom
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftps
+          local-dir: apps/web/dist/
+          server-dir: mivelo.kaantiftikci.com/
+          exclude: '**/.git*'
