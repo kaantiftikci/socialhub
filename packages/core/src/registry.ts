@@ -16,6 +16,7 @@ import { linkedin } from './connectors/browser/linkedin.js';
 import { instagram } from './connectors/browser/instagram.js';
 import { x } from './connectors/browser/x.js';
 import { messenger } from './connectors/browser/messenger.js';
+import { gmail } from './connectors/browser/gmail.js';
 import { slackStrategy } from './connectors/browser/slack.js';
 import { MailConnector, type MailConfig } from './connectors/mail.js';
 import { ShopierConnector } from './connectors/shopier.js';
@@ -128,7 +129,22 @@ export class Registry {
         c = new ShopierConnector(account, this.store, token);
         break;
       }
-      case 'gmail':
+      case 'gmail': {
+        // Gmail: varsayılan tarayıcı girişi (uygulama şifresi/OAuth istemcisi gerekmez); IMAP yapılandırması (token) verildiyse eski yol
+        const tokenFile = path.join(sessionDir(account.id), 'token');
+        if (!fs.existsSync(tokenFile)) {
+          c = new BrowserConnector(account, this.store, gmail, 30_000);
+          break;
+        }
+        let cfg: MailConfig = { user: '' };
+        try {
+          cfg = JSON.parse(fs.readFileSync(tokenFile, 'utf8')) as MailConfig;
+        } catch {
+          /* yapılandırma yok */
+        }
+        c = new MailConnector(account, this.store, cfg);
+        break;
+      }
       case 'outlook':
       case 'yahoo':
       case 'icloud':

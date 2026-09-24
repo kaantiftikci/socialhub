@@ -88,7 +88,7 @@ export const PLATFORMS: Record<Platform, { name: string; code: string; color: st
   x: { name: 'X', code: 'X', color: '#2B2833', method: 'Tarayıcı oturumu', available: true, mode: 'browser' },
   instagram: { name: 'Instagram', code: 'IG', color: '#C13584', method: 'Tarayıcı oturumu', available: true, mode: 'browser' },
   messenger: { name: 'Messenger', code: 'MS', color: '#0866FF', method: 'Tarayıcı oturumu', available: true, mode: 'browser' },
-  gmail: { name: 'Gmail', code: 'GM', color: '#EA4335', method: 'IMAP · uygulama şifresi', available: true, mode: 'mail', category: 'mail' },
+  gmail: { name: 'Gmail', code: 'GM', color: '#EA4335', method: 'Tarayıcı girişi · Gmail web', available: true, mode: 'browser', category: 'mail' },
   outlook: { name: 'Outlook', code: 'OL', color: '#0F6CBD', method: 'Microsoft 365 · OAuth (cihaz kodu)', available: true, mode: 'mail', category: 'mail' },
   yahoo: { name: 'Yahoo Mail', code: 'YH', color: '#6001D2', method: 'IMAP · uygulama şifresi', available: true, mode: 'mail', category: 'mail' },
   icloud: { name: 'iCloud Mail', code: 'IC', color: '#3693F3', method: 'IMAP · uygulamaya özel şifre', available: true, mode: 'mail', category: 'mail' },
