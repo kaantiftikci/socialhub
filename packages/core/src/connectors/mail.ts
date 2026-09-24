@@ -56,8 +56,19 @@ export function resolveOAuth(state: string, r: { code?: string; error?: string }
   return true;
 }
 
+/** Diğer OAuth akışları (Etsy vb.) için: /oauth/callback'e gelen code/error'u bekle (10 dk). */
+export function waitOAuth(state: string, timeoutMs = 600_000): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    pendingOAuth.set(state, (r) => (r.code ? resolve(r.code) : reject(new Error(r.error ?? 'Giriş iptal edildi'))));
+    setTimeout(() => {
+      if (pendingOAuth.delete(state)) reject(new Error('Giriş zaman aşımına uğradı'));
+    }, timeoutMs).unref?.();
+  });
+}
+export const OAUTH_CALLBACK = CALLBACK;
+
 /** Görünür bir Chromium penceresi aç; `done` çözülünce kapat. Kullanıcı yalnızca giriş yapar. */
-async function withAuthWindow<T>(url: string, done: Promise<T>): Promise<T> {
+export async function withAuthWindow<T>(url: string, done: Promise<T>): Promise<T> {
   let close = async () => {};
   try {
     const { chromium } = await import('playwright');

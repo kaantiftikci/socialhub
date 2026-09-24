@@ -48,6 +48,10 @@ export function ConnectModal({
   const [active, setActive] = useState<string | null>(null); // account id
   const [tg, setTg] = useState({ apiId: '', apiHash: '' });
   const [pat, setPat] = useState('');
+  /** Pazar yeri formları (Trendyol/Hepsiburada/Etsy/Shopify): alan adı → değer */
+  const [shop, setShop] = useState<Record<string, string>>({});
+  const sf = (k: string) => shop[k] ?? '';
+  const setSf = (k: string, v: string) => setShop((p) => ({ ...p, [k]: v }));
   const [mail, setMail] = useState<MailForm>(EMPTY_MAIL);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -71,6 +75,12 @@ export function ConnectModal({
         setActive('shopier:new');
         return;
       }
+      const SHOP_FIELDS: Partial<Record<Platform, string[]>> = { trendyol: ['sellerId', 'apiKey', 'apiSecret'], hepsiburada: ['merchantId', 'username', 'password'], etsy: ['keystring'], shopify: ['shop', 'accessToken'] };
+      const shopFields = SHOP_FIELDS[platform];
+      if (shopFields && (active !== `${platform}:new` || shopFields.some((k) => !sf(k).trim()))) {
+        setActive(`${platform}:new`);
+        return;
+      }
       const isMail = PLATFORMS[platform].mode === 'mail';
       if (isMail && (active !== `${platform}:new` || !mail.user.trim())) {
         setActive(`${platform}:new`);
@@ -79,6 +89,11 @@ export function ConnectModal({
       let token: string | undefined;
       if (platform === 'telegram' && tg.apiId.trim() && tg.apiHash.trim()) token = JSON.stringify({ apiId: Number(tg.apiId.trim()), apiHash: tg.apiHash.trim() });
       if (platform === 'shopier') token = pat.trim();
+      if (shopFields) {
+        const cfg: Record<string, string> = {};
+        for (const [k, v] of Object.entries(shop)) if (v.trim()) cfg[k] = v.trim();
+        token = JSON.stringify(cfg);
+      }
       if (isMail) {
         const oauth = platform === 'outlook' || (platform === 'gmail' && mail.useOAuth);
         const cfg: Record<string, unknown> = { user: mail.user.trim(), pass: oauth ? undefined : mail.pass || undefined, clientId: oauth ? mail.clientId.trim() || undefined : undefined, clientSecret: oauth ? mail.clientSecret.trim() || undefined : undefined };
@@ -222,6 +237,69 @@ export function ConnectModal({
               </div>
             </div>
           </div>
+        )}
+
+        {(['trendyol', 'hepsiburada', 'etsy', 'shopify'] as Platform[]).map((p) =>
+          active === `${p}:new` ? (
+            <div className="pairbox" key={p}>
+              <div style={{ flexGrow: 1 }}>
+                <h3>{PLATFORMS[p].name}’{p === 'etsy' ? 'yi' : p === 'shopify' ? 'ı' : p === 'trendyol' ? 'u' : 'yı'} bağla</h3>
+                <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.5 }}>
+                  {p === 'trendyol' && (
+                    <>
+                      Trendyol Partner → <b>Hesap Bilgilerim → Entegrasyon Bilgileri</b>: Satıcı ID, API Key ve API Secret. Siparişler ve müşteri soruları sohbet olarak akar; sorulara buradan yanıt verirsin (yanıt Trendyol’a gider).
+                    </>
+                  )}
+                  {p === 'hepsiburada' && (
+                    <>
+                      Hepsiburada Satıcı Paneli → <b>Entegrasyon</b>: Merchant ID ile entegrasyon kullanıcı adı/şifresi. Siparişler ve müşteri soruları sohbet olarak akar; sorulara buradan yanıt verirsin.
+                    </>
+                  )}
+                  {p === 'etsy' && (
+                    <>
+                      etsy.com/developers’ta bir uygulama oluştur, <b>Keystring</b>’i gir; uygulamanın geri dönüş adresine <code>http://127.0.0.1:7788/oauth/callback</code> ekle. Bağlan deyince Etsy girişi açılır. Siparişler API’den; Etsy Mesajları API’de olmadığından tarayıcı oturumuyla okunur (deneysel).
+                    </>
+                  )}
+                  {p === 'shopify' && (
+                    <>
+                      Shopify yönetici → <b>Ayarlar → Uygulamalar → Uygulama geliştir</b>: read_orders, read_customers, read_fulfillments kapsamlarıyla Admin API erişim belirteci (shpat_…). Siparişler API’den; Inbox sohbetleri tarayıcı oturumuyla okunur (deneysel).
+                    </>
+                  )}
+                </p>
+                <div className="field" style={{ marginTop: 12, flexWrap: 'wrap' }}>
+                  {p === 'trendyol' && (
+                    <>
+                      <input value={sf('sellerId')} onChange={(e) => setSf('sellerId', e.target.value)} placeholder="Satıcı ID" autoComplete="off" />
+                      <input value={sf('apiKey')} onChange={(e) => setSf('apiKey', e.target.value)} placeholder="API Key" autoComplete="off" />
+                      <input value={sf('apiSecret')} onChange={(e) => setSf('apiSecret', e.target.value)} placeholder="API Secret" type="password" autoComplete="off" />
+                    </>
+                  )}
+                  {p === 'hepsiburada' && (
+                    <>
+                      <input value={sf('merchantId')} onChange={(e) => setSf('merchantId', e.target.value)} placeholder="Merchant ID" autoComplete="off" />
+                      <input value={sf('username')} onChange={(e) => setSf('username', e.target.value)} placeholder="Entegrasyon kullanıcı adı" autoComplete="off" />
+                      <input value={sf('password')} onChange={(e) => setSf('password', e.target.value)} placeholder="Şifre" type="password" autoComplete="off" />
+                    </>
+                  )}
+                  {p === 'etsy' && (
+                    <>
+                      <input value={sf('keystring')} onChange={(e) => setSf('keystring', e.target.value)} placeholder="Keystring (API key)" autoComplete="off" />
+                      <input value={sf('shopId')} onChange={(e) => setSf('shopId', e.target.value)} placeholder="Shop ID (isteğe bağlı)" autoComplete="off" />
+                    </>
+                  )}
+                  {p === 'shopify' && (
+                    <>
+                      <input value={sf('shop')} onChange={(e) => setSf('shop', e.target.value)} placeholder="magaza.myshopify.com" autoComplete="off" />
+                      <input value={sf('accessToken')} onChange={(e) => setSf('accessToken', e.target.value)} placeholder="Admin API erişim belirteci (shpat_…)" type="password" autoComplete="off" />
+                    </>
+                  )}
+                  <button className="btn lime b" onClick={() => add(p)} disabled={busy}>
+                    Bağlan
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null,
         )}
 
         {active === 'telegram:new' && (

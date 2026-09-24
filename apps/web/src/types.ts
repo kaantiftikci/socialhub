@@ -97,10 +97,10 @@ export const PLATFORMS: Record<Platform, { name: string; code: string; color: st
   icloud: { name: 'iCloud Mail', code: 'IC', color: '#3693F3', method: 'Tarayıcı girişi · iCloud web', available: true, mode: 'browser', category: 'mail' },
   imap: { name: 'Diğer e-posta', code: '@', color: '#4A4757', method: 'IMAP/SMTP · Yandex, Fastmail, kurumsal…', available: true, mode: 'mail', category: 'mail' },
   shopier: { name: 'Shopier', code: 'SH', color: '#1F2A44', method: 'Resmi API · sipariş takibi (PAT)', available: true, mode: 'token', category: 'shop' },
-  trendyol: { name: 'Trendyol', code: 'TY', color: '#F27A1A', method: 'Satıcı API · sipariş + soru-cevap', available: false, mode: 'token', category: 'shop' },
-  hepsiburada: { name: 'Hepsiburada', code: 'HB', color: '#FF6000', method: 'Satıcı API · sipariş', available: false, mode: 'token', category: 'shop' },
-  etsy: { name: 'Etsy', code: 'ET', color: '#F1641E', method: 'OAuth · sipariş + mesaj', available: false, mode: 'token', category: 'shop' },
-  shopify: { name: 'Shopify', code: 'SP', color: '#5E8E3E', method: 'Mağaza token’ı · sipariş', available: false, mode: 'token', category: 'shop' },
+  trendyol: { name: 'Trendyol', code: 'TY', color: '#F27A1A', method: 'Satıcı API · sipariş + müşteri soruları', available: true, mode: 'token', category: 'shop' },
+  hepsiburada: { name: 'Hepsiburada', code: 'HB', color: '#FF6000', method: 'Pazaryeri API · sipariş + müşteri soruları', available: true, mode: 'token', category: 'shop' },
+  etsy: { name: 'Etsy', code: 'ET', color: '#F1641E', method: 'Open API (OAuth) · sipariş; mesajlar tarayıcı oturumu', available: true, mode: 'token', category: 'shop', experimental: true },
+  shopify: { name: 'Shopify', code: 'SP', color: '#5E8E3E', method: 'Admin API belirteci · sipariş; Inbox tarayıcı oturumu', available: true, mode: 'token', category: 'shop', experimental: true },
   demo: { name: 'Demo', code: 'DM', color: '#8C889B', method: 'Örnek veri', available: true, mode: 'demo' },
 };
 

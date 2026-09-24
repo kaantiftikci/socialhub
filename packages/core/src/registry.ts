@@ -22,6 +22,10 @@ import { icloud } from './connectors/browser/icloud.js';
 import { slackStrategy } from './connectors/browser/slack.js';
 import { MailConnector, type MailConfig } from './connectors/mail.js';
 import { ShopierConnector } from './connectors/shopier.js';
+import { TrendyolConnector } from './connectors/trendyol.js';
+import { HepsiburadaConnector } from './connectors/hepsiburada.js';
+import { EtsyConnector } from './connectors/etsy.js';
+import { ShopifyConnector } from './connectors/shopify.js';
 import { MAIL_PLATFORMS } from './model.js';
 
 /** Hesap ↔ connector eşlemesi. Açılışta kayıtlı hesapları kaldırır, yenilerini oluşturur. */
@@ -51,7 +55,7 @@ export class Registry {
 
   async add(platform: Platform, opts: { token?: string; label?: string } = {}): Promise<Account> {
     // Tek hesaplı platformlar: ikinci kez "Bağlan" denirse kopya hesap açma, var olanı yeniden başlat
-    const SINGLE: Platform[] = ['whatsapp', 'telegram', 'slack', 'imessage', 'linkedin', 'x', 'instagram', 'messenger', 'shopier'];
+    const SINGLE: Platform[] = ['whatsapp', 'telegram', 'slack', 'imessage', 'linkedin', 'x', 'instagram', 'messenger', 'shopier', 'trendyol', 'hepsiburada', 'etsy', 'shopify'];
     const existing = SINGLE.includes(platform) ? this.list().find((a) => a.platform === platform) : undefined;
     if (existing) {
       if (opts.token) fs.writeFileSync(path.join(sessionDir(existing.id), 'token'), opts.token, { mode: 0o600 });
@@ -129,6 +133,23 @@ export class Registry {
         const tokenFile = path.join(sessionDir(account.id), 'token');
         const token = fs.existsSync(tokenFile) ? fs.readFileSync(tokenFile, 'utf8').trim() : '';
         c = new ShopierConnector(account, this.store, token);
+        break;
+      }
+      // Pazar yerleri: token dosyası JSON yapılandırma (Bağlan formundan); siparişler API'den, mesajlar (Etsy/Shopify) köprüden
+      case 'trendyol':
+      case 'hepsiburada':
+      case 'etsy':
+      case 'shopify': {
+        const tokenFile = path.join(sessionDir(account.id), 'token');
+        const cfg = fs.existsSync(tokenFile) ? fs.readFileSync(tokenFile, 'utf8').trim() : '';
+        c =
+          account.platform === 'trendyol'
+            ? new TrendyolConnector(account, this.store, cfg)
+            : account.platform === 'hepsiburada'
+              ? new HepsiburadaConnector(account, this.store, cfg)
+              : account.platform === 'etsy'
+                ? new EtsyConnector(account, this.store, cfg)
+                : new ShopifyConnector(account, this.store, cfg);
         break;
       }
       case 'gmail': {
