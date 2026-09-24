@@ -39,6 +39,15 @@ async function main(): Promise<void> {
   bus.log('info', `Veri dizini: ${DATA_DIR}${DEMO_MODE ? '  (DEMO MODU)' : ''}`);
 
   const server = createServer(store, registry, PORT);
+  // Aynı anda ikinci bir çekirdek (uygulama iki kez açıldı vb.) aynı oturum dosyalarını kullanıp WhatsApp'ın Signal
+  // oturumunu bozuyordu: port doluysa connector'ları hiç başlatmadan çık
+  await new Promise<void>((resolve, reject) => {
+    server.once('listening', () => resolve());
+    server.once('error', reject);
+  }).catch((e: NodeJS.ErrnoException) => {
+    bus.log('error', e.code === 'EADDRINUSE' ? `Port ${PORT} dolu: başka bir Kavşak çekirdeği çalışıyor, bu kopya kapanıyor` : `Sunucu başlatılamadı: ${e.message}`);
+    process.exit(e.code === 'EADDRINUSE' ? 0 : 1);
+  });
 
   if (DEMO_MODE) {
     const existing = registry.list().find((a) => a.platform === 'demo');
