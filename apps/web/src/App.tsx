@@ -5,7 +5,7 @@ import { Avatar, Chip, Icon, Logo, Resizer, SyncBar, Tag, ago, fmtTime, loadPane
 import { Conversation } from './Conversation';
 import { ConnectModal } from './Connect';
 import { Focus } from './Focus';
-import { isTauri, notify as desktopNotify, onDesktopEvent, playPing, SOUNDS, getSound, getPlatformSound, setPlatformSound, setBadge, windowFocused, coreInfo } from './desktop';
+import { isTauri, notify as desktopNotify, onDesktopEvent, playPing, SOUNDS, getPlatformSound, getPlatformTone, setPlatformSound, setPlatformTone, setBadge, windowFocused, coreInfo } from './desktop';
 import { PROFILE_NAME, STATIC_DEMO } from './profile';
 import { leaveDemoPanel } from './demo-session';
 
@@ -60,10 +60,36 @@ export default function App() {
   const [pSounds, setPSounds] = useState<Record<string, string>>({});
   const [appSettingsOpen, setAppSettingsOpen] = useState(false);
   const appSettingsP = useClosing(appSettingsOpen || null);
-  const changePlatformSound = (platform: string, id: string) => {
+  const changePlatformTone = (platform: string, id: string) => {
+    setPlatformTone(platform, id);
+    const cur = pSounds[platform] ?? getPlatformSound(platform);
+    if (cur !== 'off') {
+      setPlatformSound(platform, id);
+      setPSounds((p) => ({ ...p, [platform]: id }));
+    }
+    playPing(id, true);
+  };
+  const changePlatformNotify = (platform: string, on: boolean) => {
+    const tone = getPlatformTone(platform);
+    const id = on ? tone : 'off';
     setPlatformSound(platform, id);
     setPSounds((p) => ({ ...p, [platform]: id }));
-    if (id && id !== 'off') playPing(id, true);
+    if (on) playPing(tone, true);
+  };
+  const [showDetails, setShowDetailsState] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('kavsak.details') !== 'off';
+    } catch {
+      return true;
+    }
+  });
+  const setShowDetails = (v: boolean) => {
+    setShowDetailsState(v);
+    try {
+      localStorage.setItem('kavsak.details', v ? 'on' : 'off');
+    } catch {
+      /* yok */
+    }
   };
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<Array<{ message: Message; chat: Chat }>>([]);
@@ -991,6 +1017,9 @@ export default function App() {
                 onComplete={() => complete(current.id)}
                 snoozedUntil={snoozes[current.id]}
                 onUnsnooze={() => unsnooze(current.id)}
+                onTags={(tags) => api.setTags(current.id, tags).then((c) => setChats((p) => new Map(p).set(c.id, c))).catch((e) => notify(e.message, true))}
+                showDetails={isMobile ? false : showDetails}
+                onToggleDetails={() => setShowDetails(!showDetails)}
                 onBack={isMobile ? () => setSelected(null) : undefined}
                 typing={typing[current.id] ? typing[current.id].name ?? '' : null}
                 olderBusy={olderBusy}
@@ -1033,6 +1062,10 @@ export default function App() {
                     setOlderBusy(false);
                   }
                 }}
+                onOpenChat={(c) => {
+                  setChats((p) => new Map(p).set(c.id, c));
+                  setSelected(c.id);
+                }}
               />
             ) : (
               <section className="conv">
@@ -1070,7 +1103,8 @@ export default function App() {
               <div className="app-set-list">
                 {accounts.map((a) => {
                   const stored = pSounds[a.platform] ?? getPlatformSound(a.platform);
-                  const cur = stored || getSound();
+                  const notifyOn = stored !== 'off';
+                  const tone = getPlatformTone(a.platform);
                   const handle = handleOf(a);
                   return (
                     <div key={a.id} className="app-set-card">
@@ -1081,12 +1115,26 @@ export default function App() {
                           {handle && <span className="sub">{handle}</span>}
                         </span>
                       </div>
-                      <div className="tones" role="radiogroup" aria-label={`${PLATFORMS[a.platform].name} zil sesi`}>
-                        {[...SOUNDS, { id: 'off', name: 'Sessiz' }].map((sn) => (
-                          <button key={sn.id} type="button" className={cur === sn.id ? 'on' : ''} aria-checked={cur === sn.id} role="radio" onClick={() => changePlatformSound(a.platform, sn.id)}>
-                            {sn.name}
+                      <div className="pref-block">
+                        <span className="k">Zil sesi</span>
+                        <div className="tones" role="radiogroup" aria-label={`${PLATFORMS[a.platform].name} zil sesi`}>
+                          {SOUNDS.map((sn) => (
+                            <button key={sn.id} type="button" className={tone === sn.id ? 'on' : ''} aria-checked={tone === sn.id} role="radio" onClick={() => changePlatformTone(a.platform, sn.id)}>
+                              {sn.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="pref-block">
+                        <span className="k">Bildirim tercihi</span>
+                        <div className="tones" role="radiogroup" aria-label={`${PLATFORMS[a.platform].name} bildirim`}>
+                          <button type="button" className={notifyOn ? 'on' : ''} aria-checked={notifyOn} role="radio" onClick={() => changePlatformNotify(a.platform, true)}>
+                            Açık
                           </button>
-                        ))}
+                          <button type="button" className={!notifyOn ? 'on' : ''} aria-checked={!notifyOn} role="radio" onClick={() => changePlatformNotify(a.platform, false)}>
+                            Kapalı
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );

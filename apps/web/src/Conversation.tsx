@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
 import { API_BASE, mediaUrl } from './desktop';
-import { PLATFORMS, type Attachment, type Chat, type DraftResult, type Message } from './types';
-import { useClosing, Avatar, Chip, Icon, Tag, fmtDay, fmtStamp, fmtTime } from './ui';
+import { DEFAULT_TAGS, PLATFORMS, TAG_COLORS, type Attachment, type Chat, type DraftResult, type Message } from './types';
+import { useClosing, Avatar, Chip, Icon, Resizer, Tag, fmtDay, fmtStamp, fmtTime } from './ui';
 
 type Tone = 'default' | 'short' | 'formal' | 'en';
 
@@ -11,8 +11,12 @@ export function Conversation({
   messages,
   ai,
   notify,
+  onTags,
   onSnooze,
   onComplete,
+  showDetails = true,
+  onToggleDetails,
+  onOpenChat,
   onLoadOlder,
   hasOlder = false,
   olderBusy = false,
@@ -25,11 +29,15 @@ export function Conversation({
   messages: Message[];
   ai: boolean;
   notify: (t: string, err?: boolean) => void;
+  onTags: (tags: string[]) => void;
   onSnooze: () => void;
   onComplete: () => void;
   /** Ertelenmişse ne zamana kadar; geri alma */
   snoozedUntil?: number;
   onUnsnooze?: () => void;
+  showDetails?: boolean;
+  onToggleDetails?: () => void;
+  onOpenChat?: (c: Chat) => void;
   /** Depodaki daha eski mesajları (100'er) yükle */
   onLoadOlder?: () => void | Promise<void>;
   hasOlder?: boolean;
@@ -49,6 +57,9 @@ export function Conversation({
   const [drafting, setDrafting] = useState(false);
   const [sending, setSending] = useState(false);
   const [tone, setTone] = useState<Tone>('default');
+  const [tagInput, setTagInput] = useState('');
+  const [addingTag, setAddingTag] = useState(false);
+  const [remind, setRemind] = useState(true);
   const [lightbox, setLightbox] = useState<Attachment | null>(null);
   const lightboxP = useClosing(lightbox);
   useEffect(() => setLightbox(null), [chat.id]);
@@ -59,6 +70,7 @@ export function Conversation({
   const chatRef = useRef<string | undefined>(undefined);
   const heightRef = useRef(0);
   const platform = PLATFORMS[chat.platform];
+  const role = profileRole(chat);
   /** E-posta kanalları: balon yerine ileti kartları ve e-posta yanıt alanı */
   const isMail = platform.category === 'mail';
   const [uploading, setUploading] = useState<string | null>(null);
@@ -139,6 +151,16 @@ export function Conversation({
   const groups = useMemo(() => groupMessages(shown), [shown]);
   const lastIncoming = [...messages].reverse().find((m) => !m.fromMe);
   const needsReply = !!lastIncoming && messages[messages.length - 1]?.id === lastIncoming.id;
+  const [mediaOpen, setMediaOpen] = useState(false);
+  const mediaP = useClosing(mediaOpen || null);
+  const detailsP = useClosing(showDetails || null);
+  useEffect(() => setMediaOpen(false), [chat.id]);
+  const allShared = useMemo(() => {
+    const out: Array<{ att: Attachment; m: Message }> = [];
+    for (const m of [...messages].reverse()) for (const att of m.attachments ?? []) out.push({ att, m });
+    return out;
+  }, [messages]);
+  const files = useMemo(() => allShared.slice(0, 4), [allShared]);
 
   async function makeDraft(t: Tone = tone) {
     setTone(t);
@@ -191,17 +213,25 @@ export function Conversation({
           <span className="avwrap">
             <Avatar name={chat.name} size={40} url={chat.avatarUrl} />
           </span>
-          <div style={{ flexGrow: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          <div className="conv-id">
+            <div className="conv-id-top">
               <h2 title={chat.name}>{chat.name}</h2>
               {chat.tags.slice(0, 1).map((t) => (
                 <Tag key={t} name={t} />
               ))}
             </div>
             <span className="sub">
-              <Chip platform={chat.platform} size={15} />
-              {platform.name}
-              {typing != null ? <span className="typing-text"> · {typing ? `${typing.split(' ')[0]} yazıyor` : 'yazıyor'}<span className="tdots"><i /><i /><i /></span></span> : chat.kind !== 'direct' ? ` · ${chat.kind === 'group' ? 'grup' : 'kanal'}` : ' · sohbet'}
+              <Chip platform={chat.platform} size={16} />
+              <span className="meta">{platform.name}</span>
+              <span className="sep" aria-hidden="true" />
+              {typing != null ? (
+                <span className="typing-text">
+                  {typing ? `${typing.split(' ')[0]} yazıyor` : 'yazıyor'}
+                  <span className="tdots"><i /><i /><i /></span>
+                </span>
+              ) : (
+                <span className="meta">{chat.kind === 'group' ? 'Grup' : chat.kind === 'channel' ? 'Kanal' : 'Sohbet'}</span>
+              )}
             </span>
           </div>
           <button className={`btn icon b b2 ${search !== null ? 'on' : ''}`} onClick={() => setSearch(search === null ? '' : null)} title="Sohbette ara" aria-label="Ara">
@@ -219,6 +249,11 @@ export function Conversation({
           <button className="btn soft b b2" onClick={onComplete} title="Okundu olarak işaretle">
             <Icon name="check" size={15} sw={2} /> <span className="lbl">Tamamla</span> <span className="kbd lbl">E</span>
           </button>
+          {onToggleDetails && !showDetails && (
+            <button className="btn icon b b2" onClick={onToggleDetails} title="Ayrıntı panelini göster" aria-label="Ayrıntı paneli">
+              <Icon name="panel" size={15} />
+            </button>
+          )}
         </header>
         {snoozedUntil && onUnsnooze && (
           <div className="snooze-banner" role="status">
@@ -452,9 +487,401 @@ export function Conversation({
       </section>
 
 
+      {detailsP.value && (
+      <>
+      <Resizer pane="ctx" sign={-1} />
+      <aside className={`ctx ${detailsP.closing ? 'closing' : ''}`} aria-label="Kişi ayrıntıları">
+        <div className="ctx-bar">
+          {onToggleDetails && (
+            <button className="btn ghost xs icon b" onClick={onToggleDetails} title="Ayrıntı panelini gizle" aria-label="Paneli kapat">
+              <Icon name="panel" size={15} />
+            </button>
+          )}
+        </div>
+        <div className="profile">
+          <span className="avwrap">
+            <Avatar name={chat.name} size={86} url={chat.avatarUrl} />
+            <Chip platform={chat.platform} size={22} ring="#f3f2f7" />
+          </span>
+          <span className="name">{chat.name}</span>
+          {role && (role.href ? <a className="role" href={role.href} target="_blank" rel="noreferrer">{role.text}</a> : <span className="role">{role.text}</span>)}
+          <span className="sub">
+            {platform.name}
+            {' · '}
+            {chat.kind === 'group' ? 'grup' : chat.kind === 'channel' ? 'kanal' : 'sohbet'}
+          </span>
+        </div>
+        {chat.platform === 'shopier' && chat.meta?.order ? <OrderPanel chat={chat} notify={notify} /> : null}
+
+        <div className="qacts">
+          <button className="b b2" onClick={() => notify('Notlar yakında')}>
+            <Icon name="pen" size={16} /> Not ekle
+          </button>
+          <button className="b b2" onClick={onSnooze}>
+            <Icon name="bell" size={16} /> Hatırlat
+          </button>
+          <button className="go b" onClick={onComplete}>
+            <Icon name="check" size={16} sw={2} /> Tamamla
+          </button>
+        </div>
+
+        <div className="card sum">
+          <span className="h">
+            <span className="sum-ic"><Icon name="sparkle" size={13} color="#6C47FF" sw={2} /></span>
+            Özet
+            {draft && draft.summary.length > 0 && <span className="when">{fmtTime(Date.now())}</span>}
+          </span>
+          {draft && draft.summary.length > 0 ? (
+            <ul>
+              {draft.summary.map((s, i) => (
+                <li key={i}>{s}</li>
+              ))}
+            </ul>
+          ) : (
+            <span className="empty-sum">{ai ? 'Taslak yaz deyince sohbetin özeti burada görünür.' : 'Özet için AI anahtarı gerekir.'}</span>
+          )}
+        </div>
+
+        {draft && draft.actions.length > 0 && (
+          <div className="ctx-sec">
+            <span className="label">Aksiyonlar</span>
+            <div className="todos">
+              {draft.actions.map((a, i) => (
+                <label key={i} className="todo">
+                  <input type="checkbox" /> <span>{a}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="ctx-sec">
+          <span className="label">Etiketler</span>
+          <div className="ctx-tags">
+            {chat.tags.map((t) => (
+              <button key={t} type="button" className="ctx-tag b" title="Etiketi kaldır" onClick={() => onTags(chat.tags.filter((x) => x !== t))}>
+                {t === 'fırsat' ? <Icon name="sparkle" size={11} color={TAG_COLORS[t][1]} sw={2} /> : <span className="dot" style={{ background: TAG_COLORS[t]?.[1] ?? '#8c889b' }} />}
+                {t}
+              </button>
+            ))}
+            <button type="button" className={`ctx-tag add b ${addingTag ? 'on' : ''}`} aria-label="Etiket ekle" title="Etiket ekle" onClick={() => setAddingTag((v) => !v)}>
+              +
+            </button>
+          </div>
+          {addingTag && (
+            <div className="tagedit">
+              <input
+                autoFocus
+                placeholder="etiket"
+                value={tagInput}
+                onChange={(e) => setTagInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && tagInput.trim()) {
+                    onTags([...new Set([...chat.tags, tagInput.trim().toLowerCase()])]);
+                    setTagInput('');
+                    setAddingTag(false);
+                  }
+                }}
+              />
+              {DEFAULT_TAGS.filter((t) => !chat.tags.includes(t)).map((t) => (
+                <button key={t} className="tag-suggest b" onClick={() => onTags([...chat.tags, t])} title={`${t} etiketini ekle`}>
+                  + {t}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="ctx-sec">
+          <span className="label">Kanallar</span>
+          <div className="chanlist">
+            <div className="idrow">
+              <Chip platform={chat.platform} size={18} />
+              <span>{platform.name}</span>
+              <span className="m">{chat.lastMessageAt ? fmtTime(chat.lastMessageAt) : ''}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="ctx-remind">
+          <Icon name="bell" size={16} color="#6b6878" />
+          <span>2 gün yanıt yoksa hatırlat</span>
+          <button type="button" role="switch" aria-checked={remind} aria-label="Takip hatırlatıcısı" className={`sw ${remind ? 'on' : ''}`} onClick={() => setRemind(!remind)}>
+            <span />
+          </button>
+        </div>
+
+        {chat.kind === 'group' && (chat.participants?.length ?? 0) > 0 && (
+          <div className="ctx-sec">
+            <span className="label">Üyeler · {chat.participants!.length}</span>
+            <div className="members">
+              {chat.participants!.map((p) => (
+                <button
+                  key={p.id}
+                  className="member b"
+                  title={onOpenChat && PLATFORMS[chat.platform].mode !== 'mail' ? 'Özelden yaz' : p.handle ?? p.name}
+                  onClick={() => {
+                    if (!onOpenChat) return;
+                    api
+                      .openChat(chat.accountId, p)
+                      .then((c) => onOpenChat(c))
+                      .catch((e) => notify((e as Error).message, true));
+                  }}
+                >
+                  <Avatar name={p.name} size={28} url={p.avatarUrl} />
+                  <span style={{ minWidth: 0 }}>
+                    <span className="nm">
+                      {p.name}
+                      {p.admin && <span className="adm">yönetici</span>}
+                    </span>
+                    {p.handle && p.handle !== p.name && <span className="hd">{p.handle}</span>}
+                  </span>
+                  <Icon name="arrow" size={13} />
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {chat.kind === 'direct' && chat.participants && chat.participants.length > 1 && PLATFORMS[chat.platform].mode === 'mail' && (
+          <div className="ctx-sec">
+            <span className="label">Katılımcılar</span>
+            <div className="members">
+              {chat.participants.map((p) => (
+                <div key={p.id} className="member">
+                  <Avatar name={p.name} size={28} url={p.avatarUrl} />
+                  <span style={{ minWidth: 0 }}>
+                    <span className="nm">{p.name}</span>
+                    {p.handle && p.handle !== p.name && <span className="hd">{p.handle}</span>}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {files.length > 0 && (
+          <div className="ctx-sec">
+            <span className="label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              Paylaşılanlar
+              <span style={{ color: 'var(--text3)', fontWeight: 400 }}>{allShared.length}</span>
+              {allShared.length > 4 && (
+                <button className="btn ghost xs icon b" style={{ marginLeft: 'auto', transform: 'rotate(-90deg)' }} onClick={() => setMediaOpen(true)} title={`Tümünü büyük göster (${allShared.length})`} aria-label="Tüm paylaşılanlar">
+                  <Icon name="chev" size={13} sw={2} />
+                </button>
+              )}
+            </span>
+            <div className="files" style={{ marginTop: 8 }}>
+              {files.map(({ att, m }, i) => (
+                <div
+                  key={i}
+                  className="file"
+                  title={att.name}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => {
+                    if (att.url || att.link) setLightbox(att);
+                    else notify('Bu ek indirilemedi (medya kaydı yok)', true);
+                  }}
+                  onKeyDown={(e) => e.key === 'Enter' && (e.currentTarget as HTMLElement).click()}
+                >
+                  <span className="ic" style={att.kind === 'image' || att.kind === 'video' ? { background: 'var(--v-soft)', color: 'var(--v-txt)' } : { background: '#fdecea', color: '#c2261a' }}>
+                    {att.url ? (
+                      <img src={abs(att.url)} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(e) => (e.currentTarget.style.display = 'none')} />
+                    ) : att.kind === 'image' ? (
+                      <Icon name="image" size={15} color="#4526C9" />
+                    ) : att.kind === 'video' ? (
+                      <Icon name="play" size={15} color="#4526C9" />
+                    ) : att.mime?.includes('pdf') ? (
+                      'PDF'
+                    ) : (
+                      <Icon name="file" size={15} color="#C2261A" />
+                    )}
+                  </span>
+                  <span style={{ minWidth: 0 }}>
+                    <span className="nm">{att.name ?? attLabel(att.kind)}</span>
+                    <span className="sz">{att.size ? fmtSize(att.size) : fmtTime(m.ts)}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </aside>
+      </>
+      )}
+      {mediaP.value && (
+        <div className={`overlay ${mediaP.closing ? 'closing' : ''}`} onClick={() => setMediaOpen(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Paylaşılanlar" style={{ gap: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <h2 style={{ fontSize: 22 }}>Paylaşılanlar</h2>
+              <span className="pill">{allShared.length}</span>
+              <span style={{ fontSize: 12.5, color: 'var(--text3)' }}>Şu ana kadar yüklenen mesajlardaki ekler · {chat.name}</span>
+              <span style={{ flexGrow: 1 }} />
+              <button className="btn icon b b2" onClick={() => setMediaOpen(false)} aria-label="Kapat">
+                <Icon name="x" size={15} sw={2} />
+              </button>
+            </div>
+            <div className="media-grid">
+              {allShared.map(({ att, m }, i) => (
+                <div
+                  key={i}
+                  className="tile"
+                  role="button"
+                  tabIndex={0}
+                  title={att.name}
+                  onClick={() => {
+                    if (att.url || att.link) setLightbox(att);
+                    else notify('Bu ek indirilemedi (medya kaydı yok)', true);
+                  }}
+                  onKeyDown={(e) => e.key === 'Enter' && (e.currentTarget as HTMLElement).click()}
+                >
+                  {att.url ? (
+                    <img src={abs(att.url)} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(e) => (e.currentTarget.style.display = 'none')} />
+                  ) : (
+                    <span className="big">{att.kind === 'video' ? <Icon name="play" size={28} /> : att.mime?.includes('pdf') ? 'PDF' : <Icon name="file" size={28} />}</span>
+                  )}
+                  <span className="cap">
+                    <span className="nm">{att.name ?? attLabel(att.kind)}</span>
+                    <span className="sz">{fmtStamp(m.ts)}{att.size ? ` · ${fmtSize(att.size)}` : ''}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       {lightboxP.value && <Lightbox att={lightboxP.value} closing={lightboxP.closing} onClose={() => setLightbox(null)} />}
     </>
   );
+}
+
+interface OrderMeta {
+  id: string;
+  status: string;
+  paymentStatus?: string;
+  dateCreated?: string;
+  currency: string;
+  totals?: { subtotal?: string; shipping?: string; discount?: string; total?: string };
+  note?: string;
+  items: Array<{ title: string; quantity: number; total: string; type?: string; selection?: string[] }>;
+  shipping: { name: string; phone?: string; email?: string; address?: string };
+  fulfillments: Array<{ status: string; company?: string; trackingNumber?: string; trackingUrl?: string; date?: string }>;
+  refunds: Array<{ type: string; status: string; total: string; date?: string }>;
+}
+const CARRIERS: Array<[string, string]> = [
+  ['yurtici', 'Yurtiçi'], ['aras', 'Aras'], ['mng', 'MNG'], ['ptt', 'PTT'], ['surat', 'Sürat'], ['hepsijet', 'HepsiJET'], ['ups', 'UPS'], ['dhl', 'DHL'], ['fedex', 'FedEx'], ['tnt', 'TNT'], ['pts', 'PTS'], ['aramex', 'Aramex'], ['interGlobal', 'InterGlobal'], ['other', 'Diğer'],
+];
+
+/** Shopier sipariş kartı: durum, ürünler, tutar, adres, kargo; kapatma/kargo formu */
+function OrderPanel({ chat, notify }: { chat: Chat; notify: (t: string, err?: boolean) => void }) {
+  const o = chat.meta!.order as OrderMeta;
+  const [company, setCompany] = useState('yurtici');
+  const [tracking, setTracking] = useState('');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const open = o.status !== 'fulfilled';
+  const digital = o.items.every((i) => i.type === 'digital');
+  const cur = o.currency === 'TRY' ? '₺' : o.currency;
+  const fmt = (v?: string) => (v ? `${String(v).replace('.', ',')} ${cur}` : '—');
+  const submit = () => {
+    setBusy(true);
+    api
+      .action(chat.id, { kind: 'fulfill', productType: digital ? 'digital' : 'physical', shippingCompany: digital ? undefined : company, trackingNumber: digital ? undefined : tracking.trim() || undefined, note: note.trim() || (digital ? 'Dijital teslimat yapıldı' : undefined) })
+      .then(() => notify('Sipariş kapatıldı'))
+      .catch((e) => notify((e as Error).message, true))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className="order">
+      <div className="order-head">
+        <span className={`order-status ${open ? 'open' : 'done'}`}>{open ? 'Açık sipariş' : 'Kapatıldı'}</span>
+        <span className="order-total">{fmt(o.totals?.total)}</span>
+      </div>
+      <div className="order-items">
+        {o.items.map((it, i) => (
+          <div key={i} className="order-item">
+            <span className="q">{it.quantity}×</span>
+            <span className="t">
+              {it.title}
+              {it.selection?.length ? <span className="sel"> · {it.selection.join(' / ')}</span> : null}
+            </span>
+            <span className="p">{fmt(it.total)}</span>
+          </div>
+        ))}
+      </div>
+      <div className="order-rows">
+        {o.totals?.shipping && o.totals.shipping !== '0' && o.totals.shipping !== '0.00' ? <Row k="Kargo" v={fmt(o.totals.shipping)} /> : null}
+        {o.totals?.discount && o.totals.discount !== '0' && o.totals.discount !== '0.00' ? <Row k="İndirim" v={'−' + fmt(o.totals.discount)} /> : null}
+        <Row k="Tarih" v={o.dateCreated ? new Date(o.dateCreated).toLocaleString('tr-TR', { dateStyle: 'medium', timeStyle: 'short' }) : '—'} />
+        <Row k="Alıcı" v={o.shipping.name} />
+        {o.shipping.phone ? <Row k="Telefon" v={o.shipping.phone} href={`tel:${o.shipping.phone}`} /> : null}
+        {o.shipping.email ? <Row k="E-posta" v={o.shipping.email} href={`mailto:${o.shipping.email}`} /> : null}
+        {o.shipping.address ? <Row k="Adres" v={o.shipping.address} /> : null}
+        {o.note ? <Row k="Not" v={o.note} /> : null}
+        {o.fulfillments.map((f, i) => (
+          <Row key={i} k={f.status === 'shipped' ? 'Kargo' : 'Gönderi'} v={`${f.company ?? ''}${f.trackingNumber ? ' · ' + f.trackingNumber : ''}`.trim() || (f.status === 'shipped' ? 'gönderildi' : 'hazırlanıyor')} href={f.trackingUrl} />
+        ))}
+        {o.refunds.map((r, i) => (
+          <Row key={'r' + i} k="İade" v={`${r.type === 'full' ? 'tam' : 'kısmi'} ${fmt(r.total)} · ${r.status === 'succeeded' ? 'tamamlandı' : r.status === 'failed' ? 'başarısız' : 'bekliyor'}`} />
+        ))}
+      </div>
+      {open && (
+        <div className="order-form">
+          <span className="label">{digital ? 'Teslim edildi olarak kapat' : 'Kargoya ver ve kapat'}</span>
+          {!digital && (
+            <div style={{ display: 'flex', gap: 6 }}>
+              <select value={company} onChange={(e) => setCompany(e.target.value)}>
+                {CARRIERS.map(([k, n]) => (
+                  <option key={k} value={k}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+              <input value={tracking} onChange={(e) => setTracking(e.target.value)} placeholder="takip no" />
+            </div>
+          )}
+          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={digital ? 'Teslimat notu (zorunlu)' : 'Not (isteğe bağlı)'} />
+          <button className="btn primary sm b b2" disabled={busy || (digital && !note.trim())} onClick={submit}>
+            <Icon name="check" size={14} sw={2} color="#fff" /> {digital ? 'Teslim edildi' : 'Kargoya verildi'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+function Row({ k, v, href }: { k: string; v: string; href?: string }) {
+  return (
+    <div className="order-row">
+      <span className="k">{k}</span>
+      {href ? (
+        <a href={href} target="_blank" rel="noreferrer">
+          {v}
+        </a>
+      ) : (
+        <span>{v}</span>
+      )}
+    </div>
+  );
+}
+
+function profileRole(chat: Chat): { text: string; href?: string } | undefined {
+  const p = chat.platform;
+  const other = chat.kind === 'direct' ? chat.participants?.find((x) => x.id !== 'me') : undefined;
+  if (p === 'whatsapp' && chat.kind === 'direct') {
+    const num = chat.handle ?? (chat.remoteId.endsWith('@s.whatsapp.net') ? '+' + chat.remoteId.split('@')[0] : undefined);
+    if (num) return { text: num, href: `https://wa.me/${num.replace(/\D/g, '')}` };
+  } else if (p === 'instagram' || p === 'x' || p === 'linkedin' || p === 'slack') {
+    const value = chat.handle || other?.handle;
+    if (value) return { text: value, href: chat.link };
+  } else if (p === 'telegram' && chat.handle) {
+    return { text: chat.handle, href: chat.handle.startsWith('@') ? `https://t.me/${chat.handle.slice(1)}` : undefined };
+  } else if (p === 'imessage') {
+    return { text: chat.remoteId };
+  } else if (PLATFORMS[p].mode === 'mail' && chat.handle) {
+    return { text: chat.handle, href: `mailto:${chat.handle}` };
+  }
+  if (chat.kind === 'group' && chat.participants?.length) return { text: `${chat.participants.length} üye` };
+  if (chat.handle && chat.handle !== chat.name) return { text: chat.handle };
+  return undefined;
 }
 
 
