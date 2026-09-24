@@ -125,6 +125,23 @@ export function getSound(): string {
     return 'cinlama';
   }
 }
+/** Uygulama başına ses: '' = genel ayar, 'off' = kapalı, yoksa ses kimliği */
+export function getPlatformSound(platform: string): string {
+  try {
+    return localStorage.getItem(`kavsak.sound.${platform}`) ?? '';
+  } catch {
+    return '';
+  }
+}
+export function setPlatformSound(platform: string, id: string): void {
+  try {
+    if (id) localStorage.setItem(`kavsak.sound.${platform}`, id);
+    else localStorage.removeItem(`kavsak.sound.${platform}`);
+  } catch {
+    /* yok */
+  }
+}
+
 export function setSound(id: string): void {
   try {
     localStorage.setItem('kavsak.sound', id);

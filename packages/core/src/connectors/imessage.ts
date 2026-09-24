@@ -167,19 +167,57 @@ export class IMessageConnector extends BaseConnector {
   }
 
   async sendText(remoteChatId: string, text: string): Promise<{ remoteId: string }> {
-    // remoteChatId = chat_guid (ör. "iMessage;-;+905xxxxxxxxx", "iMessage;+;chat1234…"; macOS 26: "any;-;+905…" — hizmet chat.service_name'de)
+    await this.deliver(remoteChatId, { text });
+    const id = `local-${Date.now()}`;
+    this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent' });
+    return { remoteId: id };
+  }
+
+  /**
+   * Dosya gönder: `send POSIX file "…" to chat id "…"`. Mesajlar dosyayı gönderim anında okur; çekirdeğin outbox dosyası
+   * 10 dk sonra silindiğinden önce oturum klasörüne kopyalanır (im-out:<ad> vekili sohbette gösterir). Mesajlar metin+dosyayı
+   * tek iletide gönderemez: altyazı ayrı metin olarak gider. Yoklama aynı iletiyi guid ile getirince yerel kayıtlar düşer
+   * (ek satırının metni boş → yerel ek kaydının metni de boş tutulur ki dropLocalDuplicates eşleştirsin).
+   */
+  async sendMedia(remoteChatId: string, file: { path: string; name: string; mime: string; size: number }, caption?: string): Promise<{ remoteId: string }> {
+    if (!fs.existsSync(file.path)) throw new Error('Gönderilecek dosya bulunamadı');
+    const dir = path.join(sessionDir(this.account.id), 'media');
+    fs.mkdirSync(dir, { recursive: true });
+    const local = `out-${Date.now()}-${path.basename(file.name).replace(/[^\w.\-çğıöşüÇĞİÖŞÜ ]+/g, '_')}`;
+    const copy = path.join(dir, local);
+    fs.copyFileSync(file.path, copy);
+    fs.writeFileSync(copy + '.type', file.mime || mimeFromName(file.name));
+    await this.deliver(remoteChatId, { file: copy });
+    // Altyazı hemen ardından sendText ile gider; aynı milisaniyede aynı "local-<ts>" kimliği üretilmesin
+    const id = `local-${Date.now()}f`;
+    const proxied = `${this.mediaBase()}${encodeURIComponent('im-out:' + local)}`;
+    const kind = attachmentKind(file.mime, file.name);
+    this.upsertMessage({
+      remoteChatId,
+      remoteId: id,
+      senderId: 'me',
+      senderName: 'Ben',
+      fromMe: true,
+      text: '',
+      ts: Date.now(),
+      status: 'sent',
+      attachments: [{ kind, name: file.name, mime: file.mime, size: file.size, ...(kind === 'image' ? { url: proxied, link: proxied } : { link: proxied }) }],
+    });
+    if (caption) await this.sendText(remoteChatId, caption);
+    return { remoteId: id };
+  }
+
+  /** remoteChatId = chat_guid (ör. "iMessage;-;+905xxxxxxxxx", "iMessage;+;chat1234…"; macOS 26: "any;-;+905…" — hizmet chat.service_name'de) */
+  private async deliver(remoteChatId: string, payload: { text: string } | { file: string }): Promise<void> {
     const isGroup = remoteChatId.includes(';+;');
-    const esc = (s: string) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    let service = remoteChatId.startsWith('SMS;') ? 'SMS' : 'iMessage';
+    let service: 'SMS' | 'iMessage' = remoteChatId.startsWith('SMS;') ? 'SMS' : 'iMessage';
     try {
       const r = this.db?.prepare('SELECT service_name AS s FROM chat WHERE guid = ?').get(remoteChatId) as { s: string | null } | undefined;
       if (r?.s === 'SMS' || r?.s === 'RCS') service = 'SMS';
     } catch {
       /* eski şema */
     }
-    const byChat = `tell application "Messages"\n send "${esc(text)}" to chat id "${esc(remoteChatId)}"\nend tell`;
-    const byBuddy = (svc: string) =>
-      `tell application "Messages"\n set svc to 1st account whose service type = ${svc}\n set tgt to participant "${esc(remoteChatId.split(';').pop() ?? '')}" of svc\n send "${esc(text)}" to tgt\nend tell`;
+    const { byChat, byBuddy } = imessageScripts(remoteChatId, payload, service);
     const run = (script: string) =>
       new Promise<void>((resolve, reject) => {
         execFile('osascript', ['-e', script], (err, _out, stderr) => (err ? reject(new Error(stderr || err.message)) : resolve()));
@@ -190,11 +228,8 @@ export class IMessageConnector extends BaseConnector {
       await run(byChat);
     } catch (e) {
       if (isGroup) throw e;
-      await run(byBuddy(service));
+      await run(byBuddy);
     }
-    const id = `local-${Date.now()}`;
-    this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent' });
-    return { remoteId: id };
   }
 
   /** Kişi adları: AddressBook veritabanı okunabiliyorsa numaradan/e-postadan isim çöz. */
@@ -330,6 +365,14 @@ export class IMessageConnector extends BaseConnector {
    * HEIC → JPEG (sips), caf/amr/aiff sesler → mp3 (ffmpeg varsa); dönüştürülenler oturum klasöründe önbelleklenir.
    */
   async fetchMedia(u: string): Promise<{ body: Buffer; type: string } | undefined> {
+    // "im-out:<ad>": Kavşak'tan gönderilen dosyanın oturum klasöründeki kopyası (yoklama gerçek eki getirene dek)
+    const out = u.match(/^im-out:(.+)$/);
+    if (out) {
+      const file = path.join(sessionDir(this.account.id), 'media', path.basename(out[1]));
+      if (!fs.existsSync(file)) throw new Error('gönderilen dosya kopyası yok');
+      const type = fs.existsSync(file + '.type') ? fs.readFileSync(file + '.type', 'utf8') : mimeFromName(file);
+      return { body: fs.readFileSync(file), type };
+    }
     const m = u.match(/^im:(\d+)$/);
     if (!m) throw new Error('geçersiz iMessage medya adresi');
     if (!this.db) throw new Error('chat.db açık değil');
@@ -514,6 +557,18 @@ export class IMessageConnector extends BaseConnector {
       { live },
     );
   }
+}
+
+/**
+ * Mesajlar AppleScript'leri: byChat mevcut sohbete (chat id = guid), byBuddy kişi + hizmet yoluyla (eski macOS yedeği).
+ * Metin ya da POSIX dosya yolu gönderilir; tırnak ve ters bölü kaçırılır.
+ */
+export function imessageScripts(remoteChatId: string, payload: { text: string } | { file: string }, service: 'SMS' | 'iMessage'): { byChat: string; byBuddy: string } {
+  const esc = (s: string) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const what = 'file' in payload ? `POSIX file "${esc(payload.file)}"` : `"${esc(payload.text)}"`;
+  const byChat = `tell application "Messages"\n send ${what} to chat id "${esc(remoteChatId)}"\nend tell`;
+  const byBuddy = `tell application "Messages"\n set svc to 1st account whose service type = ${service}\n set tgt to participant "${esc(remoteChatId.split(';').pop() ?? '')}" of svc\n send ${what} to tgt\nend tell`;
+  return { byChat, byBuddy };
 }
 
 function expandHome(p: string | null): string | undefined {

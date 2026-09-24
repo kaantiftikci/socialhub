@@ -63,6 +63,28 @@ export function Conversation({
   const chatRef = useRef<string | undefined>(undefined);
   const heightRef = useRef(0);
   const platform = PLATFORMS[chat.platform];
+  /** E-posta kanalları: balon yerine ileti kartları ve e-posta yanıt alanı */
+  const isMail = platform.category === 'mail';
+  const [uploading, setUploading] = useState<string | null>(null);
+  async function sendFile(file: File) {
+    if (file.size > 50 * 1024 * 1024) return notify('Dosya 50 MB\'tan büyük', true);
+    setUploading(file.name);
+    try {
+      const data = await new Promise<string>((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(String(r.result).split(',')[1] ?? '');
+        r.onerror = () => rej(new Error('Dosya okunamadı'));
+        r.readAsDataURL(file);
+      });
+      await api.sendFile(chat.id, { name: file.name, mime: file.type || 'application/octet-stream', data, caption: text.trim() || undefined });
+      setText('');
+      notify(`${file.name} gönderildi`);
+    } catch (e) {
+      notify((e as Error).message, true);
+    } finally {
+      setUploading(null);
+    }
+  }
 
   // Kaydırma: sohbet açılınca en alta; "daha eski mesajlar" başa eklenince okunan yer korunur; yeni mesaj gelince
   // yalnızca zaten alttaysan en alta iner (yukarı kaydırırken sohbet durum/okundu güncellemeleriyle aşağı fırlamaz)
@@ -221,7 +243,41 @@ export function Conversation({
           </div>
         )}
 
-        <div className="msgs" ref={msgsRef}>
+        <div className={`msgs ${isMail ? 'mail' : ''}`} ref={msgsRef}>
+          {isMail && (
+            <div className="mail-thread">
+              <h3 className="mail-subject">{chat.name}</h3>
+              {shown.map((m) => {
+                const email = m.senderId.includes('@') ? m.senderId : chat.handle ?? '';
+                return (
+                  <article key={m.id} className={`mail-card ${m.fromMe ? 'me' : ''}`}>
+                    <header>
+                      <Avatar name={m.fromMe ? 'Ben' : m.senderName} size={34} url={m.senderAvatarUrl} />
+                      <div style={{ minWidth: 0, flexGrow: 1 }}>
+                        <div className="who">
+                          <b>{m.fromMe ? 'Ben' : m.senderName}</b>
+                          {!m.fromMe && email && <span className="addr">{email}</span>}
+                        </div>
+                        <div className="to">{m.fromMe ? `Alıcı: ${chat.handle ?? chat.participants?.[0]?.name ?? ''}` : 'Alıcı: ben'}</div>
+                      </div>
+                      <time>{fmtStamp(m.ts)}</time>
+                    </header>
+                    <div className="mail-body">{m.text}</div>
+                    {m.attachments?.length ? (
+                      <div className="mail-atts">
+                        {m.attachments.map((a, i) => (
+                          <a key={i} className="mail-att" href={abs(a.link ?? a.url) ?? '#'} target="_blank" rel="noreferrer" onClick={(e) => (a.link || a.url ? (a.kind === 'image' ? (e.preventDefault(), setLightbox(a)) : undefined) : e.preventDefault())}>
+                            <Icon name={a.kind === 'image' ? 'image' : a.kind === 'video' ? 'play' : 'file'} size={14} /> {a.name ?? attLabel(a.kind)}
+                            {a.size ? <span className="sz"> · {fmtSize(a.size)}</span> : null}
+                          </a>
+                        ))}
+                      </div>
+                    ) : null}
+                  </article>
+                );
+              })}
+            </div>
+          )}
           {!search && hasOlder && onLoadOlder && (
             <div style={{ display: 'flex', justifyContent: 'center', margin: '4px 0 6px' }}>
               <button className="btn xs b b2" disabled={olderBusy} onClick={() => void onLoadOlder()} aria-busy={olderBusy}>
@@ -298,7 +354,17 @@ export function Conversation({
           <div ref={endRef} />
         </div>
 
-        <div className={`composer ${draft ? 'ai' : ''}`}>
+        <div className={`composer ${draft ? 'ai' : ''} ${isMail ? 'mail' : ''}`}>
+          {isMail && (
+            <div className="mail-reply-head">
+              <span>
+                <span className="k">Alıcı</span> {chat.handle ?? chat.participants?.map((p) => p.handle ?? p.name).join(', ') ?? '—'}
+              </span>
+              <span>
+                <span className="k">Konu</span> {/^(re|ynt):/i.test(chat.name) ? chat.name : `Re: ${chat.name}`}
+              </span>
+            </div>
+          )}
           {ai && (
             <div className="comp-top">
               {draft ? (
@@ -332,15 +398,17 @@ export function Conversation({
           <textarea
             rows={2}
             value={text}
-            placeholder={draft ? 'Taslağı kabul etmek için Tab, düzenlemek için yazmaya başla' : chat.platform === 'shopier' ? 'Siparişe yerel not ekle (Shopier alıcıya mesaj ucu sunmuyor)…' : `${chat.name.length > 40 ? chat.name.slice(0, 38) + '…' : chat.name} için mesaj yaz…`}
+            placeholder={draft ? 'Taslağı kabul etmek için Tab, düzenlemek için yazmaya başla' : chat.platform === 'shopier' ? 'Siparişe yerel not ekle (Shopier alıcıya mesaj ucu sunmuyor)…' : isMail ? 'Yanıtını yaz… (Enter gönderir, Shift+Enter yeni satır)' : `${chat.name.length > 40 ? chat.name.slice(0, 38) + '…' : chat.name} için mesaj yaz…`}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKey}
             style={draft && !text.trim() ? { minHeight: 28, paddingTop: 0 } : undefined}
           />
           <div className="comp-bottom">
-            <button className="btn ghost sm icon b" aria-label="Dosya ekle" title="Yakında">
+            <label className="btn ghost sm icon b" aria-label="Fotoğraf, video veya dosya ekle" title="Fotoğraf / video / dosya gönder" style={{ cursor: uploading ? 'progress' : 'pointer' }}>
               <Icon name="link" size={16} />
-            </button>
+              <input type="file" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.txt" style={{ display: 'none' }} disabled={!!uploading} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void sendFile(f); }} />
+            </label>
+            {uploading && <span className="hint">{uploading} gönderiliyor…</span>}
             <button className="btn ghost sm icon b" aria-label="Zamanla gönder" title="Yakında">
               <Icon name="calendar" size={16} />
             </button>

@@ -5,7 +5,7 @@ import { Avatar, Chip, Icon, Logo, Resizer, SyncBar, Tag, ago, fmtTime, loadPane
 import { Conversation } from './Conversation';
 import { ConnectModal } from './Connect';
 import { Focus } from './Focus';
-import { isTauri, notify as desktopNotify, onDesktopEvent, playPing, SOUNDS, getSound, setSound, setBadge, windowFocused, coreInfo } from './desktop';
+import { isTauri, notify as desktopNotify, onDesktopEvent, playPing, SOUNDS, getSound, setSound, getPlatformSound, setPlatformSound, setBadge, windowFocused, coreInfo } from './desktop';
 
 export type View = 'inbox' | 'focus' | 'snoozed';
 export type Filter = 'all' | 'unread' | 'waiting';
@@ -51,6 +51,12 @@ export default function App() {
   const [booting, setBooting] = useState(false);
   const [bootSince] = useState(() => Date.now());
   const [sound, setSoundState] = useState<string>(() => getSound());
+  const [pSounds, setPSounds] = useState<Record<string, string>>({});
+  const changePlatformSound = (platform: string, id: string) => {
+    setPlatformSound(platform, id);
+    setPSounds((p) => ({ ...p, [platform]: id }));
+    if (id && id !== 'off') playPing(id, true);
+  };
   const changeSound = (id: string) => {
     setSound(id);
     setSoundState(id);
@@ -73,6 +79,23 @@ export default function App() {
   };
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<Array<{ message: Message; chat: Chat }>>([]);
+  /** Daha eski sohbet listesi (e-postalar): platform seçiliyken listenin sonuna gelince */
+  const [moreBusy, setMoreBusy] = useState(false);
+  const moreDone = useRef<Set<string>>(new Set());
+  const onRowsScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    if (!platformFilter || moreBusy || el.scrollHeight - el.scrollTop - el.clientHeight > 140) return;
+    const acc = accounts.find((a) => a.platform === platformFilter && a.status === 'connected');
+    if (!acc || moreDone.current.has(acc.id)) return;
+    setMoreBusy(true);
+    api
+      .moreChats(acc.id)
+      .then((r) => {
+        if (!r.supported || r.added === 0) moreDone.current.add(acc.id);
+      })
+      .catch(() => moreDone.current.add(acc.id))
+      .finally(() => setMoreBusy(false));
+  };
   const currentMessages = useMemo(() => messages.filter((m) => m.chatId === selected), [messages, selected]);
   useEffect(() => loadPaneSizes(), []);
   // Tam metin arama (FTS5): 2+ karakterde mesaj içeriklerinde de ara
@@ -260,7 +283,9 @@ export default function App() {
             void windowFocused().then((focused) => {
               if (!focused || ev.message.chatId !== selectedRef.current) {
                 desktopNotify(ev.chat.name, (ev.message.text || ev.message.attachments?.[0]?.name || 'Yeni mesaj').slice(0, 140));
-                playPing();
+                // uygulama başına ses ('' → genel ayar, 'off' → sessiz)
+                const ps = getPlatformSound(ev.chat.platform);
+                playPing(ps || undefined);
               }
             });
           }
@@ -628,6 +653,27 @@ export default function App() {
               ))}
             </div>
             <div className="section-head" style={{ margin: '10px 0 6px' }}>
+              <span className="label">Uygulama başına ses</span>
+            </div>
+            <div className="psounds">
+              {[...new Set(accounts.map((a) => a.platform))].map((p) => (
+                <label key={p} className="row-toggle" style={{ gap: 8 }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <Chip platform={p} size={16} /> {PLATFORMS[p].name}
+                  </span>
+                  <select value={pSounds[p] ?? getPlatformSound(p)} onChange={(e) => changePlatformSound(p, e.target.value)} disabled={sound === 'off'}>
+                    <option value="">Varsayılan</option>
+                    {SOUNDS.map((sn) => (
+                      <option key={sn.id} value={sn.id}>
+                        {sn.name}
+                      </option>
+                    ))}
+                    <option value="off">Sessiz</option>
+                  </select>
+                </label>
+              ))}
+            </div>
+            <div className="section-head" style={{ margin: '10px 0 6px' }}>
               <span className="label">Telefondan erişim</span>
             </div>
             <label className="row-toggle">
@@ -744,7 +790,7 @@ export default function App() {
                 )}
               </div>
 
-              <div className="rows">
+              <div className="rows" onScroll={onRowsScroll}>
                 {view === 'snoozed' ? (
                   snoozedChats.length === 0 ? (
                     <div className="empty">
@@ -799,6 +845,7 @@ export default function App() {
                     ))}
                   </div>
                 )}
+                {moreBusy && <div className="empty" style={{ padding: 10, fontSize: 12 }}>Daha eski sohbetler yükleniyor…</div>}
               </div>
               <div className="hints">
                 <span>

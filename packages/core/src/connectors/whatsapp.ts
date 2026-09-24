@@ -640,6 +640,40 @@ export class WhatsAppConnector extends BaseConnector {
     return { remoteId: id };
   }
 
+  /**
+   * Fotoğraf/video/ses/belge gönder. Hedef sendText ile aynı (sohbetin remoteId'si; LID sohbetlerde Baileys kendisi çözer).
+   * Baileys'in döndürdüğü WAMessage (şifreli medya adresi + anahtar) ingest'ten geçirilir: rememberMedia ile saklanır,
+   * böylece gönderilen fotoğraf sohbette wa:<jid>/<id> vekilinden görünür. Ses altyazı taşıyamaz; altyazı ayrı metin gider.
+   */
+  async sendMedia(remoteChatId: string, file: { path: string; name: string; mime: string; size: number }, caption?: string): Promise<{ remoteId: string }> {
+    if (!this.sock) throw new Error('WhatsApp bağlı değil');
+    if (!fs.existsSync(file.path)) throw new Error('Gönderilecek dosya bulunamadı');
+    const content = waMediaContent(file, caption);
+    const sent = await this.sock.sendMessage(remoteChatId, content);
+    const id = sent?.key?.id ?? `local-${Date.now()}`;
+    if (sent?.key?.id && sent.message) {
+      // sendMessage'ın döndürdüğü mesajda remoteJid bizim verdiğimiz jid; ingest LID→numara eşlemesini kendisi yapar
+      this.ingest(sent, false);
+    }
+    if (!this.hasMessage(this.canon(remoteChatId), id)) {
+      // Baileys mesajı döndürmediyse (nadir) yerel kayıt: ek bilgisi dosyadan
+      const kind = mediaKindOf(file.mime);
+      this.upsertMessage({
+        remoteChatId,
+        remoteId: id,
+        senderId: 'me',
+        senderName: 'Ben',
+        fromMe: true,
+        text: caption ?? '',
+        ts: Date.now(),
+        status: 'sent',
+        attachments: [{ kind, name: file.name, mime: file.mime, size: file.size }],
+      });
+    }
+    if (caption && !('caption' in content)) await this.sendText(remoteChatId, caption);
+    return { remoteId: id };
+  }
+
   /** En yeni sohbetlerin profil fotoğraflarını (varsa) çek. */
   private async fetchAvatars(sock: WASocket, jids: string[]): Promise<void> {
     for (const jid of jids) {
@@ -1287,6 +1321,29 @@ function textOf(m: proto.IMessage | undefined): string {
   if (m.productMessage) return `🛍 Ürün: ${m.productMessage.product?.title ?? ''}`;
   if (m.orderMessage) return `🧾 Sipariş: ${m.orderMessage.orderTitle ?? ''}${m.orderMessage.message ? ' — ' + m.orderMessage.message : ''}`;
   return '';
+}
+
+/** Dosya MIME'ından ek türü */
+function mediaKindOf(mime: string): Attachment['kind'] {
+  const m = mime.toLowerCase().split(';')[0].trim();
+  if (m.startsWith('image/')) return 'image';
+  if (m.startsWith('video/')) return 'video';
+  if (m.startsWith('audio/')) return 'audio';
+  return 'file';
+}
+
+/**
+ * Gönderilecek dosya → Baileys sendMessage içeriği. image/* → fotoğraf, video/* → video, audio/* → ses (ptt:false, mp4/m4a
+ * olduğu gibi gider; ogg/opus dönüşümü gerekmez), diğer her şey → belge (mimetype + dosya adı). Ses altyazı alanı taşımaz.
+ */
+export function waMediaContent(file: { path: string; name: string; mime: string }, caption?: string): Baileys.AnyMessageContent {
+  const mime = file.mime.toLowerCase().split(';')[0].trim() || 'application/octet-stream';
+  const url = { url: file.path };
+  // GIF (image/gif) WhatsApp'ta fotoğraf olarak gitmez; belge olarak gönderilir ki bozulmasın
+  if (mime.startsWith('image/') && mime !== 'image/gif') return { image: url, caption, mimetype: mime };
+  if (mime.startsWith('video/')) return { video: url, caption, mimetype: mime };
+  if (mime.startsWith('audio/')) return { audio: url, mimetype: mime, ptt: false };
+  return { document: url, mimetype: mime, fileName: file.name, caption };
 }
 
 function durationLabel(seconds: number | null | undefined): string {

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { ImapFlow } from 'imapflow';
-import nodemailer from 'nodemailer';
+import nodemailer, { type SendMailOptions } from 'nodemailer';
 import { simpleParser, type AddressObject, type ParsedMail } from 'mailparser';
 import { BaseConnector, type StartOptions } from './base.js';
 import { bus } from '../bus.js';
@@ -95,6 +95,8 @@ export class MailConnector extends BaseConnector {
   private stopping = false;
   private polling = false;
   private lastUid = 0;
+  /** Şimdiye dek alınan en küçük UID (daha eski sayfa buradan geriye gider); 0 = bilinmiyor, 1 = kutunun başı */
+  private oldestUid = 0;
   private threadOf = new Map<string, string>(); // message-id → thread key
   private stateFile: string;
 
@@ -103,8 +105,9 @@ export class MailConnector extends BaseConnector {
     this.cfg = { ...PRESETS[account.platform], ...cfg };
     this.stateFile = path.join(sessionDir(account.id), 'mail-state.json');
     try {
-      const st = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) as { lastUid?: number; threads?: Record<string, string> };
+      const st = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) as { lastUid?: number; oldestUid?: number; threads?: Record<string, string> };
       this.lastUid = st.lastUid ?? 0;
+      this.oldestUid = st.oldestUid ?? 0;
       for (const [k, v] of Object.entries(st.threads ?? {})) this.threadOf.set(k, v);
     } catch {
       /* ilk çalıştırma */
@@ -119,7 +122,7 @@ export class MailConnector extends BaseConnector {
       i++;
     }
     void i;
-    fs.writeFileSync(this.stateFile, JSON.stringify({ lastUid: this.lastUid, threads }));
+    fs.writeFileSync(this.stateFile, JSON.stringify({ lastUid: this.lastUid, oldestUid: this.oldestUid, threads }));
   }
 
   private saveCfg(): void {
@@ -242,15 +245,49 @@ export class MailConnector extends BaseConnector {
   }
 
   // ---------- IMAP ----------
-  private async poll(first: boolean): Promise<void> {
-    if (this.polling || this.stopping) return;
-    this.polling = true;
+  /** IMAP bağlantısı aç, INBOX kilidiyle `fn`i çalıştır, kapat. Testler sahte istemci için bu metodu ezer. */
+  protected async withInbox<T>(fn: (client: ImapFlow) => Promise<T>): Promise<T> {
     const client = new ImapFlow({ host: this.cfg.host!, port: this.cfg.port!, secure: this.cfg.secure ?? true, auth: this.auth(), logger: false });
     try {
       if (this.cfg.accessToken) await this.ensureOAuth();
       await client.connect();
       const lock = await client.getMailboxLock('INBOX');
       try {
+        return await fn(client);
+      } finally {
+        lock.release();
+      }
+    } finally {
+      await client.logout().catch(() => undefined);
+      client.close();
+    }
+  }
+
+  /** Verilen UID'leri indirip sohbet/mesaj olarak yaz; (işlenen e-posta, yeni açılan sohbet) sayısını döner */
+  private async fetchUids(client: ImapFlow, uids: number[], live: boolean): Promise<{ mails: number; chats: number }> {
+    let mails = 0;
+    let chats = 0;
+    if (!uids.length) return { mails, chats };
+    for await (const msg of client.fetch(uids, { uid: true, source: true, flags: true, threadId: true }, { uid: true })) {
+      try {
+        if (!msg.source) continue;
+        const parsed: ParsedMail = await simpleParser(msg.source);
+        if (this.ingest(parsed, msg.uid, msg.flags?.has('\\Seen') ?? false, (msg as { threadId?: string }).threadId, live)) chats++;
+        mails++;
+      } catch (e) {
+        bus.log('warn', `${this.account.platform} e-posta okunamadı (uid ${msg.uid}): ${(e as Error).message}`);
+      }
+      if (msg.uid > this.lastUid) this.lastUid = msg.uid;
+      if (!this.oldestUid || msg.uid < this.oldestUid) this.oldestUid = msg.uid;
+    }
+    return { mails, chats };
+  }
+
+  private async poll(first: boolean): Promise<void> {
+    if (this.polling || this.stopping) return;
+    this.polling = true;
+    try {
+      await this.withInbox(async (client) => {
         let uids: number[];
         if (this.lastUid > 0) uids = (await client.search({ uid: `${this.lastUid + 1}:*` }, { uid: true })) || [];
         else {
@@ -258,35 +295,60 @@ export class MailConnector extends BaseConnector {
           uids = ((await client.search({ since }, { uid: true })) || []).slice(-150);
         }
         uids = uids.filter((u) => u > this.lastUid);
-        let n = 0;
-        for await (const msg of client.fetch(uids.length ? uids : [], { uid: true, source: true, flags: true, threadId: true }, { uid: true })) {
-          try {
-            if (!msg.source) continue;
-            const parsed: ParsedMail = await simpleParser(msg.source);
-            this.ingest(parsed, msg.uid, msg.flags?.has('\\Seen') ?? false, (msg as { threadId?: string }).threadId, !first);
-            n++;
-          } catch (e) {
-            bus.log('warn', `${this.account.platform} e-posta okunamadı (uid ${msg.uid}): ${(e as Error).message}`);
-          }
-          if (msg.uid > this.lastUid) this.lastUid = msg.uid;
-        }
-        if (n) bus.log('info', `${this.account.platform}: ${n} e-posta alındı`);
+        const { mails } = await this.fetchUids(client, uids, !first);
+        if (mails) bus.log('info', `${this.account.platform}: ${mails} e-posta alındı`);
         this.saveState();
-      } finally {
-        lock.release();
-      }
-      await client.logout();
+      });
     } catch (e) {
       bus.log('warn', `${this.account.platform} IMAP: ${(e as Error).message}`);
       if (first) throw e;
       if (/auth|login|credential/i.test((e as Error).message)) this.setStatus('error', 'Giriş reddedildi: uygulama şifresini kontrol et');
     } finally {
       this.polling = false;
-      client.close();
     }
   }
 
-  private ingest(m: ParsedMail, uid: number, seen: boolean, gmThread: string | undefined, live: boolean): void {
+  /**
+   * Daha eski e-postalar: şimdiye dek alınan en küçük UID'den geriye en çok 100 e-posta (sayfa). Eski durum dosyasında
+   * oldestUid yoksa ilk eşitlemenin penceresi (son 30 gün / 150) yeniden hesaplanır. Yeni açılan sohbet (thread) sayısı döner; 0 = daha yok.
+   */
+  async loadMoreChats(): Promise<number> {
+    if (this.stopping) return 0;
+    if (this.oldestUid === 1) return 0;
+    // Yoklama sürüyorsa bitmesini bekle (aynı anda iki IMAP oturumu durumu bozmasın)
+    for (let i = 0; this.polling && i < 100; i++) await new Promise((r) => setTimeout(r, 200));
+    if (this.polling) throw new Error('E-posta eşitlemesi sürüyor, biraz sonra yeniden dene');
+    this.polling = true;
+    try {
+      return await this.withInbox(async (client) => {
+        if (!this.oldestUid) {
+          const since = new Date(Date.now() - 30 * 86_400_000);
+          const firstPage = ((await client.search({ since }, { uid: true })) || []).slice(-150);
+          this.oldestUid = firstPage.length ? Math.min(...firstPage) : this.lastUid + 1;
+        }
+        if (this.oldestUid <= 1) {
+          this.oldestUid = 1;
+          return 0;
+        }
+        const older = ((await client.search({ uid: `1:${this.oldestUid - 1}` }, { uid: true })) || []).filter((u) => u < this.oldestUid);
+        const page = olderPage(older, 100);
+        if (!page.length) {
+          this.oldestUid = 1;
+          this.saveState();
+          return 0;
+        }
+        const { mails, chats } = await this.fetchUids(client, page, false);
+        bus.log('info', `${this.account.platform}: ${mails} eski e-posta alındı (${chats} yeni sohbet)`);
+        this.saveState();
+        return chats;
+      });
+    } finally {
+      this.polling = false;
+    }
+  }
+
+  /** E-postayı sohbet (thread) + mesaj olarak yaz; sohbet bu e-postayla ilk kez açıldıysa true */
+  private ingest(m: ParsedMail, uid: number, seen: boolean, gmThread: string | undefined, live: boolean): boolean {
     const from = addrs(m.from)[0] ?? { address: '', name: '' };
     const me = this.cfg.user.toLowerCase();
     const fromMe = from.address === me;
@@ -340,6 +402,7 @@ export class MailConnector extends BaseConnector {
       },
       { live },
     );
+    return !existing;
   }
 
   async fetchMedia(u: string): Promise<{ body: Buffer; type: string } | undefined> {
@@ -350,7 +413,18 @@ export class MailConnector extends BaseConnector {
   }
 
   // ---------- SMTP ----------
-  async sendText(remoteChatId: string, text: string): Promise<{ remoteId: string }> {
+  /** Testler sahte taşıyıcı için bu metodu ezer */
+  protected createTransport(): { sendMail(opts: SendMailOptions): Promise<{ messageId?: string }> } {
+    return nodemailer.createTransport({
+      host: this.cfg.smtpHost,
+      port: this.cfg.smtpPort,
+      secure: this.cfg.smtpSecure ?? false,
+      auth: this.cfg.accessToken ? { type: 'OAuth2', user: this.cfg.user, accessToken: this.cfg.accessToken } : { user: this.cfg.user, pass: this.cfg.pass ?? '' },
+    });
+  }
+
+  /** Sohbetin (thread) son gelen e-postasına yanıt: alıcılar katılımcılardan, konu Re:, In-Reply-To/References son gelen mesaj */
+  private async reply(remoteChatId: string, text: string, attachments?: SendMailOptions['attachments']): Promise<string> {
     const chat = this.store.getChat(`${this.account.id}/${remoteChatId}`);
     if (!chat) throw new Error('Sohbet yok');
     const last = this.store.listMessages(chat.id, 50).filter((x) => !x.fromMe).pop();
@@ -358,25 +432,59 @@ export class MailConnector extends BaseConnector {
     const to = (chat.participants ?? []).map((p) => p.id).filter((a) => a !== me);
     if (!to.length) throw new Error('Alıcı yok');
     if (this.cfg.accessToken) await this.ensureOAuth();
-    const transport = nodemailer.createTransport({
-      host: this.cfg.smtpHost,
-      port: this.cfg.smtpPort,
-      secure: this.cfg.smtpSecure ?? false,
-      auth: this.cfg.accessToken ? { type: 'OAuth2', user: this.cfg.user, accessToken: this.cfg.accessToken } : { user: this.cfg.user, pass: this.cfg.pass ?? '' },
-    });
-    const info = await transport.sendMail({
+    const info = await this.createTransport().sendMail({
       from: this.cfg.user,
       to,
       subject: chat.name === '(konu yok)' ? '' : /^(re|ynt):/i.test(chat.name) ? chat.name : `Re: ${chat.name}`,
       text,
       inReplyTo: last?.remoteId.startsWith('<') ? last.remoteId : undefined,
       references: last?.remoteId.startsWith('<') ? last.remoteId : undefined,
+      attachments,
     });
     const id = info.messageId ?? `local-${Date.now()}`;
-    if (id) this.threadOf.set(id, remoteChatId);
+    this.threadOf.set(id, remoteChatId);
+    return id;
+  }
+
+  async sendText(remoteChatId: string, text: string): Promise<{ remoteId: string }> {
+    const id = await this.reply(remoteChatId, text);
     this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent' });
     return { remoteId: id };
   }
+
+  /**
+   * Ekli yanıt: nodemailer attachments [{ filename, path, contentType }]. Dosya oturum klasörüne kopyalanır ki gönderilen ek
+   * sohbette mail:<anahtar> vekilinden görünsün (outbox dosyası 10 dk sonra silinir).
+   */
+  async sendMedia(remoteChatId: string, file: { path: string; name: string; mime: string; size: number }, caption?: string): Promise<{ remoteId: string }> {
+    if (!fs.existsSync(file.path)) throw new Error('Gönderilecek dosya bulunamadı');
+    const mime = file.mime || 'application/octet-stream';
+    const id = await this.reply(remoteChatId, caption ?? '', [{ filename: file.name, path: file.path, contentType: mime }]);
+    const key = createHash('sha1').update(`out/${id}/${file.name}`).digest('hex');
+    const dir = path.join(sessionDir(this.account.id), 'media');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.copyFileSync(file.path, path.join(dir, key));
+    fs.writeFileSync(path.join(dir, key + '.type'), mime);
+    const url = `/api/media/${encodeURIComponent(this.account.id)}?u=${encodeURIComponent('mail:' + key)}`;
+    const kind: Attachment['kind'] = mime.startsWith('image/') ? 'image' : mime.startsWith('video/') ? 'video' : mime.startsWith('audio/') ? 'audio' : 'file';
+    this.upsertMessage({
+      remoteChatId,
+      remoteId: id,
+      senderId: 'me',
+      senderName: 'Ben',
+      fromMe: true,
+      text: caption ?? '',
+      ts: Date.now(),
+      status: 'sent',
+      attachments: [{ kind, name: file.name, mime, size: file.size, url: kind === 'image' ? url : undefined, link: url }],
+    });
+    return { remoteId: id };
+  }
+}
+
+/** Daha eski sayfa: UID listesinin (artan) sonundan `size` adet — silinmiş UID boşlukları sayfayı küçültmesin */
+export function olderPage(uids: number[], size: number): number[] {
+  return [...uids].sort((a, b) => a - b).slice(-size);
 }
 
 function htmlToText(html: string): string {

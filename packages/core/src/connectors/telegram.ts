@@ -144,6 +144,37 @@ export class TelegramConnector extends BaseConnector {
     return { remoteId: id };
   }
 
+  /**
+   * Fotoğraf/video/ses/belge gönder. GramJS sendFile dosya türünü uzantıdan çıkarır (jpg/png → fotoğraf, mp4 → video);
+   * MIME görsel/video/ses değilse forceDocument ile belge olarak gider. Dönen mesaj ingest ile yazılır: medya vekili tg:<sohbet>/<id>.
+   */
+  async sendMedia(remoteChatId: string, file: { path: string; name: string; mime: string; size: number }, caption?: string): Promise<{ remoteId: string }> {
+    if (!this.client) throw new Error('Telegram bağlı değil');
+    if (!fs.existsSync(file.path)) throw new Error('Gönderilecek dosya bulunamadı');
+    const entity = await this.entityOf(remoteChatId);
+    const sent = await this.client.sendFile(entity, tgSendFileParams(file, caption));
+    const id = String(sent.id);
+    const chat = this.ensureChat(remoteChatId, remoteChatId);
+    this.ingest(sent, remoteChatId, chat.name, false);
+    if (!this.hasMessage(remoteChatId, id)) {
+      // sendFile medyasız/eksik mesaj döndürdüyse yerel kayıt: ek bilgisi dosyadan
+      const kind = file.mime.startsWith('image/') ? 'image' : file.mime.startsWith('video/') ? 'video' : file.mime.startsWith('audio/') ? 'audio' : 'file';
+      const link = `/api/media/${encodeURIComponent(this.account.id)}?u=${encodeURIComponent(`tg:${remoteChatId}/${id}`)}`;
+      this.upsertMessage({
+        remoteChatId,
+        remoteId: id,
+        senderId: 'me',
+        senderName: 'Ben',
+        fromMe: true,
+        text: caption ?? '',
+        ts: Date.now(),
+        status: 'sent',
+        attachments: [{ kind, name: file.name, mime: file.mime, size: file.size, url: kind === 'image' ? link : undefined, link }],
+      });
+    }
+    return { remoteId: id };
+  }
+
   async markRead(remoteChatId: string): Promise<void> {
     if (!this.client) return;
     const entity = await this.entityOf(remoteChatId);
@@ -445,6 +476,16 @@ export class TelegramConnector extends BaseConnector {
     if (media instanceof Api.MessageMediaPoll) return [{ kind: 'other', name: 'Anket' }];
     return [{ kind: 'other', name: 'Medya' }];
   }
+}
+
+/**
+ * Gönderilecek dosya → GramJS sendFile parametreleri. Görsel/video/ses MIME'ları doğal medya olarak gider (GramJS türü
+ * uzantıdan çıkarır; ses için DocumentAttributeAudio kendisi ekler), diğerleri forceDocument ile belge. Boş altyazı verilmez.
+ */
+export function tgSendFileParams(file: { path: string; name: string; mime: string }, caption?: string): { file: string; caption?: string; forceDocument: boolean } {
+  const mime = file.mime.toLowerCase().split(';')[0].trim();
+  const native = /^(image|video|audio)\//.test(mime) && mime !== 'image/gif' && !/^image\/(svg|heic|heif|tiff)/.test(mime);
+  return { file: file.path, caption: caption || undefined, forceDocument: !native };
 }
 
 /** Kullanıcı/grup/kanal varlığının görünen adı (ad soyad → kullanıcı adı → başlık); bilinmiyorsa '' */

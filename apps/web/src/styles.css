@@ -482,3 +482,25 @@ nav.side { position: relative; }
   .grp, .row, .ctx, .settings, .menu, .overlay, .overlay .modal, .lightbox .box, .toast { animation: none; }
   .tdots i { animation-duration: 0s; }
 }
+
+/* e-posta görünümü */
+.msgs.mail .grp, .msgs.mail .datepill { display: none; }
+.mail-thread { display: flex; flex-direction: column; gap: 12px; max-width: 860px; width: 100%; margin: 0 auto; }
+.mail-subject { margin: 4px 0 6px; font-size: 20px; font-weight: 700; letter-spacing: -.3px; }
+.mail-card { border: 1px solid var(--line); border-radius: 16px; background: var(--surface); padding: 14px 16px; box-shadow: var(--shadow-1); animation: bubIn .22s cubic-bezier(.2,.8,.2,1) both; }
+.mail-card.me { border-color: var(--v-line); background: #faf8ff; }
+.mail-card header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.mail-card .who { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.mail-card .who b { font-size: 14px; }
+.mail-card .addr { font-size: 12px; color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail-card .to { font-size: 12px; color: var(--text3); }
+.mail-card time { font-size: 12px; color: var(--text3); white-space: nowrap; }
+.mail-body { font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+.mail-atts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.mail-att { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg2); font-size: 12.5px; color: var(--text); text-decoration: none; }
+.mail-att .sz { color: var(--text3); }
+.composer.mail { border-radius: 16px; }
+.mail-reply-head { display: flex; flex-direction: column; gap: 4px; padding: 10px 14px 6px; border-bottom: 1px solid var(--line2); font-size: 12.5px; color: var(--text2); }
+.mail-reply-head .k { display: inline-block; width: 42px; color: var(--text3); }
+.psounds { display: flex; flex-direction: column; gap: 4px; }
+.psounds select { font: inherit; font-size: 12px; border: 1px solid var(--line); border-radius: 8px; padding: 3px 6px; background: var(--surface); color: var(--text); }
