@@ -390,7 +390,25 @@ export const outlook: Strategy = {
   },
 
   async messages(page, _cookies, threadId, limit): Promise<Msg[]> {
+    // Okuma bölmesinde açmak Outlook'ta iletiyi okundu sayar; okunmamışsa okuduktan sonra geri al (sayaç ve telefon doğru kalsın)
+    const rowSel = `${LIST}[data-convid="${threadId}"]`;
+    const wasUnread = await page
+      .evaluate((sel) => !!document.querySelector(sel)?.querySelector('[title="Okundu olarak işaretle"], [aria-label="Okundu olarak işaretle"], [title="Mark as read"], [aria-label="Mark as read"]'), rowSel)
+      .catch(() => false);
     if (!(await openThread(page, threadId))) return [];
+    const restoreUnread = async () => {
+      if (!wasUnread) return;
+      await page.waitForTimeout(600);
+      const done = await page
+        .evaluate((sel) => {
+          const b = document.querySelector(sel)?.querySelector<HTMLElement>('[title="Okunmadı olarak işaretle"], [aria-label="Okunmadı olarak işaretle"], [title="Mark as unread"], [aria-label="Mark as unread"]');
+          if (!b) return false;
+          b.click();
+          return true;
+        }, rowSel)
+        .catch(() => false);
+      if (!done) bus.log('info', `Outlook: okunmamış durumu geri alınamadı (${threadId.slice(0, 10)}…)`);
+    };
     const rows = await page.evaluate((bodySel) => {
       const out: Array<{ email: string; name: string; time: string; text: string; files: string[] }> = [];
       for (const body of Array.from(document.querySelectorAll<HTMLElement>(bodySel))) {
@@ -436,6 +454,7 @@ export const outlook: Strategy = {
           attachments: r.files.length ? r.files.map((name) => ({ kind: 'file' as const, name })) : undefined,
         };
       });
+    await restoreUnread();
     return msgs.slice(-limit);
   },
 
