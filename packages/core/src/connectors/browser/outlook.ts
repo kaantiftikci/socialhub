@@ -178,7 +178,7 @@ async function inboxState(page: Page): Promise<InboxState> {
     const url = page.url();
     // login.live.com çerezleri geçerliyse yönlendirme birkaç saniyede kendiliğinden döner; 10 sn kalıyorsa etkileşim ister
     if (onLoginUrl(url)) {
-      if (++onLogin >= 10) return 'login';
+      if (++onLogin >= 15) return 'login';
     } else onLogin = 0;
     if (i >= 10 && onMailUrl(url) && (await page.locator('div[role="tree"]').count().catch(() => 0)) > 0) return 'empty';
     await page.waitForTimeout(1000);
@@ -243,6 +243,7 @@ export const outlook: Strategy = {
       await persistSessionCookies(page.context()).catch(() => 0);
       return true;
     }
+    bus.log('info', `Outlook: giriş denetimi '${st}' (${page.url().slice(0, 90)})`);
     return false;
   },
 

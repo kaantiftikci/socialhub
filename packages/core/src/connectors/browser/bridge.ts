@@ -111,7 +111,14 @@ export class BrowserConnector extends BaseConnector {
     // 1) Kayıtlı oturum var mı? Önce görünmez pencerede dene.
     if (!(await this.launch(true))) return;
     this.syncProgress(20, 'tarayıcı açıldı');
-    const loggedIn = await this.isLoggedIn();
+    let loggedIn = await this.isLoggedIn();
+    // Açılışta 8 tarayıcı aynı anda kalkınca sayfa geç çizilir ve oturum yokmuş sanılır (Outlook 'pairing' sonra 'connected'):
+    // pencere açmadan önce bir kez daha dene
+    if (!loggedIn && !interactive && this.page && !this.page.isClosed()) {
+      bus.log('info', `${this.account.platform}: oturum ilk denetimde görülmedi, 8 sn sonra yeniden deneniyor`);
+      await this.page.waitForTimeout(8000).catch(() => undefined);
+      loggedIn = await this.isLoggedIn();
+    }
     // Giriş var ama platform görünür pencerede ek adım istiyor (Messenger PIN): yalnızca kullanıcı 'Yeniden bağlan' dediyse pencere aç
     const needsWindow = loggedIn && interactive && !!this.strategy.needsWindow && (await withTimeout(this.strategy.needsWindow(this.page!), 30_000, 'pencere denetimi').catch(() => false));
     if (!loggedIn || needsWindow) {
