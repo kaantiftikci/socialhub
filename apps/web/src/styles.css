@@ -586,7 +586,7 @@ nav.side { position: relative; }
 @keyframes ctxIn { from { width: 0; padding-left: 0; padding-right: 0; border-left-width: 0; } to { width: var(--w-ctx, 320px); padding-left: 14px; padding-right: 14px; border-left-width: 1px; } }
 @keyframes ctxOut { from { width: var(--w-ctx, 320px); padding-left: 14px; padding-right: 14px; } to { width: 0; padding-left: 0; padding-right: 0; border-left-width: 0; } }
 @keyframes ctxContentIn { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
-.ctx { animation: ctxIn .3s cubic-bezier(.2,.8,.2,1) both; overflow-x: hidden; }
+.ctx { animation: ctxIn .3s cubic-bezier(.2,.8,.2,1) both; overflow-x: hidden; min-width: 0; } /* min-width:0: flex öğesi içerik genişliğinin altına inebilsin (animasyon) */
 .ctx > * { animation: ctxContentIn .28s cubic-bezier(.2,.8,.2,1) .12s both; min-width: calc(var(--w-ctx, 320px) - 28px); }
 .settings, .menu { animation: modalIn .16s ease-out both; }
 .overlay { animation: fadeIn .16s ease-out both; }
