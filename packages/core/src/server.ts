@@ -161,6 +161,35 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     if (chat) bus.emit({ type: 'chat.upsert', chat });
     return chat;
   });
+  // Dosya gönderme: JSON {name, mime, data(base64), caption} → ~/.kavsak/outbox/<zaman>-<ad> → connector.sendMedia
+  route('POST', '/api/chats/:id/send-file', async (_r, _s, p, body) => {
+    const id = decodeURIComponent(p.id);
+    const chat = store.getChat(id);
+    if (!chat) throw new HttpError(404, 'Sohbet yok');
+    const b = body as { name?: string; mime?: string; data?: string; caption?: string };
+    if (!b.name || !b.data) throw new HttpError(400, 'name ve data gerekli');
+    const c = registry.get(chat.accountId);
+    if (!c) throw new HttpError(409, 'Hesap bağlı değil');
+    if (!c.sendMedia) throw new HttpError(400, 'Bu platformda dosya gönderme desteklenmiyor');
+    const dir = path.join(DATA_DIR, 'outbox');
+    fs.mkdirSync(dir, { recursive: true });
+    const safe = String(b.name).replace(/[^\w.\-çğıöşüÇĞİÖŞÜ ]+/g, '_').slice(0, 120) || 'dosya';
+    const file = path.join(dir, `${Date.now()}-${safe}`);
+    const buf = Buffer.from(String(b.data), 'base64');
+    fs.writeFileSync(file, buf);
+    try {
+      return await c.sendMedia(chat.remoteId, { path: file, name: safe, mime: String(b.mime || 'application/octet-stream'), size: buf.length }, b.caption ? String(b.caption) : undefined);
+    } finally {
+      setTimeout(() => fs.rmSync(file, { force: true }), 10 * 60_000).unref();
+    }
+  });
+  // Sohbet listesinin sonraki sayfası (daha eski e-postalar/sohbetler)
+  route('POST', '/api/accounts/:id/more', async (_r, _s, p) => {
+    const c = registry.get(decodeURIComponent(p.id));
+    if (!c) throw new HttpError(409, 'Hesap bağlı değil');
+    if (!c.loadMoreChats) return { added: 0, supported: false };
+    return { added: await c.loadMoreChats(), supported: true };
+  });
   route('POST', '/api/chats/:id/send', async (_r, _s, p, body) => {
     const id = decodeURIComponent(p.id);
     const chat = store.getChat(id);
@@ -318,7 +347,7 @@ function readJson(req: http.IncomingMessage): Promise<unknown> {
     req.setEncoding('utf8');
     req.on('data', (c) => {
       data += c;
-      if (data.length > 1_000_000) {
+      if (data.length > (req.url?.includes('/send-file') ? 80_000_000 : 1_000_000)) {
         reject(new HttpError(413, 'İstek gövdesi çok büyük'));
         req.destroy();
       }

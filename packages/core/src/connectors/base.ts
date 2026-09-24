@@ -28,6 +28,10 @@ export interface Connector {
   openDirect?(participant: Participant): Promise<string>;
   /** Platform tarafında da oturumu kapat (örn. WhatsApp "bağlı cihazlar"dan düş). */
   logout?(): Promise<void>;
+  /** Fotoğraf/video/dosya gönder (destekleyen platformlar). file.path çekirdeğin yazdığı geçici dosya; caption isteğe bağlı açıklama */
+  sendMedia?(remoteChatId: string, file: { path: string; name: string; mime: string; size: number }, caption?: string): Promise<{ remoteId: string }>;
+  /** Sohbet listesinin sonraki sayfasını (daha eski sohbetler/e-postalar) getir; eklenen sohbet sayısını döner, 0 = daha yok */
+  loadMoreChats?(): Promise<number>;
   /** Sohbet açıkken çağrılır: yazıyor/çevrimiçi bilgisi için platforma abone ol (WhatsApp presenceSubscribe vb.) */
   watch?(remoteChatId: string): Promise<void>;
   /** Sohbet Kavşak'ta açılınca platformda da okundu işaretle (telefon/diğer istemcilerde okunmamış kalmasın) */

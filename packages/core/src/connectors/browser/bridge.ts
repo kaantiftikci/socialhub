@@ -69,6 +69,10 @@ export interface Strategy {
   markRead?(page: Page, cookies: Record<string, string>, threadId: string, lastIncomingId?: string): Promise<void>;
   /** http(s) olmayan özel medya şeması (ör. X'in "xc:<sohbet>/<ek>" çözülmüş OPFS dosyaları): strateji sayfa bağlamından okur */
   fetchMedia?(page: Page, cookies: Record<string, string>, u: string): Promise<{ body: Buffer; type: string } | undefined>;
+  /** Fotoğraf/video/dosya gönder: genelde düzenleyicideki input[type=file]'a setInputFiles ile; dönen kimlik ya da undefined */
+  sendFile?(page: Page, cookies: Record<string, string>, threadId: string, file: { path: string; name: string; mime: string; size: number }, caption?: string): Promise<string | undefined>;
+  /** Sohbet listesinin `pageIndex`. sayfası (1 = ilk sayfadan sonraki); boş dizi = daha yok */
+  moreThreads?(page: Page, cookies: Record<string, string>, pageIndex: number): Promise<Thread[]>;
   /** Kayıtlı oturum olsa da "Yeniden bağlan"da görünür pencere gerekiyor mu (ör. Messenger uçtan uca şifreli geçmiş için PIN adımı)? */
   needsWindow?(page: Page): Promise<boolean>;
   /** Görünür pencere kapatılmadan önce: kullanıcının tamamlaması gereken ek adım (PIN) için bekle */
@@ -269,6 +273,30 @@ export class BrowserConnector extends BaseConnector {
     const id = (await this.serial(async () => this.strategy.send(this.page!, await this.cookies(), remoteChatId, text))) ?? `local-${Date.now()}`;
     this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent' });
     return { remoteId: id };
+  }
+
+  async sendMedia(remoteChatId: string, file: { path: string; name: string; mime: string; size: number }, caption?: string): Promise<{ remoteId: string }> {
+    if (!this.strategy.sendFile) throw new Error('Bu platformda dosya gönderme desteklenmiyor');
+    if (!this.page || this.page.isClosed()) throw new Error('Tarayıcı oturumu açık değil');
+    const id = (await this.serial(async () => this.strategy.sendFile!(this.page!, await this.cookies(), remoteChatId, file, caption))) ?? `local-${Date.now()}`;
+    const kind = file.mime.startsWith('image/') ? 'image' : file.mime.startsWith('video/') ? 'video' : file.mime.startsWith('audio/') ? 'audio' : 'file';
+    this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text: caption ?? '', ts: Date.now(), status: 'sent', attachments: [{ kind, name: file.name, mime: file.mime, size: file.size }] });
+    return { remoteId: id };
+  }
+
+  private morePage = 0;
+  async loadMoreChats(): Promise<number> {
+    if (!this.strategy.moreThreads) throw new Error('Bu platformda daha eski sohbet listesi desteklenmiyor');
+    if (!this.page || this.page.isClosed()) throw new Error('Tarayıcı oturumu açık değil');
+    const idx = this.morePage + 1;
+    const threads = await this.serial(async () => this.strategy.moreThreads!(this.page!, await this.cookies(), idx));
+    let added = 0;
+    for (const t of threads) {
+      if (!this.store.getChat(chatId(this.account.id, t.id))) added++;
+      this.upsertChat({ remoteId: t.id, name: t.name, kind: t.kind, unread: t.unread, lastMessageAt: t.lastTs || undefined, lastPreview: t.preview || undefined, avatarUrl: t.avatarUrl, handle: t.handle, link: t.link, participants: t.participants });
+    }
+    if (threads.length) this.morePage = idx;
+    return added;
   }
 
   async markRead(remoteChatId: string): Promise<void> {
