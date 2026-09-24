@@ -96,8 +96,7 @@ function AuthScreen({
           <Logo size={36} />
           <span>mivelo</span>
         </div>
-        <h1>Demo paneline gir</h1>
-        <p>Bu herkese açık bir demodur; sana verilen kullanıcı adı ve şifreyle gir. Bağladığın uygulamalar çıkış yapsan da hesabında kalır.</p>
+        <h1>Giriş yap</h1>
         <label>
           Kullanıcı adı
           <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoCapitalize="none" required minLength={2} maxLength={40} />
