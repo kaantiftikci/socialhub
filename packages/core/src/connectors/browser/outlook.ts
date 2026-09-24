@@ -195,7 +195,10 @@ async function openThread(page: Page, id: string): Promise<boolean> {
   const paneText = () => page.evaluate((sel) => Array.from(document.querySelectorAll<HTMLElement>(sel)).map((b) => b.innerText.slice(0, 400)).join('|'), BODY).catch(() => '');
   const wasSelected = (await row.getAttribute('aria-selected').catch(() => null)) === 'true';
   const before = await paneText();
-  await row.click({ timeout: 8000 }).catch(() => undefined);
+  // Bu görünüm genişliğinde açık ileti listeyi örtüyor (satırlar visibility:hidden): Playwright tıklaması "görünmez" diye
+  // bekler; DOM click() ise React işleyicisini çalıştırıp satırı seçiyor (profil kopyasıyla doğrulandı)
+  const clicked = await row.click({ timeout: 2500 }).then(() => true).catch(() => false);
+  if (!clicked) await row.evaluate((el) => (el as HTMLElement).click()).catch(() => undefined);
   const ok = await page
     .waitForSelector(BODY, { timeout: 15_000 })
     .then(() => true)
@@ -377,6 +380,8 @@ export const outlook: Strategy = {
         const email = (from?.getAttribute('title')?.match(/[\w.+-]+@[\w.-]+/) ?? box?.innerText.match(/[\w.+-]+@[\w.-]+/) ?? [])[0] ?? '';
         const name = from?.innerText?.trim() ?? '';
         const timeEl = box?.querySelector<HTMLElement>('[data-testid="SentReceivedSavedTime"], span[title*=":"]:not([title*="@"])');
+        // zaman öğesi bulunamazsa kutunun metnindeki tam tarih ("24.09.2026 Per 03:33")
+        const timeTxt = timeEl?.getAttribute('title') || timeEl?.innerText || (box?.innerText.match(/\d{1,2}\.\d{1,2}\.\d{4}[^\n]{0,12}\d{1,2}:\d{2}/) ?? [])[0] || '';
         // ekler: dosya adı taşıyan kartlar (seçici doğrulanmadı; ad yoksa atlanır)
         const files = Array.from(box?.querySelectorAll<HTMLElement>('[data-testid*="ttachment"] [title], [role="listitem"][aria-label], [role="option"][aria-label]:not([data-convid])') ?? [])
           .map((a) => (a.getAttribute('title') || a.getAttribute('aria-label') || '').split(/,\s*/)[0].trim())
@@ -387,7 +392,7 @@ export const outlook: Strategy = {
           const qt = q.innerText?.trim();
           if (qt) text = text.replace(qt, '');
         }
-        out.push({ email: email.toLowerCase(), name, time: timeEl?.getAttribute('title') || timeEl?.innerText || '', text: text.trim(), files: Array.from(new Set(files)) });
+        out.push({ email: email.toLowerCase(), name, time: timeTxt, text: text.trim(), files: Array.from(new Set(files)) });
       }
       return out;
     }, BODY);
@@ -399,7 +404,8 @@ export const outlook: Strategy = {
         return {
           id: hashId(threadId + '|' + r.email + '|' + r.time + '|' + r.text.slice(0, 80)),
           text: r.text.slice(0, 20_000),
-          ts: parseOutlookDate(r.time) ?? Date.now() - (rows.length - i) * 60_000,
+          // zaman okunamazsa listedeki satır zamanı (yoklama saati yazılırsa sohbet en üste fırlıyor ve liste zamanı bir daha kazanamıyordu)
+          ts: parseOutlookDate(r.time) ?? (threadTs.get(threadId) || Date.now()) - (rows.length - 1 - i) * 60_000,
           fromMe,
           senderId: fromMe ? 'me' : r.email || threadId,
           senderName: fromMe ? 'Ben' : r.name || r.email || 'Gönderen',
@@ -449,6 +455,8 @@ export const FILE_INPUT = 'input[type="file"][data-testid="local-computer-filein
 
 /** threads()/moreThreads ile depoya yazılmış satır kimlikleri (moreThreads yalnızca yenilerini döndürür) */
 const listed = new Set<string>();
+/** liste satırından okunan zaman (ileti zamanı okunamazsa yedek) */
+const threadTs = new Map<string, number>();
 
 /** DOM'daki liste satırlarını ham alanlarıyla oku */
 function readListRows(page: Page): Promise<OutlookRawRow[]> {
@@ -472,6 +480,7 @@ function readListRows(page: Page): Promise<OutlookRawRow[]> {
 
 function rawToThread(r: OutlookRawRow): Thread {
   const x = outlookRow(r);
+  if (x.ts) threadTs.set(r.id, x.ts);
   return {
     id: r.id,
     name: x.subject,
