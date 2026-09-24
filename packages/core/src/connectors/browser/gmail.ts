@@ -94,10 +94,12 @@ export const gmail: Strategy = {
   home: HOME,
   loginHint: 'Açılan pencerede Google hesabına giriş yap; gelen kutusu görününce pencere kendiliğinden kapanır',
 
-  async loggedIn(page, cookies) {
+  async loggedIn(page, cookies, passive) {
     if (!cookies.SID || !cookies.HSID) return false;
     if (page.url().startsWith('https://accounts.google.com/')) return false;
     if (page.url().startsWith(BASE)) return true;
+    // görünür pencerede yönlendirme yapma: kullanıcı Google'ın izin/2FA adımlarında olabilir
+    if (passive) return page.url().includes('google.com') && !page.url().includes('/signin');
     // Google giriş sonrası mail.google.com'a yönlendirir; başka bir sayfadaysak (ör. myaccount) gelen kutusunu dene
     await page.goto(HOME, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
     await page.waitForTimeout(1500);

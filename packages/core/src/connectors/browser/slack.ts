@@ -186,11 +186,13 @@ export const slackStrategy: Strategy = {
   loginHint: 'Açılan pencerede Slack\'e giriş yap (e-posta kodu / Google), listeden çalışma alanını AÇ — giriş ancak çalışma alanı açılınca tamamlanır',
   parallel: true,
 
-  async loggedIn(page, cookies) {
+  async loggedIn(page, cookies, passive) {
     // "d": .slack.com oturum çerezi; yalnızca bir çalışma alanı gerçekten açıldığında yazılır.
     // Google/e-posta doğrulaması bitmiş ama çalışma alanı seçilmemişse yoktur → giriş tamamlanmamıştır.
     if (!cookies.d) return false;
     if (await team(page)) return true;
+    // görünür pencerede yönlendirme yapma (kullanıcı çalışma alanı seçiyor olabilir): web istemcisi yüklendiyse giriş tamam
+    if (passive) return /^https:\/\/app\.slack\.com\/client\/[A-Z]/.test(page.url());
     // "d" var ama bu sayfa (slack.com/signin listesi, <ws>.slack.com "uygulamada aç" ekranı) oturum bilgisini
     // taşımıyor: web istemcisini yükle; localConfig_v2 orada oluşur (görünür pencerede en çok 8 sn'de bir)
     if (Date.now() - lastNav < 8000) return false;

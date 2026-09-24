@@ -45,7 +45,8 @@ export interface Strategy {
   home: string;
   loginHint: string;
   /** Giriş yapılmış mı? (çerezler Node tarafında okunur, sayfa da verilir) */
-  loggedIn(page: Page, cookies: Record<string, string>): Promise<boolean>;
+  /** passive=true: görünür giriş penceresi açıkken çağrılır — sayfayı YÖNLENDİRME, yalnızca çerez/URL'ye bak (kullanıcının girişini bölmemek için) */
+  loggedIn(page: Page, cookies: Record<string, string>, passive?: boolean): Promise<boolean>;
   /** Kendi kimliğini ve görünen adını döndür */
   me(page: Page, cookies: Record<string, string>): Promise<{ id: string; label: string }>;
   threads(page: Page, cookies: Record<string, string>): Promise<Thread[]>;
@@ -164,10 +165,10 @@ export class BrowserConnector extends BaseConnector {
     await ctx?.close().catch(() => undefined);
   }
 
-  private async isLoggedIn(): Promise<boolean> {
+  private async isLoggedIn(passive = false): Promise<boolean> {
     if (!this.page || this.page.isClosed()) return false;
     try {
-      return await this.strategy.loggedIn(this.page, await this.cookies());
+      return await this.strategy.loggedIn(this.page, await this.cookies(), passive);
     } catch {
       return false;
     }
@@ -179,13 +180,20 @@ export class BrowserConnector extends BaseConnector {
    * birkaç saniye hareketsiz kalana dek bekler, sonra döner.
    */
   private async waitForLogin(): Promise<boolean> {
+    let ticks = 0;
     while (!this.stopping) {
       this.adoptNewestPage();
-      if (!this.page || this.page.isClosed()) return false;
-      if (await this.isLoggedIn()) break;
+      if (!this.page || this.page.isClosed()) {
+        bus.log('warn', `${this.account.platform}: giriş penceresi kapatıldı, giriş tamamlanmadı`);
+        return false;
+      }
+      if (await this.isLoggedIn(true)) break;
+      // ilerleme görünür olsun: 20 sn'de bir hangi sayfada beklendiği
+      if (++ticks % 10 === 0) bus.log('info', `${this.account.platform}: giriş bekleniyor (${this.page.url().slice(0, 90)})`);
       await sleep(2000);
     }
     if (this.stopping) return false;
+    bus.log('info', `${this.account.platform}: giriş algılandı (${this.page?.url().slice(0, 90)}), izin adımları için bekleniyor`);
     // izin ekranları: URL 4 sn boyunca değişmeyene ve giriş hâlâ geçerli olana kadar bekle (en fazla 60 sn)
     let lastUrl = '';
     let stableFor = 0;
@@ -193,7 +201,7 @@ export class BrowserConnector extends BaseConnector {
       this.adoptNewestPage();
       if (!this.page || this.page.isClosed()) return false;
       const url = this.page.url();
-      const stillIn = await this.isLoggedIn();
+      const stillIn = await this.isLoggedIn(true);
       if (url === lastUrl && stillIn) stableFor += 2;
       else stableFor = 0;
       lastUrl = url;
