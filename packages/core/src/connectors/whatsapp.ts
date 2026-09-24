@@ -6,7 +6,7 @@ import QRCode from 'qrcode';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as Baileys from '@whiskeysockets/baileys';
-import type { WASocket, WAMessage, proto } from '@whiskeysockets/baileys';
+import type { WASocket, WAMessage, Contact, proto } from '@whiskeysockets/baileys';
 import { BaseConnector, type StartOptions } from './base.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
@@ -62,6 +62,20 @@ export class WhatsAppConnector extends BaseConnector {
   /** Çözülemeyen (CIPHERTEXT) mesajlar: gönderen → zaman damgaları; oturum başına tek uyarı */
   private cipherHits = new Map<string, number[]>();
   private decryptWarned = false;
+  /** Rehberde kayıtlı adı olan kimlikler (lid ve numara): profil adı (pushName/notify) bunları ezmez */
+  private savedNames = new Set<string>();
+  /** Kendi kimliklerim (numara + lid): "kendime mesaj" sohbeti */
+  private meIds = new Set<string>();
+  /**
+   * Sohbetin WhatsApp'taki adresi: karşı taraf LID ile yazıyorsa @lid (depoda sohbet numarayla tutulur). Okundu alındısı ve
+   * geçmiş isteği (fetchMessageHistory) mesajın özgün anahtarıyla eşleşmeli; gönderimde Baileys 7 numarayı kendisi LID'e çevirir.
+   */
+  private wireJid = new Map<string, string>();
+  /** LID adresli gruplar (addressingMode 'lid'): alındılarda katılımcı @lid olmalı */
+  private lidGroups = new Set<string>();
+  /** contacts.upsert tek tek (kişi başına bir olay) gelir: günlüğe özet yazılır */
+  private contactTally = { total: 0, named: 0 };
+  private contactLogTimer?: NodeJS.Timeout;
 
   private authDir(): string {
     return path.join(sessionDir(this.account.id), 'auth');
@@ -82,7 +96,9 @@ export class WhatsAppConnector extends BaseConnector {
       browser: ['Mac', 'Kavşak', '1.0'],
       printQRInTerminal: false,
       syncFullHistory: history,
-      ...(history ? {} : { shouldSyncHistoryMessage: () => false }),
+      // Baileys 7 varsayılanı FULL geçmiş paketlerini ATLIYOR (yalnız INITIAL_BOOTSTRAP/RECENT işlenir): ilk eşleşmede yalnızca
+      // son birkaç sohbet gelir. Tam geçmiş için hepsi işlenir; logout soketi hiç geçmiş istemez.
+      shouldSyncHistoryMessage: () => history,
       markOnlineOnConnect: false,
       generateHighQualityLinkPreview: false,
     });
@@ -97,9 +113,18 @@ export class WhatsAppConnector extends BaseConnector {
 
   private loadNames(): void {
     try {
-      const raw = JSON.parse(fs.readFileSync(this.namesFile(), 'utf8')) as { alias?: Array<[string, string]>; names?: Array<[string, string]> };
+      const raw = JSON.parse(fs.readFileSync(this.namesFile(), 'utf8')) as {
+        alias?: Array<[string, string]>;
+        names?: Array<[string, string]>;
+        saved?: string[];
+        wire?: Array<[string, string]>;
+        lidGroups?: string[];
+      };
       this.loadingNames = true;
       for (const [k, v] of raw.names ?? []) this.nameCache.set(k, v);
+      for (const k of raw.saved ?? []) this.savedNames.add(k);
+      for (const [k, v] of raw.wire ?? []) this.wireJid.set(k, v);
+      for (const g of raw.lidGroups ?? []) this.lidGroups.add(g);
       this.store.transaction(() => {
         for (const [lid, pn] of raw.alias ?? []) if (lid.endsWith('@lid') && pn.endsWith('@s.whatsapp.net')) this.link(lid, pn);
       });
@@ -121,7 +146,10 @@ export class WhatsAppConnector extends BaseConnector {
   private saveNames(): void {
     try {
       const alias = [...this.alias.entries()].filter(([k]) => k.endsWith('@lid'));
-      fs.writeFileSync(this.namesFile(), JSON.stringify({ alias, names: [...this.nameCache.entries()] }));
+      fs.writeFileSync(
+        this.namesFile(),
+        JSON.stringify({ alias, names: [...this.nameCache.entries()], saved: [...this.savedNames], wire: [...this.wireJid.entries()], lidGroups: [...this.lidGroups] }),
+      );
     } catch {
       /* diske yazılamadı */
     }
@@ -156,6 +184,9 @@ export class WhatsAppConnector extends BaseConnector {
         this.opened = true;
         this.failedBeforeOpen = 0;
         const me = sock.user?.id ? jidNormalizedUser(sock.user.id) : '';
+        const meLid = sock.user?.lid ? jidNormalizedUser(sock.user.lid) : '';
+        this.meIds = new Set([me, meLid].filter(Boolean));
+        if (me && meLid) this.link(meLid, me);
         this.account.label = 'WhatsApp';
         this.setStatus('connected', me ? `+${me.split('@')[0]}` : undefined);
         bus.log('info', 'WhatsApp bağlandı; telefon geçmişi gönderiyor (ilk seferde 10-60 sn sürebilir)');
@@ -188,7 +219,12 @@ export class WhatsAppConnector extends BaseConnector {
               await sock.relayMessage(
                 me,
                 { protocolMessage: { type: WAProto.Message.ProtocolMessage.Type.APP_STATE_SYNC_KEY_REQUEST, appStateSyncKeyRequest: { keyIds } } },
-                { messageId: generateMessageID() },
+                // WhatsApp Web gibi "peer" mesajı: yalnızca telefona (cihaz 0) gider (Baileys 7 sendPeerDataOperationMessage ile aynı öznitelikler)
+                {
+                  messageId: generateMessageID(),
+                  additionalAttributes: { category: 'peer', push_priority: 'high_force' },
+                  additionalNodes: [{ tag: 'meta', attrs: { appdata: 'default' } }],
+                },
               );
               bus.log('info', `WhatsApp: ${keyIds.length} uygulama durumu anahtarı telefondan istendi (deneme ${attempt}); 20 sn sonra yeniden eşitlenecek`);
               setTimeout(() => void resync(attempt + 1), 20_000);
@@ -260,9 +296,8 @@ export class WhatsAppConnector extends BaseConnector {
       bus.log('info', `WhatsApp geçmiş paketi: ${chats?.length ?? 0} sohbet, ${messages?.length ?? 0} mesaj (tür ${onDemand ? 'istek üzerine' : String(syncType)}, %${progress ?? '?'}${isLatest ? ', son' : ''})`);
       let named = 0;
       for (const c of contacts ?? []) {
-        const n = c.name ?? c.notify ?? c.verifiedName ?? undefined;
-        if (n) named++;
-        this.learnContact(c.id, c.lid ?? undefined, n);
+        if (c.name ?? c.notify ?? c.verifiedName) named++;
+        this.learnContact(c);
       }
       if (contacts?.length) bus.log('info', `WhatsApp: ${contacts.length} kişi geldi (${named} adlı)`);
       // Binlerce satır tek işlemde: her satırda ayrı commit/fsync olmasın (olay döngüsü dakikalarca kilitleniyordu)
@@ -275,8 +310,12 @@ export class WhatsAppConnector extends BaseConnector {
           else if (cc.lidJid && c.id.endsWith('@s.whatsapp.net')) this.link(cc.lidJid, c.id);
           else if (cc.pnJid && c.id.endsWith('@lid')) this.link(c.id, cc.pnJid);
           const jid = this.canon(c.id);
-          if (c.name) this.nameCache.set(jid, c.name);
-          else this.ensureGroupMeta(jid);
+          if (c.id.endsWith('@lid') && jid !== c.id) this.wireJid.set(jid, c.id);
+          // birebir sohbetin adı telefondaki rehber adıdır (kayıtlı ad sayılır); grup adı konu
+          if (c.name) {
+            if (jid.endsWith('@g.us')) this.nameCache.set(jid, c.name);
+            else this.learnContact({ id: jid, name: c.name });
+          } else this.ensureGroupMeta(jid);
           const existing = this.store.getChat(chatIdOf(this.account.id, jid));
           const ts = toMs(c.conversationTimestamp);
           // unreadCount telefonun gerçek sayacı (mutlak). Alanı olmayan paketler (FULL dilimleri, ON_DEMAND) mevcut sayacı ezmesin;
@@ -312,9 +351,24 @@ export class WhatsAppConnector extends BaseConnector {
       void this.fetchAvatars(sock, (chats ?? []).map((c) => c.id).filter((id): id is string => !!id && isChatJid(id)).map((id) => this.canon(id)).slice(0, 60));
     });
 
+    // Baileys 7: uygulama durumundaki her contactAction ayrı bir contacts.upsert olayı (1 kişi) olarak gelir; id numara ya da LID
+    // olabilir, karşılığı phoneNumber / lid alanında. Günlüğe tek özet satırı yazılır.
+    // Baileys 7: geçmiş eşitlemesi bitti / durdu (telefon 2 dk yeni parça göndermedi)
+    sock.ev.on('messaging-history.status', ({ syncType, status, explicit }) => {
+      if (status === 'paused')
+        bus.log('warn', `WhatsApp: telefon geçmiş göndermeyi durdurdu (tür ${syncType}); telefonda WhatsApp'ı açık tutup bekle — eksik kalırsa cihazı kaldırıp yeniden eşleştir`);
+      else bus.log('info', `WhatsApp: geçmiş eşitlemesi tamamlandı (tür ${syncType}${explicit ? '' : ', zaman aşımıyla'})`);
+    });
     sock.ev.on('contacts.upsert', (cs) => {
-      for (const c of cs) this.learnContact(c.id, c.lid ?? undefined, c.name ?? c.notify ?? c.verifiedName ?? undefined);
-      bus.log('info', `WhatsApp: rehberden ${cs.length} kişi (${cs.filter((c) => c.name).length} adlı)`);
+      for (const c of cs) this.learnContact(c);
+      this.contactTally.total += cs.length;
+      this.contactTally.named += cs.filter((c) => c.name).length;
+      if (!this.contactLogTimer)
+        this.contactLogTimer = setTimeout(() => {
+          this.contactLogTimer = undefined;
+          bus.log('info', `WhatsApp: rehberden ${this.contactTally.total} kişi (${this.contactTally.named} adlı)`);
+          this.contactTally = { total: 0, named: 0 };
+        }, 2000);
       this.scheduleRefresh();
     });
     // Baileys 7: LID↔numara eşlemeleri tek olaydan gelir (eskiden chats.phoneNumberShare)
@@ -323,13 +377,20 @@ export class WhatsAppConnector extends BaseConnector {
       this.scheduleRefresh();
     });
     sock.ev.on('groups.upsert', (gs) => {
-      for (const g of gs) this.applyGroup(g.id, g.subject, g.participants as Array<{ id: string; admin?: string | null }> | undefined);
+      for (const g of gs) this.applyGroup(g.id, g.subject, g.participants, g.addressingMode);
     });
     sock.ev.on('groups.update', (gs) => {
       for (const g of gs) if (g.id && g.subject) this.applyGroup(g.id, g.subject, undefined);
     });
+    // contacts.update: gelen her mesajın profil adı (notify) ve profil fotoğrafı değişimi (imgUrl 'changed'/'removed')
     sock.ev.on('contacts.update', (cs) => {
-      for (const c of cs) this.learnContact(c.id, c.lid ?? undefined, c.name ?? c.notify ?? c.verifiedName ?? undefined);
+      for (const c of cs) {
+        if (c.id && c.imgUrl !== undefined) {
+          const jid = this.canon(jidNormalizedUser(c.id));
+          this.avatarCache.delete(jid);
+        }
+        this.learnContact(c);
+      }
       this.scheduleRefresh();
     });
 
@@ -337,7 +398,8 @@ export class WhatsAppConnector extends BaseConnector {
       for (const c of cs) {
         if (!c.id || !isChatJid(c.id)) continue;
         const jid = this.canon(c.id);
-        if (c.name) this.nameCache.set(jid, c.name);
+        if (c.name && jid.endsWith('@g.us')) this.nameCache.set(jid, c.name);
+        else if (c.name) this.learnContact({ id: jid, name: c.name });
         this.upsertChat({ remoteId: jid, name: this.nameOf(jid), kind: jid.endsWith('@g.us') ? 'group' : 'direct' });
       }
     });
@@ -373,14 +435,26 @@ export class WhatsAppConnector extends BaseConnector {
     sock.ev.on('messages.update', (updates) => {
       for (const u of updates) {
         if (!u.key.remoteJid || !u.key.id || !isChatJid(u.key.remoteJid)) continue;
+        // Düzenleme (MESSAGE_EDIT → update.message.editedMessage) ve herkesten silme (REVOKE → messageStubType): metni güncelle
+        if (u.update.message || u.update.messageStubType === WAProto.WebMessageInfo.StubType.REVOKE) this.applyEdit(u.key.remoteJid, u.key.id, u.update);
         const st = u.update.status;
         if (st === undefined || st === null) continue;
-        const map: Record<number, 'pending' | 'sent' | 'delivered' | 'read'> = { 0: 'pending', 1: 'pending', 2: 'sent', 3: 'delivered', 4: 'read', 5: 'read' };
+        // proto.WebMessageInfo.Status: 0 ERROR, 1 PENDING, 2 SERVER_ACK, 3 DELIVERY_ACK, 4 READ, 5 PLAYED
+        const map: Record<number, 'failed' | 'pending' | 'sent' | 'delivered' | 'read'> = { 0: 'failed', 1: 'pending', 2: 'sent', 3: 'delivered', 4: 'read', 5: 'read' };
         const cj = this.canon(u.key.remoteJid);
         const mid = `${chatIdOf(this.account.id, cj)}#${u.key.id}`;
         const stored = this.store.getMessage(mid);
         if (!stored) continue; // bilmediğimiz mesaj için boş kayıt açma
         const next = map[st] ?? 'sent';
+        // gönderim hatası yalnızca henüz iletilmemiş kendi mesajımızı "başarısız" yapar
+        if (next === 'failed') {
+          if (stored.fromMe && (stored.status === 'pending' || stored.status === 'sent')) {
+            this.store.updateStatus(mid, 'failed');
+            const chat = this.store.getChat(stored.chatId);
+            if (chat) bus.emit({ type: 'message.upsert', message: { ...stored, status: 'failed' }, chat });
+          }
+          continue;
+        }
         // alındılar sırasız gelebilir (2 sonra 1): durum hiç geri gitmesin (gönderildi → bekleniyor olmasın)
         const RANK: Record<string, number> = { pending: 0, sent: 1, delivered: 2, read: 3 };
         if ((RANK[next] ?? 0) < (RANK[stored.status] ?? 0)) continue;
@@ -405,6 +479,18 @@ export class WhatsAppConnector extends BaseConnector {
         if (stored && !stored.fromMe) this.clearUnread(cj);
       }
     });
+  }
+
+  /** Düzenlenen ya da herkesten silinen mesajın depodaki metnini güncelle (bilinmeyen mesaj için kayıt açılmaz) */
+  private applyEdit(remoteJid: string, id: string, update: Partial<WAMessage>): void {
+    const cj = this.canon(remoteJid);
+    const stored = this.store.getMessage(`${chatIdOf(this.account.id, cj)}#${id}`);
+    if (!stored) return;
+    const revoked = update.messageStubType === WAProto.WebMessageInfo.StubType.REVOKE;
+    const text = revoked ? '🚫 Bu mesaj silindi' : textOf(unwrap(update.message));
+    if (!text || text === stored.text) return;
+    const { id: _id, chatId: _c, ...rest } = stored;
+    this.upsertMessage({ ...rest, remoteChatId: cj, text, attachments: revoked ? [] : stored.attachments });
   }
 
   /** Telefonda okunan sohbetin sayacını sıfırla (bekleyen artışlar da düşer) */
@@ -459,12 +545,12 @@ export class WhatsAppConnector extends BaseConnector {
     const cid = chatIdOf(this.account.id, remoteChatId);
     const oldest = this.oldestMessage(cid, before);
     if (!oldest) return;
-    const me = jidNormalizedUser(sock.user?.id ?? '');
+    // Telefon eski dilimi mesajın özgün anahtarıyla bulur: LID ile konuşulan sohbette remoteJid @lid, LID gruplarında katılımcı @lid
     const key = {
-      remoteJid: remoteChatId,
+      remoteJid: this.wireOf(remoteChatId),
       id: oldest.remoteId,
       fromMe: oldest.fromMe,
-      participant: remoteChatId.endsWith('@g.us') ? (oldest.fromMe ? me : oldest.senderId) : undefined,
+      participant: remoteChatId.endsWith('@g.us') ? this.participantOf(remoteChatId, oldest.fromMe ? 'me' : oldest.senderId) : undefined,
     };
     let resolveWait: () => void = () => undefined;
     const waited = new Promise<void>((resolve) => {
@@ -514,6 +600,8 @@ export class WhatsAppConnector extends BaseConnector {
     this.refreshTimer = undefined;
     if (this.unreadSettleTimer) clearTimeout(this.unreadSettleTimer);
     this.unreadSettleTimer = undefined;
+    if (this.contactLogTimer) clearTimeout(this.contactLogTimer);
+    this.contactLogTimer = undefined;
     this.pendingUnread.clear();
     this.liveBumped.clear();
     this.historyCounted.clear();
@@ -559,7 +647,7 @@ export class WhatsAppConnector extends BaseConnector {
       const all = await sock.groupFetchAllParticipating();
       let n = 0;
       for (const g of Object.values(all)) {
-        this.applyGroup(g.id, g.subject, g.participants);
+        this.applyGroup(g.id, g.subject, g.participants, g.addressingMode);
         n++;
       }
       bus.log('info', `WhatsApp: ${n} grup adı/üyesi alındı${n ? ' (örn. ' + Object.values(all)[0]?.subject + ')' : ''}`);
@@ -577,19 +665,36 @@ export class WhatsAppConnector extends BaseConnector {
     setTimeout(() => {
       sock
         .groupMetadata(jid)
-        .then((g) => this.applyGroup(g.id, g.subject, g.participants))
+        .then((g) => this.applyGroup(g.id, g.subject, g.participants, g.addressingMode))
         .catch((e) => bus.log('warn', `WhatsApp grup bilgisi alınamadı (${jid}): ${(e as Error).message}`))
         .finally(() => this.groupPending.delete(jid));
     }, 300 * this.groupPending.size);
   }
 
-  private applyGroup(id: string, subject: string | undefined, participants: Array<{ id: string; jid?: string; lid?: string; admin?: string | null }> | undefined): void {
+  private applyGroup(
+    id: string,
+    subject: string | undefined,
+    participants: Array<{ id: string; phoneNumber?: string; lid?: string; jid?: string; admin?: string | null }> | undefined,
+    addressingMode?: string,
+  ): void {
     if (!id) return;
     if (subject) this.nameCache.set(id, subject);
-    // grup üyeleri hem lid hem telefon kimliğiyle gelir: eşlemeyi öğren (rehber adları telefon kimliğinde)
-    for (const p of participants ?? []) if (p.lid && p.jid) this.link(p.lid, p.jid);
+    if (addressingMode === 'lid' && !this.lidGroups.has(id)) {
+      this.lidGroups.add(id);
+      this.scheduleSaveNames();
+    }
+    // Baileys 7 üye: id (grubun adresleme biçimine göre @lid ya da numara) + karşılığı phoneNumber (id LID ise) / lid (id numaraysa).
+    // (6.x'te numara 'jid' alanındaydı.) Eşlemeyi öğren: rehber adları numarada.
+    const pnOf = (p: { id: string; phoneNumber?: string; jid?: string }) =>
+      [p.phoneNumber, p.jid, p.id].find((x): x is string => !!x && x.endsWith('@s.whatsapp.net'));
+    for (const p of participants ?? []) {
+      const pn = pnOf(p);
+      const lid = [p.lid, p.id].find((x): x is string => !!x && x.endsWith('@lid'));
+      if (pn && lid) this.link(jidNormalizedUser(lid), jidNormalizedUser(pn));
+    }
     const members: Participant[] | undefined = participants?.map((p) => {
-      const jid = p.jid && p.jid.endsWith('@s.whatsapp.net') ? p.jid : this.canon(p.id);
+      const pn = pnOf(p);
+      const jid = pn ? jidNormalizedUser(pn) : this.canon(jidNormalizedUser(p.id));
       return { id: jid, name: this.nameOf(jid), handle: jid.endsWith('@s.whatsapp.net') ? '+' + jid.split('@')[0] : undefined, avatarUrl: this.avatarCache.get(jid) || undefined, admin: !!p.admin };
     });
     if (this.store.getChat(chatIdOf(this.account.id, id)) || subject) this.upsertChat({ remoteId: id, name: subject ?? this.nameOf(id), kind: 'group', participants: members, link: undefined });
@@ -614,7 +719,13 @@ export class WhatsAppConnector extends BaseConnector {
     if (!this.sock) return;
     const msgs = this.store.listMessages(chatIdOf(this.account.id, remoteChatId), 40).filter((m) => !m.fromMe && !m.remoteId.startsWith('local-'));
     if (!msgs.length) return;
-    const keys = msgs.map((m) => ({ remoteJid: remoteChatId, id: m.remoteId, fromMe: false, participant: remoteChatId.endsWith('@g.us') && m.senderId !== 'me' ? m.senderId : undefined }));
+    const remoteJid = this.wireOf(remoteChatId);
+    const keys = msgs.map((m) => ({
+      remoteJid,
+      id: m.remoteId,
+      fromMe: false,
+      participant: remoteChatId.endsWith('@g.us') && m.senderId !== 'me' ? this.participantOf(remoteChatId, m.senderId) : undefined,
+    }));
     await this.sock.readMessages(keys);
   }
 
@@ -691,15 +802,54 @@ export class WhatsAppConnector extends BaseConnector {
     return jid;
   }
 
-  private learnContact(id: string | undefined, lid: string | undefined, name: string | undefined): void {
-    if (!id) return;
-    if (lid) this.link(lid, id);
-    if (name) {
-      if (this.nameCache.get(id) !== name) this.scheduleSaveNames();
-      this.nameCache.set(id, name);
-      const other = this.alias.get(id);
-      if (other) this.nameCache.set(other, name);
+  /** Sohbetin WhatsApp adresi (LID ile konuşulan birebir sohbette @lid) */
+  private wireOf(jid: string): string {
+    return this.wireJid.get(jid) ?? jid;
+  }
+
+  /** Grup mesajı alındısı/geçmiş isteği için katılımcı kimliği: LID grubunda @lid, değilse numara */
+  private participantOf(group: string, sender: string): string {
+    const me = [...this.meIds];
+    const lidMode = this.lidGroups.has(group);
+    if (sender === 'me') return (lidMode ? me.find((x) => x.endsWith('@lid')) : undefined) ?? me.find((x) => x.endsWith('@s.whatsapp.net')) ?? me[0] ?? '';
+    if (!lidMode || sender.endsWith('@lid')) return sender;
+    const alt = this.alias.get(sender);
+    return alt?.endsWith('@lid') ? alt : sender;
+  }
+
+  /**
+   * Kişi bilgisi (Baileys 7 Contact): id numara ya da LID; karşılığı phoneNumber / lid alanında.
+   * name = telefondaki rehber adı (kayıtlı, önceliklidir); notify = kişinin kendi profil adı (pushName) ve verifiedName yalnızca
+   * kayıtlı ad yoksa kullanılır. Eskiden her gelen mesajın contacts.update{notify} olayı rehber adını ezip sohbeti profil adıyla
+   * yeniden adlandırıyordu.
+   */
+  learnContact(c: Partial<Pick<Contact, 'id' | 'lid' | 'phoneNumber' | 'name' | 'notify' | 'verifiedName'>>): void {
+    const id = c.id ? jidNormalizedUser(c.id) : '';
+    if (!id) return; // profil fotoğrafı olaylarında id bazen jid değil, özet (hash) olabiliyor
+    const lid = c.lid ? jidNormalizedUser(c.lid) : id.endsWith('@lid') ? id : undefined;
+    const pn = c.phoneNumber ? jidNormalizedUser(c.phoneNumber) : id.endsWith('@s.whatsapp.net') ? id : undefined;
+    if (lid && pn) this.link(lid, pn);
+    const keys = [...new Set([id, lid, pn, this.alias.get(id)].filter((x): x is string => !!x))];
+    const saved = c.name?.trim();
+    const profile = (c.notify ?? c.verifiedName ?? '').trim();
+    let changed = false;
+    const setName = (k: string, name: string) => {
+      if (this.nameCache.get(k) === name) return;
+      this.nameCache.set(k, name);
+      changed = true;
+    };
+    if (saved) {
+      for (const k of keys) {
+        if (!this.savedNames.has(k)) {
+          this.savedNames.add(k);
+          changed = true;
+        }
+        setName(k, saved);
+      }
+    } else if (profile && !keys.some((k) => this.savedNames.has(k))) {
+      for (const k of keys) setName(k, profile);
     }
+    if (changed) this.scheduleSaveNames();
   }
 
   /**
@@ -745,17 +895,22 @@ export class WhatsAppConnector extends BaseConnector {
     if (ms > 1000) bus.log('info', `WhatsApp: adlar yenilendi (${renamed} gönderen, ${ms} ms)`);
   }
 
+  /**
+   * Görünen ad önceliği: WhatsApp rehber adı → macOS Kişiler → profil adı (pushName) → +numara → "WhatsApp kişisi".
+   * Profil adı herkesin kendi koyduğu addır; kullanıcının Mac rehberindeki ad daha anlamlı.
+   */
   private nameOf(jid: string): string {
-    const n = this.nameCache.get(jid) ?? this.nameCache.get(this.alias.get(jid) ?? '');
-    if (n) return n;
-    const pn = jid.endsWith('@lid') ? this.alias.get(jid) : jid;
-    if (pn && pn.endsWith('@s.whatsapp.net')) {
-      const mac = macContacts().get('+' + pn.split('@')[0]);
-      if (mac) return mac;
-      return '+' + pn.split('@')[0];
-    }
+    if (jid.endsWith('@g.us')) return this.nameCache.get(jid) ?? 'Grup';
+    const alt = this.alias.get(jid);
+    if (this.meIds.has(jid) || (alt && this.meIds.has(alt))) return 'Ben (kendime)';
+    const cached = this.nameCache.get(jid) ?? (alt ? this.nameCache.get(alt) : undefined);
+    if (cached && (this.savedNames.has(jid) || (alt && this.savedNames.has(alt)))) return cached;
+    const pn = jid.endsWith('@s.whatsapp.net') ? jid : alt?.endsWith('@s.whatsapp.net') ? alt : undefined;
+    const mac = pn ? macContacts().get('+' + pn.split('@')[0]) : undefined;
+    if (mac) return mac;
+    if (cached) return cached;
+    if (pn) return '+' + pn.split('@')[0];
     if (jid.endsWith('@lid')) return 'WhatsApp kişisi';
-    if (jid.endsWith('@g.us')) return 'Grup';
     return '+' + jid.split('@')[0];
   }
 
@@ -802,8 +957,30 @@ export class WhatsAppConnector extends BaseConnector {
     fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, this.mediaKey(jid, id));
     if (fs.existsSync(file) && fs.existsSync(file + '.type')) return { body: fs.readFileSync(file), type: fs.readFileSync(file + '.type', 'utf8') };
-    if (!this.sock) throw new Error('WhatsApp bağlı değil');
-    let body = await downloadMediaMessage(msg, 'buffer', {}, { logger: pino({ level: 'silent' }), reuploadRequest: this.sock.updateMediaMessage });
+    const sock = this.sock;
+    if (!sock) throw new Error('WhatsApp bağlı değil');
+    const download = () => downloadMediaMessage(msg, 'buffer', {}, { logger: pino({ level: 'silent' }), reuploadRequest: sock.updateMediaMessage });
+    let body: Buffer;
+    try {
+      body = await download();
+    } catch (e) {
+      // Süresi dolmuş CDN bağlantısı (404/410): telefondan yeniden yükleme istenmeli. Baileys 7.0.0-rc14 downloadMediaMessage bunu
+      // error.status'a bakarak tetikliyor, oysa Boom hatasında kod output.statusCode'da → istek hiç gitmiyor. Burada elle istenir;
+      // yeni directPath kalıcı kaydedilir ki bir dahaki sefere doğrudan insin.
+      const code = (e as { output?: { statusCode?: number }; status?: number }).output?.statusCode ?? (e as { status?: number }).status;
+      if (code !== 404 && code !== 410) throw e;
+      let timer: NodeJS.Timeout | undefined;
+      const updated = await Promise.race([
+        sock.updateMediaMessage(msg),
+        new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error('telefon medyayı 30 sn içinde yeniden yüklemedi (telefon çevrimdışı olabilir)')), 30_000))),
+      ]).finally(() => timer && clearTimeout(timer));
+      try {
+        fs.writeFileSync(idx, JSON.stringify(updated, BufferJSON.replacer));
+      } catch {
+        /* diske yazılamadı */
+      }
+      body = await download();
+    }
     let type = media?.mimetype?.split(';')[0] ?? 'application/octet-stream';
     if (type === 'audio/ogg' || type === 'audio/opus') {
       const mp3 = await transcodeToMp3(body).catch(() => undefined);
@@ -836,6 +1013,14 @@ export class WhatsAppConnector extends BaseConnector {
     else if (part?.endsWith('@lid') && k.participantPn) this.link(part, jidNormalizedUser(k.participantPn));
     else if (part?.endsWith('@s.whatsapp.net') && k.participantLid) this.link(jidNormalizedUser(k.participantLid), part);
     const jid = this.canon(raw);
+    if (raw.endsWith('@lid') && jid !== raw && this.wireJid.get(jid) !== raw) {
+      this.wireJid.set(jid, raw);
+      this.scheduleSaveNames();
+    }
+    if (raw.endsWith('@g.us') && (k.addressingMode === 'lid' || part?.endsWith('@lid')) && !this.lidGroups.has(raw)) {
+      this.lidGroups.add(raw);
+      this.scheduleSaveNames();
+    }
     const content = unwrap(m.message);
     const text = textOf(content);
     const attachments = attachmentsOf(content);
@@ -858,12 +1043,12 @@ export class WhatsAppConnector extends BaseConnector {
     const bizName = (m as WAMessage & { verifiedBizName?: string | null }).verifiedBizName ?? undefined;
     if (!m.pushName && bizName) m.pushName = bizName;
     if (m.pushName && !m.key.fromMe) {
-      const senderJid = this.canon(m.key.participant ?? jid);
-      if (!this.nameCache.has(senderJid)) this.nameCache.set(senderJid, m.pushName);
-      if (!jid.endsWith('@g.us') && !this.nameCache.has(jid)) {
-        this.nameCache.set(jid, m.pushName);
+      const senderJid = this.canon(m.key.participant ? jidNormalizedUser(m.key.participant) : jid);
+      if (!this.nameCache.has(senderJid)) this.learnContact({ id: senderJid, notify: m.pushName });
+      if (!jid.endsWith('@g.us')) {
         const existing = this.store.getChat(chatIdOf(this.account.id, jid));
-        if (existing && existing.name !== m.pushName && (existing.name.startsWith('+') || existing.name === 'WhatsApp kişisi')) this.upsertChat({ remoteId: jid, name: m.pushName });
+        const better = this.nameOf(jid);
+        if (existing && existing.name !== better && (existing.name.startsWith('+') || existing.name === 'WhatsApp kişisi')) this.upsertChat({ remoteId: jid, name: better });
       }
     }
     if (attachments.length) {
@@ -886,7 +1071,7 @@ export class WhatsAppConnector extends BaseConnector {
         }
       }
     }
-    const senderJid = m.key.fromMe ? 'me' : this.canon(m.key.participant ?? jid);
+    const senderJid = m.key.fromMe ? 'me' : this.canon(m.key.participant ? jidNormalizedUser(m.key.participant) : jid);
     if (jid.endsWith('@g.us')) this.ensureGroupMeta(jid);
     this.ensureWaChat(jid);
     // base.upsertMessage canlı (notify) ve yeni olan karşı taraf mesajı için +1 yapar; Baileys'in chats.update artışıyla mahsuplaşsın
@@ -899,7 +1084,7 @@ export class WhatsAppConnector extends BaseConnector {
         remoteChatId: jid,
         remoteId: m.key.id,
         senderId: senderJid,
-        senderName: m.key.fromMe ? 'Ben' : (this.nameCache.get(senderJid) ?? m.pushName ?? this.nameOf(senderJid)),
+        senderName: m.key.fromMe ? 'Ben' : this.nameOf(senderJid),
         senderAvatarUrl: m.key.fromMe ? undefined : this.avatarCache.get(senderJid) || undefined,
         fromMe: !!m.key.fromMe,
         text,
@@ -988,11 +1173,18 @@ function baileysLogger(): ReturnType<typeof pino> {
   const stream = {
     write(line: string) {
       try {
-        const j = JSON.parse(line) as { level?: number; msg?: string; name?: string; error?: string };
+        const j = JSON.parse(line) as { level?: number; msg?: string; name?: string; error?: unknown; err?: unknown; histNotification?: { syncType?: number; progress?: number; chunkOrder?: number }; process?: boolean };
         const msg = String(j.msg ?? '');
-        const mk = String(j.error ?? '').match(/failed to find key "([^"]+)"/);
+        const errText = errorText(j.error ?? j.err);
+        const mk = errText.match(/failed to find key "([^"]+)"/);
         if (mk) missingSyncKeys.add(mk[1]);
-        if ((j.level ?? 0) >= 40 || /sync|snapshot|patch|mutation/i.test(msg)) bus.log((j.level ?? 0) >= 40 ? 'warn' : 'info', `Baileys: ${msg}${j.name ? ` [${j.name}]` : ''}${j.error ? ` ${String(j.error).split('\n')[0].slice(0, 160)}` : ''}`);
+        // geçmiş paketi bildirimi: işlenip işlenmediği (Baileys 7 bazı türleri varsayılan olarak atlar) tanı için görünsün
+        if (msg === 'got history notification' && j.histNotification) {
+          const h = j.histNotification;
+          bus.log('info', `Baileys: geçmiş bildirimi tür=${h.syncType ?? '?'} %${h.progress ?? '?'} parça=${h.chunkOrder ?? '?'}${j.process === false ? ' (ATLANDI)' : ''}`);
+          return;
+        }
+        if ((j.level ?? 0) >= 40 || /sync|snapshot|patch|mutation/i.test(msg)) bus.log((j.level ?? 0) >= 40 ? 'warn' : 'info', `Baileys: ${msg}${j.name ? ` [${j.name}]` : ''}${errText ? ` ${errText.split('\n')[0].slice(0, 160)}` : ''}`);
       } catch {
         /* yok say */
       }
@@ -1000,6 +1192,25 @@ function baileysLogger(): ReturnType<typeof pino> {
   };
   return pino({ level: 'info' }, stream as unknown as NodeJS.WritableStream);
 }
+/** pino satırındaki hata alanı: Error yığını (string), {message, stack, output} nesnesi ya da başka bir şey → okunur metin */
+export function errorText(e: unknown): string {
+  if (e === undefined || e === null) return '';
+  if (typeof e === 'string') return e;
+  if (typeof e === 'object') {
+    const o = e as { message?: unknown; stack?: unknown; type?: unknown; output?: { statusCode?: unknown }; data?: unknown };
+    const base = typeof o.message === 'string' && o.message ? o.message : typeof o.stack === 'string' ? o.stack : '';
+    const code = o.output?.statusCode !== undefined ? ` (${String(o.output.statusCode)})` : '';
+    if (base) return base + code;
+    try {
+      const s = JSON.stringify(e);
+      return s === '{}' ? '' : s;
+    } catch {
+      return '';
+    }
+  }
+  return String(e);
+}
+
 let ffmpegOk: boolean | undefined;
 async function transcodeToMp3(input: Buffer): Promise<Buffer | undefined> {
   if (ffmpegOk === undefined) {

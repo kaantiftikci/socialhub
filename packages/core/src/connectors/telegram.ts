@@ -330,8 +330,7 @@ export class TelegramConnector extends BaseConnector {
     if (!name) {
       try {
         const chat = await m.getChat();
-        const c = chat as { title?: string; firstName?: string; lastName?: string } | undefined;
-        name = c?.title ?? [c?.firstName, c?.lastName].filter(Boolean).join(' ') ?? rid;
+        name = entityName(chat) || rid;
         if (chat) this.entities.set(rid, chat as Entity);
       } catch {
         name = rid;
@@ -340,8 +339,7 @@ export class TelegramConnector extends BaseConnector {
     let senderName = name;
     if (!m.out && !ev.isPrivate) {
       try {
-        const s = (await m.getSender()) as { firstName?: string; lastName?: string; title?: string } | undefined;
-        senderName = s?.title ?? [s?.firstName, s?.lastName].filter(Boolean).join(' ') ?? name;
+        senderName = entityName(await m.getSender()) || name;
       } catch {
         /* yok say */
       }
@@ -359,7 +357,10 @@ export class TelegramConnector extends BaseConnector {
     const text = m.message ?? '';
     const attachments = m.media ? this.attachmentsOf(m.media, remoteChatId, m.id) : undefined;
     if (!text && !attachments?.length) return;
-    this.ensureChat(remoteChatId, chatName);
+    const chat = this.ensureChat(remoteChatId, chatName);
+    // Gruplarda gönderen: getMessages/getDialogs sonucundaki varlıklar mesaja bağlanır (m.sender). Eskiden geçmiş mesajlarda
+    // gönderen adı olarak grup adı yazılıyordu. Kanal gönderileri kanal adıyla, birebir sohbetler karşı tarafın adıyla kalır.
+    if (!senderName && !m.out && chat.kind === 'group') senderName = entityName((m as { sender?: unknown }).sender) || undefined;
     this.upsertMessage(
       {
         remoteChatId,
@@ -370,7 +371,8 @@ export class TelegramConnector extends BaseConnector {
         text,
         ts: (m.date ?? Math.floor(Date.now() / 1000)) * 1000,
         status: m.out ? 'sent' : 'delivered',
-        attachments: attachments?.length ? attachments : undefined,
+        // Boş dizi de yazılır: eski sürümün bağlantı önizlemesi için bıraktığı içi boş {kind:'other'} eki temizlensin
+        attachments: attachments ?? undefined,
       },
       { live },
     );
@@ -413,12 +415,25 @@ export class TelegramConnector extends BaseConnector {
       if (mime.startsWith('image/')) return [{ kind: 'image', name: fileName ?? 'Görsel', mime, size, url: full, link: full }];
       return [{ kind: 'file', name: fileName ?? 'Dosya', mime, size, url: hasThumb ? thumb : undefined, link: full }];
     }
-    if (media instanceof Api.MessageMediaWebPage) return []; // bağlantı önizlemesi; metin zaten mesajda
+    if (media instanceof Api.MessageMediaWebPage) {
+      // Bağlantı önizlemesi: adres metinde zaten var; başlık varsa tıklanabilir kart olarak ekle
+      const wp = media.webpage instanceof Api.WebPage ? media.webpage : undefined;
+      if (!wp?.url || !(wp.title || wp.siteName)) return [];
+      return [{ kind: 'other', name: [wp.siteName, wp.title].filter(Boolean).join(' — '), link: wp.url }];
+    }
     if (media instanceof Api.MessageMediaContact) return [{ kind: 'other', name: `Kişi: ${[media.firstName, media.lastName].filter(Boolean).join(' ')} ${media.phoneNumber}`.trim() }];
     if (media instanceof Api.MessageMediaGeo || media instanceof Api.MessageMediaGeoLive || media instanceof Api.MessageMediaVenue) return [{ kind: 'other', name: 'Konum' }];
     if (media instanceof Api.MessageMediaPoll) return [{ kind: 'other', name: 'Anket' }];
     return [{ kind: 'other', name: 'Medya' }];
   }
+}
+
+/** Kullanıcı/grup/kanal varlığının görünen adı (ad soyad → kullanıcı adı → başlık); bilinmiyorsa '' */
+export function entityName(e: unknown): string {
+  if (!e || typeof e !== 'object') return '';
+  const x = e as { title?: string; firstName?: string; lastName?: string; username?: string };
+  if (x.title) return x.title;
+  return [x.firstName, x.lastName].filter(Boolean).join(' ').trim() || (x.username ? '@' + x.username : '');
 }
 
 /** Sohbet listesi önizlemesi: metin yoksa medya türü */

@@ -8,6 +8,7 @@ import { BaseConnector } from './base.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
 import { chatId as chatIdOf, type Attachment } from '../model.js';
+import { normalizePhone as normalizeContactPhone } from '../contacts-mac.js';
 
 const execFileP = promisify(execFile);
 
@@ -37,6 +38,8 @@ interface Row {
   is_filtered: number | null;
   /** Mesajlar'da "Son Silinenler"e taşınmışsa geri çekilme zamanı */
   date_retracted: number | null;
+  /** 0 normal mesaj; 2000-2007 tapback (beğendi/güldü…), 3000+ tapback geri alma, 1000 çıkartma/uygulama eki */
+  associated_message_type: number | null;
 }
 
 interface AttRow {
@@ -51,9 +54,10 @@ interface AttRow {
 }
 
 /** SELECT + JOIN gövdesi: mesaj + sohbet + gönderen (WHERE/ORDER dışarıdan eklenir) */
-const SELECT_ROWS = (retractedCol: string, filteredCol: string) =>
+const SELECT_ROWS = (retractedCol: string, filteredCol: string, assocCol: string) =>
   `SELECT m.ROWID AS rowid, m.guid, m.text, m.attributedBody, m.date, m.is_from_me, m.cache_has_attachments, m.item_type,
-          ${retractedCol} AS date_retracted, h.id AS handle, c.chat_identifier, c.guid AS chat_guid, c.display_name, ${filteredCol} AS is_filtered
+          ${retractedCol} AS date_retracted, ${assocCol} AS associated_message_type,
+          h.id AS handle, c.chat_identifier, c.guid AS chat_guid, c.display_name, ${filteredCol} AS is_filtered
      FROM message m
      JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
      JOIN chat c ON c.ROWID = cmj.chat_id
@@ -67,6 +71,21 @@ export function imessageFolder(isFiltered: number | null | undefined): 'unknown'
   return undefined;
 }
 
+/** Tapback (❤️ 👍 😂 …), tapback geri alma ve benzeri "bir mesaja bağlı" satırlar sohbette ayrı mesaj olarak görünmez */
+export function isAssociatedReaction(t: number | null | undefined): boolean {
+  return !!t && t >= 2000 && t < 4000;
+}
+
+/** Rehber eşlemesi için anahtarlar: +90… biçimi ve son 10 hane (rehberde "0532…", "532…", "+90 532…" farklı yazılabiliyor) */
+export function phoneKeys(p: string): string[] {
+  if (p.includes('@')) return [p.trim().toLowerCase()];
+  const digits = p.replace(/\D/g, '');
+  if (digits.length < 5) return [];
+  const keys = [normalizeContactPhone(p)];
+  if (digits.length >= 10) keys.push('#' + digits.slice(-10));
+  return keys;
+}
+
 export class IMessageConnector extends BaseConnector {
   private db?: Database.Database;
   private timer?: NodeJS.Timeout;
@@ -74,6 +93,7 @@ export class IMessageConnector extends BaseConnector {
   private names = new Map<string, string>();
   private retractedCol = 'NULL';
   private filteredCol = 'NULL';
+  private assocCol = 'NULL';
   private ticks = 0;
   /** message.date nanosaniye mi (macOS 10.13+; eski sürümlerde saniye) */
   private dateNs = true;
@@ -99,6 +119,7 @@ export class IMessageConnector extends BaseConnector {
       const ccols = new Set((this.db.prepare('PRAGMA table_info(chat)').all() as Array<{ name: string }>).map((c) => c.name));
       this.retractedCol = mcols.has('date_retracted') ? 'm.date_retracted' : 'NULL';
       this.filteredCol = ccols.has('is_filtered') ? 'c.is_filtered' : 'NULL';
+      this.assocCol = mcols.has('associated_message_type') ? 'm.associated_message_type' : 'NULL';
       const jcols = new Set((this.db.prepare('PRAGMA table_info(chat_message_join)').all() as Array<{ name: string }>).map((c) => c.name));
       this.dateCol = jcols.has('message_date') ? 'cmj.message_date' : 'm.date';
       this.attStmt = this.db.prepare(
@@ -146,15 +167,31 @@ export class IMessageConnector extends BaseConnector {
   }
 
   async sendText(remoteChatId: string, text: string): Promise<{ remoteId: string }> {
-    // remoteChatId = chat_guid (ör. "iMessage;-;+905xxxxxxxxx" veya "iMessage;+;chat1234…")
+    // remoteChatId = chat_guid (ör. "iMessage;-;+905xxxxxxxxx", "iMessage;+;chat1234…"; macOS 26: "any;-;+905…" — hizmet chat.service_name'de)
     const isGroup = remoteChatId.includes(';+;');
     const esc = (s: string) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    const script = isGroup
-      ? `tell application "Messages"\n send "${esc(text)}" to chat id "${esc(remoteChatId)}"\nend tell`
-      : `tell application "Messages"\n set svc to 1st account whose service type = ${remoteChatId.startsWith('SMS;') ? 'SMS' : 'iMessage'}\n set tgt to participant "${esc(remoteChatId.split(';').pop() ?? '')}" of svc\n send "${esc(text)}" to tgt\nend tell`;
-    await new Promise<void>((resolve, reject) => {
-      execFile('osascript', ['-e', script], (err, _out, stderr) => (err ? reject(new Error(stderr || err.message)) : resolve()));
-    });
+    let service = remoteChatId.startsWith('SMS;') ? 'SMS' : 'iMessage';
+    try {
+      const r = this.db?.prepare('SELECT service_name AS s FROM chat WHERE guid = ?').get(remoteChatId) as { s: string | null } | undefined;
+      if (r?.s === 'SMS' || r?.s === 'RCS') service = 'SMS';
+    } catch {
+      /* eski şema */
+    }
+    const byChat = `tell application "Messages"\n send "${esc(text)}" to chat id "${esc(remoteChatId)}"\nend tell`;
+    const byBuddy = (svc: string) =>
+      `tell application "Messages"\n set svc to 1st account whose service type = ${svc}\n set tgt to participant "${esc(remoteChatId.split(';').pop() ?? '')}" of svc\n send "${esc(text)}" to tgt\nend tell`;
+    const run = (script: string) =>
+      new Promise<void>((resolve, reject) => {
+        execFile('osascript', ['-e', script], (err, _out, stderr) => (err ? reject(new Error(stderr || err.message)) : resolve()));
+      });
+    // Önce mevcut sohbete (chat id = guid) gönder: SMS/RCS/iMessage hizmetini Mesajlar kendisi seçer. Birebir sohbette
+    // chat id tanınmazsa (eski macOS) kişi + hizmet yoluna düş.
+    try {
+      await run(byChat);
+    } catch (e) {
+      if (isGroup) throw e;
+      await run(byBuddy(service));
+    }
     const id = `local-${Date.now()}`;
     this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent' });
     return { remoteId: id };
@@ -173,19 +210,22 @@ export class IMessageConnector extends BaseConnector {
       }
       for (const file of dbs) {
         const ab = new Database(file, { readonly: true });
-        const rows = ab
-          .prepare(
-            `SELECT r.ZFIRSTNAME AS f, r.ZLASTNAME AS l, p.ZFULLNUMBER AS phone, e.ZADDRESS AS email
-             FROM ZABCDRECORD r LEFT JOIN ZABCDPHONENUMBER p ON p.ZOWNER = r.Z_PK LEFT JOIN ZABCDEMAILADDRESS e ON e.ZOWNER = r.Z_PK`,
-          )
-          .all() as Array<{ f: string | null; l: string | null; phone: string | null; email: string | null }>;
-        for (const r of rows) {
-          const name = [r.f, r.l].filter(Boolean).join(' ').trim();
-          if (!name) continue;
-          if (r.phone) this.names.set(normalizePhone(r.phone), name);
-          if (r.email) this.names.set(r.email.toLowerCase(), name);
+        try {
+          // Telefon ve e-posta ayrı sorgulanır (ikisi birden LEFT JOIN'lenince satırlar çarpılıyordu); ad yoksa kurum adı
+          const phones = ab
+            .prepare(`SELECT r.ZFIRSTNAME AS f, r.ZLASTNAME AS l, r.ZORGANIZATION AS o, p.ZFULLNUMBER AS v FROM ZABCDRECORD r JOIN ZABCDPHONENUMBER p ON p.ZOWNER = r.Z_PK`)
+            .all() as Array<{ f: string | null; l: string | null; o: string | null; v: string | null }>;
+          const emails = ab
+            .prepare(`SELECT r.ZFIRSTNAME AS f, r.ZLASTNAME AS l, r.ZORGANIZATION AS o, e.ZADDRESS AS v FROM ZABCDRECORD r JOIN ZABCDEMAILADDRESS e ON e.ZOWNER = r.Z_PK`)
+            .all() as Array<{ f: string | null; l: string | null; o: string | null; v: string | null }>;
+          for (const r of [...phones, ...emails]) {
+            const name = [r.f, r.l].filter(Boolean).join(' ').trim() || (r.o ?? '').trim();
+            if (!name || !r.v) continue;
+            for (const k of phoneKeys(r.v)) if (!this.names.has(k)) this.names.set(k, name);
+          }
+        } finally {
+          ab.close();
         }
-        ab.close();
       }
     } catch {
       /* rehber okunamadı; numaralar gösterilir */
@@ -194,12 +234,18 @@ export class IMessageConnector extends BaseConnector {
 
   private nameOf(handle: string | null, display: string | null, chatId: string): string {
     if (display) return display;
-    if (handle) return this.names.get(normalizePhone(handle)) ?? this.names.get(handle.toLowerCase()) ?? handle;
+    if (handle) {
+      for (const k of phoneKeys(handle)) {
+        const n = this.names.get(k);
+        if (n) return n;
+      }
+      return handle;
+    }
     return chatId;
   }
 
   private get selectSql(): string {
-    return SELECT_ROWS(this.retractedCol, this.filteredCol);
+    return SELECT_ROWS(this.retractedCol, this.filteredCol, this.assocCol);
   }
 
   private appleToMs(d: number): number {
@@ -326,7 +372,7 @@ export class IMessageConnector extends BaseConnector {
         .prepare(
           `SELECT c.guid AS guid, COUNT(*) AS n FROM message m
              JOIN chat_message_join j ON j.message_id = m.ROWID JOIN chat c ON c.ROWID = j.chat_id
-            WHERE m.is_from_me = 0 AND m.is_read = 0 AND m.item_type = 0 GROUP BY c.guid`,
+            WHERE m.is_from_me = 0 AND m.is_read = 0 AND m.item_type = 0 AND COALESCE(${this.assocCol}, 0) NOT BETWEEN 2000 AND 3999 GROUP BY c.guid`,
         )
         .all() as Array<{ guid: string; n: number }>;
       const counts = new Map(rows.map((r) => [r.guid, r.n]));
@@ -347,12 +393,20 @@ export class IMessageConnector extends BaseConnector {
       const rows = this.db
         .prepare(
           `SELECT m.ROWID AS rowid, m.guid, m.text, m.attributedBody, m.date, m.is_from_me, m.cache_has_attachments, m.item_type,
-                  1 AS date_retracted, h.id AS handle, c.chat_identifier, c.guid AS chat_guid, c.display_name, ${this.filteredCol} AS is_filtered
+                  1 AS date_retracted, ${this.assocCol} AS associated_message_type, h.id AS handle, c.chat_identifier, c.guid AS chat_guid, c.display_name,
+                  ${this.filteredCol} AS is_filtered
              FROM chat_recoverable_message_join j JOIN message m ON m.ROWID = j.message_id JOIN chat c ON c.ROWID = j.chat_id
              LEFT JOIN handle h ON h.ROWID = m.handle_id`,
         )
         .all() as Row[];
       for (const r of rows) this.ingest(r, false);
+      // Son Silinenler'den geri alınan / kalıcı silinen mesajların sohbeti artık "silinmiş" klasöründe görünmesin
+      const still = new Set(rows.map((r) => r.chat_guid));
+      for (const chat of this.store.listChatsOf(this.account.id)) {
+        if (!chat.meta?.deleted || still.has(chat.remoteId)) continue;
+        const { deleted: _d, ...meta } = chat.meta;
+        this.upsertChat({ remoteId: chat.remoteId, name: chat.name, meta });
+      }
       if (rows.length) bus.log('info', `iMessage: son silinenlerde ${rows.length} mesaj`);
     } catch {
       /* tablo yok (eski macOS) */
@@ -380,7 +434,8 @@ export class IMessageConnector extends BaseConnector {
     // klasör bilgisi (is_filtered) ancak mesajla birlikte öğreniliyor
     let extra = 0;
     try {
-      const chatRows = this.db.prepare('SELECT ROWID AS id FROM chat ORDER BY ROWID DESC LIMIT 1500').all() as Array<{ id: number }>;
+      // Mesajı olan tüm sohbetler (eskiden ROWID'ye göre ilk 1500 → ~400 eski sohbet hiç görünmüyordu)
+      const chatRows = this.db.prepare('SELECT DISTINCT chat_id AS id FROM chat_message_join').all() as Array<{ id: number }>;
       const perChat = this.db.prepare(`${this.selectSql} WHERE cmj.chat_id = ? AND ${this.dateCol} < ? ORDER BY ${this.dateCol} DESC LIMIT 20`);
       this.store.transaction(() => {
         for (const c of chatRows) for (const r of (perChat.all(c.id, oldest) as Row[]).reverse()) {
@@ -424,6 +479,7 @@ export class IMessageConnector extends BaseConnector {
 
   private ingest(r: Row, live: boolean): void {
     if (r.item_type !== 0) return; // grup olayları, isim değişiklikleri vb.
+    if (isAssociatedReaction(r.associated_message_type)) return; // tapback: ayrı mesaj değil
     // U+FFFC: ekin metindeki yer tutucusu
     let text = (r.text ?? '').replace(/\uFFFC/g, '').trim() || decodeAttributedBody(r.attributedBody);
     const attachments = this.attachmentsOf(r);
@@ -431,11 +487,16 @@ export class IMessageConnector extends BaseConnector {
     const deleted = !!r.date_retracted;
     if (deleted) text = `🗑 ${text || '(ek)'}`; // Mesajlar → Son Silinenler
     const isGroup = r.chat_identifier.startsWith('chat');
-    const chatName = this.nameOf(isGroup ? null : r.handle ?? r.chat_identifier, r.display_name, r.chat_identifier.replace(/\((filtered|smsft)\)$/, ''));
+    // chat_identifier filtrelenmiş sohbetlerde "+90…(smsft)" / "(filtered)" ekiyle gelir; ad/numara eşlemesinde ek atılır
+    const ident = r.chat_identifier.replace(/\((filtered|smsft)\)$/, '');
+    const chatName = this.nameOf(isGroup ? null : r.handle ?? ident, r.display_name, ident);
     const folder = imessageFolder(r.is_filtered);
     const existing = this.store.getChat(chatIdOf(this.account.id, r.chat_guid));
-    const meta = { ...(existing?.meta ?? {}), ...(folder ? { folder } : {}), ...(deleted ? { deleted: true } : {}) };
-    if (!existing || JSON.stringify(meta) !== JSON.stringify(existing.meta ?? {}))
+    // Klasör her seferinde chat.is_filtered'dan yeniden yazılır: bilinen kişiye taşınan sohbet (0) ve eski sürümün "sms" değeri silinir
+    const { folder: _oldFolder, ...rest } = existing?.meta ?? {};
+    const meta: Record<string, unknown> = { ...rest, ...(folder ? { folder } : {}), ...(deleted ? { deleted: true } : {}) };
+    // Ad da karşılaştırılır: rehber eşlemesi iyileşince (0532… ↔ +90532…) eski sohbetler de isimlensin
+    if (!existing || existing.name !== chatName || JSON.stringify(meta) !== JSON.stringify(existing.meta ?? {}))
       this.upsertChat({ remoteId: r.chat_guid, name: chatName, kind: isGroup ? 'group' : 'direct', meta });
     const ms = this.appleToMs(r.date);
     this.upsertMessage(
@@ -453,10 +514,6 @@ export class IMessageConnector extends BaseConnector {
       { live },
     );
   }
-}
-
-function normalizePhone(p: string): string {
-  return p.replace(/[^\d+]/g, '').replace(/^00/, '+');
 }
 
 function expandHome(p: string | null): string | undefined {
