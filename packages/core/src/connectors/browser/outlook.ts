@@ -239,7 +239,8 @@ export interface OutlookRawRow {
 /** Gövde metnine sızan HTML yorumu / CSS kuralları (bazı pazarlama e-postalarında <style> içeriği metin olarak geliyor) temizlenir */
 export function cleanMailText(t: string): string {
   return t
-    .replace(/[\u200b-\u200f\u2060\ufeff]/g, '')
+    .replace(/[\u200b-\u200f\u2060\ufeff\ue000-\uf8ff]/g, '') // sıfır genişlikli + simge yazı tipi (özel kullanım alanı) karakterleri
+    .replace(/\u00a0/g, ' ')
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/@media[^{]*\{[\s\S]*?\}\s*\}/g, '')
     .replace(/(?:^|\n)\s*[.#@][\w.\-#:>, \[\]="']*\{[^}]*\}/g, '')
@@ -249,7 +250,11 @@ export function cleanMailText(t: string): string {
 }
 
 export function outlookRow(r: OutlookRawRow, now = new Date()): { subject: string; sender: string; email: string; preview: string; ts: number; unread: boolean } {
-  const parts = r.label.split(/,\s*/).map((x) => x.trim()).filter(Boolean);
+  // aria-label iki biçimde: "Gönderen, Konu, Önizleme, Tarih" (virgüllü) ya da boşlukla akan tek metin (yeni OWA; önizlemedeki
+  // virgüller parça sanılmasın)
+  const rawParts = r.label.split(/,\s*/).map((x) => x.trim()).filter(Boolean);
+  const commaForm = rawParts.length >= 3 && rawParts[0].length <= 60 && !/\d{1,2}[:.]\d{2}/.test(rawParts[0]);
+  const parts = commaForm ? rawParts : [r.label.trim()];
   const labelBody = /^(Okunmamış|Unread)$/i.test(parts[0] ?? '') ? parts.slice(1) : parts;
   const email = (r.senderEmail.match(/[\w.+-]+@[\w.-]+/) ?? [])[0]?.toLowerCase() ?? '';
   const initialsOf = (n: string) => n.split(/\s+/).filter(Boolean).map((w) => w[0]).join('').toUpperCase();
@@ -476,8 +481,15 @@ function readListRows(page: Page): Promise<OutlookRawRow[]> {
       const unread = /^(Okunmamış|Unread)\b/i.test(label) || !!el.querySelector('[aria-label="Okunmamış"], [aria-label="Unread"]');
       const from = el.querySelector<HTMLElement>('span[title*="@"]');
       const titles = Array.from(el.querySelectorAll<HTMLElement>('[title]')).map((s) => s.getAttribute('title') ?? '').filter(Boolean);
-      const lines = el.innerText.split('\n').map((t) => t.trim()).filter(Boolean);
-      out.push({ id, label, unread, senderName: from?.innerText.trim() ?? '', senderEmail: from?.getAttribute('title') ?? '', titles, lines });
+      // Açık ileti listeyi örtünce satırlar visibility:hidden olur ve innerText boş döner; o zaman yaprak öğelerin
+      // textContent'i (aynı sıra: baş harfler, gönderen, konu, önizleme, saat)
+      let lines = el.innerText.split('\n').map((t) => t.trim()).filter(Boolean);
+      if (!lines.length) {
+        const leaves = Array.from(el.querySelectorAll<HTMLElement>('span, div')).filter((x) => x.children.length === 0);
+        lines = leaves.map((x) => (x.textContent ?? '').trim()).filter((t) => t && t.length < 400);
+        lines = lines.filter((t, i) => i === 0 || t !== lines[i - 1]);
+      }
+      out.push({ id, label, unread, senderName: (from?.innerText || from?.textContent || '').trim(), senderEmail: from?.getAttribute('title') ?? '', titles, lines });
     }
     return out;
   }, LIST);

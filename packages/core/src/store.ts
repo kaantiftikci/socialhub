@@ -116,6 +116,11 @@ export class Store {
       this.db.exec("UPDATE chats SET last_message_at = 0, last_preview = '' WHERE id LIKE 'outlook:%'");
       this.setFlag('fix_outlook_ts_v1');
     }
+    if (!this.flag('fix_outlook_ts_v2')) {
+      this.db.exec("DELETE FROM messages WHERE chat_id LIKE 'outlook:%'");
+      this.db.exec("UPDATE chats SET last_message_at = 0, last_preview = '' WHERE id LIKE 'outlook:%'");
+      this.setFlag('fix_outlook_ts_v2');
+    }
     // Onarım: tarayıcı kanallarında sohbet zamanı olarak yoklama saati yazılmıştı; mesajı olan sohbetleri son mesaj zamanına çek
     this.db.exec(`UPDATE chats SET last_message_at = (SELECT MAX(ts) FROM messages m WHERE m.chat_id = chats.id)
       WHERE platform IN ('messenger','x','instagram','linkedin','slack')
