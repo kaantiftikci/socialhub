@@ -4,8 +4,42 @@
  */
 export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
-/** Çekirdek API kökü: tarayıcıda Vite proxy'si (göreli), Tauri'de doğrudan yerel port. */
-export const API_BASE = isTauri ? 'http://127.0.0.1:7788' : '';
+/**
+ * Uzak çekirdek: statik/demo site gerçek çekirdeğe (Mac'teki core, HTTPS tünelle) bağlanabilir.
+ * Kurulum adres parçasıyla: https://site/#core=https://xxx.trycloudflare.com&token=… ; kaldırmak için #core=off
+ */
+function readRemoteCore(): string {
+  if (isTauri || typeof location === 'undefined') return '';
+  try {
+    const h = new URLSearchParams(location.hash.replace(/^#/, ''));
+    const core = h.get('core');
+    if (core === 'off') {
+      localStorage.removeItem('kavsak.core');
+      localStorage.removeItem('kavsak.token');
+      history.replaceState(null, '', location.pathname + location.search);
+    } else if (core && /^https?:\/\//.test(core)) {
+      localStorage.setItem('kavsak.core', core.replace(/\/+$/, ''));
+      const t = h.get('token');
+      if (t) localStorage.setItem('kavsak.token', t);
+      history.replaceState(null, '', location.pathname + location.search);
+    }
+    return localStorage.getItem('kavsak.core') ?? '';
+  } catch {
+    return '';
+  }
+}
+export const REMOTE_CORE = readRemoteCore();
+export function clearRemoteCore(): void {
+  try {
+    localStorage.removeItem('kavsak.core');
+    localStorage.removeItem('kavsak.token');
+  } catch {
+    /* yok */
+  }
+}
+
+/** Çekirdek API kökü: tarayıcıda Vite proxy'si (göreli), Tauri'de doğrudan yerel port, uzak çekirdek ayarlıysa o. */
+export const API_BASE = isTauri ? 'http://127.0.0.1:7788' : REMOTE_CORE;
 
 /** Çekirdek API belirteci: paketli uygulamada Tauri komutundan okunur (çekirdek 1-3 sn geç kalkabilir; birkaç kez dene). */
 /** Çözülmüş belirteç (senkron erişim: <img src> gibi yerler için) */
@@ -137,6 +171,28 @@ export function setPlatformSound(platform: string, id: string): void {
   try {
     if (id) localStorage.setItem(`kavsak.sound.${platform}`, id);
     else localStorage.removeItem(`kavsak.sound.${platform}`);
+  } catch {
+    /* yok */
+  }
+}
+
+/** Seçili zil sesi; bildirim kapalıyken de hatırlanır. */
+export function getPlatformTone(platform: string): string {
+  try {
+    const saved = localStorage.getItem(`kavsak.tone.${platform}`);
+    if (saved && SOUNDS.some((s) => s.id === saved)) return saved;
+  } catch {
+    /* yok */
+  }
+  const cur = getPlatformSound(platform);
+  if (cur && cur !== 'off') return cur;
+  const general = getSound();
+  return general === 'off' ? 'cinlama' : general;
+}
+
+export function setPlatformTone(platform: string, id: string): void {
+  try {
+    localStorage.setItem(`kavsak.tone.${platform}`, id);
   } catch {
     /* yok */
   }

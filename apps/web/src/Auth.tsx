@@ -4,6 +4,7 @@ import { setLeaveDemoPanel } from './demo-session';
 import { setProfileName } from './profile';
 import { clearDemoAccounts, loadDemoAccounts } from './static-demo';
 import { Logo } from './ui';
+import { REMOTE_CORE, clearRemoteCore } from './desktop';
 import App from './App';
 
 export function DemoGate() {
@@ -109,6 +110,14 @@ function AuthScreen({
         <button className="btn primary b" type="submit" disabled={busy}>
           {busy ? <span className="spin" /> : 'Giriş yap'}
         </button>
+        {REMOTE_CORE && (
+          <div className="auth-remote">
+            Gerçek çekirdek: <code>{REMOTE_CORE.replace(/^https?:\/\//, '')}</code>
+            <button type="button" className="btn ghost xs b" onClick={() => (clearRemoteCore(), location.reload())}>
+              Bağlantıyı kes
+            </button>
+          </div>
+        )}
       </form>
     </div>
   );

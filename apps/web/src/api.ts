@@ -1,5 +1,5 @@
 import type { Account, Chat, CoreEvent, DraftResult, Message, Platform } from './types';
-import { API_BASE, coreToken } from './desktop';
+import { API_BASE, REMOTE_CORE, coreToken } from './desktop';
 import { STATIC_DEMO } from './profile';
 import { connectStaticEvents, staticApi } from './static-demo';
 
@@ -55,11 +55,13 @@ const liveApi = {
   search: (q: string) => call<Array<{ message: Message; chat: Chat }>>('GET', `/search?q=${enc(q)}`),
 };
 
-export const api = STATIC_DEMO ? staticApi : liveApi;
+/** Statik sitede uzak çekirdek ayarlıysa (#core=…) gerçek API, yoksa örnek veri */
+export const USE_STATIC = STATIC_DEMO && !REMOTE_CORE;
+export const api = USE_STATIC ? staticApi : liveApi;
 
 /** Sunucudan gelen olay akışı; kopunca kendini yeniden bağlar. */
 export function connectEvents(onEvent: (ev: CoreEvent) => void, onState?: (open: boolean) => void): () => void {
-  if (STATIC_DEMO) return connectStaticEvents(onEvent, onState);
+  if (USE_STATIC) return connectStaticEvents(onEvent, onState);
   let ws: WebSocket | undefined;
   let closed = false;
   let timer: number | undefined;
