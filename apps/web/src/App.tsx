@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, connectEvents } from './api';
 import { PLATFORMS, type Account, type Chat, type CoreEvent, type Message, type Platform, DEFAULT_TAGS } from './types';
-import { Avatar, Chip, Icon, Logo, Resizer, Tag, ago, fmtTime, loadPaneSizes } from './ui';
+import { Avatar, Chip, Icon, Logo, Resizer, SyncBar, Tag, ago, fmtTime, loadPaneSizes } from './ui';
 import { Conversation } from './Conversation';
 import { ConnectModal } from './Connect';
 import { Focus } from './Focus';
@@ -49,6 +49,7 @@ export default function App() {
     return () => window.removeEventListener('resize', on);
   }, []);
   const [booting, setBooting] = useState(false);
+  const [bootSince] = useState(() => Date.now());
   const [sound, setSoundState] = useState<string>(() => getSound());
   const changeSound = (id: string) => {
     setSound(id);
@@ -83,6 +84,8 @@ export default function App() {
   }, [query]);
   const [connectOpen, setConnectOpen] = useState(false);
   const [qr, setQr] = useState<Record<string, string>>({});
+  /** Bağlanma/eşitleme ilerlemesi: hesap → {progress 0-100, since} (0/100 → gizli) */
+  const [sync, setSync] = useState<Record<string, { progress: number; since: number; label?: string }>>({});
   /** Karşı taraf yazıyor: sohbet → {ad, düşme zamanı}; 6 sn'de kendiliğinden düşer */
   const [typing, setTyping] = useState<Record<string, { name?: string; until: number }>>({});
   useEffect(() => {
@@ -220,6 +223,18 @@ export default function App() {
           pendingDeletes.add(ev.chatId);
           if (flushTimer === undefined) flushTimer = window.setTimeout(flushChats, 150);
           setSelected((sel) => (sel === ev.chatId ? null : sel));
+          break;
+        case 'account.sync':
+          setSync((prev) => {
+            if (ev.progress <= 0 || ev.progress >= 100) {
+              if (!(ev.accountId in prev)) return prev;
+              const next = { ...prev };
+              delete next[ev.accountId];
+              return next;
+            }
+            const cur = prev[ev.accountId];
+            return { ...prev, [ev.accountId]: { progress: Math.max(ev.progress, cur?.progress ?? 0), since: cur?.since ?? Date.now(), label: ev.label } };
+          });
           break;
         case 'chat.typing':
           setTyping((prev) => {
@@ -487,11 +502,7 @@ export default function App() {
           </span>
           <span className="count">{fmtCount(perPlatform.get(a.platform) ?? 0)}</span>
           <span className={`dot ${a.status}`} style={{ marginLeft: 8 }} />
-          {(a.status === 'connecting' || a.status === 'pairing' || /%\d+/.test(a.detail ?? '')) && (
-            <span className="syncbar" aria-hidden="true">
-              <span className={/%\d+/.test(a.detail ?? '') ? 'fill' : 'fill indeterminate'} style={/%\d+/.test(a.detail ?? '') ? { width: `${Math.min(100, Number((a.detail ?? '').match(/%(\d+)/)?.[1] ?? 0))}%` } : undefined} />
-            </span>
-          )}
+          {sync[a.id] && <SyncBar compact progress={/%\d+/.test(a.detail ?? '') ? Number((a.detail ?? '').match(/%(\d+)/)?.[1] ?? 0) : sync[a.id].progress} since={sync[a.id].since} />}
         </button>  );
 
   const current = selected ? chats.get(selected) : undefined;
@@ -657,9 +668,10 @@ export default function App() {
         ) : (
           <>
             <section className="list" aria-label="Sohbet listesi">
-              {(booting || accounts.some((a) => a.status === 'connecting' || a.status === 'pairing' || /%\d+/.test(a.detail ?? ''))) && (
-                <div className="syncbar top" role="progressbar" aria-label="Eşitleniyor">
-                  <span className="fill indeterminate" />
+              {(booting || Object.keys(sync).length > 0) && (
+                <div className="synctop">
+                  <SyncBar progress={booting ? 5 : Math.min(...Object.values(sync).map((s) => s.progress))} since={booting ? bootSince : Math.min(...Object.values(sync).map((s) => s.since))} />
+                  <span className="synclbl">{booting ? 'Çekirdek başlatılıyor' : `${Object.keys(sync).length} kanal eşitleniyor`}</span>
                 </div>
               )}
               <div className="list-head">
@@ -885,7 +897,9 @@ export default function App() {
       </div>
 
       {connectOpen && (
-        <ConnectModal accounts={accounts} qr={qr} prompts={prompts} connected={connectedPlatforms} onClose={() => setConnectOpen(false)} notify={notify} onChanged={refresh} />
+        <ConnectModal
+          sync={sync}
+          accounts={accounts} qr={qr} prompts={prompts} connected={connectedPlatforms} onClose={() => setConnectOpen(false)} notify={notify} onChanged={refresh} />
       )}
       {menu && (
         <div className="menu-backdrop" onClick={() => setMenu(null)} onContextMenu={(e) => (e.preventDefault(), setMenu(null))}>

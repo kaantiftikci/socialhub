@@ -72,6 +72,7 @@ export type CoreEvent =
   | { type: 'message.upsert'; message: Message; chat: Chat; live?: boolean }
   | { type: 'message.delete'; chatId: string; messageId: string }
   | { type: 'chat.typing'; chatId: string; typing: boolean; name?: string }
+  | { type: 'account.sync'; accountId: string; progress: number; label?: string }
   | { type: 'messages.read'; chatId: string; before: number }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; text: string };
 

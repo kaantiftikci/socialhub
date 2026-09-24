@@ -265,3 +265,27 @@ export function Resizer({ pane, sign = 1 }: { pane: Pane; sign?: 1 | -1 }) {
   };
   return <div className="resizer" role="separator" aria-orientation="vertical" title="Sürükleyerek boyutlandır · çift tık: varsayılan" onMouseDown={onDown} onDoubleClick={() => (setW(PANE_DEFAULT[pane]), save())} />;
 }
+
+/**
+ * Bağlanma/eşitleme çubuğu: lime, düz dolan; yüzde etiketi çubuğun ucuyla birlikte ilerler.
+ * Gerçek ilerleme (progress) kilometre taşlarıyla gelir; taşlar arasında zamanla yavaşça (en çok +22) "sürünür".
+ */
+export function SyncBar({ progress, since, compact = false }: { progress: number; since: number; compact?: boolean }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => tick((x) => x + 1), 400);
+    return () => clearInterval(t);
+  }, []);
+  const elapsed = (Date.now() - since) / 1000;
+  const creep = Math.min(22, 22 * (1 - Math.exp(-elapsed / 12)));
+  const shown = Math.max(2, Math.min(progress >= 100 ? 100 : Math.min(98, progress + creep), 100));
+  const pct = Math.round(shown);
+  return (
+    <span className={`syncbar ${compact ? 'compact' : ''}`} role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+      <span className="fill" style={{ width: `${shown}%` }} />
+      <span className="pct" style={{ left: `min(calc(${shown}% - 6px), calc(100% - 34px))` }}>
+        {pct}%
+      </span>
+    </span>
+  );
+}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from './api';
 import { PLATFORMS, type Account, type Platform } from './types';
-import { Chip, Icon } from './ui';
+import { Chip, Icon, SyncBar } from './ui';
 
 const ORDER: Platform[] = ['whatsapp', 'telegram', 'slack', 'imessage', 'linkedin', 'x', 'instagram', 'messenger'];
 const MAIL_ORDER: Platform[] = ['gmail', 'outlook', 'yahoo', 'icloud', 'imap'];
@@ -29,7 +29,10 @@ export function ConnectModal({
   onClose,
   notify,
   onChanged,
+  sync = {},
 }: {
+  /** hesap → eşitleme ilerlemesi (App'ten) */
+  sync?: Record<string, { progress: number; since: number; label?: string }>;
   accounts: Account[];
   qr: Record<string, string>;
   prompts: Record<string, { prompt: 'phone' | 'code' | 'password'; message: string }>;
@@ -405,9 +408,12 @@ export function ConnectModal({
                   {!meta.available ? (
                     <span className="st">Yakında</span>
                   ) : acc.length ? (
-                    <span className="st" style={{ color: isConn ? '#15803d' : undefined }}>
-                      <span className={`dot ${acc[0].status === 'connected' ? 'on' : acc[0].status}`} />
-                      {statusText(acc[0])}
+                    <span className="st" style={{ color: isConn ? '#15803d' : undefined, display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flexGrow: 1 }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        <span className={`dot ${acc[0].status === 'connected' ? 'on' : acc[0].status}`} />
+                        {sync[acc[0].id] ? (sync[acc[0].id].label ?? 'Eşitleniyor') : statusText(acc[0])}
+                      </span>
+                      {sync[acc[0].id] && <SyncBar progress={sync[acc[0].id].progress} since={sync[acc[0].id].since} />}
                     </span>
                   ) : (
                     <span className="st">

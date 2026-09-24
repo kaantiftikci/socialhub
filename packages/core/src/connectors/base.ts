@@ -62,11 +62,35 @@ export abstract class BaseConnector implements Connector {
     if (this.store.markOutgoingRead(cid, before) > 0) bus.emit({ type: 'messages.read', chatId: cid, before });
   }
 
+  private syncDone = false;
+  private syncTimer?: NodeJS.Timeout;
+  private syncLast = 0;
+  /** Bağlanma/eşitleme ilerlemesi (0-100). Connector kilometre taşlarını bildirir; bağlandıktan sonra 6 sn sohbet gelmezse 100 sayılır. */
+  protected syncProgress(progress: number, label?: string): void {
+    if (this.syncDone && progress < 100) this.syncDone = false;
+    if (progress >= 100) this.syncDone = true;
+    if (progress < this.syncLast && progress > 0) return; // geriye gitmesin
+    this.syncLast = progress >= 100 ? 0 : progress;
+    bus.emit({ type: 'account.sync', accountId: this.account.id, progress: Math.max(0, Math.min(100, Math.round(progress))), label });
+  }
+  /** Sohbet/mesaj akışı bağlandıktan sonra durunca eşitleme bitti sayılır */
+  private touchSync(): void {
+    if (this.syncDone || this.account.status !== 'connected') return;
+    if (this.syncTimer) clearTimeout(this.syncTimer);
+    this.syncTimer = setTimeout(() => this.syncProgress(100), 6000);
+    this.syncTimer.unref?.();
+  }
+
   protected setStatus(status: AccountStatus, detail?: string): void {
     this.account.status = status;
     this.account.detail = detail;
     this.store.upsertAccount(this.account);
     bus.emit({ type: 'account.status', account: { ...this.account } });
+    if (status === 'connecting') this.syncProgress(5, 'bağlanıyor');
+    else if (status === 'connected') {
+      this.syncProgress(this.syncLast >= 60 ? this.syncLast : 60, 'sohbetler alınıyor');
+      this.touchSync();
+    } else this.syncProgress(0);
     bus.log(status === 'error' ? 'error' : 'info', `${this.account.platform}/${this.account.label}: ${status}${detail ? ' — ' + detail : ''}`);
   }
 
@@ -83,6 +107,7 @@ export abstract class BaseConnector implements Connector {
     participants?: Participant[];
     meta?: Record<string, unknown>;
   }): Chat {
+    this.touchSync();
     const id = chatId(this.account.id, input.remoteId);
     const existing = this.store.getChat(id);
     const chat = this.store.upsertChat({

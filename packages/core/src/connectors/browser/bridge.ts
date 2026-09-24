@@ -110,6 +110,7 @@ export class BrowserConnector extends BaseConnector {
 
     // 1) Kayıtlı oturum var mı? Önce görünmez pencerede dene.
     if (!(await this.launch(true))) return;
+    this.syncProgress(20, 'tarayıcı açıldı');
     const loggedIn = await this.isLoggedIn();
     // Giriş var ama platform görünür pencerede ek adım istiyor (Messenger PIN): yalnızca kullanıcı 'Yeniden bağlan' dediyse pencere aç
     const needsWindow = loggedIn && interactive && !!this.strategy.needsWindow && (await withTimeout(this.strategy.needsWindow(this.page!), 30_000, 'pencere denetimi').catch(() => false));
@@ -144,8 +145,10 @@ export class BrowserConnector extends BaseConnector {
     } catch {
       /* etiket kalsın */
     }
+    this.syncProgress(45, 'oturum doğrulandı');
     this.setStatus('connected');
     await this.poll(true);
+    this.syncProgress(100);
     this.timer = setInterval(() => void this.poll(false), this.pollMs);
   }
 
@@ -380,6 +383,7 @@ export class BrowserConnector extends BaseConnector {
       const cookies = await this.cookies();
       // Strateji çağrıları asılı kalmasın: sayfa donarsa uyarı düşsün, sonraki yoklama devam etsin
       const threads = await withTimeout(this.strategy.threads(page, cookies), 120_000, 'sohbet listesi');
+      if (first) this.syncProgress(70, `${threads.length} sohbet, mesajlar alınıyor`);
       const changed: Thread[] = [];
       for (const t of threads) {
         // lastTs=0: strateji zaman bilgisi vermiyor (DOM okuyan Messenger) → depodaki değer korunur

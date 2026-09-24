@@ -93,6 +93,8 @@ export type CoreEvent =
   | { type: 'message.delete'; chatId: string; messageId: string }
   /** Karşı taraf yazıyor / yazmayı bıraktı */
   | { type: 'chat.typing'; chatId: string; typing: boolean; name?: string }
+  /** Bağlanma/eşitleme ilerlemesi 0-100 (0 = gizle, 100 = bitti) */
+  | { type: 'account.sync'; accountId: string; progress: number; label?: string }
   /** Gönderdiğim mesajlar `before` zamanına kadar karşı tarafça görüldü */
   | { type: 'messages.read'; chatId: string; before: number }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; text: string };
