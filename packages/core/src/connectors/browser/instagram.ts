@@ -155,6 +155,11 @@ export const instagram: Strategy = {
     }
   },
 
+  async markRead(page, cookies, threadId, lastIncomingId) {
+    if (!lastIncomingId) return;
+    await ig(page, cookies, `/api/v1/direct_v2/threads/${threadId}/items/${lastIncomingId}/seen/`, {});
+  },
+
   async threads(page, cookies): Promise<Thread[]> {
     const data = await ig(page, cookies, '/api/v1/direct_v2/inbox/?persistentBadging=true&folder=&limit=30&thread_message_limit=1');
     if (data.viewer?.pk) viewerId = String(data.viewer.pk);
@@ -177,7 +182,8 @@ export const instagram: Strategy = {
         lastTs: Math.floor(Number(t.last_activity_at ?? last?.timestamp ?? 0) / 1000),
         preview: last ? itemText(last) : '',
         unread: Number(t.read_state ?? 0) > 0 ? Number(t.unseen_count ?? 1) : 0,
-        avatarUrl: t.is_group ? undefined : t.users?.[0]?.profile_pic_url,
+        // grup: özel grup fotoğrafı varsa o, yoksa ilk üyenin fotoğrafı
+        avatarUrl: t.is_group ? (t.thread_image?.url ?? t.thread_image_url ?? t.users?.[0]?.profile_pic_url) : t.users?.[0]?.profile_pic_url,
       });
     }
     return out;

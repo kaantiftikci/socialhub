@@ -114,6 +114,12 @@ export class TelegramConnector extends BaseConnector {
     return { remoteId: id };
   }
 
+  async markRead(remoteChatId: string): Promise<void> {
+    if (!this.client) return;
+    const entity = this.entities.get(remoteChatId) ?? (await this.client.getInputEntity(bigInt(remoteChatId)));
+    await this.client.markAsRead(entity);
+  }
+
   async loadHistory(remoteChatId: string, limit = 50): Promise<void> {
     if (!this.client) return;
     const entity = this.entities.get(remoteChatId) ?? (await this.client.getInputEntity(bigInt(remoteChatId)));

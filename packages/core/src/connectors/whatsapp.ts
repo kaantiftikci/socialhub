@@ -99,7 +99,7 @@ export class WhatsAppConnector extends BaseConnector {
     const sock = makeWASocket({
       version: version as [number, number, number] | undefined,
       auth: state,
-      logger: pino({ level: 'silent' }),
+      logger: baileysLogger(),
       // DİKKAT: browser[0] 'Mac OS'/'Windows' + syncFullHistory birleşimi Baileys'i yerel masaüstü uygulaması
       // (DARWIN/WIN32) gibi tanıtır; WhatsApp bunu web sürüm numarasıyla kabul etmeyip bağlantıyı hemen kapatır (428).
       // Bu yüzden OS alanı özel bir ad: telefonda "Kavşak (Mac)" görünür, protokolde WEB_BROWSER kalır,
@@ -374,6 +374,15 @@ export class WhatsAppConnector extends BaseConnector {
     return p.id;
   }
 
+  /** Son gelen mesajları telefonda da okundu işaretle (mavi tik / okunmamış rozeti düşer) */
+  async markRead(remoteChatId: string): Promise<void> {
+    if (!this.sock) return;
+    const msgs = this.store.listMessages(chatIdOf(this.account.id, remoteChatId), 40).filter((m) => !m.fromMe && !m.remoteId.startsWith('local-'));
+    if (!msgs.length) return;
+    const keys = msgs.map((m) => ({ remoteJid: remoteChatId, id: m.remoteId, fromMe: false, participant: remoteChatId.endsWith('@g.us') && m.senderId !== 'me' ? m.senderId : undefined }));
+    await this.sock.readMessages(keys);
+  }
+
   /** Telefondaki "Bağlı cihazlar" listesinden de düş */
   async logout(): Promise<void> {
     if (!this.sock) return;
@@ -620,6 +629,22 @@ export class WhatsAppConnector extends BaseConnector {
 }
 
 const seenUnknown = new Set<string>();
+
+/** Baileys iç günlüğü: yalnızca uygulama durumu eşitlemesi / hata satırları Kavşak günlüğüne (tanı için) */
+function baileysLogger(): ReturnType<typeof pino> {
+  const stream = {
+    write(line: string) {
+      try {
+        const j = JSON.parse(line) as { level?: number; msg?: string; name?: string; error?: string };
+        const msg = String(j.msg ?? '');
+        if ((j.level ?? 0) >= 40 || /sync|snapshot|patch|mutation/i.test(msg)) bus.log((j.level ?? 0) >= 40 ? 'warn' : 'info', `Baileys: ${msg}${j.name ? ` [${j.name}]` : ''}${j.error ? ` ${String(j.error).split('\n')[0].slice(0, 160)}` : ''}`);
+      } catch {
+        /* yok say */
+      }
+    },
+  };
+  return pino({ level: 'info' }, stream as unknown as NodeJS.WritableStream);
+}
 let ffmpegOk: boolean | undefined;
 async function transcodeToMp3(input: Buffer): Promise<Buffer | undefined> {
   if (ffmpegOk === undefined) {

@@ -145,6 +145,10 @@ export const messenger: Strategy = {
     return msgs.slice(-limit);
   },
 
+  async markRead(page, _cookies, threadId) {
+    await openThread(page, threadId); // sohbeti açmak Messenger'da okundu sayılır
+  },
+
   async send(page, _cookies, threadId, text) {
     await openThread(page, threadId);
     const box = page.locator('[role="main"] div[role="textbox"][contenteditable="true"]').first();

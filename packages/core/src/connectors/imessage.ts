@@ -84,6 +84,7 @@ export class IMessageConnector extends BaseConnector {
     this.setStatus('connected');
     this.loadContacts();
     this.backfill();
+    this.syncUnread();
     this.timer = setInterval(() => this.poll(), 3000);
   }
 
@@ -161,6 +162,27 @@ export class IMessageConnector extends BaseConnector {
       .all(afterRowId, limit) as Row[];
   }
 
+  /** Okunmamış sayıları Mesajlar'ın kendi bayrağından (is_read) al */
+  private syncUnread(): void {
+    if (!this.db) return;
+    try {
+      const rows = this.db
+        .prepare(
+          `SELECT c.guid AS guid, COUNT(*) AS n FROM message m
+             JOIN chat_message_join j ON j.message_id = m.ROWID JOIN chat c ON c.ROWID = j.chat_id
+            WHERE m.is_from_me = 0 AND m.is_read = 0 AND m.item_type = 0 GROUP BY c.guid`,
+        )
+        .all() as Array<{ guid: string; n: number }>;
+      const counts = new Map(rows.map((r) => [r.guid, r.n]));
+      for (const chat of this.store.listChatsOf(this.account.id)) {
+        const n = counts.get(chat.remoteId) ?? 0;
+        if (n !== chat.unread) this.upsertChat({ remoteId: chat.remoteId, name: chat.name, unread: n });
+      }
+    } catch (e) {
+      bus.log('warn', `iMessage okunmamış sayımı: ${(e as Error).message}`);
+    }
+  }
+
   /** Sonradan "Son Silinenler"e taşınan mesajlar ROWID'siyle yeniden gelmez; ara sıra tarayıp işaretle. */
   private rescanRetracted(): void {
     if (this.retractedCol === 'NULL' || !this.db) return;
@@ -186,6 +208,7 @@ export class IMessageConnector extends BaseConnector {
         this.lastRowId = Math.max(this.lastRowId, r.rowid);
       }
       if (++this.ticks % 20 === 0) this.rescanRetracted(); // ~1 dk'da bir
+      if (this.ticks % 4 === 0) this.syncUnread(); // ~12 sn'de bir: telefonda okununca burada da düşer
     } catch (e) {
       bus.log('warn', `iMessage yoklama: ${(e as Error).message}`);
     }

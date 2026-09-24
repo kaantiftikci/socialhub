@@ -103,9 +103,14 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   });
   route('POST', '/api/chats/:id/read', (_r, _s, p) => {
     const id = decodeURIComponent(p.id);
+    const before = store.getChat(id);
     store.markRead(id);
     const chat = store.getChat(id);
-    if (chat) bus.emit({ type: 'chat.upsert', chat });
+    if (chat) {
+      bus.emit({ type: 'chat.upsert', chat });
+      // platformda da okundu işaretle (yalnızca gerçekten okunmamış vardıysa; arka planda)
+      if (before && before.unread > 0) void registry.get(chat.accountId)?.markRead?.(chat.remoteId).catch((e) => bus.log('warn', `${chat.platform}: okundu işaretlenemedi: ${(e as Error).message}`));
+    }
     return { ok: true };
   });
   route('POST', '/api/chats/:id/tags', (_r, _s, p, body) => {

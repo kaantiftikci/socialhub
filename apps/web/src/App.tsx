@@ -320,7 +320,7 @@ export default function App() {
 
   const totals = useMemo(() => {
     let unread = 0;
-    for (const c of activeChats) unread += c.unread;
+    for (const c of activeChats) if (c.kind !== 'channel') unread += c.unread; // kanallardaki binlerce okunmamış rozeti şişirmesin
     return { unread, waiting: waitingChats.length };
   }, [activeChats, waitingChats]);
   /** Başlıktaki "N yeni": yalnızca görüntülenen kapsam (platform/etiket) */
@@ -330,7 +330,7 @@ export default function App() {
     for (const c of activeChats) {
       if (platformFilter && c.platform !== platformFilter) continue;
       if (tagFilter && !c.tags.includes(tagFilter)) continue;
-      unread += c.unread;
+      if (c.kind !== 'channel') unread += c.unread;
       if (isWaiting(c)) waiting++;
     }
     return { unread, waiting };
@@ -338,7 +338,7 @@ export default function App() {
 
   const perPlatform = useMemo(() => {
     const m = new Map<Platform, number>();
-    for (const c of activeChats) m.set(c.platform, (m.get(c.platform) ?? 0) + c.unread);
+    for (const c of activeChats) if (c.kind !== 'channel') m.set(c.platform, (m.get(c.platform) ?? 0) + c.unread);
     return m;
   }, [activeChats]);
 

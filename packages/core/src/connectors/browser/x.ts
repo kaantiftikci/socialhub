@@ -324,6 +324,13 @@ export const x: Strategy = {
     return [...api, ...dom.filter((m) => !dup(m))].sort((a, b) => a.ts - b.ts).slice(-Math.max(limit, 25));
   },
 
+  async markRead(page, _cookies, threadId) {
+    // /i/chat/<id> sayfasını açmak hem eski DM'leri hem XChat'i okundu işaretler
+    const url = `${CHAT}/${threadId}`;
+    if (!page.url().startsWith(url)) await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+    await page.waitForTimeout(2500);
+  },
+
   async openDirect(_page, _cookies, p) {
     // X birebir sohbet kimliği: iki kullanıcı kimliğinin küçükten büyüğe birleşimi
     const a = BigInt(meId);

@@ -53,6 +53,8 @@ export interface Strategy {
   send(page: Page, cookies: Record<string, string>, threadId: string, text: string): Promise<string | undefined>;
   /** Bir üyeyle birebir sohbet kimliği (yoksa oluştur) */
   openDirect?(page: Page, cookies: Record<string, string>, participant: Participant): Promise<string>;
+  /** Platformda okundu işaretle; lastIncomingId depodaki son gelen mesajın kimliği */
+  markRead?(page: Page, cookies: Record<string, string>, threadId: string, lastIncomingId?: string): Promise<void>;
 }
 
 export class BrowserConnector extends BaseConnector {
@@ -217,6 +219,12 @@ export class BrowserConnector extends BaseConnector {
     const id = (await this.serial(async () => this.strategy.send(this.page!, await this.cookies(), remoteChatId, text))) ?? `local-${Date.now()}`;
     this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent' });
     return { remoteId: id };
+  }
+
+  async markRead(remoteChatId: string): Promise<void> {
+    if (!this.strategy.markRead || !this.page || this.page.isClosed()) return;
+    const last = this.store.listMessages(chatId(this.account.id, remoteChatId), 30).filter((m) => !m.fromMe).pop();
+    await this.serial(async () => this.strategy.markRead!(this.page!, await this.cookies(), remoteChatId, last?.remoteId));
   }
 
   async openDirect(p: Participant): Promise<string> {
