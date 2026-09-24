@@ -88,6 +88,8 @@ export class BrowserConnector extends BaseConnector {
   private timer?: NodeJS.Timeout;
   private stopping = false;
   private polling = false;
+  /** unloadWhenIdle: yoklamalar arasında tarayıcı kapalı (bellek); bir sonraki yoklama/işlem yeniden açar */
+  private idleClosed = false;
   private known = new Map<string, number>(); // threadId → son görülen ts
 
   constructor(
@@ -217,6 +219,15 @@ export class BrowserConnector extends BaseConnector {
     return true;
   }
 
+  /** Sayfa yoksa ve kanal boşta kapatılmışsa tarayıcıyı yeniden aç (Gmail/Outlook: yoklamalar arasında kapalı tutulur) */
+  private async ensureOpen(): Promise<boolean> {
+    if (this.page && !this.page.isClosed()) return true;
+    if (!this.idleClosed || this.stopping || this.account.status !== 'connected' || !this.chromium) return false;
+    const ok = await this.launch(true);
+    if (ok) this.idleClosed = false;
+    return ok;
+  }
+
   private async closeCtx(): Promise<void> {
     const ctx = this.ctx;
     this.ctx = undefined;
@@ -296,7 +307,7 @@ export class BrowserConnector extends BaseConnector {
   }
 
   async sendText(remoteChatId: string, text: string): Promise<{ remoteId: string }> {
-    if (!this.page || this.page.isClosed()) throw new Error('Tarayıcı oturumu açık değil');
+    if (!(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
     const id = (await this.serial(async () => this.strategy.send(this.page!, await this.cookies(), remoteChatId, text))) ?? `local-${Date.now()}`;
     this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent' });
     return { remoteId: id };
@@ -304,7 +315,7 @@ export class BrowserConnector extends BaseConnector {
 
   async sendMedia(remoteChatId: string, file: { path: string; name: string; mime: string; size: number }, caption?: string): Promise<{ remoteId: string }> {
     if (!this.strategy.sendFile) throw new Error('Bu platformda dosya gönderme desteklenmiyor');
-    if (!this.page || this.page.isClosed()) throw new Error('Tarayıcı oturumu açık değil');
+    if (!(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
     const id = (await this.serial(async () => this.strategy.sendFile!(this.page!, await this.cookies(), remoteChatId, file, caption))) ?? `local-${Date.now()}`;
     const kind = file.mime.startsWith('image/') ? 'image' : file.mime.startsWith('video/') ? 'video' : file.mime.startsWith('audio/') ? 'audio' : 'file';
     this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text: caption ?? '', ts: Date.now(), status: 'sent', attachments: [{ kind, name: file.name, mime: file.mime, size: file.size }] });
@@ -314,7 +325,7 @@ export class BrowserConnector extends BaseConnector {
   private morePage = 0;
   async loadMoreChats(): Promise<number> {
     if (!this.strategy.moreThreads) throw new Error('Bu platformda daha eski sohbet listesi desteklenmiyor');
-    if (!this.page || this.page.isClosed()) throw new Error('Tarayıcı oturumu açık değil');
+    if (!(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
     const idx = this.morePage + 1;
     const threads = await this.serial(async () => this.strategy.moreThreads!(this.page!, await this.cookies(), idx));
     let added = 0;
@@ -327,14 +338,14 @@ export class BrowserConnector extends BaseConnector {
   }
 
   async markRead(remoteChatId: string): Promise<void> {
-    if (!this.strategy.markRead || !this.page || this.page.isClosed()) return;
+    if (!this.strategy.markRead || !(await this.ensureOpen())) return;
     const last = this.store.listMessages(chatId(this.account.id, remoteChatId), 30).filter((m) => !m.fromMe).pop();
     await this.serial(async () => this.strategy.markRead!(this.page!, await this.cookies(), remoteChatId, last?.remoteId));
   }
 
   async openDirect(p: Participant): Promise<string> {
     if (!this.strategy.openDirect) throw new Error('Bu platformda doğrudan sohbet açma desteklenmiyor');
-    if (!this.page || this.page.isClosed()) throw new Error('Tarayıcı oturumu açık değil');
+    if (!(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
     return this.serial(async () => this.strategy.openDirect!(this.page!, await this.cookies(), p));
   }
 
@@ -361,7 +372,7 @@ export class BrowserConnector extends BaseConnector {
     let type: string;
     if (!/^https?:\/\//.test(url)) {
       // özel şema: stratejinin kancası (sayfa bağlamından okur; tek sayfayı paylaştığı için sırayla)
-      if (!this.strategy.fetchMedia || !this.page || this.page.isClosed()) return undefined;
+      if (!this.strategy.fetchMedia || !(await this.ensureOpen())) return undefined;
       const r = await this.serial(async () => this.strategy.fetchMedia!(this.page!, await this.cookies(), url));
       if (!r) return undefined;
       ({ body, type } = r);
@@ -391,18 +402,16 @@ export class BrowserConnector extends BaseConnector {
   }
 
   private async poll(first: boolean): Promise<void> {
-    if (this.polling || !this.page || this.page.isClosed()) return;
+    if (this.polling) return;
+    if ((!this.page || this.page.isClosed()) && !(await this.ensureOpen())) return;
     this.polling = true;
     try {
       await this.serial(() => this.pollInner(first));
-      // boşta boşaltma: ağır siteler (Gmail/Outlook) açık dururken 1 GB'ı aşıyor; bir sonraki çağrı sayfayı yeniden yükler
-      // about:blank'e gitmek render sürecini ve sitenin belleğini bırakmıyor; boş yeni sekme açıp eskisini kapatmak süreci öldürür
-      if (this.strategy.unloadWhenIdle && this.ctx && this.page && !this.page.isClosed() && this.account.status === 'connected') {
-        await this.serial(async () => {
-          const old = this.page!;
-          this.page = await this.ctx!.newPage();
-          await old.close().catch(() => undefined);
-        }).catch(() => undefined);
+      // Boşta boşaltma: sekme kapatmak/about:blank render sürecini bırakmıyor (service worker, site izolasyonu); tarayıcıyı
+      // tamamen kapat, sonraki yoklama/işlem yeniden açar (kalıcı profil oturumu korur; açılış ~3-5 sn)
+      if (this.strategy.unloadWhenIdle && this.ctx && this.account.status === 'connected' && !this.stopping) {
+        await this.serial(() => this.closeCtx()).catch(() => undefined);
+        this.idleClosed = true;
       }
     } finally {
       this.polling = false;

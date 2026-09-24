@@ -322,8 +322,17 @@ export const outlook: Strategy = {
         let email = '';
         try {
           email = pick(localStorage.getItem('olk-login_hint'));
-          // anahtar adları "olk-…Enabled_adres" biçiminde: adresin önündeki ön ek atılır
-          for (let i = 0; !email && i < localStorage.length; i++) email = pick(localStorage.key(i)).replace(/^.*_/, '');
+          // anahtar adları "olk-…Enabled_adres" / "…PIVOTadres" gibi ön ekle yapışık: tüm anahtarlardan adayları topla,
+          // en kısa ortak sonek gerçek adres (diğerleri onun ön ekli hâli)
+          if (!email) {
+            const cands: string[] = [];
+            for (let i = 0; i < localStorage.length; i++) {
+              const c = pick(localStorage.key(i));
+              if (c) cands.push(c.toLowerCase());
+            }
+            cands.sort((x, y) => x.length - y.length);
+            email = cands.find((c) => cands.every((d) => d === c || d.endsWith(c) || !c.endsWith(d))) ?? cands[0] ?? '';
+          }
         } catch {
           /* yok */
         }
