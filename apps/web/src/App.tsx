@@ -405,14 +405,6 @@ export default function App() {
   }, []);
   const isSnoozed = useCallback((id: string) => (snoozes[id] ?? 0) > Date.now(), [snoozes]);
 
-  const complete = useCallback(
-    (chatId: string) => {
-      api.markRead(chatId).catch((e) => notify(e.message, true));
-      notify('Tamamlandı');
-    },
-    [notify],
-  );
-
   // ---- türetilmiş listeler ----
   const allChats = useMemo(() => [...chats.values()], [chats]);
   const activeChats = useMemo(() => allChats.filter((c) => !isSnoozed(c.id)), [allChats, isSnoozed]);
@@ -507,11 +499,14 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const typing = !!target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setView('inbox');
-        searchRef.current?.focus();
-        searchRef.current?.select();
+        setListSearch(true);
+        requestAnimationFrame(() => {
+          searchRef.current?.focus();
+          searchRef.current?.select();
+        });
         return;
       }
       if (typing) return;
@@ -531,15 +526,13 @@ export default function App() {
         e.preventDefault();
         const n = chatList[Math.max(0, idx - 1)];
         if (n) setSelected(n.id);
-      } else if (e.key === 'e' && selected) {
-        complete(selected);
       } else if (e.key === 'h' && selected) {
         snooze(selected);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [chatList, selected, view, connectOpen, complete, snooze]);
+  }, [chatList, selected, view, connectOpen, snooze]);
 
   const orderedAccounts = useMemo(() => {
     const idx = new Map(chanOrder.map((id, i) => [id, i]));
@@ -728,11 +721,9 @@ export default function App() {
           <span className="word">mivelo</span>
           <span title={online ? 'Çekirdek bağlı' : 'Çekirdek bağlantısı yok'} className={`dot ${online ? 'on' : 'error'}`} />
         </div>
-        <label className="search">
-          <Icon name="search" size={15} />
-          <input ref={searchRef} placeholder="Ara veya komut yaz" value={query} onChange={(e) => (setQuery(e.target.value), setView('inbox'))} />
-          <span className="kbd faint">⌘K</span>
-        </label>
+        <button className="btn connect-app" onClick={() => setConnectOpen(true)}>
+          Uygulama bağla
+        </button>
         <div className="nav">
           <NavItem icon="inbox" label="Gelen kutusu" count={totals.unread} active={view === 'inbox' && filter === 'all' && !platformFilter && !tagFilter} onClick={() => goInbox('all')} />
           <NavItem icon="sparkle" label="Odak" badge="AI" count={totals.waiting} active={view === 'focus'} onClick={() => setView('focus')} />
@@ -740,12 +731,11 @@ export default function App() {
           <NavItem icon="archive" label="Okunmamış" count={0} active={view === 'inbox' && filter === 'unread' && !platformFilter && !tagFilter} onClick={() => goInbox('unread')} />
         </div>
         <div className="side-scroll">
-          <div className="section-head">
-            <span className="label">Uygulamalar</span>
-            <button className="btn ghost xs icon b" aria-label="Kanal ekle" onClick={() => setConnectOpen(true)}>
-              <Icon name="plus" size={14} sw={2} />
-            </button>
-          </div>
+          {(chatAccounts.length > 0 || accounts.length === 0) && (
+            <div className="section-head">
+              <span className="label">Uygulamalar</span>
+            </div>
+          )}
           {accounts.length === 0 && (
             <button className="chan b" onClick={() => setConnectOpen(true)} style={{ color: 'var(--v-txt)' }}>
               <Icon name="plus" size={15} sw={2} /> İlk uygulamanı bağla
@@ -753,13 +743,13 @@ export default function App() {
           )}
           {chatAccounts.map((a) => renderChan(a, chatAccounts))}
           {mailAccounts.length > 0 && (
-            <div className="section-head" style={{ marginTop: 10 }}>
+            <div className="section-head" style={{ marginTop: chatAccounts.length > 0 ? 10 : 0 }}>
               <span className="label">E-posta</span>
             </div>
           )}
           {mailAccounts.map((a) => renderChan(a, mailAccounts))}
           {shopAccounts.length > 0 && (
-            <div className="section-head" style={{ marginTop: 10 }}>
+            <div className="section-head" style={{ marginTop: chatAccounts.length > 0 || mailAccounts.length > 0 ? 10 : 0 }}>
               <span className="label">Alışveriş</span>
             </div>
           )}
@@ -781,15 +771,6 @@ export default function App() {
             </div>
           </div>
         )}
-        <div className="privacy">
-          <span style={{ width: 30, height: 30, borderRadius: 9, background: 'rgba(108,71,255,.11)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Icon name="lock" size={15} color="#6C47FF" sw={2} />
-          </span>
-          <span>
-            <span className="t">{STATIC_DEMO ? 'Hesabına özel' : 'Yerel ve şifreli'}</span>
-            <span className="s">{STATIC_DEMO ? 'Bağlantılar çıkıştan sonra da kalır' : 'Mesajlar yalnızca bu bilgisayarda'}</span>
-          </span>
-        </div>
         <div className="me">
           <Avatar name={PROFILE_NAME} size={32} />
           <span style={{ flexGrow: 1 }}>
@@ -846,7 +827,7 @@ export default function App() {
       )}
       <div className="surface">
         {view === 'focus' ? (
-          <Focus waiting={waitingChats} chats={inboxChats} ai={ai} notify={notify} onOpen={openChat} onSnooze={snooze} onComplete={complete} onBack={() => setView('inbox')} onMenu={isMobile ? () => setNavOpen(true) : undefined} />
+          <Focus waiting={waitingChats} chats={inboxChats} ai={ai} notify={notify} onOpen={openChat} onSnooze={snooze} onBack={() => setView('inbox')} onMenu={isMobile ? () => setNavOpen(true) : undefined} />
         ) : (
           <>
             <section className="list" aria-label="Sohbet listesi">
@@ -870,15 +851,12 @@ export default function App() {
                   <button className={`btn icon b b2 ${listSearch || query ? 'soft' : ''}`} aria-label="Sohbetlerde ara" title="Sohbetlerde ara" onClick={() => (setListSearch(!listSearch), listSearch && setQuery(''))}>
                     <Icon name="search" size={15} sw={2} />
                   </button>
-                  <button className="btn primary b connect-cta" onClick={() => setConnectOpen(true)}>
-                    Uygulama bağla
-                  </button>
                 </div>
 
                 {listSearch && (
                   <label className="search" style={{ margin: 0 }}>
                     <Icon name="search" size={15} />
-                    <input autoFocus placeholder="Sohbetlerde ara (ad, son mesaj)" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && (setQuery(''), setListSearch(false))} />
+                    <input ref={searchRef} autoFocus placeholder="Sohbetlerde ara (ad, son mesaj)" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && (setQuery(''), setListSearch(false))} />
                     {query && (
                       <button className="btn ghost xs icon b" aria-label="Temizle" onClick={() => setQuery('')}>
                         <Icon name="x" size={13} sw={2} />
@@ -914,21 +892,6 @@ export default function App() {
                       ))}
                   </div>
                 )}
-
-                {view === 'inbox' && totals.waiting > 0 && filter !== 'waiting' && (
-                  <button className="brief b b2" onClick={() => setView('focus')}>
-                    <span className="ico">
-                      <Icon name="sparkle" size={17} color="#111016" sw={2} />
-                    </span>
-                    <span style={{ flexGrow: 1 }}>
-                      <span className="t">{totals.waiting} kişi yanıt bekliyor</span>
-                      <span className="s">{ai ? 'Taslakların hazır' : 'Odak modunda topluca yanıtla'}</span>
-                    </span>
-                    <span className="go">
-                      Odak <Icon name="arrow" size={14} color="#6C47FF" sw={2} />
-                    </span>
-                  </button>
-                )}
               </div>
 
               <div className="rows" onScroll={onRowsScroll}>
@@ -963,7 +926,7 @@ export default function App() {
                         <span className="label">{day}</span>
                       </div>
                       {items.map((c) => (
-                        <ChatRow key={c.id} chat={c} selected={c.id === selected} onClick={() => setSelected(c.id)} onComplete={() => complete(c.id)} onSnooze={() => snooze(c.id)} typing={typing[c.id] ? typing[c.id].name ?? '' : null} />
+                        <ChatRow key={c.id} chat={c} selected={c.id === selected} onClick={() => setSelected(c.id)} onSnooze={() => snooze(c.id)} typing={typing[c.id] ? typing[c.id].name ?? '' : null} />
                       ))}
                     </div>
                   ))
@@ -994,9 +957,6 @@ export default function App() {
                   <span className="kbd">K</span> gezin
                 </span>
                 <span>
-                  <span className="kbd">E</span> tamamla
-                </span>
-                <span>
                   <span className="kbd">H</span> ertele
                 </span>
                 <span>
@@ -1014,7 +974,6 @@ export default function App() {
                 ai={ai}
                 notify={notify}
                 onSnooze={() => snooze(current.id)}
-                onComplete={() => complete(current.id)}
                 snoozedUntil={snoozes[current.id]}
                 onUnsnooze={() => unsnooze(current.id)}
                 onTags={(tags) => api.setTags(current.id, tags).then((c) => setChats((p) => new Map(p).set(c.id, c))).catch((e) => notify(e.message, true))}
@@ -1343,7 +1302,6 @@ function ChatRow({
   chat,
   selected,
   onClick,
-  onComplete,
   onSnooze,
   snoozedUntil,
   onUnsnooze,
@@ -1352,7 +1310,6 @@ function ChatRow({
   chat: Chat;
   selected: boolean;
   onClick: () => void;
-  onComplete?: () => void;
   onSnooze?: () => void;
   snoozedUntil?: number;
   onUnsnooze?: () => void;
@@ -1407,14 +1364,9 @@ function ChatRow({
             <Icon name="bell" size={13} sw={2} />
           </button>
         ) : (
-          <>
-            <button title="Tamamla (E)" onClick={onComplete}>
-              <Icon name="check" size={13} sw={2.2} />
-            </button>
-            <button title="Yarına ertele (H)" onClick={onSnooze}>
-              <Icon name="clock" size={13} sw={2} />
-            </button>
-          </>
+          <button title="Yarına ertele (H)" onClick={onSnooze}>
+            <Icon name="clock" size={13} sw={2} />
+          </button>
         )}
       </span>
     </div>

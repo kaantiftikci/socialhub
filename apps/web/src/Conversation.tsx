@@ -13,7 +13,6 @@ export function Conversation({
   notify,
   onTags,
   onSnooze,
-  onComplete,
   showDetails = true,
   onToggleDetails,
   onOpenChat,
@@ -31,7 +30,6 @@ export function Conversation({
   notify: (t: string, err?: boolean) => void;
   onTags: (tags: string[]) => void;
   onSnooze: () => void;
-  onComplete: () => void;
   /** Ertelenmişse ne zamana kadar; geri alma */
   snoozedUntil?: number;
   onUnsnooze?: () => void;
@@ -73,6 +71,27 @@ export function Conversation({
   const role = profileRole(chat);
   /** E-posta kanalları: balon yerine ileti kartları ve e-posta yanıt alanı */
   const isMail = platform.category === 'mail';
+  /** Sohbet notu: hızlı ve yerel (localStorage, sohbet kimliğine göre); sohbet değişince yeniden okunur */
+  const noteKey = `kavsak.note.${chat.id}`;
+  const [chatNote, setChatNote] = useState('');
+  const [noteOpen, setNoteOpen] = useState(false);
+  useEffect(() => {
+    try {
+      setChatNote(localStorage.getItem(noteKey) ?? '');
+    } catch {
+      setChatNote('');
+    }
+    setNoteOpen(false);
+  }, [noteKey]);
+  const saveNote = (v: string) => {
+    setChatNote(v);
+    try {
+      if (v.trim()) localStorage.setItem(noteKey, v);
+      else localStorage.removeItem(noteKey);
+    } catch {
+      /* yok */
+    }
+  };
   const [uploading, setUploading] = useState<string | null>(null);
   async function sendFile(file: File) {
     if (file.size > 50 * 1024 * 1024) return notify('Dosya 50 MB\'tan büyük', true);
@@ -246,9 +265,6 @@ export function Conversation({
               <Icon name="clock" size={15} /> <span className="lbl">Ertele</span> <span className="kbd lbl">H</span>
             </button>
           )}
-          <button className="btn soft b b2" onClick={onComplete} title="Okundu olarak işaretle">
-            <Icon name="check" size={15} sw={2} /> <span className="lbl">Tamamla</span> <span className="kbd lbl">E</span>
-          </button>
           {onToggleDetails && !showDetails && (
             <button className="btn icon b b2" onClick={onToggleDetails} title="Ayrıntı panelini göster" aria-label="Ayrıntı paneli">
               <Icon name="panel" size={15} />
@@ -514,16 +530,36 @@ export function Conversation({
         {chat.platform === 'shopier' && chat.meta?.order ? <OrderPanel chat={chat} notify={notify} /> : null}
 
         <div className="qacts">
-          <button className="b b2" onClick={() => notify('Notlar yakında')}>
-            <Icon name="pen" size={16} /> Not ekle
+          <button className={`b b2 ${noteOpen || chatNote ? 'go' : ''}`} onClick={() => setNoteOpen((v) => !v)}>
+            <Icon name="pen" size={16} /> {chatNote ? 'Notu düzenle' : 'Not ekle'}
           </button>
           <button className="b b2" onClick={onSnooze}>
             <Icon name="bell" size={16} /> Hatırlat
           </button>
-          <button className="go b" onClick={onComplete}>
-            <Icon name="check" size={16} sw={2} /> Tamamla
-          </button>
         </div>
+
+        {(noteOpen || chatNote) && (
+          <div className="card ctx-note">
+            <span className="h">
+              <Icon name="pen" size={13} sw={2} /> Not <span className="hint" style={{ marginLeft: 'auto' }}>yalnızca bu cihazda</span>
+            </span>
+            {noteOpen ? (
+              <textarea
+                autoFocus
+                value={chatNote}
+                onChange={(e) => saveNote(e.target.value)}
+                onBlur={() => setNoteOpen(false)}
+                onKeyDown={(e) => e.key === 'Escape' && setNoteOpen(false)}
+                placeholder="Bu kişi/sohbet hakkında not…"
+                rows={4}
+              />
+            ) : (
+              <div className="note-text" onClick={() => setNoteOpen(true)}>
+                {chatNote}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="card sum">
           <span className="h">

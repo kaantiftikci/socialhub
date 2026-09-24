@@ -15,7 +15,6 @@ export function Focus({
   notify,
   onOpen,
   onSnooze,
-  onComplete,
   onBack,
   onMenu,
 }: {
@@ -25,7 +24,6 @@ export function Focus({
   notify: (t: string, err?: boolean) => void;
   onOpen: (id: string) => void;
   onSnooze: (id: string) => void;
-  onComplete: (id: string) => void;
   onBack: () => void;
   onMenu?: () => void;
 }) {
@@ -212,9 +210,6 @@ export function Focus({
                   )}
                   <button className="btn b b2" onClick={() => onSnooze(c.id)}>
                     <Icon name="clock" size={14} /> Yarına ertele <span className="kbd">H</span>
-                  </button>
-                  <button className="btn ghost b" onClick={() => (onComplete(c.id), setDone((x) => ({ ...x, [c.id]: true })))}>
-                    <Icon name="check" size={14} sw={2} /> Tamamla
                   </button>
                   <span style={{ flexGrow: 1 }} />
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text3)' }}>
