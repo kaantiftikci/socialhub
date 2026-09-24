@@ -112,11 +112,32 @@ const BRAND: Partial<Record<Platform, Brand>> = {
 };
 const MIN_BRAND = 18;
 
+/** Alışveriş kanalları: harf rozeti yerine markanın kendi ikonu. */
+const SHOP_ICON: Partial<Record<Platform, { src: string; fit: 'cover' | 'contain' }>> = {
+  shopier: { src: '/brands/shopier.png', fit: 'cover' },
+  trendyol: { src: '/brands/trendyol.png', fit: 'cover' },
+  hepsiburada: { src: '/brands/hepsiburada.png', fit: 'cover' },
+  n11: { src: '/brands/n11.png', fit: 'contain' },
+  etsy: { src: '/brands/etsy.png', fit: 'cover' },
+  shopify: { src: '/brands/shopify.png', fit: 'contain' },
+  amazon: { src: '/brands/amazon.png', fit: 'cover' },
+};
+
 export function Chip({ platform, size = 18, ring }: { platform: Platform; size?: number; ring?: string }) {
   const p = PLATFORMS[platform];
   const brand = BRAND[platform];
+  const shopIcon = SHOP_ICON[platform];
+  const [shopFailed, setShopFailed] = useState(false);
+  useEffect(() => setShopFailed(false), [platform]);
   const s = Math.max(size, MIN_BRAND);
-  const base = { width: s, height: s, borderRadius: s * 0.3, boxShadow: ring ? `0 0 0 2px ${ring}` : undefined };
+  const base = { width: s, height: s, borderRadius: s * 0.3, boxShadow: ring ? `0 0 0 2px ${ring}` : undefined, overflow: 'hidden' as const };
+  if (shopIcon && !shopFailed) {
+    return (
+      <span className="plat" title={p.name} style={{ ...base, background: 'transparent' }}>
+        <img src={shopIcon.src} alt="" width={s} height={s} draggable={false} style={{ width: s, height: s, objectFit: shopIcon.fit, display: 'block' }} onError={() => setShopFailed(true)} />
+      </span>
+    );
+  }
   if (brand) {
     const inner = Math.round(s * brand.ratio);
     return (

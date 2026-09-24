@@ -510,6 +510,33 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
       ],
     },
   ],
+  amazon: [
+    {
+      remoteId: 'alici-kargo', name: 'Alıcı · sipariş 405-8821943', kind: 'direct', tags: ['müşteri'], unread: 1, handle: 'Selin A.', avatar: 'selin.jpg',
+      lines: [
+        [false, 'Merhaba, 405-8821943-221 numaralı siparişim dün teslim edildi görünüyor ama kutu bana gelmedi.'],
+        [true, 'Merhaba. Takip koduna göre bina görevlisine bırakılmış. Kapıcıya sordunuz mu?'],
+        [false, 'Sordum, onda yok. Fotoğraftaki kapı da bizim değil.'],
+        [true, 'Yanlış adrese bırakılmış. Yenisini bugün çıkarıyorum, eskisini aramanıza gerek yok.'],
+        [true, 'Yeni kargo fişi.', [pdf('amazon-kargo-405.pdf', 52_400)]],
+        [false, 'Teşekkürler. Bu sefer kapıya teslim olsun, görevliye bırakılmasın.'],
+        [true, 'Notu siparişe işledim. Takip kodu düşünce buradan yazacağım.'],
+      ],
+    },
+    {
+      remoteId: 'iade-beden', name: 'İade · beden uyumsuz', kind: 'direct', tags: ['müşteri'], unread: 1, handle: 'Emre K.', avatar: 'emre.jpg',
+      lines: [
+        [false, 'Gömlek dar geldi, iade etmek istiyorum. Sipariş 112-4402918-773.'],
+        [true, '30 gün içinde iade açık. Etiketi Seller Central’dan kesiyorum, ücreti biz karşılıyoruz.'],
+        [true, 'İade etiketi.', [pdf('amazon-iade-112.pdf', 48_100)]],
+        [false, 'Aynı modeli bir büyük alabilir miyim, yoksa para iadesi mi?'],
+        [true, 'L stokta var. İade depoya düşünce yeni siparişi ben oluştururum, kartınıza fark yansımaz.'],
+        [true, 'Beden karşılaştırması.', [pic('beden.jpg', 'gomlek.jpg')]],
+        [false, 'L olsun. Etiketi bugün yapıştırıp veriyorum.'],
+        [true, 'Tamam. Ürün bize ulaşınca L’yi aynı adrese çıkarırız.'],
+      ],
+    },
+  ],
 };
 
 const FOLK: Array<{ id: string; name: string; avatar: string; user: string }> = [
@@ -909,6 +936,7 @@ const BADGE: Partial<Record<Platform, number>> = {
   hepsiburada: 2,
   etsy: 14,
   shopify: 8,
+  amazon: 6,
 };
 
 function spreadUnread(total: number, slots: number): number[] {

@@ -96,7 +96,7 @@ export const PLATFORMS: Record<Platform, { name: string; code: string; color: st
   yahoo: { name: 'Yahoo Mail', code: 'YH', color: '#6001D2', method: 'IMAP · uygulama şifresi', available: true, mode: 'mail', category: 'mail' },
   icloud: { name: 'iCloud Mail', code: 'IC', color: '#3693F3', method: 'Tarayıcı girişi · iCloud web', available: true, mode: 'browser', category: 'mail' },
   imap: { name: 'Diğer e-posta', code: '@', color: '#4A4757', method: 'IMAP/SMTP · Yandex, Fastmail, kurumsal…', available: true, mode: 'mail', category: 'mail' },
-  shopier: { name: 'Shopier', code: 'SH', color: '#1F2A44', method: 'Resmi API · sipariş takibi (PAT)', available: true, mode: 'token', category: 'shop' },
+  shopier: { name: 'Shopier', code: 'SH', color: '#1F2A44', method: 'Resmi API · yalnız sipariş (müşteri mesajı yok)', available: false, mode: 'token', category: 'shop' },
   trendyol: { name: 'Trendyol', code: 'TY', color: '#F27A1A', method: 'Satıcı API · sipariş + müşteri soruları', available: true, mode: 'token', category: 'shop' },
   hepsiburada: { name: 'Hepsiburada', code: 'HB', color: '#FF6000', method: 'Pazaryeri API · sipariş + müşteri soruları', available: true, mode: 'token', category: 'shop' },
   etsy: { name: 'Etsy', code: 'ET', color: '#F1641E', method: 'Open API (OAuth) · sipariş; mesajlar tarayıcı oturumu', available: true, mode: 'token', category: 'shop', experimental: true },

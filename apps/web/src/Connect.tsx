@@ -6,7 +6,8 @@ import { Chip, Icon, SyncBar } from './ui';
 
 const ORDER: Platform[] = ['whatsapp', 'telegram', 'slack', 'imessage', 'linkedin', 'x', 'instagram', 'messenger'];
 const MAIL_ORDER: Platform[] = ['gmail', 'outlook', 'yahoo', 'icloud', 'imap'];
-const SHOP_ORDER: Platform[] = ['shopier', 'trendyol', 'hepsiburada', 'etsy', 'shopify', 'n11', 'amazon'];
+// Alışveriş kanalları yalnızca müşteri sorularını/mesajlarını görmek ve yanıtlamak için; Shopier'de mesajlaşma ucu olmadığından listede yok
+const SHOP_ORDER: Platform[] = ['trendyol', 'hepsiburada', 'n11', 'etsy', 'shopify', 'amazon'];
 
 interface MailForm {
   user: string;
@@ -494,7 +495,7 @@ export function ConnectModal({
                     <Icon name="mail" size={16} sw={2} /> E-posta
                   </div>
                 )}
-                {p === 'shopier' && (
+                {p === 'trendyol' && (
                   <div className="grid-head">
                     <Icon name="bag" size={16} sw={2} /> Alışveriş
                   </div>
