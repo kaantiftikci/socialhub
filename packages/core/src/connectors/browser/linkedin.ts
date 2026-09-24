@@ -48,7 +48,18 @@ async function voyager(page: Page, cookies: Record<string, string>, url: string,
  * - older: istemcinin listeyi yukarı kaydırınca yaptığı "daha eski" isteği
  *   (variables=(deliveredAt:<ms>,conversationUrn:…,countBefore:20,countAfter:0) → messengerMessagesByAnchorTimestamp)
  */
-const captured: { conversations?: string; messages?: string; older?: string; headers?: Record<string, string> } = {};
+const captured: { conversations?: string; conversationsPage?: string; messages?: string; older?: string; headers?: Record<string, string> } = {};
+/**
+ * Sohbet listesinin sonraki sayfaları: istemci listeyi aşağı kaydırınca
+ * variables=(query:(predicateUnions:List((conversationCategoryPredicate:(category:PRIMARY_INBOX)))),count:20,mailboxUrn:…,nextCursor:…)
+ * ile ister (lastUpdatedBefore yok sayılıyor; yalnızca nextCursor sayfalıyor). Yakalanamazsa bu bilinen sorgu kimliği kullanılır.
+ */
+const CONV_PAGE_QUERY_ID = 'messengerConversations.9501074288a12f3ae9e3c7ea243bccbf';
+/** İlk sayfadan sonra en çok bu kadar sayfa (20'şer sohbet) okunur */
+const MAX_CONV_PAGES = 5;
+/** Eski sohbet sayfaları seyrek değişir (yeni etkinlik ilk sayfaya çıkar): 30 dk önbellek — gereksiz istek (ve oturum riski) olmasın */
+const PAGE_TTL = 30 * 60_000;
+let olderPages: { at: number; els: J[] } | undefined;
 /** Yakalanamazsa kullanılacak bilinen "daha eski" sorgu kimliği (istemci sürümüyle değişebilir) */
 const OLDER_QUERY_ID = 'messengerMessages.d8ea76885a52fd5dc5c317078ab7c977';
 const installed = new WeakSet<Page>();
@@ -59,8 +70,18 @@ function install(page: Page): void {
   page.on('request', (req) => {
     const u = req.url();
     if (!u.includes('voyagerMessagingGraphQL/graphql')) return;
-    if (u.includes('messengerConversations') && !u.includes('messengerConversationsBySyncToken')) captured.conversations = u;
-    else if (u.includes('messengerConversations')) captured.conversations ??= u;
+    if (u.includes('messengerConversations')) {
+      let v = u;
+      try {
+        v = decodeURIComponent(u);
+      } catch {
+        /* ham URL */
+      }
+      // sayfalama isteği (liste aşağı kaydırıldı) ilk sayfa şablonunun yerine geçmesin
+      if (/[(,](nextCursor|lastUpdatedBefore):|predicateUnions/.test(v)) captured.conversationsPage = u;
+      else if (!u.includes('messengerConversationsBySyncToken')) captured.conversations = u;
+      else captured.conversations ??= u;
+    }
     if (u.includes('messengerMessages')) {
       let v = u;
       try {
@@ -196,6 +217,51 @@ function olderUrl(threadId: string, before: number, limit: number): string | und
   return `${origin}?queryId=${OLDER_QUERY_ID}&variables=(deliveredAt:${before},conversationUrn:${encodeUrn(threadId)},countBefore:${limit},countAfter:0)`;
 }
 
+/** Sohbet listesinin `nextCursor` sayfası için URL (yakalanan şablonun kökeni + sorgu kimliği) */
+export function conversationsPageUrl(base: string, mailboxUrn: string, cursor?: string, pageTemplate?: string): string {
+  const q = base.indexOf('?');
+  const origin = q < 0 ? base : base.slice(0, q);
+  const qid = pageTemplate?.match(/queryId=([^&]+)/)?.[1] ?? CONV_PAGE_QUERY_ID;
+  const vars = `query:(predicateUnions:List((conversationCategoryPredicate:(category:PRIMARY_INBOX)))),count:20,mailboxUrn:${encodeUrn(mailboxUrn)}${cursor ? `,nextCursor:${encodeURIComponent(cursor)}` : ''}`;
+  return `${origin}?queryId=${qid}&variables=(${vars})`;
+}
+
+/** Yanıttaki sohbet listesi sayfasının sonraki imleci */
+function nextCursorOf(data: J): string | undefined {
+  const d = data?.data ?? data;
+  for (const k of Object.keys(d ?? {})) if (k.startsWith('messengerConversations') && d[k]?.metadata?.nextCursor) return String(d[k].metadata.nextCursor);
+  return undefined;
+}
+
+let pagingWarned = false;
+/**
+ * İlk sayfanın (en yeni 20, sponsorlular dahil) ötesindeki sohbetler: PRIMARY_INBOX sayfaları nextCursor ile
+ * (imleçsiz ilk istek ilk sayfayla büyük ölçüde örtüşür). Çakışanlar çağıran tarafta elenir. Hata ölümcül değil (ilk sayfa yine döner).
+ */
+async function olderConversations(page: Page, cookies: Record<string, string>): Promise<J[]> {
+  if (!captured.conversations || !meId) return [];
+  if (olderPages && Date.now() - olderPages.at < PAGE_TTL) return olderPages.els;
+  const els: J[] = [];
+  let cursor: string | undefined;
+  try {
+    for (let i = 0; i <= MAX_CONV_PAGES; i++) {
+      const data = await voyager(page, cookies, conversationsPageUrl(captured.conversations, `urn:li:fsd_profile:${meId}`, cursor, captured.conversationsPage), { graphql: true });
+      const got = findElements(data, 'messengerConversations');
+      els.push(...got);
+      cursor = nextCursorOf(data);
+      if (!cursor || !got.length) break;
+    }
+  } catch (e) {
+    if (!pagingWarned) {
+      pagingWarned = true;
+      bus.log('warn', `LinkedIn: eski sohbet sayfaları okunamadı (yalnızca en yeni 20 sohbet): ${(e as Error).message}`);
+    }
+    if (!els.length) return olderPages?.els ?? [];
+  }
+  olderPages = { at: Date.now(), els };
+  return els;
+}
+
 /** urn:li:fsd_profile:ABC → ABC ; urn:li:fs_miniProfile:ABC → ABC */
 const tail = (urn: string | undefined) => String(urn ?? '').split(':').pop() ?? '';
 /** urn:li:msg_conversation:(urn:li:fsd_profile:ABC,2-XYZ==) → 2-XYZ== */
@@ -293,6 +359,11 @@ function attachmentsOf(m: J): Attachment[] {
       out.push(...attachmentsOf(r.forwardedMessageContent));
     } else if (r.unavailableContent) {
       out.push({ kind: 'other', name: 'Kullanılamayan içerik' });
+    } else if (r.hostUrnData?.type === 'FEED_UPDATE') {
+      // paylaşılan gönderi: metin/ek yok, yalnızca urn:li:fsd_update:(urn:li:activity:<id>,MESSAGING_RESHARE,…)
+      const act = String(r.hostUrnData.hostUrn ?? '').match(/urn:li:(?:activity|ugcPost|share):\d+/)?.[0];
+      const link = act ? `https://www.linkedin.com/feed/update/${act}/` : undefined;
+      out.push({ kind: 'other', name: 'Paylaşılan gönderi', link, page: link });
     }
     // hostUrnData (PREMIUM_INMAIL etiketi), messageAdRenderContent, conversationAdsMessageContent: ek değil
   }
@@ -357,11 +428,20 @@ export const linkedin: Strategy = {
     }
     if (captured.conversations) {
       const data = await voyager(page, cookies, captured.conversations, { graphql: true });
-      const els = findElements(data, 'messengerConversations');
+      const first = findElements(data, 'messengerConversations');
       if (!meId) {
         // mailboxUrn sorguda var: variables=(mailboxUrn:urn%3Ali%3Afsd_profile%3AABC)
         const m = decodeURIComponent(captured.conversations).match(/mailboxUrn:urn:li:fsd_profile:([^,)]+)/);
         if (m) meId = m[1];
+      }
+      // ilk sayfa yalnızca en yeni 20 sohbet (çoğu sponsorlu olabilir): eski sohbetler sayfalanarak eklenir
+      const seenUrns = new Set(first.map((c) => String(c.entityUrn ?? '')));
+      const els = [...first];
+      for (const c of first.length ? await olderConversations(page, cookies) : []) {
+        const urn = String(c.entityUrn ?? '');
+        if (!urn || seenUrns.has(urn)) continue;
+        seenUrns.add(urn);
+        els.push(c);
       }
       const out: Thread[] = [];
       let sponsored = 0;
@@ -487,6 +567,20 @@ export const linkedin: Strategy = {
         senderName: [mp.firstName, mp.lastName].filter(Boolean).join(' ') || 'LinkedIn kullanıcısı',
       };
     });
+  },
+
+  /**
+   * Okundu: web istemcisinin sohbet açılınca yaptığı istek —
+   * POST voyagerMessagingDashMessengerConversations?ids=List(<urn>) {"entities":{<urn>:{"patch":{"$set":{"read":true}}}}}
+   * (sayfa gezdirmeden; profil kopyasıyla doğrulandı: read false → true, unreadCount → 0).
+   */
+  async markRead(page, cookies, threadId) {
+    if (!threadId.startsWith('urn:li:msg_conversation:')) return;
+    await voyager(page, cookies, `https://www.linkedin.com/voyager/api/voyagerMessagingDashMessengerConversations?ids=List(${encodeUrn(threadId)})`, {
+      method: 'POST',
+      body: { entities: { [threadId]: { patch: { $set: { read: true } } } } },
+    });
+    olderPages = undefined; // önbellekteki eski sayfada okunmamış kalmasın
   },
 
   async send(page, cookies, threadId, text) {

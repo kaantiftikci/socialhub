@@ -358,7 +358,15 @@ export const messenger: Strategy & PinHooks = {
       bus.log('warn', `Messenger: sohbet listesi bulunamadı (sayfa: ${page.url()} · "${title}"). Görünmez modda engelleniyorsa kanala sağ tık → Yeniden bağlan ile pencereyi açıp deneyin.`);
       return [];
     }
-    await page.waitForTimeout(800);
+    // kenar çubuğu parça parça çiziliyor (ilk ~15, 1-2 sn sonra ~20 sohbet): bağlantı sayısı ~1,4 sn sabit kalana dek bekle
+    let prevCount = -1;
+    let stable = 0;
+    for (const t0 = Date.now(); Date.now() - t0 < 6_000 && stable < 4; ) {
+      await page.waitForTimeout(350);
+      const n = await page.locator(CHAT_LINK).count().catch(() => 0);
+      stable = n === prevCount ? stable + 1 : 0;
+      prevCount = n;
+    }
     const rows = await page.evaluate(() => {
       const out: Array<{ id: string; name: string; preview: string; unread: boolean; avatarUrl?: string }> = [];
       const seen = new Set<string>();

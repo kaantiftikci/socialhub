@@ -39,8 +39,31 @@ let viewerId = '';
 const userNames = new Map<string, string>();
 const userPics = new Map<string, string>();
 let debugged = 0;
-/** Sohbet başına bilinen en derin sayfalama imleci (eski mesaj yükleme): threadId → { cursor, o sayfanın en eski mesajı (ms) } */
-const cursors = new Map<string, { cursor: string; oldestTs: number }>();
+/**
+ * Sohbet başına bilinen sayfalama imleçleri (eski mesaj yükleme): threadId → [{ cursor, o sayfanın en eski mesajı (ms) }].
+ * Bir imleç, oldestTs'ten ESKİ mesajları verir; `before` için en uygun imleç oldestTs ≥ before olanların en eskisidir
+ * (oldestTs < before olan imleç [oldestTs, before) aralığını atlardı → boşluk).
+ */
+const cursors = new Map<string, Array<{ cursor: string; oldestTs: number }>>();
+
+/** `before`dan eski mesajlara boşluksuz ulaşan en derin imleç */
+export function pickCursor(list: Array<{ cursor: string; oldestTs: number }> | undefined, before: number): string | undefined {
+  let best: { cursor: string; oldestTs: number } | undefined;
+  for (const c of list ?? []) if (c.oldestTs >= before && (!best || c.oldestTs < best.oldestTs)) best = c;
+  return best?.cursor;
+}
+
+function rememberCursor(threadId: string, cursor: string, oldestTs: number): void {
+  const list = cursors.get(threadId) ?? [];
+  if (!list.some((c) => c.cursor === cursor)) list.push({ cursor, oldestTs });
+  // sohbet başına en çok 20 imleç (en yenileri değil en farklı derinlikler kalsın: eski ucu koru)
+  list.sort((a, b) => b.oldestTs - a.oldestTs);
+  if (list.length > 20) list.splice(0, list.length - 20);
+  cursors.set(threadId, list);
+}
+
+/** Okunma kaydı/tepki satırı ("Bir mesajı beğendi"): sohbette gizli (hide_in_thread), mesaj değildir */
+const isLogItem = (it: J) => it.item_type === 'action_log' || Number(it.hide_in_thread ?? 0) === 1;
 
 /** Instagram zaman damgaları µs; ms'ye çevir */
 const tsMs = (t: unknown) => Math.floor(Number(t ?? 0) / 1000);
@@ -252,7 +275,8 @@ export const instagram: Strategy = {
     for (const t of data.inbox?.threads ?? []) {
       rememberUsers(t.users);
       const items: J[] = Array.isArray(t.items) ? t.items : [];
-      const last = t.last_permanent_item ?? items[0];
+      // önizleme: son GÖRÜNÜR mesaj (son öğe "Bir mesajı beğendi" tepki kaydıysa önizleme boş kalıyordu)
+      const last = items.find((i) => !isLogItem(i)) ?? t.last_permanent_item ?? items[0];
       const participants = (t.users ?? []).map((u: J) => ({ id: String(u.pk), name: u.full_name || u.username, handle: u.username ? '@' + u.username : undefined, avatarUrl: u.profile_pic_url }));
       const solo = !t.is_group && t.users?.[0];
       // Okunmamış: platformun sayısı varsa o; yoksa viewer'ın son gördüğü andan (last_seen_at) sonra gelen,
@@ -271,7 +295,7 @@ export const instagram: Strategy = {
         name: t.thread_title || (t.users ?? []).map((u: J) => u.full_name || u.username).join(', ') || 'Sohbet',
         kind: t.is_group ? 'group' : 'direct',
         lastTs: tsMs(t.last_activity_at ?? last?.timestamp),
-        preview: last ? itemText(last) : '',
+        preview: last ? itemText(last) || (isLogItem(last) ? String(last.action_log?.description ?? '') : '') : '',
         unread,
         // grup: özel grup fotoğrafı varsa o, yoksa ilk üyenin fotoğrafı
         avatarUrl: t.is_group ? (t.thread_image?.url ?? t.thread_image_url ?? t.users?.[0]?.profile_pic_url) : t.users?.[0]?.profile_pic_url,
@@ -286,8 +310,7 @@ export const instagram: Strategy = {
    */
   async messages(page, cookies, threadId, limit, before): Promise<Msg[]> {
     const pageSize = Math.max(1, Math.min(limit, 50));
-    const known = cursors.get(threadId);
-    let cursor = before && known && known.oldestTs <= before ? known.cursor : undefined;
+    let cursor = before ? pickCursor(cursors.get(threadId), before) : undefined;
     const items: J[] = [];
     for (let i = 0; i < (before ? 4 : 1); i++) {
       const data = await ig(page, cookies, `/api/v1/direct_v2/threads/${threadId}/?limit=${pageSize}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
@@ -295,17 +318,19 @@ export const instagram: Strategy = {
       rememberUsers(th.users);
       const got: J[] = Array.isArray(th.items) ? th.items : [];
       const oldest = got.length ? Math.min(...got.map((it) => tsMs(it.timestamp))) : 0;
-      // en derin imleci hatırla (yoklama her seferinde en yeni sayfayı çeker; onunkini derin olanın üstüne yazma)
-      if (th.oldest_cursor && got.length) {
-        const cur = cursors.get(threadId);
-        if (!cur || oldest < cur.oldestTs) cursors.set(threadId, { cursor: String(th.oldest_cursor), oldestTs: oldest });
-      }
-      items.push(...(before ? got.filter((it) => tsMs(it.timestamp) < before) : got));
+      if (th.oldest_cursor && got.length) rememberCursor(threadId, String(th.oldest_cursor), oldest);
+      items.push(...(before ? got.filter((it) => tsMs(it.timestamp) < before) : got).filter((it) => !isLogItem(it)));
       if (!before || !got.length || th.has_older === false || !th.oldest_cursor) break;
       if (items.length >= Math.min(pageSize, 10)) break;
       cursor = String(th.oldest_cursor);
     }
-    return items.map((it: J) => {
+    // API yeniden eskiye ve limit+1 öğe döndürür: köprü sözleşmesi eskiden yeniye, en çok `limit`
+    const seen = new Set<string>();
+    const ordered = items
+      .filter((it) => !seen.has(String(it.item_id)) && seen.add(String(it.item_id)))
+      .sort((a, b) => Number(a.timestamp ?? 0) - Number(b.timestamp ?? 0))
+      .slice(-pageSize);
+    return ordered.map((it: J) => {
       const uid = String(it.user_id);
       const { text, attachments } = itemContent(it);
       return {

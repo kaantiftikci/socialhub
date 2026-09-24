@@ -312,7 +312,9 @@ async function readSnapshot(page: Page): Promise<boolean> {
     return true;
   }
   if (!r.b64) return false;
-  const file = path.join(os.tmpdir(), `kavsak-xchat-${meId || 'x'}.db`);
+  // süreç başına ayrı dosya: aynı hesabı açan ikinci çekirdek (geliştirme + paketli uygulama) açık DB'nin altından dosyayı değiştirmesin
+  const file = path.join(os.tmpdir(), `kavsak-xchat-${meId || 'x'}-${process.pid}.db`);
+  cleanStaleSnapshots();
   snap?.db.close();
   snap = undefined;
   fs.writeFileSync(file, Buffer.from(r.b64, 'base64'));
@@ -326,6 +328,32 @@ async function readSnapshot(page: Page): Promise<boolean> {
     snap = undefined;
     bus.log('warn', `X yerel veritabanı okunamadı: ${(e as Error).message}`);
     return false;
+  }
+}
+/** Kapanmış süreçlerden kalan anlık görüntü dosyalarını sil (süreç başına bir kez) */
+let cleaned = false;
+function cleanStaleSnapshots(): void {
+  if (cleaned) return;
+  cleaned = true;
+  try {
+    for (const f of fs.readdirSync(os.tmpdir())) {
+      const m = f.match(/^kavsak-xchat-.+?(?:-(\d+))?\.db$/);
+      if (!m) continue;
+      const pid = Number(m[1]);
+      if (pid === process.pid) continue;
+      let alive = false;
+      if (pid) {
+        try {
+          process.kill(pid, 0);
+          alive = true;
+        } catch {
+          /* süreç yok */
+        }
+      }
+      if (!alive) fs.rmSync(path.join(os.tmpdir(), f), { force: true });
+    }
+  } catch {
+    /* geçici dizin okunamadı */
   }
 }
 /** OPFS yedeğinin son değişme zamanı (ms) — eşitleme sonrası yedek yazılana dek beklemek için */
@@ -479,6 +507,7 @@ interface ConvRow {
   custom_avatar_url: string | null;
   lastTs: number | null;
   lastAt: number | null;
+  lastIn: number | null;
   unread: number;
   marked_unread_by_me: number;
   preview_text: string | null;
@@ -486,12 +515,39 @@ interface ConvRow {
   preview_owner: number | null;
 }
 /** Yerel DB → sohbet listesi (okunmamış = okundu işaretinden sonraki gelen mesaj sayısı, istemcinin kendi kuralı) */
+/**
+ * Kavşak'tan okundu işaretlenen sohbetler: konuşma kimliği → işaret anı (ms). Yerel yedek DB (backups/) okundu olayını
+ * geç yazıyor (sayfada okundu görünse de yedekte last_read_sequence_number eski kalıyor), bu yüzden işaretten önceki
+ * gelen mesajlar okunmuş sayılır. Profilin x.com localStorage'ında saklanır (çekirdek yeniden başlasa da geçerli).
+ */
+const readMarks = new Map<string, number>();
+const READ_KEY = 'kavsak:xchat-read';
+async function loadReadMarks(page: Page): Promise<void> {
+  const raw = await page.evaluate((k) => localStorage.getItem(k), READ_KEY).catch(() => null);
+  if (!raw) return;
+  try {
+    for (const [k, v] of Object.entries(JSON.parse(raw) as Record<string, number>)) if (!readMarks.has(k) || readMarks.get(k)! < v) readMarks.set(k, Number(v));
+  } catch {
+    /* bozuk kayıt */
+  }
+}
+async function saveReadMarks(page: Page): Promise<void> {
+  await page.evaluate(([k, v]) => localStorage.setItem(k, v), [READ_KEY, JSON.stringify(Object.fromEntries(readMarks))] as const).catch(() => undefined);
+}
+
+/** Yedekteki okunmamış sayısını Kavşak'ın okundu işaretiyle düzelt (işaretten sonra gelen mesaj yoksa 0) */
+export function applyReadMark(unread: number, lastIncomingTs: number | null, markedAt: number | undefined): number {
+  if (!unread || markedAt === undefined) return unread;
+  return lastIncomingTs !== null && lastIncomingTs > markedAt ? unread : 0;
+}
+
 function dbThreads(db: Database.Database): Thread[] {
   loadUsers(db);
   const rows = db
     .prepare(
       `select c.conversation_id id, c.custom_title, c.custom_avatar_url, c.marked_unread_by_me, c.last_received_message_at_msec lastAt,
          (select max(timestamp) from dm_entry e where e.conversation_id = c.conversation_id and e.affects_sort_order = 1) lastTs,
+         (select max(timestamp) from dm_entry e where e.conversation_id = c.conversation_id and e.affects_read_state = 1 and e.sender_is_owner = 0) lastIn,
          (select count(*) from dm_entry e where e.conversation_id = c.conversation_id and e.affects_read_state = 1 and e.sender_is_owner = 0
             and (c.last_read_sequence_number is null or e.sequence_number > c.last_read_sequence_number)) unread,
          (select plain_text from dm_entry e where e.conversation_id = c.conversation_id and e.entry_type = 'message' order by timestamp desc limit 1) preview_text,
@@ -517,12 +573,18 @@ function dbThreads(db: Database.Database): Thread[] {
     }
     preview ||= (c.preview_text ?? '').trim();
     if (preview && c.preview_owner === 1) preview = 'Sen: ' + preview;
-    const unread = c.marked_unread_by_me ? Math.max(1, Number(c.unread)) : Number(c.unread);
+    let unread = c.marked_unread_by_me ? Math.max(1, Number(c.unread)) : Number(c.unread);
+    if (!c.marked_unread_by_me) {
+      unread = applyReadMark(unread, c.lastIn === null ? null : Number(c.lastIn), readMarks.get(c.id));
+      if (Number(c.unread) === 0) readMarks.delete(c.id); // yedek yetişti: işarete gerek yok
+    }
     // özel grup avatarı ton.x.com'da (çerez ister, arayüz doğrudan açamaz) → verilmez
     const avatar = group ? (c.custom_avatar_url && !/ton\.(x|twitter)\.com/.test(c.custom_avatar_url) ? c.custom_avatar_url : undefined) : avatars.get(others[0]);
+    // kendine mesaj (550911115:550911115): X "Sen"/kendi adını gösterir
+    const self = !group && others.length === 0;
     out.push({
       id: threadOf(c.id),
-      name: group ? c.custom_title || groupName(others) || 'Grup' : (users.get(others[0]) ?? handles.get(others[0]) ?? others[0] ?? 'Sohbet'),
+      name: group ? c.custom_title || groupName(others) || 'Grup' : self ? (users.get(meId) ?? 'Kendine notlar') : (users.get(others[0]) ?? handles.get(others[0]) ?? others[0] ?? 'Sohbet'),
       kind: group ? 'group' : 'direct',
       lastTs: Number(c.lastTs ?? c.lastAt ?? 0),
       preview,
@@ -558,6 +620,26 @@ async function domInbox(page: Page): Promise<Array<{ id: string; name: string; p
     return out;
   });
 }
+/**
+ * /i/chat listesinde o an çizili sohbetlerin okunmamış işareti (erişilebilirlik açıklaması "…, Okunmamış").
+ * Yedek DB başka cihazda okunan sohbetleri geç güncelliyor; görünen (en yeni) sohbetlerde sayfanın canlı durumu yetkili.
+ */
+async function domUnreadFlags(page: Page): Promise<Map<string, boolean>> {
+  if (!page.url().startsWith(CHAT)) return new Map();
+  await page.waitForSelector('[data-testid^="dm-conversation-item-"]', { timeout: 3_000 }).catch(() => undefined);
+  const rows = await page
+    .evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLElement>('[data-testid^="dm-conversation-item-"]')).map((el) => ({
+        id: el.getAttribute('data-testid')!.slice('dm-conversation-item-'.length).replace(':', '-'),
+        desc: el.getAttribute('aria-description') ?? '',
+      })),
+    )
+    .catch(() => [] as Array<{ id: string; desc: string }>);
+  // açıklama hiç yoksa (arayüz değişti) işaret okunamaz: hiçbirine dokunma
+  if (!rows.some((r) => r.desc)) return new Map();
+  return new Map(rows.map((r) => [r.id, /okunmamış|unread/i.test(r.desc)]));
+}
+
 interface DomRow {
   id: string;
   text: string;
@@ -696,6 +778,7 @@ async function domMessages(page: Page, threadId: string, need: number, before?: 
   const acc = new Map<string, DomRow>();
   let box: { x: number; y: number } | undefined;
   let stale = 0;
+  const t0 = Date.now();
   for (let i = 0; i < 40; i++) {
     const r = await domRows(page);
     if (!r) break;
@@ -706,6 +789,7 @@ async function domMessages(page: Page, threadId: string, need: number, before?: 
     if (have >= need || r.atTop) break;
     stale = acc.size === beforeN ? stale + 1 : 0;
     if (stale >= 4) break; // kaydırdık, yeni satır gelmedi: geçmişin başı
+    if (Date.now() - t0 > 12_000) break; // süre sınırı: köprünün mesaj zaman aşımına yaklaşmasın; kalanı sonraki istekte
     if (!box) box = await page.evaluate(() => { const el = document.querySelector('[data-testid="dm-message-scroller"]')!.getBoundingClientRect(); return { x: el.left + el.width / 2, y: el.top + el.height / 2 }; });
     await page.mouse.move(box.x, box.y);
     await page.mouse.wheel(0, -4000);
@@ -735,7 +819,7 @@ async function legacyInbox(page: Page, cookies: Record<string, string>): Promise
       handle: c.type === 'GROUP_DM' ? undefined : handles.get(others[0]),
       link: c.type === 'GROUP_DM' ? undefined : handles.get(others[0]) ? `https://x.com/${handles.get(others[0])!.slice(1)}` : undefined,
       participants,
-      name: c.name || groupName(others) || 'Sohbet',
+      name: c.name || groupName(others) || (c.type !== 'GROUP_DM' ? (users.get(meId) ?? 'Kendine notlar') : 'Sohbet'),
       kind: c.type === 'GROUP_DM' ? 'group' : 'direct',
       lastTs: Number(c.sort_timestamp ?? last?.time ?? 0),
       preview: last?.message_data?.text ?? '',
@@ -749,19 +833,60 @@ async function legacyInbox(page: Page, cookies: Record<string, string>): Promise
 
 /** Eski 1.1 ucundan birebir sohbet geçmişi (`before` verilirse max_id ile ondan eskiler) */
 async function legacyMessages(page: Page, cookies: Record<string, string>, threadId: string, limit: number, before?: number): Promise<Msg[]> {
-  if (threadId.startsWith('g') || apiMissing.has(threadId)) return [];
+  // XChat grubu "g<kimlik>": XChat öncesi geçmişi 1.1'de "<kimlik>" altında (yalnızca 1.1 gelen kutusunda varsa; yoksa 404 beklenir)
+  const id = legacyIdOf(threadId);
+  if (apiMissing.has(id) || (threadId.startsWith('g') && !legacyThreads?.some((t) => t.id === id))) return [];
   try {
     const q = `count=${Math.min(Math.max(limit, 20), 100)}&include_ext_alt_text=false&tweet_mode=extended${before ? `&max_id=${snowflakeFromMs(before)}` : ''}`;
-    const data = await xapi(page, cookies, `/1.1/dm/conversation/${encodeURIComponent(threadId)}.json?${q}`);
+    const data = await xapi(page, cookies, `/1.1/dm/conversation/${encodeURIComponent(id)}.json?${q}`);
     const tl = data.conversation_timeline ?? {};
     collectUsers(tl);
-    return fromEntries(tl.entries ?? [], threadId).reverse();
+    return fromEntries(tl.entries ?? [], id).reverse();
   } catch (e) {
-    if (/X 404/.test((e as Error).message)) apiMissing.add(threadId);
-    else bus.log('warn', `X eski DM ucu (${threadId}): ${(e as Error).message}`);
+    if (/X 404/.test((e as Error).message)) apiMissing.add(id);
+    else bus.log('warn', `X eski DM ucu (${id}): ${(e as Error).message}`);
     return [];
   }
 }
+
+/**
+ * XChat geçmişi sunucuda DB'dekinden eskiye uzanıyor mu? dm_fetched_range.has_more=0: istemci sohbetin başına kadar
+ * indirmiş (DOM'u kaydırmak boşuna). Sohbet DB'de hiç yoksa (yalnızca 1.1 arşivi) XChat geçmişi yok: false.
+ */
+function xchatHasOlder(db: Database.Database | undefined, conv: string): boolean {
+  if (!db) return true; // DB yok: DOM tek kaynak
+  try {
+    if (!db.prepare('select 1 from dm_conversation where conversation_id = ?').get(conv)) return false;
+    const r = db.prepare('select has_more from dm_fetched_range where conv_id = ?').get(conv) as { has_more: number } | undefined;
+    return !r || Number(r.has_more) !== 0;
+  } catch {
+    return true; // şema farklı: eski davranış
+  }
+}
+
+/**
+ * Eski (1.1) grup sohbeti "<kimlik>" XChat'e taşınınca "g<kimlik>" olur: ikisi ayrı sohbet gibi listelenmesin.
+ * XChat kimliği kalır (canlı olan, gönderim DOM'dan onunla); 1.1 kaydının daha yeni zamanı/önizlemesi varsa aktarılır.
+ */
+export function mergeLegacyGroups(byId: Map<string, Thread>): void {
+  for (const [id, t] of [...byId]) {
+    if (t.kind !== 'group' || id.startsWith('g')) continue;
+    const xc = byId.get('g' + id);
+    if (!xc) continue;
+    if (t.lastTs > xc.lastTs) {
+      xc.lastTs = t.lastTs;
+      xc.preview = t.preview || xc.preview;
+    }
+    xc.preview ||= t.preview;
+    if (!xc.participants?.length && t.participants?.length) xc.participants = t.participants;
+    // köprü eski kimlikle kaydedilmiş sohbeti bu sohbete taşısın (kopya kalmasın)
+    xc.aliases = [...(xc.aliases ?? []), id];
+    byId.delete(id);
+  }
+}
+
+/** 1.1 ucundaki karşılığı: XChat grubu "g<kimlik>" → "<kimlik>" */
+const legacyIdOf = (threadId: string) => (threadId.startsWith('g') ? threadId.slice(1) : threadId);
 
 /**
  * Aynı mesaj farklı kaynaklarda (DB / 1.1 API / DOM): kimlik (sıra no) eşleşiyorsa ya da başka kaynaktan gelen
@@ -819,8 +944,16 @@ export const x: Strategy & { fetchMedia(page: Page, cookies: Record<string, stri
     let fromDb = false;
     try {
       if (await syncAndSnapshot(page)) {
+        await loadReadMarks(page);
         const list = dbThreads(snap!.db); // şema uyuşmazlığında burada patlar → DOM yedeğine düş
-        for (const t of list) byId.set(t.id, t);
+        // görünen sohbetlerde sayfanın canlı okunmamış işareti yedekten yetkili (telefonda okunan sohbet yedekte okunmamış kalıyor)
+        const live = await domUnreadFlags(page);
+        for (const t of list) {
+          const u = live.get(t.id);
+          if (u === false) t.unread = 0;
+          else if (u === true) t.unread = Math.max(1, t.unread);
+          byId.set(t.id, t);
+        }
         fromDb = true;
       }
     } catch (e) {
@@ -849,6 +982,7 @@ export const x: Strategy & { fetchMedia(page: Page, cookies: Record<string, stri
         bus.log('warn', `X sohbet listesi (DOM) okunamadı: ${(e as Error).message}`);
       }
     }
+    mergeLegacyGroups(byId);
     return [...byId.values()];
   },
 
@@ -866,7 +1000,9 @@ export const x: Strategy & { fetchMedia(page: Page, cookies: Record<string, stri
     let dom: Msg[] = [];
     // DB'de olmayan eski XChat mesajları yalnızca sayfada: eski mesaj isteğinde (ya da DB hiç yoksa) kaydırarak oku
     const known = mergeMsgs(db, api);
-    if (before !== undefined ? known.filter((m) => m.ts < before).length < limit : !snap) {
+    // DOM (yavaş: sayfayı kaydırır) yalnızca XChat'te DB'dekinden eski geçmiş varken; yalnızca 1.1 arşivi olan ya da
+    // başına kadar indirilmiş sohbette gereksiz (önceden eski mesaj isteği ~17 sn boşuna kaydırıyordu)
+    if (before !== undefined ? known.filter((m) => m.ts < before).length < limit && xchatHasOlder(snap?.db, conv) : !snap) {
       try {
         const oldest = known[0]?.ts ?? before;
         dom = await domMessages(page, threadId, before === undefined ? limit : limit - known.filter((m) => m.ts < before).length, before, oldest ? oldest - 1 : undefined);
@@ -879,11 +1015,18 @@ export const x: Strategy & { fetchMedia(page: Page, cookies: Record<string, stri
   },
 
   async markRead(page, _cookies, threadId) {
-    // /i/chat/<id> sayfasını açmak hem eski DM'leri hem XChat'i okundu işaretler (istemci okundu olayı gönderir)
+    // /i/chat/<id> sayfasını açmak okundu işaretler: istemci şifreli okundu olayını SendMessageEventMutation ile gönderir
+    // (profil kopyasıyla doğrulandı; olay sayfa açıldıktan 1-3 sn sonra gidiyor, eskiden 0,8 sn beklenip kapatılıyordu).
+    // Sayfa zaten açıksa yeniden yükle: aradaki yeni mesajlar için olay yeniden gönderilsin.
     const url = `${CHAT}/${threadId}`;
-    if (!page.url().startsWith(url)) await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+    const sent = page.waitForRequest((r) => /SendMessageEventMutation|mark_read|markRead/i.test(r.url()), { timeout: 6_000 }).catch(() => undefined);
+    if (page.url().startsWith(url)) await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+    else await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
     await page.waitForSelector('[data-testid="dm-message-scroller"]', { timeout: 10_000 }).catch(() => undefined);
-    await page.waitForTimeout(800);
+    await sent;
+    await page.waitForTimeout(500);
+    readMarks.set(convOf(threadId), Date.now());
+    await saveReadMarks(page);
   },
 
   async openDirect(_page, _cookies, p) {

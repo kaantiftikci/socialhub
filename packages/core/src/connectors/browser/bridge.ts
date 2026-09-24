@@ -30,6 +30,8 @@ export interface Thread {
   handle?: string;
   link?: string;
   participants?: Participant[];
+  /** Aynı sohbetin eski kimlikleri (ör. X'te eski DM grubu "<id>" → XChat "g<id>"): depoda varsa bu sohbete birleştirilir */
+  aliases?: string[];
 }
 
 export interface Msg {
@@ -355,6 +357,14 @@ export class BrowserConnector extends BaseConnector {
         // ilk yoklamada (açılış) platformun okunmamış/önizleme değeri yetkili; sonra yalnızca yeni etkinlikte
         const fresh = first || !ex || t.lastTs > ex.lastMessageAt || !ex.lastPreview;
         this.upsertChat({ remoteId: t.id, name: t.name, kind: t.kind, unread: fresh ? t.unread : undefined, lastMessageAt: t.lastTs || undefined, lastPreview: fresh ? t.preview || undefined : undefined, avatarUrl: t.avatarUrl, handle: t.handle, link: t.link, participants: t.participants });
+        // eski kimlikli kopya (hedef sohbet yukarıda yazıldı)
+        for (const a of t.aliases ?? []) {
+          const from = chatId(this.account.id, a);
+          if (a !== t.id && this.store.getChat(from)) {
+            this.store.mergeChats(from, chatId(this.account.id, t.id));
+            bus.emit({ type: 'chat.delete', chatId: from });
+          }
+        }
         if (!this.known.has(t.id) || (this.known.get(t.id) ?? 0) < t.lastTs) changed.push(t);
       }
       const batch = changed.slice(0, first ? 16 : 8);
