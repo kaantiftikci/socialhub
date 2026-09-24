@@ -239,7 +239,11 @@ export const instagram: Strategy = {
   async threads(page, cookies): Promise<Thread[]> {
     // thread_message_limit=10: her sohbetin son mesajları da gelir → okunmamış sayısı gerçekten hesaplanır
     // (inbox yanıtında unseen_count yok; read_state yalnızca 0/1 veriyor)
-    const data = await ig(page, cookies, '/api/v1/direct_v2/inbox/?persistentBadging=true&folder=&limit=40&thread_message_limit=10');
+    // Instagram bazen geniş isteğe (limit=40, thread_message_limit=10) 500 'Oops' döndürüyor: eski dar parametrelerle yedek
+    const data = await ig(page, cookies, '/api/v1/direct_v2/inbox/?persistentBadging=true&folder=&limit=40&thread_message_limit=10').catch(async (e: Error) => {
+      if (!/Instagram 5\d\d/.test(e.message)) throw e;
+      return ig(page, cookies, '/api/v1/direct_v2/inbox/?persistentBadging=true&folder=&limit=30&thread_message_limit=1');
+    });
     if (data.viewer?.pk) viewerId = String(data.viewer.pk);
     const out: Thread[] = [];
     for (const t of data.inbox?.threads ?? []) {
