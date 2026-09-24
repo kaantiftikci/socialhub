@@ -53,24 +53,75 @@ export function parseGmailDate(s: string | undefined | null, now = new Date()): 
   return Number.isFinite(p) ? p : undefined;
 }
 
+/**
+ * Ek öğesinin download_url'si: "mime:ad:url". Gmail url'nin başına bazen hesap kökünü bir kez daha ekler
+ * ("https://mail.google.com/mail/u/0/https://mail.google.com/mail/u/0?ui=2&…&view=att&disp=safe") → son
+ * "https://"den itibaren al. Dosya adında ':' olabilir; ayrım ":http" ile yapılır.
+ */
+export function parseDownloadUrl(d: string): Attachment | undefined {
+  const i = d.indexOf(':');
+  const j = d.indexOf(':http', i + 1);
+  if (i <= 0 || j < 0) return undefined;
+  const mime = d.slice(0, i).trim().toLowerCase();
+  let name = d.slice(i + 1, j);
+  try {
+    name = decodeURIComponent(name);
+  } catch {
+    /* ham ad kalsın */
+  }
+  const raw = d.slice(j + 1);
+  const url = raw.slice(raw.lastIndexOf('https://'));
+  if (!/^https:\/\//.test(url)) return undefined;
+  const kind: Attachment['kind'] = mime.startsWith('image/') ? 'image' : mime.startsWith('video/') ? 'video' : mime.startsWith('audio/') ? 'audio' : 'file';
+  return { kind, name: name || undefined, mime: mime || undefined, url: kind === 'image' ? url : undefined, link: url };
+}
+
 let meEmail = '';
 
 async function readMe(page: Page): Promise<{ email: string; name: string }> {
   return page.evaluate(() => {
-    const a = document.querySelector<HTMLElement>('a[aria-label*="Google Hesabı"], a[aria-label*="Google Account"], a[href*="accounts.google.com/SignOutOptions"]');
+    const a = document.querySelector<HTMLElement>('[aria-label^="Google Hesabı"], [aria-label^="Google Account"], a[href*="accounts.google.com/SignOutOptions"]');
     const label = a?.getAttribute('aria-label') ?? '';
-    const email = label.match(/[\w.+-]+@[\w.-]+/)?.[0] ?? '';
-    const name = label.replace(/\(.*$/, '').replace(/^(Google Hesabı|Google Account):?\s*/i, '').trim();
+    // yedek: sekme başlığı "Gelen Kutusu (2.437) - ad@gmail.com - Gmail"
+    const email = label.match(/[\w.+-]+@[\w.-]+/)?.[0] ?? document.title.match(/[\w.+-]+@[\w.-]+\.\w+/)?.[0] ?? '';
+    const name = label.replace(/\(.*$/s, '').replace(/^(Google Hesabı|Google Account):?\s*/i, '').trim();
     return { email, name };
   });
 }
 
+/** Oturum düşmüşse Gmail giriş/tanıtım sayfasına yönlendirir: mail.google.com dışındaki her adres */
+export function isSignedOutUrl(url: string): boolean {
+  return /^https:\/\/(accounts\.google\.com|workspace\.google\.com|www\.google\.com\/(intl\/[^/]+\/)?gmail\/about)/.test(url);
+}
+
+/** Gelen kutusu liste görünümü mü? (#inbox; #inbox/<dizi> ya da #search/… değil) */
+export function isInboxListUrl(url: string): boolean {
+  if (!url.startsWith(BASE)) return false;
+  const hash = url.slice(url.indexOf('#') >= 0 ? url.indexOf('#') : url.length);
+  return hash === '' || hash === '#inbox' || /^#inbox\/p\d+$/.test(hash);
+}
+
+/**
+ * Liste görünümüne dön ve görünür satırları bekle. messages()/markRead bir diziyi açınca sayfa #inbox/<id>'de
+ * kalır; o görünümde gelen kutusu satırları DOM'da ama gizlidir → görünür tr.zA hiç gelmez. Önce SPA içinde
+ * hash'i değiştir (hızlı), olmazsa sayfayı yeniden yükle.
+ */
 async function ensureInbox(page: Page): Promise<boolean> {
-  if (!page.url().startsWith(BASE)) await page.goto(HOME, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
-  return page
-    .waitForSelector('tr.zA', { timeout: 20_000 })
-    .then(() => true)
-    .catch(() => false);
+  const visibleRows = (ms: number) =>
+    page
+      .waitForSelector('tr.zA', { state: 'visible', timeout: ms })
+      .then(() => true)
+      .catch(() => false);
+  if (page.url().startsWith(BASE)) {
+    if (!isInboxListUrl(page.url())) {
+      await page.evaluate(() => {
+        location.hash = '#inbox';
+      }).catch(() => undefined);
+    }
+    if (await visibleRows(10_000)) return true;
+  }
+  await page.goto(HOME, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+  return visibleRows(20_000);
 }
 
 async function openThread(page: Page, id: string): Promise<boolean> {
@@ -78,8 +129,18 @@ async function openThread(page: Page, id: string): Promise<boolean> {
   if (!page.url().includes(`/${id}`)) {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
   }
+  // görünür bir ileti + (varsa) görünür konu başlığı bu dizinin: önceki dizinin görünümü henüz kapanmamışken okumayalım
   const ok = await page
-    .waitForSelector('div.adn', { timeout: 15_000 })
+    .waitForFunction(
+      (tid) => {
+        const shown = (e: Element) => (e as HTMLElement).offsetParent !== null;
+        if (!Array.from(document.querySelectorAll('div.adn')).some(shown)) return false;
+        const h = Array.from(document.querySelectorAll('h2[data-legacy-thread-id]')).find(shown);
+        return !h || !/^[0-9a-f]+$/.test(tid) || h.getAttribute('data-legacy-thread-id') === tid;
+      },
+      id,
+      { timeout: 15_000 },
+    )
     .then(() => true)
     .catch(() => false);
   if (!ok) return false;
@@ -107,7 +168,8 @@ export const gmail: Strategy = {
   },
 
   async me(page) {
-    if (!page.url().startsWith(BASE)) await ensureInbox(page);
+    // üst çubuk (hesap düğmesi) satırlarla birlikte yüklenir; hemen okumak boş e-posta verir → fromMe hiç doğru olmaz
+    await ensureInbox(page);
     const { email, name } = await readMe(page).catch(() => ({ email: '', name: '' }));
     meEmail = email.toLowerCase();
     return { id: meEmail, label: email || name || 'Gmail' };
@@ -116,6 +178,8 @@ export const gmail: Strategy = {
   async threads(page): Promise<Thread[]> {
     const ok = await ensureInbox(page);
     if (!ok) {
+      // köprü hata yakalayınca loggedIn'e bakar ve eşleştirmeye (pairing) geçer; boş liste dönmek bunu engellerdi
+      if (isSignedOutUrl(page.url())) throw new Error('Gmail oturumu düşmüş');
       bus.log('warn', `Gmail: gelen kutusu satırları bulunamadı (sayfa: ${page.url()}). Görünmez modda engellendiyse kanala sağ tık → Yeniden bağlan ile pencereyi aç.`);
       return [];
     }
@@ -123,7 +187,10 @@ export const gmail: Strategy = {
     const rows = await page.evaluate(() => {
       const out: Array<{ id: string; name: string; email: string; subject: string; snippet: string; time: string; unread: boolean; count: number }> = [];
       const seen = new Set<string>();
-      for (const tr of Array.from(document.querySelectorAll<HTMLElement>('tr.zA'))) {
+      // gizli görünümlerdeki (önceki arama/etiket) satırlar karışmasın: yalnızca görünür satırlar
+      const all = Array.from(document.querySelectorAll<HTMLElement>('tr.zA'));
+      const visible = all.filter((tr) => tr.offsetParent !== null);
+      for (const tr of visible.length ? visible : all) {
         const idEl = tr.querySelector<HTMLElement>('[data-legacy-thread-id]');
         const id = idEl?.getAttribute('data-legacy-thread-id') ?? '';
         if (!id || seen.has(id)) continue;
@@ -159,11 +226,14 @@ export const gmail: Strategy = {
     });
   },
 
-  async messages(page, _cookies, threadId, limit): Promise<Msg[]> {
+  async messages(page, _cookies, threadId, limit, before): Promise<Msg[]> {
     if (!(await openThread(page, threadId))) return [];
+    if (!meEmail) meEmail = (await readMe(page).catch(() => ({ email: '' }))).email.toLowerCase();
     const rows = await page.evaluate(() => {
       const out: Array<{ id: string; name: string; email: string; time: string; text: string; atts: string[] }> = [];
-      for (const el of Array.from(document.querySelectorAll<HTMLElement>('div.adn'))) {
+      const all = Array.from(document.querySelectorAll<HTMLElement>('div.adn'));
+      const visible = all.filter((e) => e.offsetParent !== null);
+      for (const el of visible.length ? visible : all) {
         const id = el.getAttribute('data-legacy-message-id') ?? el.getAttribute('data-message-id') ?? '';
         const from = el.querySelector<HTMLElement>('span.gD');
         const body = el.querySelector<HTMLElement>('div.a3s');
@@ -183,16 +253,7 @@ export const gmail: Strategy = {
       .filter((r) => r.text || r.atts.length)
       .map((r, i) => {
         const fromMe = !!meEmail && r.email === meEmail;
-        const attachments = r.atts
-          .map((d): Attachment | undefined => {
-            const m = d.match(/^([^:]+):([^:]*):(https?:\/\/.+)$/);
-            if (!m) return undefined;
-            const mime = m[1];
-            const kind: Attachment['kind'] = mime.startsWith('image/') ? 'image' : mime.startsWith('video/') ? 'video' : mime.startsWith('audio/') ? 'audio' : 'file';
-            const att: Attachment = { kind, name: decodeURIComponent(m[2]) || undefined, mime, url: kind === 'image' ? m[3] : undefined, link: m[3] };
-            return att;
-          })
-          .filter((a): a is Attachment => !!a);
+        const attachments = r.atts.map(parseDownloadUrl).filter((a): a is Attachment => !!a);
         return {
           id: r.id || hashId(threadId + '|' + r.email + '|' + r.time + '|' + r.text.slice(0, 80)),
           text: r.text,
@@ -203,7 +264,8 @@ export const gmail: Strategy = {
           attachments: attachments.length ? attachments : undefined,
         };
       });
-    return msgs.slice(-limit);
+    // dizinin tamamı tek seferde gelir: "before" ile yalnızca daha eski iletiler (yoksa boş → sayfalama biter)
+    return (before ? msgs.filter((m) => m.ts < before) : msgs).slice(-limit);
   },
 
   async markRead(page, _cookies, threadId) {

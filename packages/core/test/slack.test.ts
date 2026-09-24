@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Page } from 'playwright';
-import { slackStrategy, formatSlackText, fileToAttachment, _resetSlackState } from '../src/connectors/browser/slack.js';
+import { slackStrategy, formatSlackText, fileToAttachment, apiUrls, _resetSlackState } from '../src/connectors/browser/slack.js';
 
 /** Sahte sayfa: slack() çağrılarını (args.method) sabit yanıtlarla karşılar, team() için localConfig döner. */
 function fakePage(handlers: Record<string, (params: Record<string, unknown>) => unknown>, calls: Array<{ method: string; params: Record<string, unknown> }> = []): Page {
@@ -11,12 +11,12 @@ function fakePage(handlers: Record<string, (params: Record<string, unknown>) => 
     goto: async () => undefined,
     waitForURL: async () => undefined,
     waitForTimeout: async () => undefined,
-    evaluate: async (_fn: unknown, args?: { method?: string; params?: Record<string, unknown> }) => {
-      if (!args?.method) return { token: 'xoxc-test', domain: 'ws', name: 'Test WS', userId: 'U_ME' };
+    evaluate: async (_fn: unknown, args?: { method?: string; params?: Record<string, unknown>; urls?: string[] }) => {
+      if (!args?.method) return { token: 'xoxc-test', domain: 'ws', name: 'Test WS', userId: 'U_ME', url: 'https://ws.slack.com/' };
       calls.push({ method: args.method, params: args.params ?? {} });
       const h = handlers[args.method];
       if (!h) throw new Error(`Slack ${args.method}: beklenmeyen çağrı`);
-      return { ok: true, ...(h(args.params ?? {}) as object) };
+      return { j: { ok: true, ...(h(args.params ?? {}) as object) }, idx: 0 };
     },
   } as unknown as Page;
 }
@@ -129,4 +129,21 @@ test('messages(before): latest=before saniye, inclusive=false; markRead → conv
   await slackStrategy.markRead!(page, {}, 'D1', '1700000009.000100');
   const mark = calls.find((c) => c.method === 'conversations.mark')!;
   assert.deepEqual(mark.params, { channel: 'D1', ts: '1700000009.000100' });
+});
+
+test('apiUrls: web istemcisinin host\'u + _x_gantry (CORS: kaynak yansıtılır), yedek app.slack.com aynı-kaynak', () => {
+  _resetSlackState();
+  const now = 1790246809465;
+  // öğrenilmiş parametre yok: çalışma alanı adresi + _x_id + _x_gantry=true
+  assert.deepEqual(apiUrls({ domain: 'ws', url: 'https://ws.slack.com/' }, 'client.counts', { base: '', query: {} }, now), [
+    'https://ws.slack.com/api/client.counts?_x_id=kavsak-1790246809.465&_x_gantry=true',
+    'https://app.slack.com/api/client.counts',
+  ]);
+  // url yoksa domain'den; web istemcisinden öğrenilen sabit parametreler eklenir
+  const [u] = apiUrls({ domain: 'ws', url: '' }, 'auth.test', { base: 'https://ws.slack.com/api/', query: { _x_version_ts: '1790232454', fp: 'ef' } }, now);
+  assert.equal(u, 'https://ws.slack.com/api/auth.test?_x_id=kavsak-1790246809.465&_x_version_ts=1790232454&fp=ef&_x_gantry=true');
+  // başka çalışma alanından öğrenilmiş host kullanılmaz
+  assert.ok(apiUrls({ domain: 'ws', url: 'https://ws.slack.com/' }, 'auth.test', { base: 'https://baska.slack.com/api/', query: {} }, now)[0].startsWith('https://ws.slack.com/api/'));
+  // hiç bilgi yoksa yalnız aynı-kaynak
+  assert.deepEqual(apiUrls({ domain: '', url: '' }, 'auth.test', { base: '', query: {} }, now), ['https://app.slack.com/api/auth.test']);
 });

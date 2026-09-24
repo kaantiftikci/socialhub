@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Tarayıcı stratejisini (slack/instagram/linkedin/x/messenger) gerçek oturumla, uygulamaya dokunmadan doğrular:
- *   node scripts/verify-strategy.mjs slack            # ~/.kavsak/sessions/slack:*/profile'ı /tmp'ye kopyalar
+ *   node scripts/verify-strategy.mjs slack            # ~/.kavsak/sessions/<platform>:<id>/profile'ı /tmp'ye kopyalar
  *   node scripts/verify-strategy.mjs slack /yol/profil # verilen profil kopyasını kullanır
  * Çıktı: sohbet sayısı, ilk 8 sohbet (ad, tür, okunmamış, son etkinlik), ilk 3 sohbette mesajlar (zaman, gönderen, metin, ek),
  * bir sohbette "before" ile daha eski sayfa. Önce `npm run build -w packages/core`.
@@ -31,7 +31,11 @@ if (!profile) {
   for (const f of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) fs.rmSync(path.join(profile, f), { force: true });
   console.log('profil kopyalandı →', profile);
 }
-const ctx = await chromium.launchPersistentContext(profile, { headless: true, channel: 'chromium', viewport: { width: 1180, height: 820 }, locale: 'tr-TR', args: ['--disable-blink-features=AutomationControlled'] });
+// gerçek tarayıcı kimliği (görünmez modda "HeadlessChrome" bazı siteleri kapatır; köprüdeki realUserAgent ile aynı)
+const probe = await chromium.launch({ headless: true, channel: 'chromium' });
+const ua = (await (await probe.newPage()).evaluate(() => navigator.userAgent)).replace(/HeadlessChrome/g, 'Chrome');
+await probe.close();
+const ctx = await chromium.launchPersistentContext(profile, { userAgent: ua, headless: true, channel: 'chromium', viewport: { width: 1180, height: 820 }, locale: 'tr-TR', args: ['--disable-blink-features=AutomationControlled'] });
 const page = ctx.pages()[0] ?? (await ctx.newPage());
 const cookies = async () => Object.fromEntries((await ctx.cookies()).map((c) => [c.name, c.value]));
 const t0 = Date.now();

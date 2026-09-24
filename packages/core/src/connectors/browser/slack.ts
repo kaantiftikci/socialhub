@@ -29,19 +29,64 @@ interface TeamCfg {
   domain: string;
   name: string;
   userId: string;
+  /** Çalışma alanı adresi (https://<ws>.slack.com/) — web istemcisi API'yi buradan çağırır */
+  url: string;
+}
+
+/**
+ * Web istemcisinin kendi API isteklerinden öğrenilen host ve sabit sorgu parametreleri.
+ * Neden gerekli: slack.com/api ve <ws>.slack.com/api, `_x_gantry=true` işareti olmayan isteklere
+ * `Access-Control-Allow-Origin: *` döner; `credentials: 'include'` (d çerezi şart) ile joker kaynak
+ * tarayıcıda CORS hatasına düşer → "TypeError: Failed to fetch". Web istemcisi (app.slack.com) istekleri
+ * https://<ws>.slack.com/api/<method>?_x_id=…&_x_gantry=true&… ile yapar; sunucu o zaman kaynağı
+ * (https://app.slack.com) + Allow-Credentials: true yansıtır.
+ */
+const KEEP_QUERY = ['_x_version_ts', '_x_frontend_build_type', '_x_desktop_ia', '_x_gantry', 'fp'];
+const learned = { base: '', query: {} as Record<string, string> };
+const watched = new WeakSet<Page>();
+/** app.slack.com'un aynı-kaynak /api/ ucu çalıştıysa (çapraz kaynak başarısız) doğrudan onu kullan */
+let sameOriginOnly = false;
+
+function watchClientRequests(page: Page): void {
+  if (watched.has(page) || typeof (page as { on?: unknown }).on !== 'function') return;
+  watched.add(page);
+  page.on('request', (req) => {
+    const m = req.url().match(/^(https:\/\/[a-z0-9-]+(?:\.enterprise)?\.slack\.com\/api\/)[\w.]+\?(.*)$/);
+    if (!m || !m[2].includes('_x_id=')) return;
+    learned.base = m[1];
+    const q = new URLSearchParams(m[2]);
+    const keep: Record<string, string> = {};
+    for (const k of KEEP_QUERY) {
+      const v = q.get(k);
+      if (v) keep[k] = v;
+    }
+    learned.query = keep;
+  });
+}
+
+/** Denenecek API adresleri (sırayla): web istemcisinin host'u + _x_ parametreleri, sonra app.slack.com aynı-kaynak /api/ */
+export function apiUrls(t: Pick<TeamCfg, 'domain' | 'url'>, method: string, learnedCfg: { base: string; query: Record<string, string> } = learned, now = Date.now()): string[] {
+  const sameOrigin = `https://app.slack.com/api/${method}`;
+  const teamBase = t.url ? t.url.replace(/\/?$/, '/') + 'api/' : t.domain ? `https://${t.domain}.slack.com/api/` : '';
+  // öğrenilen host yalnızca bu çalışma alanınınsa (çoklu çalışma alanında başka takımın host'u değil)
+  const base = learnedCfg.base && (!teamBase || learnedCfg.base === teamBase) ? learnedCfg.base : teamBase;
+  if (!base || sameOriginOnly) return [sameOrigin];
+  const q = new URLSearchParams({ _x_id: `kavsak-${(now / 1000).toFixed(3)}`, ...learnedCfg.query, _x_gantry: 'true' });
+  return [`${base}${method}?${q}`, sameOrigin];
 }
 
 async function team(page: Page): Promise<TeamCfg | undefined> {
   if (page.isClosed() || !page.url().startsWith('https://app.slack.com/')) return undefined;
+  watchClientRequests(page);
   return page.evaluate(() => {
     try {
       const raw = localStorage.getItem('localConfig_v2');
       if (!raw) return undefined;
-      const cfg = JSON.parse(raw) as { teams?: Record<string, { token?: string; domain?: string; name?: string; user_id?: string }>; lastActiveTeamId?: string };
+      const cfg = JSON.parse(raw) as { teams?: Record<string, { token?: string; domain?: string; name?: string; user_id?: string; url?: string }>; lastActiveTeamId?: string };
       const teams = Object.values(cfg.teams ?? {});
       const t = (cfg.lastActiveTeamId && cfg.teams?.[cfg.lastActiveTeamId]) || teams.find((x) => x.token?.startsWith('xoxc'));
       if (!t?.token) return undefined;
-      return { token: t.token, domain: t.domain ?? '', name: t.name ?? 'Slack', userId: t.user_id ?? '' };
+      return { token: t.token, domain: t.domain ?? '', name: t.name ?? 'Slack', userId: t.user_id ?? '', url: t.url ?? '' };
     } catch {
       return undefined;
     }
@@ -65,18 +110,33 @@ async function openClient(page: Page): Promise<TeamCfg | undefined> {
 async function slack(page: Page, method: string, params: Record<string, string | number | boolean> = {}): Promise<J> {
   const t = (await team(page)) ?? (Date.now() - lastNav > 8000 ? await openClient(page) : undefined);
   if (!t) throw new Error('Slack oturumu bulunamadı');
-  return page.evaluate(
-    async ({ method, params, token }) => {
-      const body = new FormData();
-      body.append('token', token);
-      for (const [k, v] of Object.entries(params)) body.append(k, String(v));
-      const r = await fetch(`https://slack.com/api/${method}`, { method: 'POST', body, credentials: 'include' });
-      const j = await r.json();
-      if (!j.ok) throw new Error(`Slack ${method}: ${j.error ?? r.status}`);
-      return j;
+  const urls = apiUrls(t, method);
+  const r = await page.evaluate(
+    async ({ method, params, token, urls }) => {
+      let netErr = '';
+      for (let i = 0; i < urls.length; i++) {
+        const body = new FormData();
+        body.append('token', token);
+        for (const [k, v] of Object.entries(params)) body.append(k, String(v));
+        let res: Response;
+        try {
+          res = await fetch(urls[i], { method: 'POST', body, credentials: 'include' });
+        } catch (e) {
+          // CORS/ağ hatası: sıradaki adresi dene
+          netErr = (e as Error).message;
+          continue;
+        }
+        const j = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
+        if (!j.ok) throw new Error(`Slack ${method}: ${j.error ?? res.status}`);
+        return { j, idx: i };
+      }
+      throw new Error(`Slack ${method}: ağ/CORS hatası (${netErr})`);
     },
-    { method, params, token: t.token },
+    { method, params, token: t.token, urls },
   );
+  // yalnızca aynı-kaynak uç çalıştıysa sonraki çağrılarda boşuna çapraz kaynak deneme
+  if (r.idx > 0 && urls.length > 1) sameOriginOnly = true;
+  return r.j;
 }
 
 interface UserInfo {
@@ -300,4 +360,7 @@ export function _resetSlackState(): void {
   lastRead.clear();
   meId = '';
   listLoadedAt = 0;
+  learned.base = '';
+  learned.query = {};
+  sameOriginOnly = false;
 }
