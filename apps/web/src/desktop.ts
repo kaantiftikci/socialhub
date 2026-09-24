@@ -8,6 +8,15 @@ export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in
 export const API_BASE = isTauri ? 'http://127.0.0.1:7788' : '';
 
 /** Çekirdek API belirteci: paketli uygulamada Tauri komutundan okunur (çekirdek 1-3 sn geç kalkabilir; birkaç kez dene). */
+/** Çözülmüş belirteç (senkron erişim: <img src> gibi yerler için) */
+let tokenValue = '';
+/** "/api/…" göreli medya adresini çekirdeğe yönlendir (Tauri: 127.0.0.1:7788; telefon: ?token= eklenir) */
+export function mediaUrl(u?: string): string | undefined {
+  if (!u || !u.startsWith('/')) return u;
+  const full = API_BASE + u;
+  return tokenValue && u.startsWith('/api/') ? `${full}${full.includes('?') ? '&' : '?'}token=${encodeURIComponent(tokenValue)}` : full;
+}
+
 export const coreToken: Promise<string> = (async () => {
   if (!isTauri) {
     // Telefondan erişim: bağlantı ?token=… ile gelir; sakla ve adresten temizle
@@ -36,6 +45,7 @@ export const coreToken: Promise<string> = (async () => {
   }
   return '';
 })();
+void coreToken.then((t) => (tokenValue = t));
 
 export async function setBadge(count: number): Promise<void> {
   if (!isTauri) return;

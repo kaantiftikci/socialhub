@@ -12,7 +12,9 @@ import { bus } from '../../bus.js';
  * Deneysel: arayüz değişirse günlükteki "Outlook: … bulunamadı" satırı seçicilerin güncellenmesi gerektiğini gösterir.
  */
 const BASE = 'https://outlook.live.com/mail/0/';
-const HOME = BASE;
+/** nlp=1: oturum yoksa pazarlama sayfası yerine doğrudan Microsoft giriş ekranı */
+const HOME = `${BASE}?nlp=1`;
+const LIST = 'div[role="option"][data-convid]';
 
 const MONTHS: Record<string, number> = {
   oca: 0, şub: 1, mar: 2, nis: 3, may: 4, haz: 5, tem: 6, ağu: 7, eyl: 8, eki: 9, kas: 10, ara: 11,
@@ -77,13 +79,18 @@ export const outlook: Strategy = {
   loginHint: 'Açılan pencerede Microsoft hesabına giriş yap; gelen kutusu görününce pencere kendiliğinden kapanır',
 
   async loggedIn(page, _cookies, passive) {
-    const url = page.url();
-    if (/login\.live\.com|login\.microsoftonline\.com|account\.microsoft\.com/.test(url)) return false;
-    if (/outlook\.(live|office)\.com\/mail/.test(url)) return true;
-    if (passive) return false;
-    await page.goto(HOME, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
-    await page.waitForTimeout(2000);
-    return /outlook\.(live|office)\.com\/mail/.test(page.url());
+    // Oturum yoksa outlook.live.com/mail bir an açılıp microsoft.com pazarlama sayfasına yönlenir: adres tek başına
+    // yetmez; ileti listesi (ya da klasör ağacı) gerçekten çizildiyse giriş tamamdır
+    const onMail = () => /outlook\.(live|office)\.com\/mail/.test(page.url());
+    const hasList = async () => (await page.locator(`${LIST}, div[role="tree"]`).count().catch(() => 0)) > 0;
+    if (passive) return onMail() && (await hasList());
+    if (!onMail()) await page.goto(HOME, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+    for (let i = 0; i < 12; i++) {
+      if (!onMail()) return false; // giriş ekranına ya da pazarlama sayfasına yönlendi
+      if (await hasList()) return true;
+      await page.waitForTimeout(1000);
+    }
+    return false;
   },
 
   async me(page) {

@@ -314,7 +314,7 @@ export default function App() {
    * Gelen kutusu, sayaçlar ve odak için sohbetler: arşivlenmiş (Telegram) ve klasörlenmiş (iMessage bilinmeyen/istenmeyen/SMS)
    * sohbetler dışarıda kalır; onlar yalnızca kendi sekmelerinde görünür.
    */
-  const inboxChats = useMemo(() => activeChats.filter((c) => !c.meta?.archived && !(c.platform === 'imessage' && c.meta?.folder)), [activeChats]);
+  const inboxChats = useMemo(() => activeChats.filter((c) => !c.meta?.archived && !(c.platform === 'imessage' && c.meta?.folder === 'junk')), [activeChats]);
   const archivedCount = useMemo(() => activeChats.filter((c) => c.platform === platformFilter && !!c.meta?.archived).length, [activeChats, platformFilter]);
   const snoozedChats = useMemo(() => allChats.filter((c) => isSnoozed(c.id)).sort((a, b) => snoozes[a.id] - snoozes[b.id]), [allChats, isSnoozed, snoozes]);
   const waitingChats = useMemo(() => inboxChats.filter(isWaiting).sort((a, b) => b.lastMessageAt - a.lastMessageAt), [inboxChats]);
@@ -332,9 +332,10 @@ export default function App() {
       if (c.platform !== 'imessage') return true;
       const folder = c.meta?.folder as string | undefined;
       if (imActive === 'deleted') return !!c.meta?.deleted;
-      if (imActive === 'junk') return folder === 'junk' || folder === 'sms'; // istenmeyen + filtrelenen SMS
+      if (imActive === 'junk') return folder === 'junk';
       if (imActive) return folder === imActive;
-      return !folder;
+      // "Mesajlar": tümü (istenmeyen hariç) — son gelenlerin çoğu bilinmeyen gönderenlerden
+      return folder !== 'junk';
     });
     if (tagFilter) list = list.filter((c) => c.tags.includes(tagFilter));
     // iMessage'da Okunmamış/Bekleyen sekmeleri yok (Mesajlar uygulamasındaki klasörler var)

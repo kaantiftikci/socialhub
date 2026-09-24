@@ -1,6 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
 import type { BrowserContext, Page } from 'playwright';
 import { BaseConnector, type StartOptions } from '../base.js';
 import { chatId } from '../../model.js';
@@ -132,9 +133,10 @@ export class BrowserConnector extends BaseConnector {
   }
 
   /** Kalıcı profille Chromium aç. headless=true: arka planda çalışan görünmez pencere. */
-  private async launch(headless: boolean): Promise<boolean> {
+  private async launch(headless: boolean, retried = false): Promise<boolean> {
+    const profile = path.join(sessionDir(this.account.id), 'profile');
     try {
-      this.ctx = await this.chromium!.launchPersistentContext(path.join(sessionDir(this.account.id), 'profile'), {
+      this.ctx = await this.chromium!.launchPersistentContext(profile, {
         headless: headless || process.env.KAVSAK_HEADLESS === '1',
         // tam Chromium (headless-shell değil): siteler "yeni headless" modu normal tarayıcı gibi görür
         channel: process.env.KAVSAK_CHROMIUM ? undefined : 'chromium',
@@ -144,7 +146,16 @@ export class BrowserConnector extends BaseConnector {
         args: ['--disable-blink-features=AutomationControlled'],
       });
     } catch (e) {
-      this.setStatus('error', `Chromium açılamadı: ${(e as Error).message.split('\n')[0]}. Çözüm: npx playwright install chromium`);
+      const msg = (e as Error).message;
+      // Önceki çekirdekten kalan Chromium profil kilidini tutuyorsa: o süreci kapat, kilidi sil, bir kez daha dene
+      if (!retried && /ProcessSingleton|SingletonLock|profile directory is already in use/i.test(msg)) {
+        bus.log('warn', `${this.account.platform}: profil kilidi bulundu (eski tarayıcı açık kalmış); temizlenip yeniden deneniyor`);
+        await new Promise<void>((r) => execFile('pkill', ['-f', `--user-data-dir=${profile}`], () => r()));
+        await sleep(1500);
+        for (const f of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) fs.rmSync(path.join(profile, f), { force: true });
+        return this.launch(headless, true);
+      }
+      this.setStatus('error', `Chromium açılamadı: ${msg.split('\n')[0]}. Çözüm: npx playwright install chromium`);
       return false;
     }
     const ctx = this.ctx;

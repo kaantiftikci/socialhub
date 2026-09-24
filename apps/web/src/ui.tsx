@@ -1,3 +1,4 @@
+import { mediaUrl } from './desktop';
 import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import type { ReactNode } from 'react';
 import { PLATFORMS, TAG_COLORS, type Platform } from './types';
@@ -124,7 +125,7 @@ export function Avatar({ name, size = 40, url }: { name: string; size?: number; 
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [url]);
   // süresi dolan CDN bağlantıları (WhatsApp/Instagram/X) kırık resim yerine baş harfe düşsün
-  if (url && !failed) return <img className="avatar" src={url} alt="" width={size} height={size} style={{ width: size, height: size }} onError={() => setFailed(true)} />;
+  if (url && !failed) return <img className="avatar" src={mediaUrl(url)} alt="" width={size} height={size} style={{ width: size, height: size }} onError={() => setFailed(true)} />;
   let h = 0;
   for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   const [bg, fg] = PALETTE[h % PALETTE.length];

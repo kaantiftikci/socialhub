@@ -61,9 +61,9 @@ const SELECT_ROWS = (retractedCol: string, filteredCol: string) =>
 
 /** Mesajlar uygulamasındaki klasör: chat.is_filtered değerinden */
 export function imessageFolder(isFiltered: number | null | undefined): 'unknown' | 'junk' | 'sms' | undefined {
-  if (isFiltered === 1) return 'unknown';
+  // chat.db: 1 bilinmeyen gönderen, 2 istenmeyen ("(filtered)"), 4 işlem/promosyon SMS ("(smsft)") → bilinmeyen
+  if (isFiltered === 1 || isFiltered === 4) return 'unknown';
   if (isFiltered === 2) return 'junk';
-  if (isFiltered === 4) return 'sms';
   return undefined;
 }
 
@@ -134,6 +134,7 @@ export class IMessageConnector extends BaseConnector {
     this.loadContacts();
     this.backfill();
     this.syncUnread();
+    this.scanRecoverable();
     this.timer = setInterval(() => this.poll(), 3000);
   }
 
@@ -339,7 +340,27 @@ export class IMessageConnector extends BaseConnector {
   }
 
   /** Sonradan "Son Silinenler"e taşınan mesajlar ROWID'siyle yeniden gelmez; ara sıra tarayıp işaretle. */
+  /** Mesajlar → Son Silinenler: chat_recoverable_message_join (ileti chat_message_join'dan çıkarılır, orada durur) */
+  private scanRecoverable(): void {
+    if (!this.db) return;
+    try {
+      const rows = this.db
+        .prepare(
+          `SELECT m.ROWID AS rowid, m.guid, m.text, m.attributedBody, m.date, m.is_from_me, m.cache_has_attachments, m.item_type,
+                  1 AS date_retracted, h.id AS handle, c.chat_identifier, c.guid AS chat_guid, c.display_name, ${this.filteredCol} AS is_filtered
+             FROM chat_recoverable_message_join j JOIN message m ON m.ROWID = j.message_id JOIN chat c ON c.ROWID = j.chat_id
+             LEFT JOIN handle h ON h.ROWID = m.handle_id`,
+        )
+        .all() as Row[];
+      for (const r of rows) this.ingest(r, false);
+      if (rows.length) bus.log('info', `iMessage: son silinenlerde ${rows.length} mesaj`);
+    } catch {
+      /* tablo yok (eski macOS) */
+    }
+  }
+
   private rescanRetracted(): void {
+    this.scanRecoverable();
     if (this.retractedCol === 'NULL' || !this.db) return;
     for (const r of this.query(Math.max(0, this.lastRowId - 5000), 500, true)) this.ingest(r, false);
   }

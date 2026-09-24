@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
-import { API_BASE } from './desktop';
+import { API_BASE, mediaUrl } from './desktop';
 import { DEFAULT_TAGS, PLATFORMS, type Attachment, type Chat, type DraftResult, type Message, type Participant } from './types';
 import { Avatar, Chip, Icon, Resizer, Tag, fmtDay, fmtStamp, fmtTime } from './ui';
 
@@ -822,7 +822,7 @@ function statusLabel(s: Message['status']) {
 
 /** Çekirdeğin vekil yolları (/api/media/…) Tauri'de mutlak adrese çevrilir */
 function abs(u?: string): string | undefined {
-  return u && u.startsWith('/') ? API_BASE + u : u;
+  return mediaUrl(u);
 }
 /** Doğrudan oynatılabilir/indirilebilir dosya mı (vekil yolu ya da bilinen uzantı) — sayfa bağlantısı değil */
 function isMediaFile(u?: string): boolean {
