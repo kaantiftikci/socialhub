@@ -6,7 +6,7 @@ import { Chip, Icon, SyncBar } from './ui';
 
 const ORDER: Platform[] = ['whatsapp', 'telegram', 'slack', 'imessage', 'linkedin', 'x', 'instagram', 'messenger'];
 const MAIL_ORDER: Platform[] = ['gmail', 'outlook', 'yahoo', 'icloud', 'imap'];
-const SHOP_ORDER: Platform[] = ['shopier', 'trendyol', 'hepsiburada', 'etsy', 'shopify'];
+const SHOP_ORDER: Platform[] = ['shopier', 'trendyol', 'hepsiburada', 'etsy', 'shopify', 'n11', 'amazon'];
 
 interface MailForm {
   user: string;
@@ -69,7 +69,7 @@ export function ConnectModal({
         setActive('shopier:new');
         return;
       }
-      const SHOP_FIELDS: Partial<Record<Platform, string[]>> = { trendyol: ['sellerId', 'apiKey', 'apiSecret'], hepsiburada: ['merchantId', 'username', 'password'], etsy: ['keystring'], shopify: ['shop', 'accessToken'] };
+      const SHOP_FIELDS: Partial<Record<Platform, string[]>> = { trendyol: ['sellerId', 'apiKey', 'apiSecret'], hepsiburada: ['merchantId', 'username', 'password'], etsy: ['keystring'], shopify: ['shop', 'accessToken'], n11: ['appKey', 'appSecret'], amazon: ['clientId', 'clientSecret', 'refreshToken'] };
       const shopFields = SHOP_FIELDS[platform];
       if (shopFields && (active !== `${platform}:new` || shopFields.some((k) => !sf(k).trim()))) {
         setActive(`${platform}:new`);
@@ -242,11 +242,11 @@ export function ConnectModal({
           </div>
         )}
 
-        {(['trendyol', 'hepsiburada', 'etsy', 'shopify'] as Platform[]).map((p) =>
+        {(['trendyol', 'hepsiburada', 'etsy', 'shopify', 'n11', 'amazon'] as Platform[]).map((p) =>
           active === `${p}:new` ? (
             <div className="pairbox" key={p}>
               <div style={{ flexGrow: 1 }}>
-                <h3>{PLATFORMS[p].name}’{p === 'etsy' ? 'yi' : p === 'shopify' ? 'ı' : p === 'trendyol' ? 'u' : 'yı'} bağla</h3>
+                <h3>{PLATFORMS[p].name}’{p === 'etsy' ? 'yi' : p === 'shopify' ? 'ı' : p === 'trendyol' ? 'u' : p === 'n11' ? 'i' : p === 'amazon' ? 'u' : 'yı'} bağla</h3>
                 <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.5 }}>
                   {p === 'trendyol' && (
                     <>
@@ -261,6 +261,16 @@ export function ConnectModal({
                   {p === 'etsy' && (
                     <>
                       etsy.com/developers’ta bir uygulama oluştur, <b>Keystring</b>’i gir; uygulamanın geri dönüş adresine <code>http://127.0.0.1:7788/oauth/callback</code> ekle. Bağlan deyince Etsy girişi açılır. Siparişler API’den; Etsy Mesajları API’de olmadığından tarayıcı oturumuyla okunur (deneysel).
+                    </>
+                  )}
+                  {p === 'n11' && (
+                    <>
+                      n11 Mağaza Paneli → <b>Ayarlar → API Bilgileri</b>: App Key ve App Secret. Siparişler ve müşteri soruları sohbet olarak akar; sorulara buradan yanıt verirsin.
+                    </>
+                  )}
+                  {p === 'amazon' && (
+                    <>
+                      Seller Central → <b>Uygulamalar ve Hizmetler → Uygulama geliştir</b> (SP-API, kendi kendine yetkilendirme): LWA Client ID, Client Secret ve Refresh Token. Siparişler API’den; alıcı mesajları SP-API’de okunamadığından Seller Central oturumuyla okunur (deneysel). Pazar yeri varsayılan Türkiye.
                     </>
                   )}
                   {p === 'shopify' && (
@@ -288,6 +298,20 @@ export function ConnectModal({
                     <>
                       <input value={sf('keystring')} onChange={(e) => setSf('keystring', e.target.value)} placeholder="Keystring (API key)" autoComplete="off" />
                       <input value={sf('shopId')} onChange={(e) => setSf('shopId', e.target.value)} placeholder="Shop ID (isteğe bağlı)" autoComplete="off" />
+                    </>
+                  )}
+                  {p === 'n11' && (
+                    <>
+                      <input value={sf('appKey')} onChange={(e) => setSf('appKey', e.target.value)} placeholder="App Key" autoComplete="off" />
+                      <input value={sf('appSecret')} onChange={(e) => setSf('appSecret', e.target.value)} placeholder="App Secret" type="password" autoComplete="off" />
+                    </>
+                  )}
+                  {p === 'amazon' && (
+                    <>
+                      <input value={sf('clientId')} onChange={(e) => setSf('clientId', e.target.value)} placeholder="LWA Client ID" autoComplete="off" />
+                      <input value={sf('clientSecret')} onChange={(e) => setSf('clientSecret', e.target.value)} placeholder="LWA Client Secret" type="password" autoComplete="off" />
+                      <input value={sf('refreshToken')} onChange={(e) => setSf('refreshToken', e.target.value)} placeholder="Refresh Token" type="password" autoComplete="off" />
+                      <input value={sf('marketplaceId')} onChange={(e) => setSf('marketplaceId', e.target.value)} placeholder="Marketplace ID (boş: Türkiye A33AVAJ2PDY3EV)" autoComplete="off" />
                     </>
                   )}
                   {p === 'shopify' && (

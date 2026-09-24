@@ -739,7 +739,7 @@ export default function App() {
           <NavItem icon="bell" label="Ertelenenler" count={snoozedChats.length} active={view === 'snoozed'} onClick={() => setView('snoozed')} />
           <NavItem icon="archive" label="Okunmamış" count={0} active={view === 'inbox' && filter === 'unread' && !platformFilter && !tagFilter} onClick={() => goInbox('unread')} />
         </div>
-        <div>
+        <div className="side-scroll">
           <div className="section-head">
             <span className="label">Uygulamalar</span>
             <button className="btn ghost xs icon b" aria-label="Kanal ekle" onClick={() => setConnectOpen(true)}>
@@ -766,7 +766,7 @@ export default function App() {
           {shopAccounts.map((a) => renderChan(a, shopAccounts))}
         </div>
         {(
-          <div>
+          <div className="side-tags">
             <div className="section-head">
               <span className="label">Etiketler</span>
             </div>

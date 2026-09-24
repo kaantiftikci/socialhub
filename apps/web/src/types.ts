@@ -1,4 +1,4 @@
-export type Platform = 'whatsapp' | 'telegram' | 'slack' | 'linkedin' | 'x' | 'imessage' | 'instagram' | 'messenger' | 'gmail' | 'outlook' | 'yahoo' | 'icloud' | 'imap' | 'shopier' | 'trendyol' | 'hepsiburada' | 'etsy' | 'shopify' | 'demo';
+export type Platform = 'whatsapp' | 'telegram' | 'slack' | 'linkedin' | 'x' | 'imessage' | 'instagram' | 'messenger' | 'gmail' | 'outlook' | 'yahoo' | 'icloud' | 'imap' | 'shopier' | 'trendyol' | 'hepsiburada' | 'etsy' | 'shopify' | 'n11' | 'amazon' | 'demo';
 export type Category = 'chat' | 'mail' | 'shop';
 export type AccountStatus = 'disconnected' | 'connecting' | 'pairing' | 'connected' | 'error';
 
@@ -101,6 +101,8 @@ export const PLATFORMS: Record<Platform, { name: string; code: string; color: st
   hepsiburada: { name: 'Hepsiburada', code: 'HB', color: '#FF6000', method: 'Pazaryeri API · sipariş + müşteri soruları', available: true, mode: 'token', category: 'shop' },
   etsy: { name: 'Etsy', code: 'ET', color: '#F1641E', method: 'Open API (OAuth) · sipariş; mesajlar tarayıcı oturumu', available: true, mode: 'token', category: 'shop', experimental: true },
   shopify: { name: 'Shopify', code: 'SP', color: '#5E8E3E', method: 'Admin API belirteci · sipariş; Inbox tarayıcı oturumu', available: true, mode: 'token', category: 'shop', experimental: true },
+  n11: { name: 'n11', code: 'N11', color: '#5D3EBC', method: 'Pazaryeri API · sipariş + müşteri soruları', available: true, mode: 'token', category: 'shop' },
+  amazon: { name: 'Amazon', code: 'AMZ', color: '#FF9900', method: 'SP-API · sipariş; alıcı mesajları Seller Central oturumu', available: true, mode: 'token', category: 'shop', experimental: true },
   demo: { name: 'Demo', code: 'DM', color: '#8C889B', method: 'Örnek veri', available: true, mode: 'demo' },
 };
 

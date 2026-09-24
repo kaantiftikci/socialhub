@@ -103,7 +103,8 @@ export function loadDemoAccounts(list: Array<Record<string, unknown>>): void {
       label: String(a.label || PLATFORMS[a.platform as Platform]?.name || a.platform),
       status: (a.status as Account['status']) || 'connected',
       createdAt: Number(a.createdAt) || Date.now(),
-    }));
+    }))
+    .filter((a) => a.platform !== 'yahoo' && a.platform !== 'imap');
   const byPlatform = new Map(accounts.map((a) => [a.platform, a]));
   const extras = accounts.filter((a) => !DEMO_APPS.includes(a.platform));
   const next = [...DEMO_APPS.map((p) => byPlatform.get(p) ?? demoAccount(p)), ...extras];

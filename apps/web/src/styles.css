@@ -103,7 +103,10 @@ button:focus-visible, a:focus-visible, .sw:focus-visible { outline: 2px solid va
 
 /* ---------- layout ---------- */
 .app { width: 100%; height: 100%; display: flex; background: var(--bg); overflow: hidden; }
-.sidebar { width: var(--w-side, 232px); flex-shrink: 0; padding: 18px 14px 14px; display: flex; flex-direction: column; gap: 16px; overflow: hidden; }
+.sidebar { width: var(--w-side, 268px); flex-shrink: 0; min-height: 0; height: 100%; padding: 18px 12px 14px; display: flex; flex-direction: column; gap: 14px; overflow: hidden; }
+.side-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; margin-right: -6px; padding-right: 6px; }
+.side-scroll::-webkit-scrollbar { width: 8px; }
+.side-scroll::-webkit-scrollbar-thumb { background: #ddd9e6; border-radius: 8px; }
 .sidebar .b:hover { background: var(--surface); filter: none; box-shadow: var(--shadow-1); }
 .surface { flex-grow: 1; min-width: 0; margin: 10px 10px 10px 0; background: var(--surface); border-radius: 22px; border: 1px solid var(--line3); display: flex; overflow: hidden; box-shadow: 0 1px 2px rgba(17,16,22,.03); }
 .brand { display: flex; align-items: center; gap: 10px; padding: 0 4px; }
@@ -120,13 +123,14 @@ button:focus-visible, a:focus-visible, .sw:focus-visible { outline: 2px solid va
 .chan { display: flex; align-items: center; gap: 11px; height: 30px; padding: 0 10px; border: 0; background: transparent; border-radius: 9px; color: var(--text2); font-size: 13px; width: 100%; text-align: left; }
 .chan.active { background: var(--bg2); color: var(--text); }
 .chan .count { margin-left: auto; font-size: 11.5px; color: var(--text3); font-variant-numeric: tabular-nums; }
+.side-tags { flex-shrink: 0; }
 .tagrow { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 6px; }
 .tagbtn { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px 0 8px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); font-size: 12px; color: var(--text2); }
 .tagbtn.active { border-color: var(--v-line); background: var(--v-soft); color: var(--v-txt); }
-.privacy { display: flex; align-items: center; gap: 11px; padding: 11px 12px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); margin-top: auto; }
+.privacy { display: flex; align-items: center; gap: 11px; padding: 11px 12px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); flex-shrink: 0; }
 .privacy .t { font-size: 12px; font-weight: 600; display: block; }
 .privacy .s { font-size: 11px; color: var(--text3); }
-.me { display: flex; align-items: center; gap: 10px; padding: 0 4px; }
+.me { display: flex; align-items: center; gap: 10px; padding: 0 4px; flex-shrink: 0; }
 .me .n { font-size: 13px; font-weight: 600; display: block; }
 .me .s { font-size: 11.5px; color: var(--text3); }
 
@@ -422,7 +426,7 @@ a.att-card { cursor: pointer; }
 
 /* ---------- dar pencere: konuşma alanı hiç sıkışmasın ---------- */
 @media (max-width: 1100px) { .ctx, .resizer:has(+ .ctx) { display: none; } }
-@media (max-width: 960px) { .sidebar { width: min(var(--w-side, 232px), 196px); } .list { width: min(var(--w-list, 340px), 292px); } .privacy { display: none; } }
+@media (max-width: 960px) { .sidebar { width: min(var(--w-side, 268px), 240px); } .list { width: min(var(--w-list, 340px), 292px); } .privacy { display: none; } }
 @media (max-width: 760px) { .sidebar .hints, .list .hints { display: none; } .list { width: min(var(--w-list, 340px), 250px); } }
 .conv { min-width: 280px; }
 

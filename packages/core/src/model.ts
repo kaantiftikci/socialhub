@@ -4,7 +4,7 @@
  * geçmiş yükleme (backfill) ile canlı akış çakıştığında kayıt tekrarlanmaz.
  */
 
-export type Platform = 'whatsapp' | 'telegram' | 'slack' | 'linkedin' | 'x' | 'imessage' | 'instagram' | 'messenger' | 'gmail' | 'outlook' | 'yahoo' | 'icloud' | 'imap' | 'shopier' | 'trendyol' | 'hepsiburada' | 'etsy' | 'shopify' | 'demo';
+export type Platform = 'whatsapp' | 'telegram' | 'slack' | 'linkedin' | 'x' | 'imessage' | 'instagram' | 'messenger' | 'gmail' | 'outlook' | 'yahoo' | 'icloud' | 'imap' | 'shopier' | 'trendyol' | 'hepsiburada' | 'etsy' | 'shopify' | 'n11' | 'amazon' | 'demo';
 export const MAIL_PLATFORMS: Platform[] = ['gmail', 'outlook', 'yahoo', 'icloud', 'imap'];
 
 export type AccountStatus = 'disconnected' | 'connecting' | 'pairing' | 'connected' | 'error';

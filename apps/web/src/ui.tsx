@@ -243,7 +243,7 @@ export function agoLong(ts: number): string {
 
 // ---------- yeniden boyutlanabilir paneller ----------
 type Pane = 'side' | 'list' | 'ctx';
-const PANE_DEFAULT: Record<Pane, number> = { side: 232, list: 340, ctx: 320 };
+const PANE_DEFAULT: Record<Pane, number> = { side: 268, list: 340, ctx: 320 };
 const PANE_LIMIT: Record<Pane, [number, number]> = { side: [168, 380], list: [250, 600], ctx: [220, 520] };
 const PANE_KEY = 'kavsak.panes';
 

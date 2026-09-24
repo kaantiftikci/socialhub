@@ -27,7 +27,7 @@ session_start();
 
 const PLATFORMS = [
     'whatsapp', 'telegram', 'slack', 'linkedin', 'x', 'imessage', 'instagram', 'messenger',
-    'gmail', 'outlook', 'yahoo', 'icloud', 'imap', 'shopier', 'trendyol', 'hepsiburada', 'etsy', 'shopify',
+    'gmail', 'outlook', 'yahoo', 'icloud', 'imap', 'shopier', 'trendyol', 'hepsiburada', 'etsy', 'shopify', 'n11', 'amazon',
 ];
 const STATUSES = ['disconnected', 'connecting', 'pairing', 'connected', 'error'];
 

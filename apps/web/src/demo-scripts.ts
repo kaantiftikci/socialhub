@@ -16,7 +16,8 @@ export interface Script {
 
 const pdf = (name: string, size = 128_440): Attachment => ({ kind: 'file', name, mime: 'application/pdf', size, link: '/demo/files/ornek.pdf' });
 const csv = (name: string, size = 18_420): Attachment => ({ kind: 'file', name, mime: 'text/csv', size, link: '/demo/files/siparisler.csv' });
-const pic = (name: string, size = 86_400): Attachment => ({ kind: 'image', name, mime: 'image/jpeg', size, url: '/demo/files/urun.jpg' });
+const pic = (name: string, file = 'urun.jpg', size = 140_000): Attachment => ({ kind: 'image', name, mime: 'image/jpeg', size, url: `/demo/files/${file}` });
+const vid = (name: string, file: string, poster: string, size: number): Attachment => ({ kind: 'video', name, mime: 'video/mp4', size, link: `/demo/files/${file}`, url: `/demo/files/${poster}` });
 
 /** Bağlı her uygulamanın örnek sohbetleri. Alışveriş kanalları müşteri sorusu olarak yazılır. */
 export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
@@ -32,7 +33,9 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
         [false, 'Teşekkürler. Bir de fatura kesilecek mi, kurumsal istiyorum.'],
         [true, 'Evet, e-fatura yarın kesilir. Unvanı sipariş notuna yazdım.'],
         [false, 'Unvan: Demir Studio. Vergi no’yu az önce mesajda iletmiştim.'],
-        [true, 'Aldım, muhasebeye ilettim.'],
+        [true, 'Aldım, muhasebeye ilettim. Gömleğin son hali ve paketleme videosu da burada.'],
+        [true, 'Gömlek.', [pic('gomlek.jpg', 'gomlek.jpg')]],
+        [true, 'Paketleme.', [vid('paketleme.mp4', 'paket.mp4', 'gomlek.jpg', 574_823)]],
         [false, 'Süper. Çıkınca takip numarasını da buradan atar mısınız?'],
       ],
     },
@@ -154,7 +157,8 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
         [true, 'Mekân gün ışığı olsun, ürün saatte tek parça. Tarih 12 Ekim uygun.'],
         [false, '12 Ekim bizde dolu. 14 öğleden sonra?'],
         [true, '14 de olur. Referans kareyi de ekleyeyim.'],
-        [true, 'Referans.', [pic('referans.jpg')]],
+        [true, 'Referans.', [pic('referans.jpg', 'elbise.jpg')]],
+        [true, 'Kısa çekim.', [vid('cekim.mp4', 'cicek.mp4', 'elbise.jpg', 1_128_375)]],
         [false, 'Bu açı iyi. Onaylıyorum.'],
       ],
     },
@@ -210,8 +214,9 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
         [true, 'Sana 38 olur. Tabloyu bırakıyorum.'],
         [true, 'Beden tablosu.', [pdf('beden-tablosu.pdf', 110_200)]],
         [false, 'Kumaşın yakın fotoğrafı da var mı, keten mi pamuk mu?'],
-        [true, 'Yüzde yüz keten. Yakın kare:'],
-        [true, 'Kumaş.', [pic('keten-kumas.jpg')]],
+        [true, 'Yüzde yüz keten. Yakın kare ve kısa video:'],
+        [true, 'Kumaş.', [pic('keten-kumas.jpg', 'kumas.jpg')]],
+        [true, 'Ürün videosu.', [vid('urun.mp4', 'cicek.mp4', 'gomlek.jpg', 1_128_375)]],
         [false, 'Tamam, birazdan siteden geçeceğim. İndirim kodu var mı?'],
         [true, 'INSTA10, bu akşam bitiyor.'],
       ],
@@ -225,7 +230,7 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
         [true, 'Duruyor. Hangi parça, keten gömlek mi?'],
         [false, 'Evet, ekru renk. İstanbul içi bugün kargo olur mu?'],
         [true, 'Saat 15’e kadar onaylarsan bugün çıkar. Ürün fotoğrafı:'],
-        [true, 'Ekru gömlek.', [pic('gomlek-ekru.jpg')]],
+        [true, 'Ekru gömlek.', [pic('gomlek-ekru.jpg', 'gomlek.jpg')]],
         [false, 'Bu renk iyi. Adresimi sipariş notuna yazdım.'],
         [true, 'Gördüm. Çıkınca takip linkini buradan atarım.'],
         [false, 'Teşekkürler, bekliyorum.'],
@@ -261,7 +266,7 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
         [false, 'Lansman 15 Ekim. Basın bülteni bu hafta çıksın istedik.\n\nGündem ekte.\n\nMelis', [pdf('toplanti-gundem.pdf', 66_400)]],
         [true, 'Bülteni yarına bırakıyorum. Alıntı izinleri tamam.'],
         [false, 'Fotoğraf seçimini de bugün kapatalım, üç kare yeterli.'],
-        [true, 'Seçtiklerimi ekledim.', [pic('lansman-kare.jpg')]],
+        [true, 'Seçtiklerimi ekledim.', [pic('lansman-kare.jpg', 'elbise.jpg')]],
         [false, 'İkinci kare iyi. Bülten taslağını görünce son bir tur atarım.'],
         [true, 'Taslak sabah 9’da posta kutusunda olur.'],
       ],
@@ -317,7 +322,7 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
       lines: [
         [false, 'Hafta sonu için evin anahtarını nereye bıraktığını yazmamışsın.'],
         [true, 'Komşuda, 4 numarada. Notu da fotoğrafladım.'],
-        [true, 'Not.', [pic('anahtar-notu.jpg')]],
+        [true, 'Not.', [pic('anahtar-notu.jpg', 'kumas.jpg')]],
         [false, 'Gördüm. Çiçekleri de sularım.'],
         [true, 'Sağ ol. Market listesi duruyorsa onu da halledersin.'],
         [false, 'Listede yalnızca süt ve ekmek var, tamam.'],
@@ -377,7 +382,8 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
       remoteId: 'kerem', name: 'Kerem Aydın · iade', kind: 'direct', tags: ['müşteri'], unread: 1, handle: 'Kerem Aydın', avatar: 'kerem.jpg',
       lines: [
         [false, 'Kupa çatlamış geldi, fotoğrafını çektim. İade etmek istiyorum.'],
-        [false, 'Fotoğraf.', [pic('hasarli-kupa.jpg')]],
+        [false, 'Fotoğraf.', [pic('hasarli-kupa.jpg', 'kupa.jpg')]],
+        [false, 'Bir de kısa video çektim.', [vid('kupa.mp4', 'paket.mp4', 'kupa.jpg', 574_823)]],
         [true, 'Üzüldüm, değişim ya da iade yapabiliriz. Hangisini istersiniz?'],
         [false, 'İade olsun. Ücret karta geri döner mi?'],
         [true, 'Evet, ürün bize ulaşınca 3 iş günü. Form ektedir, kargo ücretsiz.'],
@@ -399,7 +405,8 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
         [true, 'Evet, 38. Boy option’ı standart, 162–175 arasına göre kesildi.'],
         [false, 'Kumaş kırışıyor mu, ütü istiyor mu?'],
         [true, 'Keten olduğu için kırışır, bu dokusunun parçası. Nemli ütüyle düzelir. Yakın kare:'],
-        [true, 'Kumaş.', [pic('keten-kumas.jpg')]],
+        [true, 'Kumaş.', [pic('keten-kumas.jpg', 'kumas.jpg')]],
+        [true, 'Elbise videosu.', [vid('elbise.mp4', 'cicek.mp4', 'elbise.jpg', 1_128_375)]],
         [false, 'Anladım, teşekkürler. Siparişi bu akşam geçeceğim.'],
       ],
     },
@@ -424,7 +431,7 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
       lines: [
         [false, 'İlandaki ekru ile bej aynı mı? Ekranda ikisi de açık duruyor.'],
         [true, 'Aynı ürün değil. Ekru daha sıcak, bej griye yakın. Yan yana kare:'],
-        [true, 'Renk karşılaştırması.', [pic('renk-ekru-bej.jpg')]],
+        [true, 'Renk karşılaştırması.', [pic('renk-ekru-bej.jpg', 'elbise.jpg')]],
         [false, 'Ekru istiyorum. Stokta 36 var mı?'],
         [true, '36 ekru var, 4 adet. Bej 36 tükendi.'],
         [false, 'Bugün sipariş versem pazartesi gelir mi, İzmir.'],
@@ -453,6 +460,8 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
         [false, 'Deniz suyunda? Tatilde takmak istiyorum.'],
         [true, 'Deniz suyunda çıkarın. Bakım notunu ekliyorum, kutusuna da aynı kâğıt gidiyor.'],
         [true, 'Bakım notu.', [pdf('kolye-bakim.pdf', 46_200)]],
+        [true, 'Kolye.', [pic('kolye.jpg', 'kolye.jpg')]],
+        [true, 'Ürün videosu.', [vid('kolye.mp4', 'cicek.mp4', 'kolye.jpg', 1_128_375)]],
         [false, 'Zincir uzatma istiyorum, 5 cm mümkün mü?'],
         [true, 'Mümkün, sipariş notuna yazın ya da buradan onay verin, ücretsiz ekleriz.'],
         [false, 'Onaylıyorum, 5 cm uzatma olsun.'],
@@ -503,4 +512,430 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
   ],
 };
 
-export const DEMO_APPS: Platform[] = (Object.keys(PLATFORMS) as Platform[]).filter((p) => p !== 'demo' && SCRIPTS[p]);
+const FOLK: Array<{ id: string; name: string; avatar: string; user: string }> = [
+  { id: 'leyla', name: 'Leyla Koç', avatar: 'ayse.jpg', user: 'leylako' },
+  { id: 'tarik', name: 'Tarık Uçar', avatar: 'can.jpg', user: 'tarikucar' },
+  { id: 'beren', name: 'Beren Ak', avatar: 'selin.jpg', user: 'berenak' },
+  { id: 'cem', name: 'Cem Polat', avatar: 'mert.jpg', user: 'cempolat' },
+  { id: 'defne', name: 'Defne Sarı', avatar: 'elif.jpg', user: 'defnesari' },
+  { id: 'onur', name: 'Onur Bilgin', avatar: 'burak.jpg', user: 'onurbilgin' },
+  { id: 'asli', name: 'Aslı Er', avatar: 'nisa.jpg', user: 'aslier' },
+  { id: 'koray', name: 'Koray Demir', avatar: 'emre.jpg', user: 'koraydemir' },
+  { id: 'yalcin', name: 'Ece Yalçın', avatar: 'ece.jpg', user: 'eceyalcin' },
+  { id: 'solmaz', name: 'Pınar Solmaz', avatar: 'pinar.jpg', user: 'pinarsolmaz' },
+  { id: 'sen', name: 'Kerem Şen', avatar: 'kerem.jpg', user: 'keremsen' },
+  { id: 'ari', name: 'Melis Arı', avatar: 'melis.jpg', user: 'melisari' },
+  { id: 'kurt', name: 'Deniz Kurt', avatar: 'deniz.jpg', user: 'denizkurt' },
+  { id: 'sevgi', name: 'Sevgi Han', avatar: 'fatura.jpg', user: 'sevgihan' },
+];
+
+const PER_APP = 9;
+
+function handleFor(platform: Platform, folk: (typeof FOLK)[number], n: number): string | undefined {
+  const cat = PLATFORMS[platform].category;
+  if (cat === 'mail') return `${folk.user}@posta.example`;
+  if (cat === 'shop') return folk.name;
+  if (platform === 'whatsapp' || platform === 'imessage') return `+90 53${n % 10} ${200 + n} 40 ${String(10 + n).padStart(2, '0')}`;
+  if (platform === 'slack') return `@${folk.user}`;
+  if (platform === 'linkedin') return folk.name;
+  return `@${folk.user}`;
+}
+
+/** Var olan iki örneğin üstüne, uygulamaya uygun ek sohbetler. Alışverişte hepsi müşteri sorusu. */
+function extraScripts(platform: Platform, used: Set<string>): Script[] {
+  const shop = PLATFORMS[platform].category === 'shop';
+  const mail = PLATFORMS[platform].category === 'mail';
+  const shift = (Object.keys(SCRIPTS) as Platform[]).indexOf(platform);
+  const pool = FOLK.filter((f) => !used.has(f.id));
+  const folk = [...pool.slice(shift % pool.length), ...pool.slice(0, shift % pool.length)];
+  const out: Script[] = [];
+  const orders = [5510, 6621, 7732, 8843, 9054, 2267, 3378, 4489];
+  folk.slice(0, PER_APP).forEach((f, i) => {
+    const topic = (i + shift) % 8;
+    const no = orders[(i + shift) % orders.length];
+    const unread = i % 3 === 0 ? 2 : i % 3 === 1 ? 1 : 0;
+    const base = { remoteId: f.id, handle: handleFor(platform, f, i), avatar: f.avatar, unread };
+    if (shop) {
+      const pack = shopThread(topic, f.name, no);
+      out.push({ ...base, name: pack.name, kind: 'direct', tags: pack.tags, lines: pack.lines });
+      return;
+    }
+    if (mail) {
+      const pack = mailThread(topic, f.name, no);
+      out.push({ ...base, name: pack.name, kind: 'direct', tags: pack.tags, lines: pack.lines });
+      return;
+    }
+    if (i === 2) {
+      out.push({
+        ...base,
+        remoteId: `grup-${f.id}`,
+        name: i % 2 === 0 ? 'Operasyon' : 'Sabah ekibi',
+        kind: 'group',
+        tags: ['ekip'],
+        avatar: 'ekip.jpg',
+        handle: undefined,
+        lines: [
+          [false, 'Mert: Bugünkü kuyruk 18 mesaj. Öğlene kadar yarısını kapatabiliriz.'],
+          [false, 'Zeynep: Beden sorularına tabloyu ekleyin, her seferinde yazmayalım.'],
+          [true, 'Tablo duruyor. Kargo gecikenlere de fişi iliştirelim.'],
+          [false, 'Mert: Stok dökümü.', [csv(`stok-${no}.csv`)]],
+          [false, 'Zeynep: Öğleden sonra iki iade var, formları ben doldururum.'],
+          [true, 'Tamam. Akşam kısa bir tur daha atarız, taşan kalmasın.'],
+          [false, 'Mert: Anlaşıldı.'],
+        ],
+      });
+      return;
+    }
+    const pack = chatThread(topic, f.name, no);
+    out.push({ ...base, name: f.name, kind: 'direct', tags: pack.tags, lines: pack.lines });
+  });
+  return out;
+}
+
+function chatThread(i: number, name: string, no: number): { tags: string[]; lines: Line[] } {
+  const first = name.split(' ')[0];
+  const threads: Array<{ tags: string[]; lines: Line[] }> = [
+    {
+      tags: ['müşteri'],
+      lines: [
+        [false, `Merhaba, ${no} numaralı siparişin kargosu hâlâ hareket etmiyor.`],
+        [true, 'Bakıyorum. Dün depoya inmiş, etiket bu sabah kesildi.'],
+        [false, 'Hangi firma? Adres değişikliği yapabilir miyim, ofise gelsin.'],
+        [true, 'Yurtiçi. Adresi güncelledim, fişi de bırakıyorum.'],
+        [true, 'Kargo fişi.', [pdf(`kargo-${no}.pdf`, 62_400)]],
+        [false, 'Teşekkürler. Çıkınca takip numarasını da yazar mısınız?'],
+        [true, 'Numara sisteme düşünce buradan ileteceğim.'],
+      ],
+    },
+    {
+      tags: ['müşteri'],
+      lines: [
+        [false, 'Bu model bana dar gelir mi? Normalde M alıyorum.'],
+        [true, 'Kalıp regular. M giyiyorsanız M alın, bir büyük almanıza gerek yok.'],
+        [false, 'Boyum 172. Tabloyu atabilir misiniz?'],
+        [true, 'Tablo ektedir. 170–176 arası M rahat duruyor.'],
+        [true, 'Beden tablosu.', [pdf(`beden-${no}.pdf`, 98_200)]],
+        [false, 'Kumaşın yakını da var mı?'],
+        [true, 'Var.', [pic('kumas.jpg', 'kumas.jpg')]],
+        [false, 'Tamam, M ile ilerliyorum.'],
+      ],
+    },
+    {
+      tags: ['ekip'],
+      lines: [
+        [false, 'Toplantıyı yarına alabilir miyiz? Bugün sevkiyat var.'],
+        [true, 'Yarın 11:00 uygun. Gündemi kısa tutalım.'],
+        [false, 'Gündem taslağını ekledim.'],
+        [false, 'Gündem.', [pdf(`gundem-${no}.pdf`, 54_100)]],
+        [true, 'Baktım. Kargo maddesini üste alalım.'],
+        [false, 'Aldım. Daveti güncelliyorum.'],
+      ],
+    },
+    {
+      tags: ['fırsat'],
+      lines: [
+        [false, `${first}, katalogdaki üçüncü modele benzer bir çekim düşünüyoruz.`],
+        [true, 'Uygun. Referans kare ve kısa videoyu bırakıyorum.'],
+        [true, 'Referans.', [pic('referans.jpg', 'elbise.jpg')]],
+        [true, 'Kısa video.', [vid(`cekim-${no}.mp4`, 'cicek.mp4', 'elbise.jpg', 1_128_375)]],
+        [false, 'Bu açı iyi. Tarih için perşembe olur mu?'],
+        [true, 'Perşembe öğleden sonra uygun.'],
+      ],
+    },
+    {
+      tags: ['müşteri'],
+      lines: [
+        [false, 'Ürün kutusu ezik geldi. Fotoğrafını çektim.'],
+        [false, 'Fotoğraf.', [pic('kutu.jpg', 'kupa.jpg')]],
+        [true, 'Üzüldük. Değişim ya da iade, hangisini istersiniz?'],
+        [false, 'Değişim olsun, aynı ürün tekrar gelsin.'],
+        [true, 'Yeni paket yarın çıkar. İade formu gerekmez, fotoğraf yeterli.'],
+        [false, 'Tamam, takip kodunu bekliyorum.'],
+        [true, 'Çıkınca buraya yazacağım.'],
+      ],
+    },
+    {
+      tags: ['kişisel'],
+      lines: [
+        [false, 'Akşamki yemeği 8’e çekebilir miyiz?'],
+        [true, '8 iyi. Ben biraz erken çıkarım.'],
+        [false, 'Listede hâlâ süt var, bakkala uğrarsın.'],
+        [true, 'Uğrarım. Anahtar sende mi?'],
+        [false, 'Bende. Kapıda buluşalım.'],
+      ],
+    },
+    {
+      tags: ['müşteri'],
+      lines: [
+        [false, 'Faturayı kurumsal kesebilir misiniz? Unvanı yazıyorum.'],
+        [true, 'Keseriz. Vergi numarasını da iletin, bugün içinde çıkar.'],
+        [false, 'Unvan posta ile gitti. PDF olarak da isterim.'],
+        [true, 'Kesen kopya ektedir.', [pdf(`fatura-${no}.pdf`, 81_300)]],
+        [false, 'Geldi, muhasebeye ilettim. Teşekkürler.'],
+      ],
+    },
+    {
+      tags: [],
+      lines: [
+        [false, 'Dün konuştuğumuz dosyayı bulamadım, bir daha atar mısın?'],
+        [true, 'Atıyorum. Son sayfadaki tarihi sen güncelle.'],
+        [true, 'Dosya.', [pdf(`not-${no}.pdf`, 66_000)]],
+        [false, 'Aldım. Akşam birlikte bakarız.'],
+        [true, 'Tamam, 7’de yaz.'],
+      ],
+    },
+  ];
+  return threads[i % threads.length];
+}
+
+function mailThread(i: number, name: string, no: number): { name: string; tags: string[]; lines: Line[] } {
+  const threads: Array<{ name: string; tags: string[]; lines: Line[] }> = [
+    {
+      name: `Kargo bildirimi — ${no}`,
+      tags: ['müşteri'],
+      lines: [
+        [false, `Merhaba,\n\n${no} numaralı gönderiniz yola çıktı. Etiket ektedir.\n\n${name}`, [pdf(`etiket-${no}.pdf`, 44_200)]],
+        [true, 'Teşekkürler. Adreste daire numarası eksik, ekler misiniz?'],
+        [false, 'Ekledim. Teslimat yarına kaldı, yeni fiş ektedir.', [pdf(`etiket-${no}-v2.pdf`, 46_100)]],
+        [true, 'Tamam, kapıcıya bırakılmasın notunu da görüyorum.'],
+      ],
+    },
+    {
+      name: `Fatura ${no}`,
+      tags: [],
+      lines: [
+        [false, `Merhaba,\n\n${no} numaralı faturanız ektedir.\n\n${name}`, [pdf(`fatura-${no}.pdf`, 79_500)]],
+        [true, 'Kalemlerden biri fazla görünüyor. Dökümü atabilir misiniz?'],
+        [false, 'Döküm ektedir.', [csv(`dokum-${no}.csv`)]],
+        [true, 'Şimdi uyuyor. Ödemeyi cuma yapacağız.'],
+        [false, 'Cuma uygun. Dekontu bu yazışmaya eklemeniz yeterli.'],
+      ],
+    },
+    {
+      name: `Toplantı notu — ${name.split(' ')[0]}`,
+      tags: ['ekip'],
+      lines: [
+        [false, `Gündem ektedir. Saat 11:00, süre yarım saat.\n\n${name}`, [pdf(`gundem-${no}.pdf`, 52_000)]],
+        [true, 'Kargo maddesini üste aldım. Sunumu da ekliyorum.'],
+        [true, 'Sunum.', [pdf(`sunum-${no}.pdf`, 240_000)]],
+        [false, 'İkinci slayt yeterli. Yarın kısa tutalım.'],
+      ],
+    },
+    {
+      name: `Teklif revizyonu ${no}`,
+      tags: ['fırsat'],
+      lines: [
+        [false, `Revize teklif ektedir. Eğitim günü ikiye indi.\n\n${name}`, [pdf(`teklif-${no}.pdf`, 188_000)]],
+        [true, 'Uygun. Sözleşme taslağını da isteriz.'],
+        [false, 'Taslak ektedir.', [pdf(`sozlesme-${no}.pdf`, 210_000)]],
+        [true, 'Hukuk yarına bakar. İmzayı bu hafta kapatırız.'],
+      ],
+    },
+    {
+      name: `Destek kaydı #${no}`,
+      tags: ['müşteri'],
+      lines: [
+        [false, `Davet postası yine spamde. Kayıt ektedir.\n\n${name}`, [pdf(`kayit-${no}.pdf`, 48_600)]],
+        [true, 'SPF satırını eklemeniz gerekiyor. Yarın sabah test edelim.'],
+        [false, 'Ekledik. 09:30 uygun.'],
+        [true, 'Takvime yazdım.'],
+      ],
+    },
+    {
+      name: `Sipariş özeti ${no}`,
+      tags: ['müşteri'],
+      lines: [
+        [false, `Siparişiniz alındı. Özet ektedir.\n\n${name}`, [pdf(`siparis-${no}.pdf`, 61_000)]],
+        [true, 'Ürün görselini de görebilir miyim, renk tutsun.'],
+        [false, 'Görsel ektedir.', [pic('urun.jpg', 'gomlek.jpg')]],
+        [true, 'Bu renk doğru. Faturayı e-posta ile istiyorum.'],
+        [false, 'E-fatura kesilince bu zincire düşecek.'],
+      ],
+    },
+    {
+      name: `Mutabakat ${no}`,
+      tags: ['ekip'],
+      lines: [
+        [false, `Açık iki kalem var. Liste ektedir.\n\n${name}`, [csv(`mutabakat-${no}.csv`)]],
+        [true, 'Birincisi iade, dekontu iletiyorum.'],
+        [true, 'Dekont.', [pdf(`dekont-${no}.pdf`, 58_000)]],
+        [false, 'İşlendi. Kalan kalem kargo farkı.'],
+        [true, 'Onu da bu hafta kapatırız.'],
+      ],
+    },
+    {
+      name: `Ekim seçkisi`,
+      tags: [],
+      lines: [
+        [false, `Liste ve fiyatlar ektedir.\n\n${name}`, [csv(`secim-${no}.csv`)]],
+        [true, 'Üçüncü sırayı çıkarın, stok yok.'],
+        [false, 'Güncel dosya ektedir.', [csv(`secim-${no}-v2.csv`)]],
+        [true, 'Bu haliyle cuma gidebilir. Kısa videoyu da koydum.'],
+        [true, 'Video.', [vid(`secim-${no}.mp4`, 'paket.mp4', 'elbise.jpg', 574_823)]],
+      ],
+    },
+  ];
+  return threads[i % threads.length];
+}
+
+function shopThread(i: number, name: string, no: number): { name: string; tags: string[]; lines: Line[] } {
+  const first = name.split(' ')[0];
+  const threads: Array<{ name: string; tags: string[]; lines: Line[] }> = [
+    {
+      name: `${first} · sipariş ${no}`,
+      tags: ['müşteri'],
+      lines: [
+        [false, `Merhaba, ${no} numaralı siparişim hâlâ hazırlanıyor. Ne zaman çıkar?`],
+        [true, 'Bugün 16:00’ya kadar kargoya veriyoruz. Adres notunu kontrol ettim.'],
+        [false, 'Kapıcıya bırakılmasın. Fiş varsa atar mısınız?'],
+        [true, 'Notu düştüm. Fiş ektedir.', [pdf(`kargo-${no}.pdf`, 48_900)]],
+        [false, 'Teşekkürler. Takip kodu düşünce buradan yazın lütfen.'],
+        [true, 'Yazarım. Başka sorunuz olursa bu siparişten devam edin.'],
+      ],
+    },
+    {
+      name: `${first} · beden sorusu`,
+      tags: ['müşteri'],
+      lines: [
+        [false, 'Normalde 38 alıyorum, bu model küçük mü duruyor?'],
+        [true, 'Kalıp regular. 38 giyiyorsanız 38 alın.'],
+        [false, 'Boyum 168, kilo 60. Emin olamadım.'],
+        [true, 'Size 38 olur. Ölçü tablosu ektedir.', [pdf(`beden-${no}.pdf`, 110_200)]],
+        [false, 'Kumaş pamuk mu keten mi?'],
+        [true, 'Keten. Yakın kare:', [pic('kumas.jpg', 'kumas.jpg')]],
+        [false, 'Anladım, 38 geçiyorum.'],
+      ],
+    },
+    {
+      name: `${first} · iade ${no}`,
+      tags: ['müşteri'],
+      lines: [
+        [false, 'Ürün beklediğim gibi değil, iade etmek istiyorum.'],
+        [true, '14 gün içinde ücretsiz iade var. Formu iletiyorum.'],
+        [true, 'İade formu.', [pdf(`iade-${no}.pdf`, 52_600)]],
+        [false, 'Karta ne zaman döner?'],
+        [true, 'Ürün bize ulaşınca 3 iş günü. Kodu paketin üstüne yazmanız yeterli.'],
+        [false, 'Yarın kargoya veririm.'],
+      ],
+    },
+    {
+      name: `${first} · renk ve stok`,
+      tags: ['müşteri'],
+      lines: [
+        [false, 'Ekranda ekru ve bej aynı görünüyor. Hangisi daha sıcak?'],
+        [true, 'Ekru daha sıcak. Yan yana kare:'],
+        [true, 'Renkler.', [pic('renk.jpg', 'elbise.jpg')]],
+        [false, 'Ekru olsun. 36 stokta var mı?'],
+        [true, '36 ekru var, 3 adet. Bugün onaylarsanız yarın çıkar.'],
+        [false, 'Onaylıyorum.'],
+      ],
+    },
+    {
+      name: `${first} · fatura ${no}`,
+      tags: ['müşteri'],
+      lines: [
+        [false, `${no} faturası mailime düşmedi. PDF gönderebilir misiniz?`],
+        [true, 'Gönderiyorum. Bireysel kesilmişti.'],
+        [true, 'Fatura.', [pdf(`fatura-${no}.pdf`, 79_400)]],
+        [false, 'Kurumsala çevirebilir miyiz? Unvanı yazayım.'],
+        [true, 'Sipariş kapanmadan çevirebiliriz. Unvan ve vergi numarasını bırakın.'],
+        [false, 'Az önce yazdım.'],
+      ],
+    },
+    {
+      name: `${first} · hasarlı ürün`,
+      tags: ['müşteri'],
+      lines: [
+        [false, 'Kutu ezik geldi, ürün de çizilmiş. Fotoğraf ve video çektim.'],
+        [false, 'Fotoğraf.', [pic('hasar.jpg', 'kupa.jpg')]],
+        [false, 'Video.', [vid(`hasar-${no}.mp4`, 'paket.mp4', 'kupa.jpg', 574_823)]],
+        [true, 'İnceledim. Değişim yapalım, yenisi yarın çıkar. Bunu geri göndermeniz yeterli.'],
+        [false, 'Kargo ücretini ben mi ödeyeceğim?'],
+        [true, 'Hayır, iade kodu bizden. Form ektedir.', [pdf(`iade-${no}.pdf`, 52_600)]],
+      ],
+    },
+    {
+      name: `${first} · ödeme ${no}`,
+      tags: ['müşteri'],
+      lines: [
+        [false, 'Kart çekilmeden hata verdi. Sipariş oluştu mu?'],
+        [true, `${no} taslak duruyor, çekim yok. Linki yeniledim.`],
+        [false, 'Yine olmadı. Havale yapayım.'],
+        [true, 'Açıklamaya sipariş numarasını yazın. Bilgi ektedir.', [pdf(`havale-${no}.pdf`, 38_700)]],
+        [false, 'Gönderdim. Dekont da ektedir.', [pdf(`dekont-${no}.pdf`, 61_500)]],
+        [true, 'Ödeme işlendi. Yarın kargoda.'],
+      ],
+    },
+    {
+      name: `${first} · ürün videosu`,
+      tags: ['fırsat'],
+      lines: [
+        [false, 'Kumaşın dökümünü videoda görebilir miyim? Fotoğraf yetmedi.'],
+        [true, 'Kısa çekim ve yakın kare ektedir.'],
+        [true, 'Video.', [vid(`urun-${no}.mp4`, 'cicek.mp4', 'kumas.jpg', 1_128_375)]],
+        [true, 'Yakın kare.', [pic('yakin.jpg', 'kumas.jpg')]],
+        [false, 'Tamam, bu haliyle sipariş vereceğim. Beden M.'],
+        [true, 'M stokta. Sorunuz olursa buradan devam edin.'],
+      ],
+    },
+  ];
+  return threads[i % threads.length];
+}
+
+for (const platform of Object.keys(SCRIPTS) as Platform[]) {
+  const have = SCRIPTS[platform] ?? [];
+  const used = new Set(have.map((s) => s.remoteId));
+  const need = PER_APP - have.length;
+  if (need > 0) SCRIPTS[platform] = [...have, ...extraScripts(platform, used).slice(0, need)];
+}
+
+/** Kanal satırındaki bildirim: her uygulamada başka bir toplam. Kanallar sayıma girmez. */
+const BADGE: Partial<Record<Platform, number>> = {
+  whatsapp: 4,
+  telegram: 18,
+  slack: 1,
+  imessage: 27,
+  linkedin: 7,
+  x: 13,
+  instagram: 3,
+  messenger: 36,
+  gmail: 9,
+  outlook: 22,
+  yahoo: 0,
+  icloud: 11,
+  imap: 16,
+  shopier: 5,
+  trendyol: 29,
+  hepsiburada: 2,
+  etsy: 14,
+  shopify: 8,
+};
+
+function spreadUnread(total: number, slots: number): number[] {
+  const out = Array(slots).fill(0);
+  if (total <= 0 || slots === 0) return out;
+  const used = Math.min(slots, total >= 10 ? 4 : total >= 4 ? 3 : total);
+  let left = total;
+  for (let i = 0; i < used; i++) {
+    const give = i === used - 1 ? left : Math.max(1, Math.ceil(left / (used - i + 0.4)));
+    const n = Math.min(left, give);
+    out[i] = n;
+    left -= n;
+  }
+  if (left > 0) out[0] += left;
+  return out;
+}
+
+for (const platform of Object.keys(SCRIPTS) as Platform[]) {
+  const chats = SCRIPTS[platform] ?? [];
+  const idx = chats.map((s, i) => (s.kind === 'channel' ? -1 : i)).filter((i) => i >= 0);
+  for (const s of chats) if (s.kind !== 'channel') s.unread = 0;
+  const parts = spreadUnread(BADGE[platform] ?? 0, idx.length);
+  idx.forEach((at, i) => {
+    chats[at].unread = parts[i] ?? 0;
+  });
+}
+
+/** Demoda bağlı gelmeyenler: kullanıcı isterse Bağlan’dan ekler. */
+const DEMO_SKIP: Platform[] = ['yahoo', 'imap'];
+export const DEMO_APPS: Platform[] = (Object.keys(PLATFORMS) as Platform[]).filter((p) => p !== 'demo' && !DEMO_SKIP.includes(p) && SCRIPTS[p]);
