@@ -38,6 +38,8 @@ fn find_node() -> String {
     let home = std::env::var("HOME").unwrap_or_default();
     let mut candidates: Vec<String> = vec![
         "/opt/homebrew/bin/node".into(),
+        format!("{home}/.local/node/bin/node"),
+        format!("{home}/.local/bin/node"),
         "/usr/local/bin/node".into(),
         format!("{home}/.volta/bin/node"),
         format!("{home}/.fnm/aliases/default/bin/node"),
@@ -56,7 +58,8 @@ fn find_node() -> String {
         }
     }
     // son çare: giriş kabuğuna sor
-    if let Ok(out) = Command::new("/bin/zsh").args(["-lc", "command -v node"]).output() {
+    // -i: .zshrc de okunsun (PATH çoğunlukla orada); -l yalnız .zprofile okur
+    if let Ok(out) = Command::new("/bin/zsh").args(["-ilc", "command -v node"]).output() {
         let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
         if !p.is_empty() {
             return p;
