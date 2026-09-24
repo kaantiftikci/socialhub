@@ -12,6 +12,12 @@ Dil: arayüz ve yorumlar Türkçe.
 - Değişiklik sonrası: `npm run typecheck`, `npm run build -w packages/core`, `npm run build -w apps/web`; mümkünse demo
   modunda (`npm run demo`) Playwright ile görsel doğrulama.
 
+## Test ve doğrulama
+- `npm test -w packages/core` — sahte sayfa nesnesiyle strateji birim testleri (Slack: client.counts/conversations.list/history biçimlendirme,
+  before, conversations.mark). Yeni strateji mantığı için buraya test ekle.
+- `node scripts/verify-strategy.mjs <slack|instagram|linkedin|x|messenger>` — canlı oturumun profil KOPYASIYLA (uygulamaya dokunmadan)
+  threads/messages/before doğrulaması. Önce `npm run build -w packages/core`.
+
 ## Yapı
 - `packages/core` — Node 22, TypeScript ESM. SQLite (better-sqlite3 + FTS5) `~/.kavsak/kavsak.db`; oturumlar
   `~/.kavsak/sessions/<hesapId>/`. REST + WS sunucu 127.0.0.1:7788 (`server.ts`). `registry.ts` hesap↔connector.

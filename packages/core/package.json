@@ -9,7 +9,8 @@
     "demo": "tsx src/index.ts --demo",
     "start": "node dist/index.js",
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@slack/web-api": "^7.9.1",
