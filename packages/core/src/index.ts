@@ -45,7 +45,7 @@ async function main(): Promise<void> {
     server.once('listening', () => resolve());
     server.once('error', reject);
   }).catch((e: NodeJS.ErrnoException) => {
-    bus.log('error', e.code === 'EADDRINUSE' ? `Port ${PORT} dolu: başka bir Kavşak çekirdeği çalışıyor, bu kopya kapanıyor` : `Sunucu başlatılamadı: ${e.message}`);
+    bus.log('error', e.code === 'EADDRINUSE' ? `Port ${PORT} dolu: başka bir Mivelo çekirdeği çalışıyor, bu kopya kapanıyor` : `Sunucu başlatılamadı: ${e.message}`);
     process.exit(e.code === 'EADDRINUSE' ? 0 : 1);
   });
 

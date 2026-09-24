@@ -34,7 +34,7 @@ export interface Connector {
   loadMoreChats?(): Promise<number>;
   /** Sohbet açıkken çağrılır: yazıyor/çevrimiçi bilgisi için platforma abone ol (WhatsApp presenceSubscribe vb.) */
   watch?(remoteChatId: string): Promise<void>;
-  /** Sohbet Kavşak'ta açılınca platformda da okundu işaretle (telefon/diğer istemcilerde okunmamış kalmasın) */
+  /** Sohbet Mivelo'da açılınca platformda da okundu işaretle (telefon/diğer istemcilerde okunmamış kalmasın) */
   markRead?(remoteChatId: string): Promise<void>;
   /** Platforma özel işlem (örn. Shopier siparişi kargo bilgisiyle kapatma) */
   action?(remoteChatId: string, payload: Record<string, unknown>): Promise<void>;

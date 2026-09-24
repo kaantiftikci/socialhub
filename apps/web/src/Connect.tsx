@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { api } from './api';
+import { STATIC_DEMO } from './profile';
 import { PLATFORMS, type Account, type Platform } from './types';
 import { Chip, Icon, SyncBar } from './ui';
 
@@ -50,22 +51,18 @@ export function ConnectModal({
   const [mail, setMail] = useState<MailForm>(EMPTY_MAIL);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
-  const [showLogs, setShowLogs] = useState(false);
-  const [logs, setLogs] = useState<Array<{ ts: number; level: 'info' | 'warn' | 'error'; text: string }>>([]);
-
-  useEffect(() => {
-    if (!showLogs) return;
-    const load = () => api.logs().then(setLogs).catch(() => undefined);
-    load();
-    const t = window.setInterval(load, 3000);
-    return () => clearInterval(t);
-  }, [showLogs]);
 
   const activeAccount = accounts.find((a) => a.id === active);
 
   async function add(platform: Platform) {
     setBusy(true);
     try {
+      if (STATIC_DEMO) {
+        const a = await api.addAccount(platform);
+        setActive(a.id);
+        await onChanged();
+        return;
+      }
       if (platform === 'telegram' && active !== 'telegram:new') {
         setActive('telegram:new');
         return;
@@ -232,7 +229,7 @@ export function ConnectModal({
             <div style={{ flexGrow: 1 }}>
               <h3>Telegram’ı bağla</h3>
               <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.5 }}>
-                WhatsApp gibi QR ile bağlanır: Bağlan deyince çıkan kodu telefondaki Telegram → <b>Ayarlar → Cihazlar → Masaüstü Cihazı Bağla</b> ile okut. Alanları boş bırakırsan Kavşak’ın
+                WhatsApp gibi QR ile bağlanır: Bağlan deyince çıkan kodu telefondaki Telegram → <b>Ayarlar → Cihazlar → Masaüstü Cihazı Bağla</b> ile okut. Alanları boş bırakırsan Mivelo’nun
                 varsayılan uygulama kimliği kullanılır; istersen <b>my.telegram.org → API development tools</b>’dan kendi <b>api_id</b> / <b>api_hash</b>’ini gir.
               </p>
               <div className="field" style={{ marginTop: 12, gap: 8 }}>
@@ -311,7 +308,7 @@ export function ConnectModal({
               {activeAccount.platform === 'imessage' && activeAccount.status === 'error' && (
                 <ol>
                   <li>Sistem Ayarları → Gizlilik ve Güvenlik → <b>Tam Disk Erişimi</b> bölmesi otomatik açıldı (açılmadıysa ⌘K ile arat)</li>
-                  <li>Listede <b>Kavşak</b> yoksa “+” ile ekle — geliştirme modunda (<code>npm run desktop</code>) <b>Terminal</b>’i ekle; anahtarı aç</li>
+                  <li>Listede <b>Mivelo</b> yoksa “+” ile ekle — geliştirme modunda (<code>npm run desktop</code>) <b>Terminal</b>’i ekle; anahtarı aç</li>
                   <li>Terminal’i/uygulamayı yeniden başlat ve aşağıdaki <b>Yeniden dene</b>’ye bas</li>
                 </ol>
               )}
@@ -360,15 +357,13 @@ export function ConnectModal({
 
   return (
     <div className={`overlay ${closing ? 'closing' : ''}`} onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Kanal bağla">
+      <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Uygulama bağla">
+        <div className="modal-scroll">
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
           <div style={{ flexGrow: 1 }}>
             <h2>
               Bütün sohbetlerin, <mark>tek bir yerde.</mark>
             </h2>
-            <p style={{ margin: '8px 0 0', color: 'var(--text2)', fontSize: 14 }}>
-              Kanallarını bağla. Oturum anahtarları ve mesajlar yalnızca bu bilgisayarda saklanır.
-            </p>
           </div>
           <button className="btn icon b b2" onClick={onClose} aria-label="Kapat">
             <Icon name="x" size={15} sw={2} />
@@ -384,16 +379,19 @@ export function ConnectModal({
             void 0;
             return (
               <div key={p} style={{ display: 'contents' }}>
+                {p === 'whatsapp' && (
+                  <div className="grid-head">
+                    <Icon name="users" size={16} sw={2} /> Sosyal Medya
+                  </div>
+                )}
                 {p === 'gmail' && (
                   <div className="grid-head">
-                    <Icon name="mail" size={14} /> E-posta
-                    <span style={{ fontWeight: 400, color: 'var(--text3)' }}> · IMAP/SMTP ile, ücretsiz</span>
+                    <Icon name="mail" size={16} sw={2} /> E-posta
                   </div>
                 )}
                 {p === 'shopier' && (
                   <div className="grid-head">
-                    <Icon name="bag" size={14} /> Alışveriş
-                    <span style={{ fontWeight: 400, color: 'var(--text3)' }}> · sipariş takibi; Shopier hazır, diğerleri sırada</span>
+                    <Icon name="bag" size={16} sw={2} /> Alışveriş
                   </div>
                 )}
               <div className={`pcard ${!meta.available ? 'soon' : ''} ${isActive ? 'active' : ''}`}>
@@ -408,9 +406,7 @@ export function ConnectModal({
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  {!meta.available ? (
-                    <span className="st">Yakında</span>
-                  ) : acc.length ? (
+                  {meta.available && (acc.length ? (
                     <span className="st" style={{ color: isConn ? '#15803d' : undefined, display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flexGrow: 1 }}>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                         <span className={`dot ${acc[0].status === 'connected' ? 'on' : acc[0].status}`} />
@@ -422,7 +418,7 @@ export function ConnectModal({
                     <span className="st">
                       <span className="dot" /> Bağlı değil
                     </span>
-                  )}
+                  ))}
                   <span style={{ flexGrow: 1 }} />
                   {meta.available && acc.length > 0 && (
                     <>
@@ -452,27 +448,10 @@ export function ConnectModal({
           })}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, color: 'var(--text3)' }}>
-          <Icon name="lock" size={14} />
-          Yerel öncelikli: hiçbir mesaj Kavşak sunucularına gitmez. Oturumlar <code>~/.kavsak</code> altında tutulur.
-          <span style={{ flexGrow: 1 }} />
-          <button className="btn xs b b2" onClick={() => setShowLogs(!showLogs)}>
-            <Icon name="history" size={13} /> {showLogs ? 'Günlüğü gizle' : 'Günlük'}
-          </button>
-        </div>
-        {showLogs && (
-          <div className="logs">
-            {logs.length === 0 && 'Henüz kayıt yok.'}
-            {logs.slice(-120).map((l, i) => (
-              <div key={i} className={l.level}>
-                <span className="t">{new Date(l.ts).toLocaleTimeString('tr-TR')}</span> {l.text}
-              </div>
-            ))}
-          </div>
-        )}
         <div style={{ fontSize: 11.5, lineHeight: 1.5, color: 'var(--text3)' }}>
-          Kavşak bağımsız bir uygulamadır; WhatsApp, Telegram, Slack, Apple (iMessage), LinkedIn, X, Instagram veya Messenger tarafından geliştirilmemiş, onaylanmamış ya da desteklenmemiştir.
+          Mivelo bağımsız bir uygulamadır; WhatsApp, Telegram, Slack, Apple (iMessage), LinkedIn, X, Instagram veya Messenger tarafından geliştirilmemiş, onaylanmamış ya da desteklenmemiştir.
           Adlar ve logolar ilgili sahiplerinin tescilli markalarıdır ve yalnızca uyumluluğu belirtmek için kullanılır.
+        </div>
         </div>
       </div>
     </div>

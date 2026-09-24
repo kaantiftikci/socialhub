@@ -1,4 +1,4 @@
-# Kavşak
+# Mivelo
 
 Tüm mesajlaşma kanalların için **yerel öncelikli, AI destekli tek gelen kutusu**. Çalışma adı; henüz kesinleşmedi.
 
@@ -52,7 +52,7 @@ npm run dev
 
 Arayüzde **+ Kanal bağla**:
 
-- **WhatsApp:** Bağlan → telefonda *Ayarlar → Bağlı cihazlar → Cihaz bağla* → QR'ı okut. Cihaz telefonda "Kavşak (Mac)" olarak görünür; tam geçmiş istenir (`syncFullHistory`), telefon sohbet geçmişini gönderir (ilk seferde 1-3 dk sürebilir, Günlük panelinde "geçmiş paketi" satırları akar). WhatsApp'ın gizli LID kimlikleri: grup üyeliklerinden ve `chats.phoneNumberShare` olayından lid↔numara eşlemesi öğrenilir; aynı kişinin lid ve numara olarak açılmış iki sohbeti otomatik birleştirilir. Rehber adları WhatsApp'tan geç gelirse macOS Kişiler (AddressBook, Tam Disk Erişimi gerekir) yedek kaynak olarak kullanılır. Fotoğraf/video/belge/sesli mesajlar istek üzerine indirilir (`/api/media/<hesap>?u=wa:<jid>/<id>`) ve önbelleklenir; sesli mesajlar `ffmpeg` kuruluysa (`brew install ffmpeg`) mp3'e çevrilir, yoksa ogg olarak sunulur (WebKit ogg/opus oynatamayabilir). 90 sn içinde geçmiş gelmezse günlükte uyarı çıkar: telefondan cihazı kaldırıp kanalı Kaldır → yeniden bağla.
+- **WhatsApp:** Bağlan → telefonda *Ayarlar → Bağlı cihazlar → Cihaz bağla* → QR'ı okut. Cihaz telefonda "Mivelo (Mac)" olarak görünür; tam geçmiş istenir (`syncFullHistory`), telefon sohbet geçmişini gönderir (ilk seferde 1-3 dk sürebilir, Günlük panelinde "geçmiş paketi" satırları akar). WhatsApp'ın gizli LID kimlikleri: grup üyeliklerinden ve `chats.phoneNumberShare` olayından lid↔numara eşlemesi öğrenilir; aynı kişinin lid ve numara olarak açılmış iki sohbeti otomatik birleştirilir. Rehber adları WhatsApp'tan geç gelirse macOS Kişiler (AddressBook, Tam Disk Erişimi gerekir) yedek kaynak olarak kullanılır. Fotoğraf/video/belge/sesli mesajlar istek üzerine indirilir (`/api/media/<hesap>?u=wa:<jid>/<id>`) ve önbelleklenir; sesli mesajlar `ffmpeg` kuruluysa (`brew install ffmpeg`) mp3'e çevrilir, yoksa ogg olarak sunulur (WebKit ogg/opus oynatamayabilir). 90 sn içinde geçmiş gelmezse günlükte uyarı çıkar: telefondan cihazı kaldırıp kanalı Kaldır → yeniden bağla.
 - **Telegram:** `TELEGRAM_API_ID` ve `TELEGRAM_API_HASH` gerekir (https://my.telegram.org, ücretsiz). Bağlan → telefon → kod → (varsa) 2FA parolası.
 - **Slack:** https://api.slack.com/apps'ten bir uygulama oluştur, *User Token Scopes*'a
   `channels:history groups:history im:history mpim:history channels:read groups:read im:read mpim:read users:read chat:write`
@@ -61,7 +61,7 @@ Arayüzde **+ Kanal bağla**:
 - **iMessage:** Yalnızca macOS. Çekirdeği çalıştıran terminale *Sistem Ayarları → Gizlilik ve Güvenlik → Tam Disk Erişimi* ver. Gönderme, Mesajlar uygulaması üzerinden (AppleScript) yapılır; ilk gönderimde otomasyon izni istenir.
 - **Slack:** Bağlan → açılan pencerede app.slack.com'a giriş yap; web istemcisinin oturum anahtarı (xoxc) + çerezle Slack Web API'si kullanılır, uygulama/token üretmek gerekmez. İstersen `~/.kavsak/sessions/<hesap>/token` dosyasına `xoxp-` token yazarak resmi API moduna geçebilirsin.
 - **Telegram:** Bağlan → my.telegram.org'dan alınan `api_id`/`api_hash` girilir (bir kez), sonra WhatsApp gibi **QR** çıkar: telefonda Telegram → Ayarlar → Cihazlar → Masaüstü Cihazı Bağla ile okut (`tg://login?token=…`, ~30 sn'de bir yenilenir); iki adımlı doğrulama varsa parola sorulur.
-- **iMessage:** chat.db açılamazsa Sistem Ayarları → Gizlilik ve Güvenlik → Tam Disk Erişimi bölmesi otomatik açılır; Kavşak'ı (geliştirmede Terminal'i) ekleyip Yeniden dene.
+- **iMessage:** chat.db açılamazsa Sistem Ayarları → Gizlilik ve Güvenlik → Tam Disk Erişimi bölmesi otomatik açılır; Mivelo'yu (geliştirmede Terminal'i) ekleyip Yeniden dene.
 - **E-posta (Gmail / Outlook / Yahoo / iCloud / diğer IMAP):** IMAP ile okunur, SMTP ile yanıtlanır; her e-posta konuşması bir sohbet. Gmail/Yahoo/iCloud uygulama şifresi ister. Outlook/Microsoft 365 kişisel hesaplarda şifreyle IMAP kapalı olduğundan ücretsiz bir Azure uygulama kimliği (Client ID, public client) girilir; Bağlan deyince kod önceden dolu `microsoft.com/devicelogin` penceresi açılır, giriş yapınca kendiliğinden kapanır. Gmail'de de istersen şifresiz yol var: Google Cloud'da ücretsiz bir "Desktop app" OAuth istemcisi (Client ID + secret) → Bağlan deyince Google giriş penceresi açılır, izin verince `127.0.0.1:7788/oauth/callback` üzerinden kapanır (XOAUTH2). Yenileme anahtarları yerelde `~/.kavsak/sessions/<hesap>/token` içinde.
 - **Shopier:** Satıcı panelinde *Hesap Yönetimi → Kişisel Erişim Anahtarı* (2FA gerekli) ile PAT üret, Bağlan formuna yapıştır. Resmi REST API (`https://api.shopier.com/v1`, `Authorization: Bearer <PAT>`, dakikada 200 istek) ile son 60 günün siparişleri 60 sn'de bir çekilir; her sipariş bir sohbet (`#no · alıcı`), sipariş/kargo/iade olayları mesaj olarak akar, sağ panelde sipariş kartı (ürünler, tutar, adres, kargo takibi) ve **Kargoya verildi / Teslim edildi** formu (`PUT /orders/{id}` → `fulfillments`). Shopier API'sinde alıcı-satıcı mesajlaşma ucu yok; sohbete yazılan metin yerel not olarak saklanır.
 - **Trendyol, Hepsiburada, Etsy, Shopify:** Bağlan penceresinde "Alışveriş" altında listelenir, connector'lar sırada ("Yakında").
@@ -76,7 +76,7 @@ Gereksinim: Rust (https://rustup.rs) ve Xcode Command Line Tools.
 
 ```bash
 npm run desktop        # geliştirme: çekirdek + Vite + Tauri penceresi (terminalden)
-npm run app            # paketle ve Kavşak.app'i aç (terminalden bağımsız, gerçek uygulama)
+npm run app            # paketle ve Mivelo.app'i aç (terminalden bağımsız, gerçek uygulama)
 npm run desktop:build  # yalnızca paketle: .app + .dmg → apps/desktop/src-tauri/target/release/bundle
 ```
 
@@ -86,13 +86,13 @@ açılınca çekirdeği `node Resources/core/dist/index.js` ile kendisi başlat�
 Makinede Node 22+ kurulu olmalı — Finder'dan açılan uygulamanın PATH'i kısıtlı olduğundan node Homebrew, nvm, volta, fnm
 ve asdf konumlarında aranır, bulunamazsa giriş kabuğuna sorulur (`KAVSAK_NODE=/yol/node` ile de verilebilir). Oturumlar
 ve veritabanı geliştirme sürümüyle aynı `~/.kavsak` altında olduğundan bağlı kanallar paketli sürüme aynen taşınır; iMessage
-için Tam Disk Erişimi'ni bu kez **Kavşak.app**'e vermek gerekir. Uygulamayı `Applications`'a kopyalayabilirsin
+için Tam Disk Erişimi'ni bu kez **Mivelo.app**'e vermek gerekir. Uygulamayı `Applications`'a kopyalayabilirsin
 (`.dmg` istersen `npx tauri build --bundles dmg` — Tauri'nin dmg betiği bazen Finder izinleri yüzünden düşer, .app bundan etkilenmez). İmzasız olduğundan ilk açılışta sağ tık → Aç gerekebilir. Uygulama çekirdeği bekçiyle izler (çökerse 10 sn içinde yeniden başlatır); başlatma günlüğü `~/.kavsak/desktop.log`, çekirdek çıktısı `~/.kavsak/core.log`. Paketli sürümde de geliştirici araçları açık: pencerede sağ tık → Inspect Element (ya da ⌥⌘I).
 
 - Menü çubuğunda simge: okunmamış sayısı, göster/gizle, Odak modu, çıkış. Dock rozeti de güncellenir.
 - Mesaj göndermek için **Enter** (Shift+Enter yeni satır). **⌘⇧K** pencereyi getirir/gizler; kapat düğmesi pencereyi gizler, uygulama arka planda çalışmaya devam eder.
 - Yeni mesajlarda sistem bildirimi (pencere odakta değilse ya da başka sohbet açıksa).
-- Bildirimler paketli sürümde Kavşak simgesiyle gelir (geliştirmede macOS bildirimi Terminal'e yazar).
+- Bildirimler paketli sürümde Mivelo simgesiyle gelir (geliştirmede macOS bildirimi Terminal'e yazar).
 
 ## Yerel API (kısa)
 

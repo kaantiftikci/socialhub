@@ -1,7 +1,7 @@
 [package]
 name = "kavsak-desktop"
 version = "0.1.0"
-description = "Kavşak — tüm mesajlaşma kanalların için tek gelen kutusu"
+description = "Mivelo — tüm mesajlaşma kanalların için tek gelen kutusu"
 authors = ["Kaan"]
 edition = "2021"
 

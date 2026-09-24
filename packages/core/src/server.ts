@@ -314,7 +314,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
       if (url.pathname.startsWith('/api/')) throw new HttpError(404, 'Yol yok');
       if (distDir) return serveStatic(distDir, url.pathname, res);
       res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
-      res.end('Kavşak çekirdeği çalışıyor. Arayüz için: npm run dev -w apps/web');
+      res.end('Mivelo çekirdeği çalışıyor. Arayüz için: npm run dev -w apps/web');
     } catch (e) {
       const status = e instanceof HttpError ? e.status : 500;
       if (status === 500) bus.log('error', `API: ${(e as Error).stack ?? e}`);

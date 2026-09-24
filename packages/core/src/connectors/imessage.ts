@@ -126,7 +126,7 @@ export class IMessageConnector extends BaseConnector {
         `SELECT a.ROWID AS rowid, a.filename, a.mime_type, a.total_bytes, a.transfer_name, a.uti, a.hide_attachment
            FROM message_attachment_join j JOIN attachment a ON a.ROWID = j.attachment_id WHERE j.message_id = ? ORDER BY a.ROWID`,
       );
-      // Tanı: chat.db'deki en yeni mesaj. Mac'in Mesajlar uygulamasına yeni mesaj düşmüyorsa Kavşak da gösteremez;
+      // Tanı: chat.db'deki en yeni mesaj. Mac'in Mesajlar uygulamasına yeni mesaj düşmüyorsa Mivelo da gösteremez;
       // bu durum kodda değil, iPhone ↔ Mac eşitlemesinde (Metin Mesajı Yönlendirme / iCloud'da Mesajlar) çözülür.
       const newest = (this.db.prepare('SELECT MAX(date) AS d FROM message').get() as { d: number | null }).d ?? 0;
       this.dateNs = newest > 1e12;
@@ -137,16 +137,16 @@ export class IMessageConnector extends BaseConnector {
         if (days >= 3)
           bus.log(
             'warn',
-            `iMessage: Bu Mac’in Mesajlar uygulamasına ${days} gündür yeni mesaj gelmemiş; Kavşak yalnızca chat.db’de olanı gösterebilir. iPhone’da Ayarlar → Mesajlar → Metin Mesajı Yönlendirme’de bu Mac’i aç ve Mac’te Mesajlar → Ayarlar → iMessage → “iCloud’da Mesajlar”ı etkinleştirip “Şimdi Eşzamanla” de.`,
+            `iMessage: Bu Mac’in Mesajlar uygulamasına ${days} gündür yeni mesaj gelmemiş; Mivelo yalnızca chat.db’de olanı gösterebilir. iPhone’da Ayarlar → Mesajlar → Metin Mesajı Yönlendirme’de bu Mac’i aç ve Mac’te Mesajlar → Ayarlar → iMessage → “iCloud’da Mesajlar”ı etkinleştirip “Şimdi Eşzamanla” de.`,
           );
       }
     } catch (e) {
       // Sistem Ayarları → Gizlilik ve Güvenlik → Tam Disk Erişimi bölmesini doğrudan aç
       execFile('open', ['x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles'], () => undefined);
-      bus.log('error', `iMessage: chat.db açılamadı (${(e as Error).message}); Kavşak’ta görünen iMessage verisi son başarılı okumadan kalma, yeni mesajlar gelmez`);
+      bus.log('error', `iMessage: chat.db açılamadı (${(e as Error).message}); Mivelo’da görünen iMessage verisi son başarılı okumadan kalma, yeni mesajlar gelmez`);
       this.setStatus(
         'error',
-        'Tam Disk Erişimi gerekli — açılan Sistem Ayarları penceresinde listeye Kavşak’ı (geliştirme modunda Terminal’i) ekleyip anahtarı aç, sonra “Yeniden dene” de',
+        'Tam Disk Erişimi gerekli — açılan Sistem Ayarları penceresinde listeye Mivelo’yu (geliştirme modunda Terminal’i) ekleyip anahtarı aç, sonra “Yeniden dene” de',
       );
       return;
     }
@@ -310,7 +310,7 @@ export class IMessageConnector extends BaseConnector {
         : this.db.prepare(`${this.selectSql} WHERE c.guid = ? ORDER BY ${d} DESC LIMIT ?`).all(remoteChatId, cap)
     ) as Row[];
     // Eski sürümün ROWID'ye göre açılış geçmişi bazı sohbetlerde en eski mesajları yüklemişti; en yeni ile en eski yüklü
-    // arasında boşluk kalmış olabilir. "before"dan eski mesaj kalmadıysa Kavşak'ta henüz olmayan (aradaki) mesajları
+    // arasında boşluk kalmış olabilir. "before"dan eski mesaj kalmadıysa Mivelo'da henüz olmayan (aradaki) mesajları
     // yeniden eskiye doğru doldur.
     if (!rows.length && before) {
       const all = this.db.prepare(`${this.selectSql} WHERE c.guid = ? ORDER BY ${d} DESC`).iterate(remoteChatId) as IterableIterator<Row>;
@@ -365,7 +365,7 @@ export class IMessageConnector extends BaseConnector {
    * HEIC → JPEG (sips), caf/amr/aiff sesler → mp3 (ffmpeg varsa); dönüştürülenler oturum klasöründe önbelleklenir.
    */
   async fetchMedia(u: string): Promise<{ body: Buffer; type: string } | undefined> {
-    // "im-out:<ad>": Kavşak'tan gönderilen dosyanın oturum klasöründeki kopyası (yoklama gerçek eki getirene dek)
+    // "im-out:<ad>": Mivelo'dan gönderilen dosyanın oturum klasöründeki kopyası (yoklama gerçek eki getirene dek)
     const out = u.match(/^im-out:(.+)$/);
     if (out) {
       const file = path.join(sessionDir(this.account.id), 'media', path.basename(out[1]));

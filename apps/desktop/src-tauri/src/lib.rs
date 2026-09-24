@@ -1,4 +1,4 @@
-//! Kavşak masaüstü kabuğu.
+//! Mivelo masaüstü kabuğu.
 //!
 //! Sorumluluklar:
 //! - Node çekirdeğini (packages/core) başlatmak ve uygulama kapanırken durdurmak
@@ -36,10 +36,11 @@ fn find_node() -> String {
         return n;
     }
     let home = std::env::var("HOME").unwrap_or_default();
+    // Finder/Dock'tan açılınca PATH launchd'nin kısıtlı yolu: terminalden çalışan `node` görünmez. Bilinen kurulum yerleri:
     let mut candidates: Vec<String> = vec![
-        "/opt/homebrew/bin/node".into(),
         format!("{home}/.local/node/bin/node"),
         format!("{home}/.local/bin/node"),
+        "/opt/homebrew/bin/node".into(),
         "/usr/local/bin/node".into(),
         format!("{home}/.volta/bin/node"),
         format!("{home}/.fnm/aliases/default/bin/node"),
@@ -260,7 +261,7 @@ pub fn run() {
                 .register(Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyK));
 
             // Menü çubuğu
-            let show = MenuItem::with_id(app, "show", "Kavşak’ı Göster", true, Some("CmdOrCtrl+Shift+K"))?;
+            let show = MenuItem::with_id(app, "show", "Mivelo’yu Göster", true, Some("CmdOrCtrl+Shift+K"))?;
             let focus = MenuItem::with_id(app, "focus", "Odak modu", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Çıkış", true, Some("CmdOrCtrl+Q"))?;
             let menu = Menu::with_items(app, &[&show, &focus, &PredefinedMenuItem::separator(app)?, &quit])?;
@@ -269,7 +270,7 @@ pub fn run() {
             TrayIconBuilder::with_id("main")
                 .icon(tray_icon)
                 .icon_as_template(true)
-                .tooltip("Kavşak")
+                .tooltip("Mivelo")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, ev| match ev.id().as_ref() {
@@ -301,7 +302,7 @@ pub fn run() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("Kavşak başlatılamadı")
+        .expect("Mivelo başlatılamadı")
         .run(|app, event| match event {
             // Dock simgesine tıklanınca pencereyi geri getir (macOS)
             #[cfg(target_os = "macos")]

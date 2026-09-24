@@ -2,7 +2,7 @@
   "name": "kavsak",
   "private": true,
   "version": "0.1.0",
-  "description": "Kavşak — tüm mesajlaşma kanalların için yerel öncelikli, AI destekli tek gelen kutusu",
+  "description": "Mivelo — tüm mesajlaşma kanalların için yerel öncelikli, AI destekli tek gelen kutusu",
   "workspaces": [
     "packages/*",
     "apps/*"
@@ -15,7 +15,7 @@
     "desktop": "concurrently -n core,desktop -c magenta,cyan \"npm run dev -w packages/core\" \"npm run dev -w apps/desktop\"",
     "desktop:build": "npm run build -w apps/desktop",
     "typecheck": "npm run typecheck -w packages/core && npm run typecheck -w apps/web",
-    "app": "npm run desktop:build && open \"apps/desktop/src-tauri/target/release/bundle/macos/Kavşak.app\""
+    "app": "npm run desktop:build && open \"apps/desktop/src-tauri/target/release/bundle/macos/Mivelo.app\""
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

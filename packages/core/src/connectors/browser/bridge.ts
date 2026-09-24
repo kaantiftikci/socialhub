@@ -100,13 +100,14 @@ export interface Strategy {
 
 export class BrowserConnector extends BaseConnector {
   private chromium?: (typeof import('playwright'))['chromium'];
+  private request?: (typeof import('playwright'))['request'];
   private ctx?: BrowserContext;
   private page?: Page;
-  private timer?: NodeJS.Timeout;
   /** sayfasız mod: tarayıcı kapalı, istekler bu bağlamdan */
   private api?: APIRequestContext;
   private state?: StorageState;
   private pageless = false;
+  private timer?: NodeJS.Timeout;
   private stopping = false;
   private polling = false;
   /** unloadWhenIdle: yoklamalar arasında tarayıcı kapalı (bellek); bir sonraki yoklama/işlem yeniden açar */
@@ -133,7 +134,6 @@ export class BrowserConnector extends BaseConnector {
     }
     this.setStatus('connecting');
 
-    // 1) Kayıtlı oturum var mı? Önce görünmez pencerede dene.
     // 0) API tabanlı kanal ve kayıtlı oturum durumu varsa tarayıcısız başla (bellek: Chromium hiç açılmaz)
     if (this.strategy.pageless && !interactive && fs.existsSync(this.stateFile)) {
       try {
@@ -149,6 +149,7 @@ export class BrowserConnector extends BaseConnector {
       this.pageless = false;
       if (this.stopping) return;
     }
+    // 1) Kayıtlı oturum var mı? Önce görünmez pencerede dene.
     if (!(await this.launch(true))) return;
     this.syncProgress(20, 'tarayıcı açıldı');
     let loggedIn = await this.isLoggedIn();
@@ -186,26 +187,25 @@ export class BrowserConnector extends BaseConnector {
       if (!(await this.launch(true))) return;
     }
     if (this.stopping) return;
-    try {
     this.syncProgress(45, 'oturum doğrulandı');
     await this.finishStart();
   }
 
   private async finishStart(): Promise<void> {
+    try {
       const me = await this.strategy.me(this.target(), await this.cookies());
       this.account.label = me.label;
     } catch {
       /* etiket kalsın */
     }
-    this.syncProgress(45, 'oturum doğrulandı');
     this.setStatus('connected');
     await this.poll(true);
+    if (this.account.status !== 'connected') return;
     this.syncProgress(100);
+    if (this.timer) clearInterval(this.timer);
     this.timer = setInterval(() => void this.poll(false), this.pollMs);
   }
 
-  /** Kalıcı profille Chromium aç. headless=true: arka planda çalışan görünmez pencere. */
-  private async launch(headless: boolean, retried = false): Promise<boolean> {
   private get stateFile(): string {
     return path.join(sessionDir(this.account.id), 'state.json');
   }
@@ -271,6 +271,8 @@ export class BrowserConnector extends BaseConnector {
     }
   }
 
+  /** Kalıcı profille Chromium aç. headless=true: arka planda çalışan görünmez pencere. */
+  private async launch(headless: boolean, retried = false): Promise<boolean> {
     const profile = path.join(sessionDir(this.account.id), 'profile');
     try {
       const hidden = headless || process.env.KAVSAK_HEADLESS === '1';
@@ -347,9 +349,9 @@ export class BrowserConnector extends BaseConnector {
   }
 
   private async isLoggedIn(passive = false): Promise<boolean> {
+    if (this.pageless && !passive) await this.ensureOpen();
     if (!this.page || this.page.isClosed()) return false;
     try {
-    if (this.pageless && !passive) await this.ensureOpen();
       return await this.strategy.loggedIn(this.page, await this.cookies(), passive);
     } catch {
       return false;
@@ -405,11 +407,11 @@ export class BrowserConnector extends BaseConnector {
 
   async stop(): Promise<void> {
     this.stopping = true;
-    if (this.timer) clearInterval(this.timer);
-    await this.closeCtx();
     await this.api?.dispose().catch(() => undefined);
     this.api = undefined;
     this.pageless = false;
+    if (this.timer) clearInterval(this.timer);
+    await this.closeCtx();
     this.setStatus('disconnected');
   }
 
@@ -512,13 +514,13 @@ export class BrowserConnector extends BaseConnector {
 
   private async cookies(): Promise<Record<string, string>> {
     const out: Record<string, string> = {};
-    for (const c of (await this.ctx?.cookies()) ?? []) out[c.name] = c.value;
-    return out;
     if (this.pageless && this.api) {
       this.state = await this.api.storageState().catch(() => this.state);
       for (const c of this.state?.cookies ?? []) out[c.name] = c.value;
       return out;
     }
+    for (const c of (await this.ctx?.cookies()) ?? []) out[c.name] = c.value;
+    return out;
   }
 
   private async poll(first: boolean): Promise<void> {
@@ -527,13 +529,13 @@ export class BrowserConnector extends BaseConnector {
     this.polling = true;
     try {
       await this.serial(() => this.pollInner(first));
-      // Boşta boşaltma: sekme kapatmak/about:blank render sürecini bırakmıyor (service worker, site izolasyonu); tarayıcıyı
-      // tamamen kapat, sonraki yoklama/işlem yeniden açar (kalıcı profil oturumu korur; açılış ~3-5 sn)
       // API tabanlı kanal: ilk başarılı yoklamadan sonra tarayıcı kapanır; sayfasızda çerezler her yoklamada diske
       if (this.strategy.pageless && this.account.status === 'connected' && !this.stopping) {
         if (this.ctx) await this.serial(() => this.goPageless()).catch((e) => bus.log('warn', `${this.account.platform}: sayfasız moda geçilemedi: ${(e as Error).message}`));
         else if (this.api) this.saveState(await this.api.storageState().catch(() => this.state!));
       }
+      // Boşta boşaltma: sekme kapatmak/about:blank render sürecini bırakmıyor (service worker, site izolasyonu); tarayıcıyı
+      // tamamen kapat, sonraki yoklama/işlem yeniden açar (kalıcı profil oturumu korur; açılış ~3-5 sn)
       if (this.strategy.unloadWhenIdle && this.ctx && this.account.status === 'connected' && !this.stopping) {
         await this.serial(() => this.closeCtx()).catch(() => undefined);
         this.idleClosed = true;
@@ -554,12 +556,12 @@ export class BrowserConnector extends BaseConnector {
       const changed: Thread[] = [];
       for (const t of threads) {
         // lastTs=0: strateji zaman bilgisi vermiyor (DOM okuyan Messenger) → depodaki değer korunur
-        // Kavşak'ta okunan sohbeti platformun eski 'okunmamış' değeri geri açmasın: yalnızca yeni etkinlikte aktar
+        // Mivelo'da okunan sohbeti platformun eski 'okunmamış' değeri geri açmasın: yalnızca yeni etkinlikte aktar
         const ex = this.store.getChat(chatId(this.account.id, t.id));
         // lastTs=0 (DOM okuyan Messenger): çekirdek yeniden başladıysa platformun okunmamış durumu depoya aktarılsın
         // ilk yoklamada (açılış) platformun okunmamış/önizleme değeri yetkili; sonra yalnızca yeni etkinlikte
         const fresh = first || !ex || t.lastTs > ex.lastMessageAt || !ex.lastPreview;
-        // okunmamış her zaman platformun değeri: telefonda okunan sohbet burada da okundu olur (Kavşak'ta okunan platforma markRead ile gider)
+        // okunmamış her zaman platformun değeri: telefonda okunan sohbet burada da okundu olur (Mivelo'da okunan platforma markRead ile gider)
         this.upsertChat({ remoteId: t.id, name: t.name, kind: t.kind, unread: t.unread, lastMessageAt: t.lastTs || undefined, lastPreview: fresh ? t.preview || undefined : undefined, avatarUrl: t.avatarUrl, handle: t.handle, link: t.link, participants: t.participants });
         if (t.readByOthersUpTo) this.outgoingRead(t.id, t.readByOthersUpTo);
         // eski kimlikli kopya (hedef sohbet yukarıda yazıldı)

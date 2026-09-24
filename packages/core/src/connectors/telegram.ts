@@ -57,7 +57,7 @@ export class TelegramConnector extends BaseConnector {
     const saved = fs.existsSync(this.sessionFile) ? fs.readFileSync(this.sessionFile, 'utf8').trim() : '';
     const client = new TelegramClient(new StringSession(saved), apiId, apiHash, {
       connectionRetries: 5,
-      deviceModel: 'Kavşak',
+      deviceModel: 'Mivelo',
       appVersion: '0.1',
     });
     this.client = client;

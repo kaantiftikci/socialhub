@@ -5,7 +5,9 @@ import { Avatar, Chip, Icon, Logo, Resizer, SyncBar, Tag, ago, fmtTime, loadPane
 import { Conversation } from './Conversation';
 import { ConnectModal } from './Connect';
 import { Focus } from './Focus';
-import { isTauri, notify as desktopNotify, onDesktopEvent, playPing, SOUNDS, getSound, setSound, getPlatformSound, setPlatformSound, setBadge, windowFocused, coreInfo } from './desktop';
+import { isTauri, notify as desktopNotify, onDesktopEvent, playPing, SOUNDS, getSound, getPlatformSound, setPlatformSound, setBadge, windowFocused, coreInfo } from './desktop';
+import { PROFILE_NAME, STATIC_DEMO } from './profile';
+import { leaveDemoPanel } from './demo-session';
 
 export type View = 'inbox' | 'focus' | 'snoozed';
 export type Filter = 'all' | 'unread' | 'waiting';
@@ -44,46 +46,24 @@ export default function App() {
   }, [settingsOpen]);
   // Dar ekran (telefon): sol menü gizli, liste ↔ sohbet tek sütun
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 820);
+  const [navOpen, setNavOpen] = useState(false);
   useEffect(() => {
     const on = () => setIsMobile(window.innerWidth < 820);
     window.addEventListener('resize', on);
     return () => window.removeEventListener('resize', on);
   }, []);
+  useEffect(() => {
+    if (!isMobile) setNavOpen(false);
+  }, [isMobile]);
   const [booting, setBooting] = useState(false);
   const [bootSince] = useState(() => Date.now());
-  const [sound, setSoundState] = useState<string>(() => getSound());
   const [pSounds, setPSounds] = useState<Record<string, string>>({});
-  const [appSoundsOpen, setAppSoundsOpen] = useState(false);
-  const soundPlatforms = useMemo(() => [...new Set(accounts.map((a) => a.platform))], [accounts]);
-  const [soundApp, setSoundAppState] = useState('');
-  const setSoundApp = (p: string) => setSoundAppState(p);
-  useEffect(() => {
-    if (appSoundsOpen && !soundApp && soundPlatforms[0]) setSoundAppState(soundPlatforms[0]);
-  }, [appSoundsOpen, soundApp, soundPlatforms]);
+  const [appSettingsOpen, setAppSettingsOpen] = useState(false);
+  const appSettingsP = useClosing(appSettingsOpen || null);
   const changePlatformSound = (platform: string, id: string) => {
     setPlatformSound(platform, id);
     setPSounds((p) => ({ ...p, [platform]: id }));
     if (id && id !== 'off') playPing(id, true);
-  };
-  const changeSound = (id: string) => {
-    setSound(id);
-    setSoundState(id);
-    if (id !== 'off') playPing(id, true);
-  };
-  const [showDetails, setShowDetailsState] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('kavsak.details') !== 'off';
-    } catch {
-      return true;
-    }
-  });
-  const setShowDetails = (v: boolean) => {
-    setShowDetailsState(v);
-    try {
-      localStorage.setItem('kavsak.details', v ? 'on' : 'off');
-    } catch {
-      /* yok */
-    }
   };
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<Array<{ message: Message; chat: Chat }>>([]);
@@ -556,16 +536,36 @@ export default function App() {
     }
   };
   const [dragId, setDragId] = useState<string | null>(null);
-  const [dragOver, setDragOver] = useState<{ id: string; after: boolean } | null>(null);
+  /** Aynı gruptaki hedef sıra (sürüklenen satırın gideceği indeks) */
+  const [dragTo, setDragTo] = useState<number | null>(null);
   /** Sürüklenen satırın sabit konumlu hayaleti: satırı yerinde dönüştürmek kaydırma alanını büyütüp titretiyordu */
   const [ghost, setGhost] = useState<{ top: number; left: number; width: number } | null>(null);
   const dragStart = useRef({ y: 0, top: 0, left: 0, width: 0 });
   const dragRaf = useRef(0);
-  const renderChan = (a: Account) => (
+  /** Sürükleme başındaki sabit yuvalar: kayan satırların dönüşümü ölçümü bozmasın */
+  const dragSlots = useRef<{ id: string; top: number }[]>([]);
+  const dragPitch = useRef(30);
+  const dragToRef = useRef<number | null>(null);
+  const dragIdRef = useRef<string | null>(null);
+  /** Gruptaki satır, boşalan yuvayı doldurmak için kaç piksel kaysın (0: yerinde) */
+  const chanShift = (id: string, group: Account[]) => {
+    if (!dragId || dragTo == null) return 0;
+    const from = group.findIndex((x) => x.id === dragId);
+    if (from < 0) return 0;
+    const i = group.findIndex((x) => x.id === id);
+    if (i < 0 || i === from) return 0;
+    if (dragTo < from && i >= dragTo && i < from) return dragPitch.current;
+    if (dragTo > from && i > from && i <= dragTo) return -dragPitch.current;
+    return 0;
+  };
+  const renderChan = (a: Account, group: Account[]) => {
+        const shift = chanShift(a.id, group);
+        return (
         <button
           key={a.id}
-          className={`chan b ${platformFilter === a.platform ? 'active' : ''} ${dragOver?.id === a.id && dragId !== a.id ? (dragOver.after ? 'dragover-after' : 'dragover') : ''} ${dragId === a.id ? 'dragging' : ''}`}
+          className={`chan b ${platformFilter === a.platform ? 'active' : ''} ${dragId === a.id ? 'dragging' : ''}`}
           data-acc={a.id}
+          style={shift ? { transform: `translateY(${shift}px)` } : undefined}
           onClick={() => (setView('inbox'), selectPlatform(platformFilter === a.platform ? null : a.platform), setFilter('all'))}
           onContextMenu={(e) => {
             e.preventDefault();
@@ -585,41 +585,77 @@ export default function App() {
               (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
               const row = (e.currentTarget as HTMLElement).closest('.chan') as HTMLElement | null;
               const rr = row?.getBoundingClientRect();
+              const nodes = group.map((acc) => document.querySelector<HTMLElement>(`.chan[data-acc="${acc.id}"]`));
+              const rects = nodes.map((el) => el?.getBoundingClientRect());
+              dragSlots.current = group.map((acc, i) => ({ id: acc.id, top: rects[i]?.top ?? 0 }));
+              const tops = dragSlots.current.map((s) => s.top);
+              dragPitch.current = tops.length > 1 ? tops[1] - tops[0] : (rr?.height ?? 30);
+              const from = group.findIndex((x) => x.id === a.id);
+              dragToRef.current = from;
+              dragIdRef.current = a.id;
               dragStart.current = { y: e.clientY, top: rr?.top ?? e.clientY, left: rr?.left ?? e.clientX, width: rr?.width ?? 200 };
               setGhost({ top: dragStart.current.top, left: dragStart.current.left, width: dragStart.current.width });
+              setDragTo(from);
               setDragId(a.id);
             }}
             onPointerMove={(e) => {
-              if (dragId !== a.id) return;
-              const { clientX, clientY } = e;
+              if (dragIdRef.current !== a.id) return;
+              const { clientY } = e;
               cancelAnimationFrame(dragRaf.current);
               dragRaf.current = requestAnimationFrame(() => {
                 const st = dragStart.current;
                 setGhost({ top: st.top + (clientY - st.y), left: st.left, width: st.width });
-                const el = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>('.chan[data-acc]');
-                const id = el?.dataset.acc;
-                if (!el || !id || id === a.id) {
-                  setDragOver((cur) => (cur ? null : cur));
-                  return;
+                const slots = dragSlots.current;
+                const pitch = dragPitch.current;
+                if (!slots.length) return;
+                let to = slots.length - 1;
+                for (let i = 0; i < slots.length; i++) {
+                  if (clientY < slots[i].top + pitch) {
+                    to = i;
+                    break;
+                  }
                 }
-                const r = el.getBoundingClientRect();
-                // orta çizgide ±5 px histerezis: aynı satır içinde üst/alt arasında titremesin
-                const mid = r.top + r.height / 2;
-                setDragOver((cur) => {
-                  const after = cur?.id === id ? (clientY > mid + 5 ? true : clientY < mid - 5 ? false : cur.after) : clientY > mid;
-                  return cur?.id === id && cur.after === after ? cur : { id, after };
-                });
+                const cur = dragToRef.current;
+                if (cur != null && Math.abs(to - cur) === 1) {
+                  const boundary = slots[Math.min(to, cur)].top + pitch;
+                  if (Math.abs(clientY - boundary) < 5) to = cur;
+                }
+                if (to !== dragToRef.current) {
+                  dragToRef.current = to;
+                  setDragTo(to);
+                }
               });
             }}
             onPointerUp={(e) => {
               (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-              if (dragId === a.id && dragOver && dragOver.id !== a.id) moveChan(a.id, dragOver.id, dragOver.after);
+              const slots = dragSlots.current;
+              const from = slots.findIndex((s) => s.id === a.id);
+              const to = dragToRef.current;
               cancelAnimationFrame(dragRaf.current);
+              if (dragIdRef.current === a.id && to != null && from >= 0 && to !== from) {
+                document.querySelectorAll<HTMLElement>('.sidebar .chan').forEach((el) => {
+                  el.style.transition = 'none';
+                });
+                moveChan(a.id, slots[to].id, to > from);
+                requestAnimationFrame(() => {
+                  document.querySelectorAll<HTMLElement>('.sidebar .chan').forEach((el) => {
+                    el.style.transition = '';
+                  });
+                });
+              }
+              dragIdRef.current = null;
+              dragToRef.current = null;
               setDragId(null);
-              setDragOver(null);
+              setDragTo(null);
               setGhost(null);
             }}
-            onPointerCancel={() => (setDragId(null), setDragOver(null), setGhost(null))}
+            onPointerCancel={() => {
+              dragIdRef.current = null;
+              dragToRef.current = null;
+              setDragId(null);
+              setDragTo(null);
+              setGhost(null);
+            }}
           >
             <Icon name="grip" size={13} sw={2} />
           </span>
@@ -631,7 +667,9 @@ export default function App() {
           <span className="count">{fmtCount(perPlatform.get(a.platform) ?? 0)}</span>
           <span className={`dot ${a.status}`} style={{ marginLeft: 8 }} />
           {sync[a.id] && <SyncBar compact progress={/%\d+/.test(a.detail ?? '') ? Number((a.detail ?? '').match(/%(\d+)/)?.[1] ?? 0) : sync[a.id].progress} since={sync[a.id].since} />}
-        </button>  );
+        </button>
+        );
+  };
 
   const current = selected ? chats.get(selected) : undefined;
   const connectedPlatforms = [...new Set(accounts.filter((a) => a.status !== 'disconnected').map((a) => a.platform))];
@@ -647,11 +685,21 @@ export default function App() {
   };
 
   return (
-    <div className={`app ${isTauri ? 'tauri' : ''} ${isMobile ? 'mobile' : ''} ${isMobile && selected ? 'm-conv' : ''}`}>
-      <nav className="sidebar" aria-label="Ana menü">
+    <div className={`app ${isTauri ? 'tauri' : ''} ${isMobile ? 'mobile' : ''} ${isMobile && selected ? 'm-conv' : ''} ${isMobile && navOpen ? 'nav-open' : ''}`}>
+      {isMobile && navOpen && <button className="nav-backdrop" aria-label="Menüyü kapat" onClick={() => setNavOpen(false)} />}
+      <nav
+        className="sidebar"
+        aria-label="Ana menü"
+        onClick={(e) => {
+          if (!isMobile) return;
+          const t = e.target as HTMLElement;
+          if (t.closest('.settings, .me, .search, label')) return;
+          if (t.closest('button, .chan, .nav-item, .tagbtn')) setNavOpen(false);
+        }}
+      >
         <div className="brand" data-tauri-drag-region>
           <Logo />
-          <span className="word">kavşak</span>
+          <span className="word">mivelo</span>
           <span title={online ? 'Çekirdek bağlı' : 'Çekirdek bağlantısı yok'} className={`dot ${online ? 'on' : 'error'}`} />
         </div>
         <label className="search">
@@ -667,29 +715,29 @@ export default function App() {
         </div>
         <div>
           <div className="section-head">
-            <span className="label">Kanallar</span>
+            <span className="label">Uygulamalar</span>
             <button className="btn ghost xs icon b" aria-label="Kanal ekle" onClick={() => setConnectOpen(true)}>
               <Icon name="plus" size={14} sw={2} />
             </button>
           </div>
           {accounts.length === 0 && (
             <button className="chan b" onClick={() => setConnectOpen(true)} style={{ color: 'var(--v-txt)' }}>
-              <Icon name="plus" size={15} sw={2} /> İlk kanalını bağla
+              <Icon name="plus" size={15} sw={2} /> İlk uygulamanı bağla
             </button>
           )}
-          {chatAccounts.map((a) => renderChan(a))}
+          {chatAccounts.map((a) => renderChan(a, chatAccounts))}
           {mailAccounts.length > 0 && (
             <div className="section-head" style={{ marginTop: 10 }}>
               <span className="label">E-posta</span>
             </div>
           )}
-          {mailAccounts.map((a) => renderChan(a))}
+          {mailAccounts.map((a) => renderChan(a, mailAccounts))}
           {shopAccounts.length > 0 && (
             <div className="section-head" style={{ marginTop: 10 }}>
               <span className="label">Alışveriş</span>
             </div>
           )}
-          {shopAccounts.map((a) => renderChan(a))}
+          {shopAccounts.map((a) => renderChan(a, shopAccounts))}
         </div>
         {(
           <div>
@@ -712,15 +760,15 @@ export default function App() {
             <Icon name="lock" size={15} color="#6C47FF" sw={2} />
           </span>
           <span>
-            <span className="t">Yerel ve şifreli</span>
-            <span className="s">Mesajlar yalnızca bu bilgisayarda</span>
+            <span className="t">{STATIC_DEMO ? 'Hesabına özel' : 'Yerel ve şifreli'}</span>
+            <span className="s">{STATIC_DEMO ? 'Bağlantılar çıkıştan sonra da kalır' : 'Mesajlar yalnızca bu bilgisayarda'}</span>
           </span>
         </div>
         <div className="me">
-          <Avatar name="Kaan" size={32} />
+          <Avatar name={PROFILE_NAME} size={32} />
           <span style={{ flexGrow: 1 }}>
-            <span className="n">Kaan</span>
-            <span className="s">{accounts.length} kanal · Pro</span>
+            <span className="n">{PROFILE_NAME}</span>
+            <span className="s">{accounts.length} uygulama{STATIC_DEMO ? '' : ' · Pro'}</span>
           </span>
           <button className="btn ghost sm icon b" aria-label="Ayarlar" onClick={() => setSettingsOpen(!settingsOpen)}>
             <Icon name="sliders" size={16} />
@@ -729,78 +777,26 @@ export default function App() {
         {settingsP.value && (
           <div className={`settings ${settingsP.closing ? 'closing' : ''}`} role="dialog" aria-label="Ayarlar">
             <div className="section-head" style={{ marginBottom: 6 }}>
-              <span className="label">Bildirim sesi</span>
+              <span className="label">Ayarlar</span>
               <button className="btn ghost xs icon b" onClick={() => setSettingsOpen(false)} aria-label="Kapat">
                 <Icon name="x" size={13} sw={2} />
               </button>
             </div>
-            <label className="row-toggle">
-              <span>Ses çal</span>
-              <input type="checkbox" checked={sound !== 'off'} onChange={(e) => changeSound(e.target.checked ? 'cinlama' : 'off')} />
-            </label>
-            <div className="sound-list">
-              {SOUNDS.map((sn) => (
-                <button key={sn.id} className={`b ${sound === sn.id ? 'on' : ''}`} onClick={() => changeSound(sn.id)} disabled={sound === 'off'}>
-                  <Icon name="volume" size={13} /> {sn.name}
-                  <span
-                    className="try"
-                    role="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      playPing(sn.id, true);
-                    }}
-                  >
-                    Dene
-                  </span>
-                </button>
-              ))}
-            </div>
-            <button className="row-toggle b psounds-head" onClick={() => setAppSoundsOpen(!appSoundsOpen)} aria-expanded={appSoundsOpen}>
-              <span>Uygulama bildirimleri</span>
-              <Icon name={appSoundsOpen ? 'chevup' : 'chev'} size={14} sw={2} />
+            <button className="row-toggle b psounds-head" onClick={() => setAppSettingsOpen(true)}>
+              <span>Uygulama ayarları</span>
+              <span style={{ display: 'inline-flex', transform: 'rotate(-90deg)' }}>
+                <Icon name="chev" size={14} sw={2} />
+              </span>
             </button>
-            {appSoundsOpen && (
-              <div className="psounds">
-                <select className="psel" value={soundApp} onChange={(e) => setSoundApp(e.target.value)}>
-                  {soundPlatforms.map((p) => (
-                    <option key={p} value={p}>
-                      {PLATFORMS[p].name}
-                    </option>
-                  ))}
-                </select>
-                {soundApp && (
-                  <div className="sound-list">
-                    {[{ id: '', name: 'Varsayılan (genel ses)' }, ...SOUNDS, { id: 'off', name: 'Sessiz' }].map((sn) => {
-                      const cur = pSounds[soundApp] ?? getPlatformSound(soundApp);
-                      return (
-                        <button key={sn.id || 'default'} className={`b ${cur === sn.id ? 'on' : ''}`} onClick={() => changePlatformSound(soundApp, sn.id)} disabled={sound === 'off'}>
-                          <Icon name={sn.id === 'off' ? 'eyeoff' : 'volume'} size={13} /> {sn.name}
-                          {sn.id && sn.id !== 'off' && (
-                            <span
-                              className="try"
-                              role="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                playPing(sn.id, true);
-                              }}
-                            >
-                              Dene
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-            <div className="section-head" style={{ margin: '10px 0 6px' }}>
-              <span className="label">Telefondan erişim</span>
-            </div>
             <label className="row-toggle">
               <span>Aynı Wi‑Fi'daki telefondan aç</span>
               <input type="checkbox" checked={!!lan?.enabled} onChange={(e) => api.setLan(e.target.checked).then(setLanState).catch((err) => notify(err.message, true))} />
             </label>
+            {STATIC_DEMO && (
+              <button className="row-toggle b psounds-head" onClick={() => leaveDemoPanel()}>
+                <span>Çıkış yap</span>
+              </button>
+            )}
             {lan?.enabled && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: 'var(--text2)' }}>
                 {lan.qr && <img src={lan.qr} alt="Bağlantı QR kodu" style={{ width: 150, height: 150, borderRadius: 10, border: '1px solid var(--line)', background: '#fff' }} />}
@@ -812,13 +808,6 @@ export default function App() {
                 <span style={{ color: 'var(--text3)' }}>Bağlantı gizli bir anahtar içerir; yalnızca kendi cihazlarına ver. Mac uyurken erişim durur.</span>
               </div>
             )}
-            <div className="section-head" style={{ margin: '10px 0 6px' }}>
-              <span className="label">Görünüm</span>
-            </div>
-            <label className="row-toggle">
-              <span>Sağ ayrıntı paneli</span>
-              <input type="checkbox" checked={showDetails} onChange={(e) => setShowDetails(e.target.checked)} />
-            </label>
           </div>
         )}
       </nav>
@@ -831,7 +820,7 @@ export default function App() {
       )}
       <div className="surface">
         {view === 'focus' ? (
-          <Focus waiting={waitingChats} chats={inboxChats} ai={ai} notify={notify} onOpen={openChat} onSnooze={snooze} onComplete={complete} onBack={() => setView('inbox')} />
+          <Focus waiting={waitingChats} chats={inboxChats} ai={ai} notify={notify} onOpen={openChat} onSnooze={snooze} onComplete={complete} onBack={() => setView('inbox')} onMenu={isMobile ? () => setNavOpen(true) : undefined} />
         ) : (
           <>
             <section className="list" aria-label="Sohbet listesi">
@@ -843,6 +832,11 @@ export default function App() {
               )}
               <div className="list-head">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {isMobile && (
+                    <button className="btn icon b b2" aria-label="Menü" title="Menü" onClick={() => setNavOpen(true)}>
+                      <Icon name="grip" size={16} sw={2} />
+                    </button>
+                  )}
                   {platformFilter && view !== 'snoozed' && <Chip platform={platformFilter} size={26} />}
                   <h1>{view === 'snoozed' ? 'Ertelenenler' : platformFilter ? PLATFORMS[platformFilter].name : tagFilter ? capitalize(tagFilter) : 'Gelen kutusu'}</h1>
                   {view !== 'snoozed' && scoped.unread > 0 && <span className="pill">{fmtCount(scoped.unread)} yeni</span>}
@@ -850,8 +844,8 @@ export default function App() {
                   <button className={`btn icon b b2 ${listSearch || query ? 'soft' : ''}`} aria-label="Sohbetlerde ara" title="Sohbetlerde ara" onClick={() => (setListSearch(!listSearch), listSearch && setQuery(''))}>
                     <Icon name="search" size={15} sw={2} />
                   </button>
-                  <button className="btn icon primary b" aria-label="Kanal bağla" onClick={() => setConnectOpen(true)}>
-                    <Icon name="plus" size={16} sw={2} />
+                  <button className="btn primary b connect-cta" onClick={() => setConnectOpen(true)}>
+                    Uygulama bağla
                   </button>
                 </div>
 
@@ -930,7 +924,7 @@ export default function App() {
                       <>
                         Henüz sohbet yok.
                         <br />
-                        Bir kanal bağlayınca mesajlar burada görünür.
+                        Bir uygulama bağlayınca mesajlar burada görünür.
                       </>
                     ) : (
                       emptyText
@@ -997,9 +991,6 @@ export default function App() {
                 onComplete={() => complete(current.id)}
                 snoozedUntil={snoozes[current.id]}
                 onUnsnooze={() => unsnooze(current.id)}
-                onTags={(tags) => api.setTags(current.id, tags).then((c) => setChats((p) => new Map(p).set(c.id, c))).catch((e) => notify(e.message, true))}
-                showDetails={isMobile ? false : showDetails}
-                onToggleDetails={() => setShowDetails(!showDetails)}
                 onBack={isMobile ? () => setSelected(null) : undefined}
                 typing={typing[current.id] ? typing[current.id].name ?? '' : null}
                 olderBusy={olderBusy}
@@ -1042,21 +1033,17 @@ export default function App() {
                     setOlderBusy(false);
                   }
                 }}
-                onOpenChat={(c) => {
-                  setChats((p) => new Map(p).set(c.id, c));
-                  setSelected(c.id);
-                }}
               />
             ) : (
               <section className="conv">
                 <div className="empty" style={{ margin: 'auto', maxWidth: 380 }}>
                   <Logo size={40} />
                   <p style={{ marginTop: 12, fontSize: 15, color: 'var(--text2)' }}>
-                    {accounts.length === 0 ? 'Başlamak için bir kanal bağla. WhatsApp için telefonundan QR okutman yeterli.' : 'Soldan bir sohbet seç.'}
+                    {accounts.length === 0 ? 'Başlamak için bir uygulama bağla.' : 'Soldan bir sohbet seç.'}
                   </p>
                   {accounts.length === 0 && (
                     <button className="btn primary b" onClick={() => setConnectOpen(true)}>
-                      <Icon name="plus" size={15} sw={2} /> Kanal bağla
+                      <Icon name="plus" size={15} sw={2} /> Uygulama bağla
                     </button>
                   )}
                 </div>
@@ -1066,6 +1053,50 @@ export default function App() {
         )}
       </div>
 
+      {appSettingsP.value && (
+        <div className={`overlay app-settings ${appSettingsP.closing ? 'closing' : ''}`} onClick={() => setAppSettingsOpen(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Uygulama ayarları">
+            <div className="modal-scroll">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <h2 style={{ fontSize: 26 }}>Uygulama ayarları</h2>
+              <span style={{ flexGrow: 1 }} />
+              <button className="btn icon b b2" onClick={() => setAppSettingsOpen(false)} aria-label="Kapat">
+                <Icon name="x" size={15} sw={2} />
+              </button>
+            </div>
+            {accounts.length === 0 ? (
+              <p style={{ margin: 0, color: 'var(--text2)', fontSize: 14 }}>Bağlı uygulama yok.</p>
+            ) : (
+              <div className="app-set-list">
+                {accounts.map((a) => {
+                  const stored = pSounds[a.platform] ?? getPlatformSound(a.platform);
+                  const cur = stored || getSound();
+                  const handle = handleOf(a);
+                  return (
+                    <div key={a.id} className="app-set-card">
+                      <div className="who">
+                        <Chip platform={a.platform} size={36} />
+                        <span>
+                          <b>{PLATFORMS[a.platform].name}</b>
+                          {handle && <span className="sub">{handle}</span>}
+                        </span>
+                      </div>
+                      <div className="tones" role="radiogroup" aria-label={`${PLATFORMS[a.platform].name} zil sesi`}>
+                        {[...SOUNDS, { id: 'off', name: 'Sessiz' }].map((sn) => (
+                          <button key={sn.id} type="button" className={cur === sn.id ? 'on' : ''} aria-checked={cur === sn.id} role="radio" onClick={() => changePlatformSound(a.platform, sn.id)}>
+                            {sn.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            </div>
+          </div>
+        </div>
+      )}
       {connectP.value && (
         <ConnectModal
           closing={connectP.closing}

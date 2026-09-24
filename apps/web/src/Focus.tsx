@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from './api';
 import { PLATFORMS, type Chat, type DraftResult } from './types';
 import { Avatar, Chip, Icon, ago, agoLong } from './ui';
+import { PROFILE_NAME } from './profile';
 
 /**
  * Odak modu: yanıt bekleyenler (en eskiden yeniye), her biri için AI taslağı ve tek tıkla gönderme.
@@ -16,6 +17,7 @@ export function Focus({
   onSnooze,
   onComplete,
   onBack,
+  onMenu,
 }: {
   waiting: Chat[];
   chats: Chat[];
@@ -25,6 +27,7 @@ export function Focus({
   onSnooze: (id: string) => void;
   onComplete: (id: string) => void;
   onBack: () => void;
+  onMenu?: () => void;
 }) {
   const [drafts, setDrafts] = useState<Record<string, DraftResult | 'loading' | 'error'>>({});
   const [sending, setSending] = useState<string | null>(null);
@@ -85,21 +88,26 @@ export function Focus({
   return (
     <section className="focus" aria-label="Odak modu">
       <div className="top">
+        {onMenu && (
+          <button className="btn icon b b2" aria-label="Menü" title="Menü" onClick={onMenu}>
+            <Icon name="grip" size={16} sw={2} />
+          </button>
+        )}
         <button className="btn b b2" onClick={onBack}>
           <Icon name="back" size={15} sw={2} /> Gelen kutusu <span className="kbd">Esc</span>
         </button>
         <span style={{ flexGrow: 1 }} />
         <span style={{ fontSize: 13, color: 'var(--text3)' }}>{dateStr}</span>
-        <Avatar name="Kaan" size={34} />
+        <Avatar name={PROFILE_NAME} size={34} />
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 28 }}>
+      <div className="focus-hero">
         <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <span className="chip" style={{ alignSelf: 'flex-start', background: 'var(--v-soft)', color: 'var(--v-txt)' }}>
             <Icon name="sparkle" size={13} color="#6C47FF" sw={2} /> Odak · günlük özet
           </span>
           <h1>
-            {greet}, <em>Kaan.</em>
+            {greet}, <em>{PROFILE_NAME}.</em>
           </h1>
           <p className="lead">
             {visible.length > 0 ? `${visible.length} kişi yanıtını bekliyor` : 'Yanıt bekleyen kimse yok'}
@@ -122,7 +130,7 @@ export function Focus({
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
+      <div className="focus-cols">
         <div style={{ flexGrow: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, letterSpacing: -0.3 }}>Yanıt bekleyenler</h2>

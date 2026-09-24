@@ -93,9 +93,9 @@ export class WhatsAppConnector extends BaseConnector {
       logger: baileysLogger(),
       // DİKKAT: browser[0] 'Mac OS'/'Windows' + syncFullHistory birleşimi Baileys'i yerel masaüstü uygulaması
       // (DARWIN/WIN32) gibi tanıtır; WhatsApp bunu web sürüm numarasıyla kabul etmeyip bağlantıyı hemen kapatır (428).
-      // Bu yüzden OS alanı özel bir ad: telefonda "Kavşak (Mac)" görünür, protokolde WEB_BROWSER kalır,
+      // Bu yüzden OS alanı özel bir ad: telefonda "Mivelo (Mac)" görünür, protokolde WEB_BROWSER kalır,
       // requireFullSync ile telefon tam sohbet geçmişini yine gönderir.
-      browser: ['Mac', 'Kavşak', '1.0'],
+      browser: ['Mac', 'Mivelo', '1.0'],
       printQRInTerminal: false,
       syncFullHistory: history,
       // Baileys 7 varsayılanı FULL geçmiş paketlerini ATLIYOR (yalnız INITIAL_BOOTSTRAP/RECENT işlenir): ilk eşleşmede yalnızca
@@ -897,7 +897,7 @@ export class WhatsAppConnector extends BaseConnector {
       if (needOpen) await sock.waitForConnectionUpdate(async (u) => u.connection === 'open', 15_000);
       let timer: NodeJS.Timeout | undefined;
       await Promise.race([
-        sock.logout('Kavşak: hesap kaldırıldı'),
+        sock.logout('Mivelo: hesap kaldırıldı'),
         new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error('çıkış isteği 10 sn içinde tamamlanmadı')), 10_000))),
       ]).finally(() => timer && clearTimeout(timer));
       bus.log('info', 'WhatsApp: cihaz telefondaki Bağlı cihazlar listesinden çıkarıldı');
@@ -907,7 +907,7 @@ export class WhatsAppConnector extends BaseConnector {
         bus.log('info', 'WhatsApp: cihaz telefondan zaten çıkarılmış');
         return;
       }
-      bus.log('warn', `WhatsApp: telefondan çıkış yapılamadı (${(e as Error).message}). Telefonda WhatsApp → Bağlı cihazlar → "Kavşak (Mac)" → Çıkış yap ile elle kaldır.`);
+      bus.log('warn', `WhatsApp: telefondan çıkış yapılamadı (${(e as Error).message}). Telefonda WhatsApp → Bağlı cihazlar → "Mivelo (Mac)" → Çıkış yap ile elle kaldır.`);
     }
   }
 
@@ -1307,8 +1307,8 @@ export class WhatsAppConnector extends BaseConnector {
       bus.log(
         'warn',
         sender === 'me'
-          ? `WhatsApp: telefondan gelen mesajlar çözülemiyor (${hits.length} kez / 5 dk); Bağlı cihazlar'dan Kavşak'ı kaldırıp yeniden eşleştir`
-          : `WhatsApp: ${this.nameOf(sender)} kişisinden gelen mesajlar çözülemiyor (${hits.length} kez / 5 dk); Bağlı cihazlar'dan Kavşak'ı kaldırıp yeniden eşleştir`,
+          ? `WhatsApp: telefondan gelen mesajlar çözülemiyor (${hits.length} kez / 5 dk); Bağlı cihazlar'dan Mivelo'yu kaldırıp yeniden eşleştir`
+          : `WhatsApp: ${this.nameOf(sender)} kişisinden gelen mesajlar çözülemiyor (${hits.length} kez / 5 dk); Bağlı cihazlar'dan Mivelo'yu kaldırıp yeniden eşleştir`,
       );
     }
     if (!m.key.id) return;
@@ -1369,7 +1369,7 @@ function thumbOf(m: proto.IMessage | undefined): Uint8Array | undefined {
   return (m?.imageMessage ?? m?.videoMessage ?? m?.ptvMessage ?? m?.documentMessage)?.jpegThumbnail ?? undefined;
 }
 
-/** Baileys iç günlüğü: yalnızca uygulama durumu eşitlemesi / hata satırları Kavşak günlüğüne (tanı için) */
+/** Baileys iç günlüğü: yalnızca uygulama durumu eşitlemesi / hata satırları Mivelo günlüğüne (tanı için) */
 function baileysLogger(): ReturnType<typeof pino> {
   const stream = {
     write(line: string) {

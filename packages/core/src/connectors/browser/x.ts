@@ -521,7 +521,7 @@ interface ConvRow {
 }
 /** Yerel DB → sohbet listesi (okunmamış = okundu işaretinden sonraki gelen mesaj sayısı, istemcinin kendi kuralı) */
 /**
- * Kavşak'tan okundu işaretlenen sohbetler: konuşma kimliği → işaret anı (ms). Yerel yedek DB (backups/) okundu olayını
+ * Mivelo'dan okundu işaretlenen sohbetler: konuşma kimliği → işaret anı (ms). Yerel yedek DB (backups/) okundu olayını
  * geç yazıyor (sayfada okundu görünse de yedekte last_read_sequence_number eski kalıyor), bu yüzden işaretten önceki
  * gelen mesajlar okunmuş sayılır. Profilin x.com localStorage'ında saklanır (çekirdek yeniden başlasa da geçerli).
  */
@@ -540,7 +540,7 @@ async function saveReadMarks(page: Page): Promise<void> {
   await page.evaluate(([k, v]) => localStorage.setItem(k, v), [READ_KEY, JSON.stringify(Object.fromEntries(readMarks))] as const).catch(() => undefined);
 }
 
-/** Yedekteki okunmamış sayısını Kavşak'ın okundu işaretiyle düzelt (işaretten sonra gelen mesaj yoksa 0) */
+/** Yedekteki okunmamış sayısını Mivelo'nun okundu işaretiyle düzelt (işaretten sonra gelen mesaj yoksa 0) */
 export function applyReadMark(unread: number, lastIncomingTs: number | null, markedAt: number | undefined): number {
   if (!unread || markedAt === undefined) return unread;
   return lastIncomingTs !== null && lastIncomingTs > markedAt ? unread : 0;

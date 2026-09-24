@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
 import { API_BASE, mediaUrl } from './desktop';
-import { DEFAULT_TAGS, PLATFORMS, type Attachment, type Chat, type DraftResult, type Message, type Participant } from './types';
-import { useClosing, Avatar, Chip, Icon, Resizer, Tag, fmtDay, fmtStamp, fmtTime } from './ui';
+import { PLATFORMS, type Attachment, type Chat, type DraftResult, type Message } from './types';
+import { useClosing, Avatar, Chip, Icon, Tag, fmtDay, fmtStamp, fmtTime } from './ui';
 
 type Tone = 'default' | 'short' | 'formal' | 'en';
 
@@ -11,12 +11,8 @@ export function Conversation({
   messages,
   ai,
   notify,
-  onTags,
   onSnooze,
   onComplete,
-  showDetails = true,
-  onToggleDetails,
-  onOpenChat,
   onLoadOlder,
   hasOlder = false,
   olderBusy = false,
@@ -29,15 +25,11 @@ export function Conversation({
   messages: Message[];
   ai: boolean;
   notify: (t: string, err?: boolean) => void;
-  onTags: (tags: string[]) => void;
   onSnooze: () => void;
   onComplete: () => void;
   /** Ertelenmişse ne zamana kadar; geri alma */
   snoozedUntil?: number;
   onUnsnooze?: () => void;
-  showDetails?: boolean;
-  onToggleDetails?: () => void;
-  onOpenChat?: (c: Chat) => void;
   /** Depodaki daha eski mesajları (100'er) yükle */
   onLoadOlder?: () => void | Promise<void>;
   hasOlder?: boolean;
@@ -57,8 +49,6 @@ export function Conversation({
   const [drafting, setDrafting] = useState(false);
   const [sending, setSending] = useState(false);
   const [tone, setTone] = useState<Tone>('default');
-  const [tagInput, setTagInput] = useState('');
-  const [remind, setRemind] = useState(true);
   const [lightbox, setLightbox] = useState<Attachment | null>(null);
   const lightboxP = useClosing(lightbox);
   useEffect(() => setLightbox(null), [chat.id]);
@@ -149,16 +139,6 @@ export function Conversation({
   const groups = useMemo(() => groupMessages(shown), [shown]);
   const lastIncoming = [...messages].reverse().find((m) => !m.fromMe);
   const needsReply = !!lastIncoming && messages[messages.length - 1]?.id === lastIncoming.id;
-  const [mediaOpen, setMediaOpen] = useState(false);
-  const mediaP = useClosing(mediaOpen || null);
-  const detailsP = useClosing(showDetails || null);
-  useEffect(() => setMediaOpen(false), [chat.id]);
-  const allShared = useMemo(() => {
-    const out: Array<{ att: Attachment; m: Message }> = [];
-    for (const m of [...messages].reverse()) for (const att of m.attachments ?? []) out.push({ att, m });
-    return out;
-  }, [messages]);
-  const files = useMemo(() => allShared.slice(0, 4), [allShared]);
 
   async function makeDraft(t: Tone = tone) {
     setTone(t);
@@ -239,11 +219,6 @@ export function Conversation({
           <button className="btn soft b b2" onClick={onComplete} title="Okundu olarak işaretle">
             <Icon name="check" size={15} sw={2} /> <span className="lbl">Tamamla</span> <span className="kbd lbl">E</span>
           </button>
-          {onToggleDetails && !showDetails && (
-            <button className="btn icon b b2" onClick={onToggleDetails} title="Ayrıntı panelini göster" aria-label="Ayrıntı paneli">
-              <Icon name="panel" size={15} />
-            </button>
-          )}
         </header>
         {snoozedUntil && onUnsnooze && (
           <div className="snooze-banner" role="status">
@@ -470,414 +445,18 @@ export function Conversation({
               <Chip platform={chat.platform} size={14} /> {platform.name}
             </span>
             <button className="btn primary b" onClick={send} disabled={sending || !(text.trim() || draft?.draft)} style={{ marginLeft: 6 }}>
-              {sending ? <span className="spin" /> : <Icon name="send" size={15} sw={1.9} />} Gönder <span className="kbd onprimary">↵</span>
+              {sending ? <span className="spin" /> : <Icon name="send" size={15} sw={1.9} />} Gönder
             </button>
           </div>
         </div>
       </section>
 
-      {detailsP.value && (
-      <>
-      <Resizer pane="ctx" sign={-1} />
-      <aside className={`ctx ${detailsP.closing ? 'closing' : ''}`} aria-label="Kişi ayrıntıları">
-        {onToggleDetails && (
-          <button className="btn ghost xs icon b ctx-close" onClick={onToggleDetails} title="Ayrıntı panelini gizle" aria-label="Paneli kapat">
-            <Icon name="panel" size={15} />
-          </button>
-        )}
-        <div className="profile">
-          <span className="avwrap">
-            <Avatar name={chat.name} size={72} url={chat.avatarUrl} />
-            <Chip platform={chat.platform} size={22} ring="#fbfafd" />
-          </span>
-          <span className="name">{chat.name}</span>
-          <span className="sub">
-            {platform.name} · {chat.kind === 'group' ? `grup · ${chat.participants?.length ?? '?'} üye` : chat.kind === 'channel' ? 'kanal' : 'sohbet'}
-          </span>
-          <PlatformFacts chat={chat} />
-        </div>
-        {chat.platform === 'shopier' && chat.meta?.order ? <OrderPanel chat={chat} notify={notify} /> : null}
 
-        <div className="qacts">
-          <button className="b b2" onClick={() => notify('Notlar yakında')}>
-            <Icon name="pen" size={16} /> Not ekle
-          </button>
-          <button className="b b2" onClick={onSnooze}>
-            <Icon name="bell" size={16} /> Hatırlat
-          </button>
-          <button className="b b2" onClick={onComplete}>
-            <Icon name="check" size={16} sw={2} /> Tamamla
-          </button>
-        </div>
-
-        <div>
-          <span className="label">Etiketler</span>
-          <div className="tagedit" style={{ marginTop: 8 }}>
-            {chat.tags.map((t) => (
-              <Tag key={t} name={t} onRemove={() => onTags(chat.tags.filter((x) => x !== t))} />
-            ))}
-            <input
-              placeholder="+ etiket"
-              value={tagInput}
-              onChange={(e) => setTagInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && tagInput.trim()) {
-                  onTags([...new Set([...chat.tags, tagInput.trim().toLowerCase()])]);
-                  setTagInput('');
-                }
-              }}
-            />
-            {DEFAULT_TAGS.filter((t) => !chat.tags.includes(t)).map((t) => (
-              <button key={t} className="tag-suggest b" onClick={() => onTags([...chat.tags, t])} title={`${t} etiketini ekle`}>
-                + {t}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {draft && draft.summary.length > 0 ? (
-          <div className="card violet">
-            <span className="h">
-              <Icon name="sparkle" size={14} color="#6C47FF" sw={2} /> Özet
-              <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text3)', fontWeight: 400 }}>{fmtTime(Date.now())}</span>
-            </span>
-            <ul>
-              {draft.summary.map((s, i) => (
-                <li key={i}>{s}</li>
-              ))}
-            </ul>
-          </div>
-        ) : (
-          <div className="card">
-            <span className="h">
-              <Icon name="sparkle" size={14} color="#6C47FF" sw={2} /> {ai ? 'Özet' : 'AI taslak kapalı'}
-            </span>
-            <span style={{ fontSize: 12.5, color: 'var(--text3)', lineHeight: 1.45 }}>
-              {ai ? '“Taslak yaz” deyince sohbetin özeti ve aksiyonları burada görünür.' : (
-                <>
-                  Çekirdeği <code>ANTHROPIC_API_KEY</code> ile başlatırsan özet, aksiyon ve senin tarzında taslak açılır.
-                </>
-              )}
-            </span>
-          </div>
-        )}
-
-        {draft && draft.actions.length > 0 && (
-          <div>
-            <span className="label">Aksiyonlar</span>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
-              {draft.actions.map((a, i) => (
-                <label key={i} className="todo">
-                  <input type="checkbox" /> <span>{a}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="card" style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <Icon name="bell" size={16} color="#4A4757" />
-          <span style={{ flexGrow: 1, fontSize: 12.5, lineHeight: 1.35 }}>2 gün yanıt yoksa hatırlat</span>
-          <button type="button" role="switch" aria-checked={remind} aria-label="Takip hatırlatıcısı" className={`sw ${remind ? 'on' : ''}`} onClick={() => setRemind(!remind)} disabled title="Yakında">
-            <span />
-          </button>
-        </div>
-
-        {chat.kind === 'group' && (chat.participants?.length ?? 0) > 0 && (
-          <div>
-            <span className="label">Üyeler · {chat.participants!.length}</span>
-            <div className="members">
-              {chat.participants!.map((p) => (
-                <button
-                  key={p.id}
-                  className="member b"
-                  title={onOpenChat && PLATFORMS[chat.platform].mode !== 'mail' ? 'Özelden yaz' : p.handle ?? p.name}
-                  onClick={() => {
-                    if (!onOpenChat) return;
-                    api
-                      .openChat(chat.accountId, p)
-                      .then((c) => onOpenChat(c))
-                      .catch((e) => notify((e as Error).message, true));
-                  }}
-                >
-                  <Avatar name={p.name} size={28} url={p.avatarUrl} />
-                  <span style={{ minWidth: 0 }}>
-                    <span className="nm">
-                      {p.name}
-                      {p.admin && <span className="adm">yönetici</span>}
-                    </span>
-                    {p.handle && p.handle !== p.name && <span className="hd">{p.handle}</span>}
-                  </span>
-                  <Icon name="arrow" size={13} />
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        {chat.kind === 'direct' && chat.participants && chat.participants.length > 1 && PLATFORMS[chat.platform].mode === 'mail' && (
-          <div>
-            <span className="label">Katılımcılar</span>
-            <div className="members">
-              {chat.participants.map((p) => (
-                <div key={p.id} className="member">
-                  <Avatar name={p.name} size={28} url={p.avatarUrl} />
-                  <span style={{ minWidth: 0 }}>
-                    <span className="nm">{p.name}</span>
-                    {p.handle && p.handle !== p.name && <span className="hd">{p.handle}</span>}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-        {files.length > 0 && (
-          <div>
-            <span className="label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              Paylaşılanlar
-              <span style={{ color: 'var(--text3)', fontWeight: 400 }}>{allShared.length}</span>
-              {allShared.length > 4 && (
-                <button className="btn ghost xs icon b" style={{ marginLeft: 'auto', transform: 'rotate(-90deg)' }} onClick={() => setMediaOpen(true)} title={`Tümünü büyük göster (${allShared.length})`} aria-label="Tüm paylaşılanlar">
-                  <Icon name="chev" size={13} sw={2} />
-                </button>
-              )}
-            </span>
-            <div className="files" style={{ marginTop: 8 }}>
-              {files.map(({ att, m }, i) => (
-                <div
-                  key={i}
-                  className="file"
-                  title={att.name}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => {
-                    if (att.url || att.link) setLightbox(att);
-                    else notify('Bu ek indirilemedi (medya kaydı yok)', true);
-                  }}
-                  onKeyDown={(e) => e.key === 'Enter' && (e.currentTarget as HTMLElement).click()}
-                >
-                  <span className="ic" style={att.kind === 'image' || att.kind === 'video' ? { background: 'var(--v-soft)', color: 'var(--v-txt)' } : { background: '#fdecea', color: '#c2261a' }}>
-                    {att.url ? (
-                      <img src={abs(att.url)} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(e) => (e.currentTarget.style.display = 'none')} />
-                    ) : att.kind === 'image' ? (
-                      <Icon name="image" size={15} color="#4526C9" />
-                    ) : att.kind === 'video' ? (
-                      <Icon name="play" size={15} color="#4526C9" />
-                    ) : att.mime?.includes('pdf') ? (
-                      'PDF'
-                    ) : (
-                      <Icon name="file" size={15} color="#C2261A" />
-                    )}
-                  </span>
-                  <span style={{ minWidth: 0 }}>
-                    <span className="nm">{att.name ?? attLabel(att.kind)}</span>
-                    <span className="sz">{att.size ? fmtSize(att.size) : fmtTime(m.ts)}</span>
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </aside>
-      </>
-      )}
-      {mediaP.value && (
-        <div className={`overlay ${mediaP.closing ? 'closing' : ''}`} onClick={() => setMediaOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Paylaşılanlar" style={{ gap: 14 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <h2 style={{ fontSize: 22 }}>Paylaşılanlar</h2>
-              <span className="pill">{allShared.length}</span>
-              <span style={{ fontSize: 12.5, color: 'var(--text3)' }}>Şu ana kadar yüklenen mesajlardaki ekler · {chat.name}</span>
-              <span style={{ flexGrow: 1 }} />
-              <button className="btn icon b b2" onClick={() => setMediaOpen(false)} aria-label="Kapat">
-                <Icon name="x" size={15} sw={2} />
-              </button>
-            </div>
-            <div className="media-grid">
-              {allShared.map(({ att, m }, i) => (
-                <div
-                  key={i}
-                  className="tile"
-                  role="button"
-                  tabIndex={0}
-                  title={att.name}
-                  onClick={() => {
-                    if (att.url || att.link) setLightbox(att);
-                    else notify('Bu ek indirilemedi (medya kaydı yok)', true);
-                  }}
-                  onKeyDown={(e) => e.key === 'Enter' && (e.currentTarget as HTMLElement).click()}
-                >
-                  {att.url ? (
-                    <img src={abs(att.url)} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(e) => (e.currentTarget.style.display = 'none')} />
-                  ) : (
-                    <span className="big">{att.kind === 'video' ? <Icon name="play" size={28} /> : att.mime?.includes('pdf') ? 'PDF' : <Icon name="file" size={28} />}</span>
-                  )}
-                  <span className="cap">
-                    <span className="nm">{att.name ?? attLabel(att.kind)}</span>
-                    <span className="sz">{fmtStamp(m.ts)}{att.size ? ` · ${fmtSize(att.size)}` : ''}</span>
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
       {lightboxP.value && <Lightbox att={lightboxP.value} closing={lightboxP.closing} onClose={() => setLightbox(null)} />}
     </>
   );
 }
 
-interface OrderMeta {
-  id: string;
-  status: string;
-  paymentStatus?: string;
-  dateCreated?: string;
-  currency: string;
-  totals?: { subtotal?: string; shipping?: string; discount?: string; total?: string };
-  note?: string;
-  items: Array<{ title: string; quantity: number; total: string; type?: string; selection?: string[] }>;
-  shipping: { name: string; phone?: string; email?: string; address?: string };
-  fulfillments: Array<{ status: string; company?: string; trackingNumber?: string; trackingUrl?: string; date?: string }>;
-  refunds: Array<{ type: string; status: string; total: string; date?: string }>;
-}
-const CARRIERS: Array<[string, string]> = [
-  ['yurtici', 'Yurtiçi'], ['aras', 'Aras'], ['mng', 'MNG'], ['ptt', 'PTT'], ['surat', 'Sürat'], ['hepsijet', 'HepsiJET'], ['ups', 'UPS'], ['dhl', 'DHL'], ['fedex', 'FedEx'], ['tnt', 'TNT'], ['pts', 'PTS'], ['aramex', 'Aramex'], ['interGlobal', 'InterGlobal'], ['other', 'Diğer'],
-];
-
-/** Shopier sipariş kartı: durum, ürünler, tutar, adres, kargo; kapatma/kargo formu */
-function OrderPanel({ chat, notify }: { chat: Chat; notify: (t: string, err?: boolean) => void }) {
-  const o = chat.meta!.order as OrderMeta;
-  const [company, setCompany] = useState('yurtici');
-  const [tracking, setTracking] = useState('');
-  const [note, setNote] = useState('');
-  const [busy, setBusy] = useState(false);
-  const open = o.status !== 'fulfilled';
-  const digital = o.items.every((i) => i.type === 'digital');
-  const cur = o.currency === 'TRY' ? '₺' : o.currency;
-  const fmt = (v?: string) => (v ? `${String(v).replace('.', ',')} ${cur}` : '—');
-  const submit = () => {
-    setBusy(true);
-    api
-      .action(chat.id, { kind: 'fulfill', productType: digital ? 'digital' : 'physical', shippingCompany: digital ? undefined : company, trackingNumber: digital ? undefined : tracking.trim() || undefined, note: note.trim() || (digital ? 'Dijital teslimat yapıldı' : undefined) })
-      .then(() => notify('Sipariş kapatıldı'))
-      .catch((e) => notify((e as Error).message, true))
-      .finally(() => setBusy(false));
-  };
-  return (
-    <div className="order">
-      <div className="order-head">
-        <span className={`order-status ${open ? 'open' : 'done'}`}>{open ? 'Açık sipariş' : 'Kapatıldı'}</span>
-        <span className="order-total">{fmt(o.totals?.total)}</span>
-      </div>
-      <div className="order-items">
-        {o.items.map((it, i) => (
-          <div key={i} className="order-item">
-            <span className="q">{it.quantity}×</span>
-            <span className="t">
-              {it.title}
-              {it.selection?.length ? <span className="sel"> · {it.selection.join(' / ')}</span> : null}
-            </span>
-            <span className="p">{fmt(it.total)}</span>
-          </div>
-        ))}
-      </div>
-      <div className="order-rows">
-        {o.totals?.shipping && o.totals.shipping !== '0' && o.totals.shipping !== '0.00' ? <Row k="Kargo" v={fmt(o.totals.shipping)} /> : null}
-        {o.totals?.discount && o.totals.discount !== '0' && o.totals.discount !== '0.00' ? <Row k="İndirim" v={'−' + fmt(o.totals.discount)} /> : null}
-        <Row k="Tarih" v={o.dateCreated ? new Date(o.dateCreated).toLocaleString('tr-TR', { dateStyle: 'medium', timeStyle: 'short' }) : '—'} />
-        <Row k="Alıcı" v={o.shipping.name} />
-        {o.shipping.phone ? <Row k="Telefon" v={o.shipping.phone} href={`tel:${o.shipping.phone}`} /> : null}
-        {o.shipping.email ? <Row k="E-posta" v={o.shipping.email} href={`mailto:${o.shipping.email}`} /> : null}
-        {o.shipping.address ? <Row k="Adres" v={o.shipping.address} /> : null}
-        {o.note ? <Row k="Not" v={o.note} /> : null}
-        {o.fulfillments.map((f, i) => (
-          <Row key={i} k={f.status === 'shipped' ? 'Kargo' : 'Gönderi'} v={`${f.company ?? ''}${f.trackingNumber ? ' · ' + f.trackingNumber : ''}`.trim() || (f.status === 'shipped' ? 'gönderildi' : 'hazırlanıyor')} href={f.trackingUrl} />
-        ))}
-        {o.refunds.map((r, i) => (
-          <Row key={'r' + i} k="İade" v={`${r.type === 'full' ? 'tam' : 'kısmi'} ${fmt(r.total)} · ${r.status === 'succeeded' ? 'tamamlandı' : r.status === 'failed' ? 'başarısız' : 'bekliyor'}`} />
-        ))}
-      </div>
-      {open && (
-        <div className="order-form">
-          <span className="label">{digital ? 'Teslim edildi olarak kapat' : 'Kargoya ver ve kapat'}</span>
-          {!digital && (
-            <div style={{ display: 'flex', gap: 6 }}>
-              <select value={company} onChange={(e) => setCompany(e.target.value)}>
-                {CARRIERS.map(([k, n]) => (
-                  <option key={k} value={k}>
-                    {n}
-                  </option>
-                ))}
-              </select>
-              <input value={tracking} onChange={(e) => setTracking(e.target.value)} placeholder="takip no" />
-            </div>
-          )}
-          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={digital ? 'Teslimat notu (zorunlu)' : 'Not (isteğe bağlı)'} />
-          <button className="btn primary sm b b2" disabled={busy || (digital && !note.trim())} onClick={submit}>
-            <Icon name="check" size={14} sw={2} color="#fff" /> {digital ? 'Teslim edildi' : 'Kargoya verildi'}
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-function Row({ k, v, href }: { k: string; v: string; href?: string }) {
-  return (
-    <div className="order-row">
-      <span className="k">{k}</span>
-      {href ? (
-        <a href={href} target="_blank" rel="noreferrer">
-          {v}
-        </a>
-      ) : (
-        <span>{v}</span>
-      )}
-    </div>
-  );
-}
-
-/** Platforma özel kimlik satırı: numara, @kullanıcı, profil bağlantısı, e-posta */
-function PlatformFacts({ chat }: { chat: Chat }) {
-  const p = chat.platform;
-  const items: Array<{ label: string; value: string; href?: string; copy?: boolean }> = [];
-  const other = chat.kind === 'direct' ? chat.participants?.find((x) => x.id !== 'me') : undefined;
-  if (p === 'whatsapp') {
-    if (chat.kind === 'direct') {
-      const num = chat.handle ?? (chat.remoteId.endsWith('@s.whatsapp.net') ? '+' + chat.remoteId.split('@')[0] : undefined);
-      if (num) items.push({ label: 'Numara', value: num, href: `https://wa.me/${num.replace(/\D/g, '')}`, copy: true });
-    }
-  } else if (p === 'instagram' || p === 'x' || p === 'linkedin' || p === 'slack') {
-    if (chat.handle) items.push({ label: 'Kullanıcı', value: chat.handle, href: chat.link });
-    else if (other?.handle) items.push({ label: 'Kullanıcı', value: other.handle });
-  } else if (p === 'telegram') {
-    if (chat.handle) items.push({ label: 'Kullanıcı', value: chat.handle, href: chat.handle.startsWith('@') ? `https://t.me/${chat.handle.slice(1)}` : undefined });
-  } else if (p === 'imessage') {
-    items.push({ label: 'Kimlik', value: chat.remoteId, copy: true });
-  } else if (PLATFORMS[p].mode === 'mail') {
-    if (chat.handle) items.push({ label: 'Gönderen', value: chat.handle, href: `mailto:${chat.handle}`, copy: true });
-  }
-  if (!items.length) return null;
-  return (
-    <div className="facts">
-      {items.map((it) => (
-        <span key={it.label} className="fact">
-          <span className="k">{it.label}</span>
-          {it.href ? (
-            <a href={it.href} target="_blank" rel="noreferrer" title="Aç">
-              {it.value}
-            </a>
-          ) : (
-            <span>{it.value}</span>
-          )}
-          {it.copy && (
-            <button className="b" title="Kopyala" onClick={() => void navigator.clipboard?.writeText(it.value)}>
-              <Icon name="copy" size={12} />
-            </button>
-          )}
-        </span>
-      ))}
-    </div>
-  );
-}
 
 /** Medya penceresi: görsel/video doğrudan, Instagram/X gönderileri gömülü (embed) sayfayla, diğerleri bağlantıyla. */
 function Lightbox({ att, onClose, closing }: { att: Attachment; onClose: () => void; closing?: boolean }) {

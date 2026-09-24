@@ -1,5 +1,7 @@
 import type { Account, Chat, CoreEvent, DraftResult, Message, Platform } from './types';
 import { API_BASE, coreToken } from './desktop';
+import { STATIC_DEMO } from './profile';
+import { connectStaticEvents, staticApi } from './static-demo';
 
 const BASE = API_BASE + '/api';
 
@@ -29,7 +31,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 
 const enc = encodeURIComponent;
 
-export const api = {
+const liveApi = {
   health: () => call<{ ok: boolean; ai: boolean; stats: { unread: number; chats: number } }>('GET', '/health'),
   accounts: () => call<Account[]>('GET', '/accounts'),
   addAccount: (platform: Platform, token?: string) => call<Account>('POST', '/accounts', { platform, token }),
@@ -53,8 +55,11 @@ export const api = {
   search: (q: string) => call<Array<{ message: Message; chat: Chat }>>('GET', `/search?q=${enc(q)}`),
 };
 
+export const api = STATIC_DEMO ? staticApi : liveApi;
+
 /** Sunucudan gelen olay akışı; kopunca kendini yeniden bağlar. */
 export function connectEvents(onEvent: (ev: CoreEvent) => void, onState?: (open: boolean) => void): () => void {
+  if (STATIC_DEMO) return connectStaticEvents(onEvent, onState);
   let ws: WebSocket | undefined;
   let closed = false;
   let timer: number | undefined;
