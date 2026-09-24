@@ -70,16 +70,40 @@ export function Conversation({
     const chatChanged = chatRef.current !== chat.id;
     chatRef.current = chat.id;
     const prepended = !!el && !!firstIdRef.current && first !== firstIdRef.current && messages.some((m) => m.id === firstIdRef.current);
-    if (chatChanged || (lastIdRef.current === undefined && last !== undefined)) endRef.current?.scrollIntoView({ block: 'end' });
-    else if (prepended && el) el.scrollTop += el.scrollHeight - heightRef.current;
-    else if (el && last !== lastIdRef.current) {
-      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 240;
-      if (nearBottom) endRef.current?.scrollIntoView({ block: 'end' });
-    }
+    if (chatChanged || (lastIdRef.current === undefined && last !== undefined)) {
+      stickRef.current = true;
+      endRef.current?.scrollIntoView({ block: 'end' });
+    } else if (prepended && el) el.scrollTop += el.scrollHeight - heightRef.current;
+    else if (el && last !== lastIdRef.current && stickRef.current) endRef.current?.scrollIntoView({ block: 'end' });
     firstIdRef.current = first;
     lastIdRef.current = last;
     heightRef.current = el?.scrollHeight ?? 0;
   }, [messages, chat.id]);
+
+  // Alta yapışma: kullanıcı en alttayken sonradan yüklenen foto/video/önizlemeler içeriği uzatınca görünüm yukarıda
+  // kalmasın (Instagram'da sohbet açılınca "yukarı atma" hissi buydu). Kullanıcı yukarı kaydırınca yapışma bırakılır.
+  const stickRef = useRef(true);
+  useEffect(() => {
+    const el = msgsRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      heightRef.current = el.scrollHeight;
+    };
+    // medya yüklenmesi (load olayları kabarcıklanmaz; yakalama evresinde dinlenir)
+    const onMediaLoad = () => {
+      if (stickRef.current) el.scrollTop = el.scrollHeight;
+      heightRef.current = el.scrollHeight;
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    el.addEventListener('load', onMediaLoad, true);
+    el.addEventListener('loadedmetadata', onMediaLoad, true);
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      el.removeEventListener('load', onMediaLoad, true);
+      el.removeEventListener('loadedmetadata', onMediaLoad, true);
+    };
+  }, [chat.id]);
 
   const shown = useMemo(() => {
     const q = (search ?? '').trim().toLocaleLowerCase('tr-TR');
