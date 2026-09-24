@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
+import os from 'node:os';
+import QRCode from 'qrcode';
 import { DATA_DIR } from './config.js';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Store } from './store.js';
@@ -52,15 +54,49 @@ const LOCAL_ORIGIN = /^(https?:\/\/(localhost|127\.0\.0\.1|tauri\.localhost)(:\d
 // fbsbx.com: Instagram/Messenger sesli mesaj ve dosyaları; giphy/tenor: DM GIF'leri
 const MEDIA_HOSTS = /(^|\.)(twimg\.com|twitter\.com|x\.com|cdninstagram\.com|fbcdn\.net|fbsbx\.com|facebook\.com|messenger\.com|licdn\.com|linkedin\.com|slack-edge\.com|slack-files\.com|files\.slack\.com|whatsapp\.net|telegram\.org|shopier\.com|giphy\.com|tenor\.com|mail\.google\.com|googleusercontent\.com)$/i;
 
+/** ~/.kavsak/settings.json: { lan: boolean } — telefondan (aynı Wi‑Fi) erişim */
+const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
+function readSettings(): { lan?: boolean } {
+  try {
+    return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) as { lan?: boolean };
+  } catch {
+    return {};
+  }
+}
+/** Bu Mac'in yerel ağ IPv4 adresleri (Wi‑Fi/Ethernet) */
+function lanAddresses(): string[] {
+  const out: string[] = [];
+  for (const list of Object.values(os.networkInterfaces())) for (const i of list ?? []) if (i.family === 'IPv4' && !i.internal) out.push(i.address);
+  return out;
+}
+const isLoopback = (addr: string | undefined) => !addr || addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
+
 export function createServer(store: Store, registry: Registry, port: number): http.Server {
   const token = loadToken();
-  /** Origin yoksa (curl, aynı süreç) ya da yerel origin ise serbest; diğer her origin (null dahil) belirteç ister */
+  let lanEnabled = !!readSettings().lan;
+  const givenToken = (req: http.IncomingMessage): string => {
+    const u = new URL(req.url ?? '/', 'http://x');
+    return (req.headers['x-kavsak-token'] as string | undefined) ?? u.searchParams.get('token') ?? '';
+  };
+  /**
+   * Yerel (loopback) istemci: Origin yoksa ya da yerel origin ise serbest; diğer origin'ler (null dahil) belirteç ister.
+   * Uzak istemci (telefon): yalnızca LAN modu açıksa ve belirteç doğruysa.
+   */
   const authorized = (req: http.IncomingMessage): boolean => {
+    if (!isLoopback(req.socket.remoteAddress)) {
+      if (!lanEnabled) return false;
+      // arayüz dosyaları (index, assets) belirteçsiz inebilir; veri (/api, /ws) belirteç ister
+      const p = new URL(req.url ?? '/', 'http://x').pathname;
+      if (req.method === 'GET' && !p.startsWith('/api/') && p !== '/ws') return true;
+      return givenToken(req) === token;
+    }
     const origin = req.headers.origin;
     if (!origin || LOCAL_ORIGIN.test(origin)) return true;
-    const u = new URL(req.url ?? '/', 'http://x');
-    const given = (req.headers['x-kavsak-token'] as string | undefined) ?? u.searchParams.get('token') ?? '';
-    return given === token;
+    return givenToken(req) === token;
+  };
+  const lanInfo = async () => {
+    const urls = lanAddresses().map((ip) => `http://${ip}:${port}/?token=${token}`);
+    return { enabled: lanEnabled, urls, qr: urls[0] ? await QRCode.toDataURL(urls[0], { margin: 1, width: 220 }) : undefined };
   };
   // Bekleyen QR kodları: arayüz sonradan açılsa da eşleşme ekranı boş kalmasın
   const pendingQr = new Map<string, string>();
@@ -168,6 +204,14 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     return result;
   });
   route('GET', '/api/logs', () => bus.recent.slice(-200));
+  // Telefondan erişim (aynı Wi‑Fi): bağlantı + QR; açma/kapama
+  route('GET', '/api/lan', () => lanInfo());
+  route('POST', '/api/lan', async (_r, _s, _p, body) => {
+    lanEnabled = !!(body as { enabled?: boolean }).enabled;
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify({ ...readSettings(), lan: lanEnabled }), { mode: 0o600 });
+    bus.log('info', lanEnabled ? `Telefondan erişim açıldı: ${lanAddresses().map((ip) => `http://${ip}:${port}`).join(', ')}` : 'Telefondan erişim kapatıldı');
+    return lanInfo();
+  });
   route('GET', '/api/search', (req) => {
     const q = new URL(req.url ?? '/', 'http://x').searchParams.get('q') ?? '';
     return q.trim() ? store.search(q) : [];
@@ -175,7 +219,8 @@ export function createServer(store: Store, registry: Registry, port: number): ht
 
   // ---------- static (derlenmiş arayüz varsa) ----------
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const distDir = [path.resolve(here, '../../../apps/web/dist'), path.resolve(here, '../../apps/web/dist')].find((d) => fs.existsSync(d));
+  // derlenmiş arayüz: geliştirmede apps/web/dist, paketli uygulamada Resources/core/web (bundle-core.mjs kopyalar)
+  const distDir = [path.resolve(here, '../web'), path.resolve(here, '../../web'), path.resolve(here, '../../../apps/web/dist'), path.resolve(here, '../../apps/web/dist')].find((d) => fs.existsSync(path.join(d, 'index.html')));
 
   const server = http.createServer(async (req, res) => {
     const origin = req.headers.origin;
@@ -260,7 +305,8 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   });
   server.on('close', unsub);
 
-  server.listen(port, '127.0.0.1', () => bus.log('info', `Yerel API hazır: http://127.0.0.1:${port}  (ws: /ws)`));
+  // 0.0.0.0: telefondan erişim için; uzak istemciler yalnızca LAN modu + belirteçle geçer (authorized)
+  server.listen(port, '0.0.0.0', () => bus.log('info', `Yerel API hazır: http://127.0.0.1:${port}  (ws: /ws)${lanEnabled ? ' · telefondan: ' + lanAddresses().map((ip) => `http://${ip}:${port}`).join(', ') : ''}`));
   return server;
 }
 

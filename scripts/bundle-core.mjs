@@ -24,6 +24,10 @@ if (!fs.existsSync(path.join(coreDir, 'dist', 'index.js'))) {
 fs.rmSync(path.join(out, 'dist'), { recursive: true, force: true });
 fs.mkdirSync(out, { recursive: true });
 fs.cpSync(path.join(coreDir, 'dist'), path.join(out, 'dist'), { recursive: true });
+// derlenmiş arayüz: çekirdek bunu http://<ip>:7788/ altında sunar (telefondan erişim)
+const webDist = path.join(root, 'apps', 'web', 'dist');
+fs.rmSync(path.join(out, 'web'), { recursive: true, force: true });
+if (fs.existsSync(webDist)) fs.cpSync(webDist, path.join(out, 'web'), { recursive: true });
 
 const bundlePkg = { name: 'kavsak-core-bundle', version: pkg.version, private: true, type: 'module', main: 'dist/index.js', dependencies: pkg.dependencies };
 const pkgPath = path.join(out, 'package.json');

@@ -37,6 +37,17 @@ export default function App() {
   const [olderBusy, setOlderBusy] = useState(false);
   const [noMoreOlder, setNoMoreOlder] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [lan, setLanState] = useState<{ enabled: boolean; urls: string[]; qr?: string } | null>(null);
+  useEffect(() => {
+    if (settingsOpen) api.lan().then(setLanState).catch(() => setLanState(null));
+  }, [settingsOpen]);
+  // Dar ekran (telefon): sol menü gizli, liste ↔ sohbet tek sütun
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 820);
+  useEffect(() => {
+    const on = () => setIsMobile(window.innerWidth < 820);
+    window.addEventListener('resize', on);
+    return () => window.removeEventListener('resize', on);
+  }, []);
   const [booting, setBooting] = useState(false);
   const [sound, setSoundState] = useState<string>(() => getSound());
   const changeSound = (id: string) => {
@@ -460,7 +471,7 @@ export default function App() {
   };
 
   return (
-    <div className={`app ${isTauri ? 'tauri' : ''}`}>
+    <div className={`app ${isTauri ? 'tauri' : ''} ${isMobile ? 'mobile' : ''} ${isMobile && selected ? 'm-conv' : ''}`}>
       <nav className="sidebar" aria-label="Ana menü">
         <div className="brand" data-tauri-drag-region>
           <Logo />
@@ -568,6 +579,24 @@ export default function App() {
                 </button>
               ))}
             </div>
+            <div className="section-head" style={{ margin: '10px 0 6px' }}>
+              <span className="label">Telefondan erişim</span>
+            </div>
+            <label className="row-toggle">
+              <span>Aynı Wi‑Fi'daki telefondan aç</span>
+              <input type="checkbox" checked={!!lan?.enabled} onChange={(e) => api.setLan(e.target.checked).then(setLanState).catch((err) => notify(err.message, true))} />
+            </label>
+            {lan?.enabled && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: 'var(--text2)' }}>
+                {lan.qr && <img src={lan.qr} alt="Bağlantı QR kodu" style={{ width: 150, height: 150, borderRadius: 10, border: '1px solid var(--line)', background: '#fff' }} />}
+                {lan.urls.map((u) => (
+                  <code key={u} style={{ fontSize: 11, wordBreak: 'break-all', userSelect: 'all' }}>
+                    {u}
+                  </code>
+                ))}
+                <span style={{ color: 'var(--text3)' }}>Bağlantı gizli bir anahtar içerir; yalnızca kendi cihazlarına ver. Mac uyurken erişim durur.</span>
+              </div>
+            )}
             <div className="section-head" style={{ margin: '10px 0 6px' }}>
               <span className="label">Görünüm</span>
             </div>
@@ -745,8 +774,9 @@ export default function App() {
                 onSnooze={() => snooze(current.id)}
                 onComplete={() => complete(current.id)}
                 onTags={(tags) => api.setTags(current.id, tags).then((c) => setChats((p) => new Map(p).set(c.id, c))).catch((e) => notify(e.message, true))}
-                showDetails={showDetails}
+                showDetails={isMobile ? false : showDetails}
                 onToggleDetails={() => setShowDetails(!showDetails)}
+                onBack={isMobile ? () => setSelected(null) : undefined}
                 olderBusy={olderBusy}
                 hasOlder={noMoreOlder !== current.id}
                 onLoadOlder={async () => {

@@ -9,7 +9,21 @@ export const API_BASE = isTauri ? 'http://127.0.0.1:7788' : '';
 
 /** Çekirdek API belirteci: paketli uygulamada Tauri komutundan okunur (çekirdek 1-3 sn geç kalkabilir; birkaç kez dene). */
 export const coreToken: Promise<string> = (async () => {
-  if (!isTauri) return '';
+  if (!isTauri) {
+    // Telefondan erişim: bağlantı ?token=… ile gelir; sakla ve adresten temizle
+    try {
+      const u = new URL(location.href);
+      const t = u.searchParams.get('token');
+      if (t) {
+        localStorage.setItem('kavsak.token', t);
+        u.searchParams.delete('token');
+        history.replaceState(null, '', u.pathname + (u.search || '') + u.hash);
+      }
+      return localStorage.getItem('kavsak.token') ?? '';
+    } catch {
+      return '';
+    }
+  }
   try {
     const { invoke } = await import('@tauri-apps/api/core');
     for (let i = 0; i < 30; i++) {

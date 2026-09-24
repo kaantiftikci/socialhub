@@ -45,6 +45,8 @@ export const api = {
   draft: (chatId: string, tone?: string) => call<DraftResult>('POST', `/chats/${enc(chatId)}/draft`, { tone }),
   openChat: (accountId: string, participant: { id: string; name: string; handle?: string; avatarUrl?: string }) => call<Chat>('POST', '/chats/open', { accountId, participant }),
   action: (chatId: string, payload: Record<string, unknown>) => call<Chat>('POST', `/chats/${enc(chatId)}/action`, payload),
+  lan: () => call<{ enabled: boolean; urls: string[]; qr?: string }>('GET', '/lan'),
+  setLan: (enabled: boolean) => call<{ enabled: boolean; urls: string[]; qr?: string }>('POST', '/lan', { enabled }),
   logs: () => call<Array<{ ts: number; level: 'info' | 'warn' | 'error'; text: string }>>('GET', '/logs'),
   search: (q: string) => call<Array<{ message: Message; chat: Chat }>>('GET', `/search?q=${enc(q)}`),
 };

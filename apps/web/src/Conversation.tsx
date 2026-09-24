@@ -20,6 +20,7 @@ export function Conversation({
   onLoadOlder,
   hasOlder = false,
   olderBusy = false,
+  onBack,
 }: {
   chat: Chat;
   messages: Message[];
@@ -35,6 +36,8 @@ export function Conversation({
   onLoadOlder?: () => void | Promise<void>;
   hasOlder?: boolean;
   olderBusy?: boolean;
+  /** Dar ekranda listeye dön */
+  onBack?: () => void;
 }) {
   const [search, setSearch] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -138,6 +141,11 @@ export function Conversation({
     <>
       <section className="conv" aria-label="Konuşma">
         <header className="conv-head">
+          {onBack && (
+            <button className="btn icon b b2" onClick={onBack} aria-label="Listeye dön" title="Listeye dön" style={{ transform: 'rotate(90deg)' }}>
+              <Icon name="chev" size={15} sw={2} />
+            </button>
+          )}
           <span className="avwrap">
             <Avatar name={chat.name} size={40} url={chat.avatarUrl} />
           </span>

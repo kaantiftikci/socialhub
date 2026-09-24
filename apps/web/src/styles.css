@@ -169,6 +169,14 @@ button:focus-visible, a:focus-visible, .sw:focus-visible { outline: 2px solid va
 @container (max-width: 760px) { .conv-head .lbl { display: none; } .conv-head .btn:not(.icon) { width: 34px; padding: 0; } }
 @container (max-width: 560px) { .conv-head .sub { display: none; } }
 .tabs { flex-wrap: wrap; }
+/* Telefon: sol menü gizli, liste tam genişlik; sohbet seçilince sohbet tam ekran */
+.app.mobile .sidebar, .app.mobile .resizer, .app.mobile .ctx { display: none; }
+.app.mobile .list { width: 100%; flex-grow: 1; border-right: 0; }
+.app.mobile .conv { display: none; }
+.app.mobile.m-conv .list { display: none; }
+.app.mobile.m-conv .conv { display: flex; width: 100%; }
+.app.mobile .hints { display: none; }
+@media (max-width: 820px) { html, body { min-width: 0; } .app { min-width: 0; } }
 .conv-head { height: 68px; flex-shrink: 0; padding: 0 16px 0 20px; border-bottom: 1px solid var(--line2); display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; }
 .conv-head > div { min-width: 60px; }
 .conv-head h2 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -.3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; max-width: 100%; }
