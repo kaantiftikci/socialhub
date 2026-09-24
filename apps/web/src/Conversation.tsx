@@ -75,12 +75,17 @@ export function Conversation({
   const noteKey = `kavsak.note.${chat.id}`;
   const [chatNote, setChatNote] = useState('');
   const [noteOpen, setNoteOpen] = useState(false);
+  /** düzenleme taslağı: Kaydet'e basılmadan yazılmaz */
+  const [noteDraft, setNoteDraft] = useState('');
   useEffect(() => {
+    let v = '';
     try {
-      setChatNote(localStorage.getItem(noteKey) ?? '');
+      v = localStorage.getItem(noteKey) ?? '';
     } catch {
-      setChatNote('');
+      /* yok */
     }
+    setChatNote(v);
+    setNoteDraft(v);
     setNoteOpen(false);
   }, [noteKey]);
   const saveNote = (v: string) => {
@@ -530,7 +535,7 @@ export function Conversation({
         {chat.platform === 'shopier' && chat.meta?.order ? <OrderPanel chat={chat} notify={notify} /> : null}
 
         <div className="qacts">
-          <button className={`b b2 ${noteOpen || chatNote ? 'go' : ''}`} onClick={() => setNoteOpen((v) => !v)}>
+          <button className={`b b2 ${noteOpen || chatNote ? 'go' : ''}`} onClick={() => (setNoteDraft(chatNote), setNoteOpen((v) => !v))}>
             <Icon name="pen" size={16} /> {chatNote ? 'Notu düzenle' : 'Not ekle'}
           </button>
           <button className="b b2" onClick={onSnooze}>
@@ -544,17 +549,24 @@ export function Conversation({
               <Icon name="pen" size={13} sw={2} /> Not <span className="hint" style={{ marginLeft: 'auto' }}>yalnızca bu cihazda</span>
             </span>
             {noteOpen ? (
-              <textarea
-                autoFocus
-                value={chatNote}
-                onChange={(e) => saveNote(e.target.value)}
-                onBlur={() => setNoteOpen(false)}
-                onKeyDown={(e) => e.key === 'Escape' && setNoteOpen(false)}
-                placeholder="Bu kişi/sohbet hakkında not…"
-                rows={4}
-              />
+              <>
+                <textarea autoFocus value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} placeholder="Bu kişi/sohbet hakkında not…" rows={4} />
+                <div className="note-actions">
+                  <button className="btn primary sm b b2" onClick={() => (saveNote(noteDraft), setNoteOpen(false), notify(noteDraft.trim() ? 'Not kaydedildi' : 'Not silindi'))}>
+                    <Icon name="check" size={13} sw={2} /> Kaydet
+                  </button>
+                  <button className="btn sm b b2" onClick={() => (setNoteDraft(chatNote), setNoteOpen(false))}>
+                    Kapat
+                  </button>
+                  {chatNote && (
+                    <button className="btn ghost sm b b2" style={{ marginLeft: 'auto' }} onClick={() => (saveNote(''), setNoteDraft(''), setNoteOpen(false), notify('Not silindi'))}>
+                      <Icon name="trash" size={13} /> Sil
+                    </button>
+                  )}
+                </div>
+              </>
             ) : (
-              <div className="note-text" onClick={() => setNoteOpen(true)}>
+              <div className="note-text" onClick={() => (setNoteDraft(chatNote), setNoteOpen(true))}>
                 {chatNote}
               </div>
             )}
