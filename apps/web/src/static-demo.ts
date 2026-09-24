@@ -65,6 +65,7 @@ function seed(): void {
         tags: s.tags,
         handle: s.handle,
         avatarUrl: `/demo/avatars/${s.avatar}`,
+        meta: s.summary?.length || s.note ? { ...(s.summary?.length ? { summary: s.summary } : {}), ...(s.note ? { note: s.note } : {}) } : undefined,
         participants: s.handle && PLATFORMS[acc.platform].category === 'mail' ? [{ id: s.handle, name: s.handle.split('@')[0] ?? s.handle, handle: s.handle, avatarUrl: `/demo/avatars/${s.avatar}` }] : undefined,
       });
     });

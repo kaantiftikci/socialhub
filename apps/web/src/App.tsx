@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, connectEvents } from './api';
 import { PLATFORMS, type Account, type Chat, type CoreEvent, type Message, type Platform, DEFAULT_TAGS } from './types';
 import { Avatar, Chip, Icon, Logo, Resizer, SyncBar, Tag, ago, fmtTime, loadPaneSizes, useClosing } from './ui';
-import { Conversation } from './Conversation';
+import { Conversation, startScheduledSends } from './Conversation';
 import { ConnectModal } from './Connect';
 import { Focus } from './Focus';
 import { isTauri, notify as desktopNotify, onDesktopEvent, playPing, SOUNDS, getPlatformSound, getPlatformTone, setPlatformSound, setPlatformTone, setBadge, windowFocused, coreInfo } from './desktop';
@@ -449,7 +449,7 @@ export default function App() {
   }, [activeChats, inboxChats, filter, platformFilter, tagFilter, query, smartSort, imFolder, tgArchive]);
 
   /** Boş liste metni: hangi sekme/filtre boşsa ona göre anlamlı bir açıklama */
-  const emptyText = imFolder || tgArchive ? 'Bu klasörde sohbet yok.' : query.trim() ? 'Aramayla eşleşen sohbet yok.' : filter === 'unread' && platformFilter !== 'imessage' ? 'Okunmamış sohbet yok.' : filter === 'waiting' && platformFilter !== 'imessage' ? 'Yanıt bekleyen sohbet yok.' : tagFilter ? 'Bu etikette sohbet yok.' : platformFilter ? 'Bu kanalda henüz sohbet yok.' : 'Bu filtreye uyan sohbet yok.';
+  const emptyText = imFolder || tgArchive ? 'Bu klasörde sohbet yok.' : query.trim() ? 'Aramayla eşleşen sohbet yok.' : filter === 'unread' && platformFilter !== 'imessage' ? 'Okunmamış sohbet yok.' : tagFilter ? 'Bu etikette sohbet yok.' : platformFilter ? 'Bu kanalda henüz sohbet yok.' : 'Bu filtreye uyan sohbet yok.';
 
   const totals = useMemo(() => {
     let unread = 0;
@@ -459,14 +459,12 @@ export default function App() {
   /** Başlıktaki "N yeni": yalnızca görüntülenen kapsam (platform/etiket) */
   const scoped = useMemo(() => {
     let unread = 0;
-    let waiting = 0;
     for (const c of inboxChats) {
       if (platformFilter && c.platform !== platformFilter) continue;
       if (tagFilter && !c.tags.includes(tagFilter)) continue;
       unread += countable(c);
-      if (isWaiting(c)) waiting++;
     }
-    return { unread, waiting };
+    return { unread };
   }, [inboxChats, platformFilter, tagFilter]);
 
   const perPlatform = useMemo(() => {
@@ -482,6 +480,9 @@ export default function App() {
   }, [allChats]);
 
   // ---- masaüstü ----
+  useEffect(() => {
+    startScheduledSends();
+  }, []);
   useEffect(() => {
     void setBadge(Math.min(totals.unread, 999));
     if (!isTauri && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => undefined);
@@ -876,17 +877,16 @@ export default function App() {
                 )}
                 {view === 'inbox' && (
                   <div className="tabs" role="tablist" aria-label={platformFilter === 'imessage' ? 'Mesajlar klasörleri' : 'Filtreler'}>
-                    {/* iMessage: Okunmamış/Bekleyen yerine Mesajlar uygulamasındaki klasörler */}
-                    {(platformFilter === 'imessage' ? (['all'] as Filter[]) : (['all', 'unread', 'waiting'] as Filter[])).map((f) => (
+                    {/* iMessage: Okunmamış yerine Mesajlar uygulamasındaki klasörler */}
+                    {(platformFilter === 'imessage' ? (['all'] as Filter[]) : (['all', 'unread'] as Filter[])).map((f) => (
                       <button key={f} role="tab" aria-selected={filter === f && !imFolder} className={filter === f && !imFolder ? 'active' : ''} onClick={() => (setFilter(f), setImFolder(null))}>
-                        {f === 'all' ? (platformFilter === 'imessage' ? 'Mesajlar' : 'Tümü') : f === 'unread' ? 'Okunmamış ' : 'Bekleyen '}
+                        {f === 'all' ? (platformFilter === 'imessage' ? 'Mesajlar' : 'Tümü') : 'Okunmamış '}
                         {f === 'unread' && scoped.unread > 0 && <span className="c">{fmtCount(scoped.unread)}</span>}
-                        {f === 'waiting' && scoped.waiting > 0 && <span className="c amber">{scoped.waiting}</span>}
                       </button>
                     ))}
                     {platformFilter === 'imessage' &&
-                      ([['unknown', 'Bilinmeyen gönderenler'], ['junk', 'İstenmeyen'], ['deleted', 'Son silinenler']] as Array<[typeof imFolder, string]>).map(([fo, label]) => (
-                        <button key={String(fo)} role="tab" aria-selected={imFolder === fo} className={imFolder === fo ? 'active' : ''} onClick={() => (setImFolder(fo), setFilter('all'))}>
+                      ([['unknown', 'Bilinmeyen', 'Bilinmeyen gönderenler'], ['junk', 'İstenmeyen', 'İstenmeyen'], ['deleted', 'Silinenler', 'Son silinenler']] as Array<[typeof imFolder, string, string]>).map(([fo, label, title]) => (
+                        <button key={String(fo)} role="tab" title={title} aria-selected={imFolder === fo} className={imFolder === fo ? 'active' : ''} onClick={() => (setImFolder(fo), setFilter('all'))}>
                           {label}
                         </button>
                       ))}

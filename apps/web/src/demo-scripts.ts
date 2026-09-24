@@ -11,6 +11,10 @@ export interface Script {
   handle?: string;
   /** public/demo/avatars içindeki dosya adı */
   avatar: string;
+  /** Sağ paneldeki Özet kutusu için örnek maddeler */
+  summary?: string[];
+  /** Sağ paneldeki Not kartı */
+  note?: string;
   lines: Line[];
 }
 
@@ -914,6 +918,72 @@ for (const platform of Object.keys(SCRIPTS) as Platform[]) {
   const used = new Set(have.map((s) => s.remoteId));
   const need = PER_APP - have.length;
   if (need > 0) SCRIPTS[platform] = [...have, ...extraScripts(platform, used).slice(0, need)];
+}
+
+/** Bazı profillerde sağ panel Özet kutusu dolu gelsin. */
+const SAMPLE_SUMMARY: Partial<Record<Platform, Record<string, string[]>>> = {
+  whatsapp: {
+    ayse: ['4821 numaralı sipariş bugün Yurtiçi ile çıkacak, kapıcıya bırakılmayacak.', 'Kurumsal e-fatura yarın kesilecek; unvan Demir Studio.', 'Takip numarası kargo sisteme düşünce iletilecek.'],
+    ekip: ['Bu hafta 31 sipariş, keten seride KETEN15 kuponu var.', 'Kampanya maili yarın 10:00’da çıkacak; son okuma sende.', 'Stok tablosu ve kare görsel ekte.'],
+  },
+  telegram: {
+    can: ['Webhook imzası zorunlu; imzasız istek 401 dönüyor.', 'Saat farkı toleransı beş dakika.', 'Doğrulama bu gece staging’e basılacak, sabah 09:30 bakılacak.'],
+  },
+  slack: {
+    mert: ['Çift çekim sabah kapatıldı, tutar iade edildi.', 'Müşteriye dönüşü Mert yazacak.', 'Kargo gecikme şablonu akşama doldurulacak.'],
+  },
+  instagram: {
+    selin: ['Keten seri için üç hikâye ve bir reels; yayın 18 Ekim.', 'Ürünler çarşamba S ve M olarak kargolanacak.', 'Kapak karesi yayın öncesi onaya sunulacak.'],
+  },
+  gmail: {
+    fatura: ['Eylül faturası 1.250 TL; ek depolama 12–18 Eylül.', 'Döküm uyuyor, ödeme cuma.', 'Dekont bu yazışmaya eklenecek.'],
+  },
+  shopier: {
+    elif: ['4821 siparişte beden M’den S’e çevrildi, henüz paketlenmemişti.', 'Fatura bireysel kalacak, kargo yarın öğleden önce.', 'Kapıcıya bırakılmaması notu düşüldü.'],
+  },
+  trendyol: {
+    'soru-kalip': ['Keten elbise kalıbı regular; 170 cm / 62 kg için 38 önerildi.', 'Keten kırışır, nemli ütüyle düzelir.', 'Müşteri siparişi bu akşam geçecek.'],
+  },
+  etsy: {
+    lina: ['Kolye altın kaplama; duşta, parfümden sonra ve denizde çıkarılmalı.', '5 cm zincir uzatma onaylandı, ücretsiz.', 'Yarın kargoya verilecek.'],
+  },
+  amazon: {
+    'alici-kargo': ['405-8821943 yanlış adrese bırakılmış, kutu müşteriye ulaşmadı.', 'Yeni paket bugün çıkıyor, eskisini aramasına gerek yok.', 'Bu sefer kapıya teslim, görevliye bırakılmayacak.'],
+  },
+};
+for (const platform of Object.keys(SAMPLE_SUMMARY) as Platform[]) {
+  const map = SAMPLE_SUMMARY[platform] ?? {};
+  for (const s of SCRIPTS[platform] ?? []) if (map[s.remoteId]) s.summary = map[s.remoteId];
+}
+
+/** Bazı profillerde kayıtlı not görünsün. */
+const SAMPLE_NOTE: Partial<Record<Platform, Record<string, string>>> = {
+  whatsapp: {
+    ayse: 'Kurumsal fatura: Demir Studio. Kapıcıya bırakılmasın. Takip kodunu çıkınca yaz.',
+  },
+  slack: {
+    mert: 'İade dekontu iletildi. Kargo gecikme şablonunu akşam hatırlat.',
+  },
+  gmail: {
+    fatura: 'Ödeme cuma. Dekont gelince bu kaydı kapat.',
+  },
+  shopier: {
+    elif: 'Beden S’e çevrildi. Fatura bireysel. Yarın Yurtiçi, kapıcıya yok.',
+    kerem: 'Kupa çatlak geldi. İade seçti; karta 3 iş günü, kargo ücretsiz.',
+  },
+  trendyol: {
+    'soru-kargo': '1042931 bugün 16:00’ya kadar Trendyol Express ile çıkacak. Adres Ankara, Çankaya.',
+  },
+  etsy: {
+    lina: '5 cm zincir uzatma onaylı. Duş ve deniz uyarısı verildi.',
+  },
+  amazon: {
+    'alici-kargo': 'Yanlış adrese bırakılmış. Yeni paket bugün, bu sefer kapıya teslim.',
+  },
+};
+for (const platform of Object.keys(SAMPLE_NOTE) as Platform[]) {
+  const map = SAMPLE_NOTE[platform] ?? {};
+  for (const s of SCRIPTS[platform] ?? []) if (map[s.remoteId]) s.note = map[s.remoteId];
 }
 
 /** Kanal satırındaki bildirim: her uygulamada başka bir toplam. Kanallar sayıma girmez. */

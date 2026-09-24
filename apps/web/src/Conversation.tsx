@@ -6,6 +6,87 @@ import { useClosing, Avatar, Chip, Icon, Resizer, Tag, fmtDay, fmtStamp, fmtTime
 
 type Tone = 'default' | 'short' | 'formal' | 'en';
 
+interface ScheduledSend {
+  id: string;
+  chatId: string;
+  text: string;
+  at: number;
+}
+
+const SCHED_KEY = 'kavsak.scheduled';
+let schedTimer = 0;
+const schedListeners = new Set<() => void>();
+
+function readScheduled(): ScheduledSend[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SCHED_KEY) || '[]') as ScheduledSend[];
+    return Array.isArray(raw) ? raw.filter((x) => x && typeof x.at === 'number' && typeof x.text === 'string' && typeof x.chatId === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function emitScheduled(): void {
+  for (const fn of schedListeners) fn();
+}
+
+/** Bekleyen zamanlanmış gönderileri kurar. Uygulama açıkken süresi gelenin mesajını yollar. */
+export function startScheduledSends(): void {
+  window.clearTimeout(schedTimer);
+  const next = readScheduled().sort((a, b) => a.at - b.at)[0];
+  if (!next) return;
+  const wait = Math.max(0, next.at - Date.now());
+  schedTimer = window.setTimeout(() => void flushScheduled(), Math.min(wait, 2_000_000_000));
+}
+
+async function flushScheduled(): Promise<void> {
+  const now = Date.now();
+  const all = readScheduled();
+  const due = all.filter((s) => s.at <= now);
+  let rest = all.filter((s) => s.at > now);
+  for (const s of due) {
+    try {
+      await api.send(s.chatId, s.text);
+    } catch {
+      rest = [...rest, { ...s, at: Date.now() + 60_000 }];
+    }
+  }
+  try {
+    localStorage.setItem(SCHED_KEY, JSON.stringify(rest));
+  } catch {
+    /* yok */
+  }
+  emitScheduled();
+  startScheduledSends();
+}
+
+function queueScheduled(item: ScheduledSend): void {
+  try {
+    localStorage.setItem(SCHED_KEY, JSON.stringify([...readScheduled(), item]));
+  } catch {
+    /* yok */
+  }
+  emitScheduled();
+  startScheduledSends();
+}
+
+function cancelScheduled(id: string): void {
+  try {
+    localStorage.setItem(SCHED_KEY, JSON.stringify(readScheduled().filter((s) => s.id !== id)));
+  } catch {
+    /* yok */
+  }
+  emitScheduled();
+  startScheduledSends();
+}
+
+function tomorrowAt(hour: number): number {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setHours(hour, 0, 0, 0);
+  return d.getTime();
+}
+
 export function Conversation({
   chat,
   messages,
@@ -69,35 +150,92 @@ export function Conversation({
   const heightRef = useRef(0);
   const platform = PLATFORMS[chat.platform];
   const role = profileRole(chat);
+  const sampleSummary = Array.isArray(chat.meta?.summary) ? chat.meta.summary.filter((x): x is string => typeof x === 'string') : [];
+  const summary = draft && draft.summary.length > 0 ? draft.summary : sampleSummary;
   /** E-posta kanalları: balon yerine ileti kartları ve e-posta yanıt alanı */
   const isMail = platform.category === 'mail';
   /** Sohbet notu: hızlı ve yerel (localStorage, sohbet kimliğine göre); sohbet değişince yeniden okunur */
   const noteKey = `kavsak.note.${chat.id}`;
+  const sampleNote = typeof chat.meta?.note === 'string' ? chat.meta.note : '';
   const [chatNote, setChatNote] = useState('');
   const [noteOpen, setNoteOpen] = useState(false);
   /** düzenleme taslağı: Kaydet'e basılmadan yazılmaz */
   const [noteDraft, setNoteDraft] = useState('');
   useEffect(() => {
-    let v = '';
+    let v = sampleNote;
     try {
-      v = localStorage.getItem(noteKey) ?? '';
+      const stored = localStorage.getItem(noteKey);
+      if (stored !== null) v = stored;
     } catch {
       /* yok */
     }
     setChatNote(v);
     setNoteDraft(v);
     setNoteOpen(false);
-  }, [noteKey]);
+  }, [noteKey, sampleNote]);
   const saveNote = (v: string) => {
     setChatNote(v);
     try {
-      if (v.trim()) localStorage.setItem(noteKey, v);
-      else localStorage.removeItem(noteKey);
+      localStorage.setItem(noteKey, v.trim() ? v : '');
     } catch {
       /* yok */
     }
   };
   const [uploading, setUploading] = useState<string | null>(null);
+  /** Seçilen ek: hemen gönderilmez, kompozörde önizleme olarak bekler; Gönder ile (açıklama = yazılan metin) gider */
+  const [pending, setPending] = useState<{ file: File; url?: string } | null>(null);
+  const pickFile = (f: File) => {
+    if (f.size > 50 * 1024 * 1024) return notify('Dosya 50 MB\'tan büyük', true);
+    setPending((prev) => {
+      if (prev?.url) URL.revokeObjectURL(prev.url);
+      return { file: f, url: f.type.startsWith('image/') || f.type.startsWith('video/') ? URL.createObjectURL(f) : undefined };
+    });
+  };
+  const clearPending = () => {
+    setPending((prev) => {
+      if (prev?.url) URL.revokeObjectURL(prev.url);
+      return null;
+    });
+  };
+  useEffect(() => () => clearPending(), [chat.id]); // sohbet değişince bekleyen ek atılır
+  const [schedOpen, setSchedOpen] = useState(false);
+  const [schedWhen, setSchedWhen] = useState('');
+  const [queued, setQueued] = useState<ScheduledSend[]>([]);
+  const schedRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const sync = () => setQueued(readScheduled().filter((s) => s.chatId === chat.id).sort((a, b) => a.at - b.at));
+    schedListeners.add(sync);
+    sync();
+    startScheduledSends();
+    return () => {
+      schedListeners.delete(sync);
+    };
+  }, [chat.id]);
+  useEffect(() => setSchedOpen(false), [chat.id]);
+  useEffect(() => {
+    if (!schedOpen) return;
+    const close = (e: MouseEvent) => {
+      if (!schedRef.current?.contains(e.target as Node)) setSchedOpen(false);
+    };
+    window.addEventListener('mousedown', close);
+    return () => window.removeEventListener('mousedown', close);
+  }, [schedOpen]);
+  function queueAt(at: number) {
+    const body = (text || draft?.draft || '').trim();
+    if (!body) {
+      notify('Zamanlamak için bir mesaj yaz');
+      return;
+    }
+    if (!Number.isFinite(at) || at <= Date.now()) {
+      notify('Gelecek bir saat seç', true);
+      return;
+    }
+    queueScheduled({ id: crypto.randomUUID(), chatId: chat.id, text: body, at });
+    setText('');
+    setDraft(null);
+    setSchedOpen(false);
+    notify(`${fmtStamp(at)} tarihinde gönderilecek`);
+  }
   async function sendFile(file: File) {
     if (file.size > 50 * 1024 * 1024) return notify('Dosya 50 MB\'tan büyük', true);
     setUploading(file.name);
@@ -199,6 +337,13 @@ export function Conversation({
   }
 
   async function send() {
+    if (pending) {
+      if (sending || uploading) return;
+      const f = pending.file;
+      clearPending();
+      await sendFile(f);
+      return;
+    }
     const body = (text || draft?.draft || '').trim();
     if (!body || sending) return;
     setSending(true);
@@ -473,35 +618,75 @@ export function Conversation({
               </button>
             </div>
           )}
+          {pending && (
+            <div className="pend-att">
+              {pending.url && pending.file.type.startsWith('image/') ? (
+                <img src={pending.url} alt={pending.file.name} />
+              ) : pending.url ? (
+                <video src={pending.url} muted playsInline />
+              ) : (
+                <span className="pend-file">
+                  <Icon name="file" size={16} />
+                </span>
+              )}
+              <span className="pend-meta">
+                <b>{pending.file.name}</b>
+                <span>{fmtSize(pending.file.size)} · Gönder ile gider; yazdığın metin açıklama olur</span>
+              </span>
+              <button className="btn ghost xs icon b" onClick={clearPending} aria-label="Eki kaldır" title="Eki kaldır">
+                <Icon name="x" size={13} sw={2} />
+              </button>
+            </div>
+          )}
           {draft && !text.trim() && <div className="ghost-draft">{draft.draft}</div>}
           <textarea
             rows={2}
             value={text}
-            placeholder={draft ? 'Taslağı kabul etmek için Tab, düzenlemek için yazmaya başla' : chat.platform === 'shopier' ? 'Siparişe yerel not ekle (Shopier alıcıya mesaj ucu sunmuyor)…' : isMail ? 'Yanıtını yaz… (Enter gönderir, Shift+Enter yeni satır)' : `${chat.name.length > 40 ? chat.name.slice(0, 38) + '…' : chat.name} için mesaj yaz…`}
+            placeholder={pending ? 'Açıklama ekle (isteğe bağlı) ve Gönder' : draft ? 'Taslağı kabul etmek için Tab, düzenlemek için yazmaya başla' : chat.platform === 'shopier' ? 'Siparişe yerel not ekle (Shopier alıcıya mesaj ucu sunmuyor)…' : isMail ? 'Yanıtını yaz… (Enter gönderir, Shift+Enter yeni satır)' : `${chat.name.length > 40 ? chat.name.slice(0, 38) + '…' : chat.name} için mesaj yaz…`}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKey}
             style={draft && !text.trim() ? { minHeight: 28, paddingTop: 0 } : undefined}
           />
+          {queued.length > 0 && (
+            <div className="sched-list">
+              {queued.map((s) => (
+                <div key={s.id} className="sched-row">
+                  <Icon name="calendar" size={14} />
+                  <span>{fmtStamp(s.at)} · {s.text}</span>
+                  <button className="btn ghost xs b" onClick={() => (cancelScheduled(s.id), notify('Zamanlama iptal edildi'))}>Vazgeç</button>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="comp-bottom">
             <label className="btn ghost sm icon b" aria-label="Fotoğraf, video veya dosya ekle" title="Fotoğraf / video / dosya gönder" style={{ cursor: uploading ? 'progress' : 'pointer' }}>
               <Icon name="link" size={16} />
-              <input type="file" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.txt" style={{ display: 'none' }} disabled={!!uploading} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void sendFile(f); }} />
+              <input type="file" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.txt" style={{ display: 'none' }} disabled={!!uploading} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) pickFile(f); }} />
             </label>
             {uploading && <span className="hint">{uploading} gönderiliyor…</span>}
-            <button className="btn ghost sm icon b" aria-label="Zamanla gönder" title="Yakında">
-              <Icon name="calendar" size={16} />
-            </button>
+            <div className="sched" ref={schedRef}>
+              <button className={`btn ghost sm icon b ${schedOpen ? 'soft' : ''}`} aria-label="Zamanla gönder" title="Zamanla gönder" aria-expanded={schedOpen} onClick={() => setSchedOpen((v) => !v)}>
+                <Icon name="calendar" size={16} />
+              </button>
+              {schedOpen && (
+                <div className="sched-pop" role="dialog" aria-label="Gönderim zamanı">
+                  <button className="b" onClick={() => queueAt(Date.now() + 3_600_000)}>1 saat sonra</button>
+                  <button className="b" onClick={() => queueAt(tomorrowAt(9))}>Yarın 09:00</button>
+                  <label>
+                    <input type="datetime-local" value={schedWhen} onChange={(e) => setSchedWhen(e.target.value)} />
+                    <button className="b" onClick={() => queueAt(new Date(schedWhen).getTime())}>Ayarla</button>
+                  </label>
+                </div>
+              )}
+            </div>
             <span style={{ flexGrow: 1 }} />
             {draft && !text.trim() && (
               <span className="hint">
                 <span className="kbd">Tab</span> kabul et
               </span>
             )}
-            <span className="btn sm" style={{ gap: 6 }}>
-              <Chip platform={chat.platform} size={14} /> {platform.name}
-            </span>
-            <button className="btn primary b" onClick={send} disabled={sending || !(text.trim() || draft?.draft)} style={{ marginLeft: 6 }}>
-              {sending ? <span className="spin" /> : <Icon name="send" size={15} sw={1.9} />} Gönder
+            <button className="btn primary b" onClick={send} disabled={sending || !!uploading || !(pending || text.trim() || draft?.draft)}>
+              {sending || uploading ? <span className="spin" /> : <Icon name="send" size={15} sw={1.9} />} Gönder
             </button>
           </div>
         </div>
@@ -546,7 +731,7 @@ export function Conversation({
         {(noteOpen || chatNote) && (
           <div className="card ctx-note">
             <span className="h">
-              <Icon name="pen" size={13} sw={2} /> Not <span className="hint" style={{ marginLeft: 'auto' }}>yalnızca bu cihazda</span>
+              <Icon name="pen" size={13} sw={2} /> Not
             </span>
             {noteOpen ? (
               <>
@@ -579,9 +764,9 @@ export function Conversation({
             Özet
             {draft && draft.summary.length > 0 && <span className="when">{fmtTime(Date.now())}</span>}
           </span>
-          {draft && draft.summary.length > 0 ? (
+          {summary.length > 0 ? (
             <ul>
-              {draft.summary.map((s, i) => (
+              {summary.map((s, i) => (
                 <li key={i}>{s}</li>
               ))}
             </ul>
