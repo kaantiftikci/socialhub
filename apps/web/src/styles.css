@@ -55,11 +55,9 @@ button:focus-visible, a:focus-visible, .sw:focus-visible { outline: 2px solid va
 .sidebar .btn.connect-app {
   position: relative;
   overflow: hidden;
-  width: auto; /* tam genişlik değil: gezinme satırlarının metniyle aynı sol hizada, kompakt */
-  align-self: flex-start;
-  margin-left: 10px;
+  width: 100%;
   height: 36px; /* gelen kutusu satırıyla aynı boy */
-  padding: 0 16px;
+  padding: 0 10px;
   border-radius: 11px;
   font-size: 13px;
   font-weight: 600;
