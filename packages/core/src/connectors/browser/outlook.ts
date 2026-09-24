@@ -262,7 +262,8 @@ export const outlook: Strategy = {
         let email = '';
         try {
           email = pick(localStorage.getItem('olk-login_hint'));
-          for (let i = 0; !email && i < localStorage.length; i++) email = pick(localStorage.key(i));
+          // anahtar adları "olk-…Enabled_adres" biçiminde: adresin önündeki ön ek atılır
+          for (let i = 0; !email && i < localStorage.length; i++) email = pick(localStorage.key(i)).replace(/^.*_/, '');
         } catch {
           /* yok */
         }
