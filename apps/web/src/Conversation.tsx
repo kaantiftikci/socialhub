@@ -187,21 +187,18 @@ export function Conversation({
         )}
 
         <div className="msgs" ref={msgsRef}>
-          {messages.length > 0 && !search && hasOlder && (
+          {!search && hasOlder && onLoadOlder && (
             <div style={{ display: 'flex', justifyContent: 'center', margin: '4px 0 6px' }}>
-              <button
-                className="btn xs b b2"
-                disabled={olderBusy}
-                onClick={() => void onLoadOlder?.()}
-              >
-                <Icon name="history" size={13} /> {olderBusy ? 'Yükleniyor…' : 'Daha eski mesajlar'}
+              <button className="btn xs b b2" disabled={olderBusy} onClick={() => void onLoadOlder()} aria-busy={olderBusy}>
+                {olderBusy ? <span className="spin" style={{ width: 12, height: 12 }} /> : <Icon name="history" size={13} />}{' '}
+                {olderBusy ? 'Yükleniyor…' : messages.length > 0 ? 'Daha eski mesajlar' : 'Geçmişi platformdan yükle'}
               </button>
             </div>
           )}
           {messages.length === 0 && (
             <div className="empty">
-              Bu sohbette henüz mesaj yok.
-              {chat.unread > 0 && (
+              {olderBusy ? 'Mesajlar yükleniyor…' : 'Bu sohbette henüz mesaj yok.'}
+              {!olderBusy && chat.unread > 0 && (
                 <>
                   <br />
                   <span style={{ fontSize: 12 }}>Platform mesajları vermedi (X’te şifreli sohbetler bu uçlardan okunamaz).</span>
@@ -223,35 +220,9 @@ export function Conversation({
                   {g.items.map((m, i) => (
                     <div key={m.id} className={`bub ${g.items.length === 1 ? 'first last' : i === 0 ? 'first' : i === g.items.length - 1 ? 'last' : 'mid'}`}>
                       {m.text}
-                      {m.attachments?.map((a, j) =>
-                        a.kind === 'audio' && a.link ? (
-                          <span key={j} className="att-audio">
-                            <Icon name="mic" size={14} />
-                            <audio src={abs(a.link)} controls preload="metadata" />
-                          </span>
-                        ) : a.url || (a.kind === 'video' && a.link) ? (
-                          <button key={j} className="att-card b" onClick={() => setLightbox(a)} title="Aç">
-                            {a.url ? (
-                              <img src={abs(a.url)} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(e) => (e.currentTarget.style.display = 'none')} />
-                            ) : (
-                              <span className="att-blank">
-                                <Icon name="play" size={28} color="#fff" />
-                              </span>
-                            )}
-                            <span className="att-cap">
-                              <Icon name={a.kind === 'video' ? 'play' : a.kind === 'image' ? 'image' : 'link'} size={13} />
-                              {a.name ?? attLabel(a.kind)}
-                              {a.link && !isMediaFile(a.link) ? <Icon name="external" size={12} /> : null}
-                            </span>
-                          </button>
-                        ) : (
-                          <a key={j} className="att" href={abs(a.link)} target={a.link ? '_blank' : undefined} rel="noreferrer" download={a.kind === 'file' && isMediaFile(a.link) ? a.name ?? true : undefined} style={{ textDecoration: 'none' }}>
-                            <Icon name={a.kind === 'image' ? 'image' : a.kind === 'audio' ? 'mic' : 'file'} size={14} />
-                            {a.name ?? attLabel(a.kind)}
-                            {a.size ? <span style={{ opacity: 0.7 }}> · {fmtSize(a.size)}</span> : null}
-                          </a>
-                        ),
-                      )}
+                      {m.attachments?.map((a, j) => (
+                        <AttachmentView key={j} a={a} onOpen={setLightbox} />
+                      ))}
                     </div>
                   ))}
                   <span className="meta">
@@ -770,8 +741,10 @@ function Lightbox({ att, onClose }: { att: Attachment; onClose: () => void }) {
           </div>
         ) : embed ? (
           <iframe src={embed} title={att.name ?? 'Gönderi'} allow="autoplay; encrypted-media; picture-in-picture" />
-        ) : att.url ? (
-          <img src={abs(att.url)} alt={att.name ?? ''} referrerPolicy="no-referrer" />
+        ) : att.url || (att.kind === 'image' && link && isFile) ? (
+          <img src={att.kind === 'image' && link && (isImageFile(att.link) || !att.url) ? link : abs(att.url)} alt={att.name ?? ''} referrerPolicy="no-referrer" />
+        ) : link ? (
+          <div style={{ padding: 28, color: '#fff', fontSize: 13 }}>Önizleme yok — dosyayı aşağıdan indir.</div>
         ) : null}
         <div className="bar">
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexGrow: 1 }}>{att.name ?? attLabel(att.kind)}</span>
@@ -843,8 +816,91 @@ function statusLabel(s: Message['status']) {
 function abs(u?: string): string | undefined {
   return u && u.startsWith('/') ? API_BASE + u : u;
 }
+/** Doğrudan oynatılabilir/indirilebilir dosya mı (vekil yolu ya da bilinen uzantı) — sayfa bağlantısı değil */
 function isMediaFile(u?: string): boolean {
-  return !!u && (u.startsWith('/api/media/') || /\.(mp4|webm|mov)(\?|$)/i.test(u));
+  // X/Twitter CDN'i uzantı yerine "?format=jpg" kullanır; o da dosya sayılır
+  return !!u && (u.startsWith('/api/media/') || /\.(mp4|webm|mov|m4v|jpe?g|png|gif|webp|mp3|m4a|ogg|opus|wav|pdf)(\?|$)/i.test(u) || /[?&]format=(jpe?g|png|webp|gif|mp4)(&|$)/i.test(u));
+}
+function isImageFile(u?: string): boolean {
+  return !!u && /\.(jpe?g|png|gif|webp)(\?|$)/i.test(u);
+}
+/** http(s) sayfa bağlantısı (Instagram/X/LinkedIn gönderisi gibi): yeni sekmede açılır, medya değil */
+function isPageLink(u?: string): boolean {
+  return !!u && /^https?:\/\//i.test(u) && !isMediaFile(u);
+}
+
+/**
+ * Mesaj balonundaki ek:
+ * - audio → <audio controls> (link)
+ * - video (dosya) → <video controls> (link, url poster)
+ * - sayfa bağlantısı (Instagram gönderisi vb.) → önizleme görseli + yeni sekmede aç
+ * - image → <img> (url), tıklayınca büyük pencere
+ * - file/other → indirme bağlantısı (yeni sekme)
+ */
+function AttachmentView({ a, onOpen }: { a: Attachment; onOpen: (a: Attachment) => void }) {
+  const link = abs(a.link);
+  const url = abs(a.url);
+  const hideOnError = (e: React.SyntheticEvent<HTMLImageElement>) => (e.currentTarget.style.display = 'none');
+  if (a.kind === 'audio' && link) {
+    return (
+      <span className="att-audio">
+        <Icon name="mic" size={14} />
+        <audio src={link} controls preload="metadata" />
+      </span>
+    );
+  }
+  if (a.kind === 'video' && link && isMediaFile(a.link)) {
+    return (
+      <span className="att-card att-video">
+        <video src={link} poster={url} controls preload="metadata" playsInline />
+        <span className="att-cap">
+          <Icon name="play" size={13} />
+          {a.name ?? attLabel(a.kind)}
+          <a href={link} target="_blank" rel="noreferrer" download={a.name ?? true} title="İndir" aria-label="Videoyu indir" style={{ marginLeft: 'auto', display: 'inline-flex', color: 'inherit' }}>
+            <Icon name="external" size={12} />
+          </a>
+        </span>
+      </span>
+    );
+  }
+  const page = a.page ?? (isPageLink(a.link) ? a.link : undefined);
+  if (page) {
+    return (
+      <a className="att-card b" href={page} target="_blank" rel="noreferrer" title="Gönderiyi tarayıcıda aç">
+        {url ? (
+          <img src={url} alt="" loading="lazy" referrerPolicy="no-referrer" onError={hideOnError} />
+        ) : (
+          <span className="att-blank">
+            <Icon name={a.kind === 'video' ? 'play' : 'link'} size={28} color="#fff" />
+          </span>
+        )}
+        <span className="att-cap">
+          <Icon name={a.kind === 'video' ? 'play' : a.kind === 'image' ? 'image' : 'link'} size={13} />
+          {a.name ?? attLabel(a.kind)}
+          <Icon name="external" size={12} />
+        </span>
+      </a>
+    );
+  }
+  if (url) {
+    return (
+      <button type="button" className="att-card b" onClick={() => onOpen(a)} title="Büyüt">
+        <img src={url} alt="" loading="lazy" referrerPolicy="no-referrer" onError={hideOnError} />
+        <span className="att-cap">
+          <Icon name={a.kind === 'video' ? 'play' : 'image'} size={13} />
+          {a.name ?? attLabel(a.kind)}
+        </span>
+      </button>
+    );
+  }
+  return (
+    <a className="att" href={link} target={link ? '_blank' : undefined} rel="noreferrer" download={link && isMediaFile(a.link) ? a.name ?? true : undefined} style={{ textDecoration: 'none' }} title={link ? 'İndir' : undefined}>
+      <Icon name={a.kind === 'image' ? 'image' : a.kind === 'audio' ? 'mic' : a.kind === 'video' ? 'play' : 'file'} size={14} />
+      {a.name ?? attLabel(a.kind)}
+      {a.size ? <span style={{ opacity: 0.7 }}> · {fmtSize(a.size)}</span> : null}
+      {link ? <Icon name="external" size={12} /> : null}
+    </a>
+  );
 }
 
 function attLabel(k: string) {

@@ -92,6 +92,11 @@ export class Store {
       this.db.exec("DELETE FROM messages WHERE chat_id LIKE 'messenger:%'");
       this.setFlag('fix_messenger_ts_v1');
     }
+    // X: eski sürüm /i/chat DOM'undan okuduğu mesajları 'xc-<uuid>' kimliği ve yanlış zamanla kaydetmişti; bir kez temizle
+    if (!this.flag('fix_x_xc_v1')) {
+      this.db.exec("DELETE FROM messages WHERE remote_id LIKE 'xc-%' AND chat_id IN (SELECT id FROM chats WHERE platform = 'x')");
+      this.setFlag('fix_x_xc_v1');
+    }
     // Onarım: tarayıcı kanallarında sohbet zamanı olarak yoklama saati yazılmıştı; mesajı olan sohbetleri son mesaj zamanına çek
     this.db.exec(`UPDATE chats SET last_message_at = (SELECT MAX(ts) FROM messages m WHERE m.chat_id = chats.id)
       WHERE platform IN ('messenger','x','instagram','linkedin','slack')

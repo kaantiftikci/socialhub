@@ -1,12 +1,19 @@
+import os from 'node:os';
+import path from 'node:path';
+import fs from 'node:fs';
+import Database from 'better-sqlite3';
 import type { Page } from 'playwright';
 import type { Msg, Strategy, Thread } from './bridge.js';
-import type { Attachment } from '../../model.js';
+import type { Attachment, Participant } from '../../model.js';
 import { bus } from '../../bus.js';
 
 /**
- * X (Twitter): web istemcisinin 1.1 DM uçları. Not: X, Kasım 2025'te uçtan uca şifreli
- * "Chat"e geçti; şifreli sohbetler bu uçlarla okunamaz, yalnızca şifrelenmemiş (legacy) DM'ler gelir.
- * Bu connector "deneysel" olarak işaretlidir.
+ * X (Twitter). Kasım 2025'ten beri sohbetler uçtan uca şifreli "XChat" (/i/chat). Sunucu yalnızca
+ * şifreli olay akışı verir; web istemcisi bunları tarayıcıda çözüp OPFS içindeki bir SQLite
+ * veritabanına yazar (backups/chat_<kimlik>.db). Kaynaklar, öncelik sırasıyla:
+ *  1) Yerel XChat veritabanı (sayfa bağlamından okunur): sohbet listesi, okunmamış sayısı, son mesajlar — tam ve hızlı.
+ *  2) Eski 1.1 DM uçları: XChat öncesi (donuk) birebir yazışma geçmişi.
+ *  3) /i/chat DOM'u: veritabanında olmayan daha eski XChat mesajları (sayfa yukarı kaydırılarak) ve DB yoksa yedek.
  */
 type J = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 const BEARER = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
@@ -130,105 +137,652 @@ function fromEntries(entries: J[], convId?: string): Msg[] {
         senderId: sid,
         senderName: users.get(sid) ?? 'X kullanıcısı',
         senderAvatarUrl: avatars.get(sid),
-        attachments,
+        attachments: attachments.length ? attachments : undefined,
       };
     });
 }
 
 const CHAT = 'https://x.com/i/chat';
 const TR_MONTHS: Record<string, number> = { oca: 0, şub: 1, mar: 2, nis: 3, may: 4, haz: 5, tem: 6, ağu: 7, eyl: 8, eki: 9, kas: 10, ara: 11, jan: 0, feb: 1, apr: 3, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
-/** "3 g", "1 ha", "12 dk", "2 sa", "5 ay" → yaklaşık zaman damgası */
-function fromRelative(rel: string): number {
-  const m = rel.trim().match(/^(\d+)\s*(dk|sa|g|ha|ay|y|m|h|d|w|mo)$/i);
-  if (!m) return 0;
-  const n = Number(m[1]);
-  const unit = m[2].toLowerCase();
-  const ms = unit === 'dk' || unit === 'm' ? 60e3 : unit === 'sa' || unit === 'h' ? 3600e3 : unit === 'g' || unit === 'd' ? 86400e3 : unit === 'ha' || unit === 'w' ? 7 * 86400e3 : unit === 'ay' || unit === 'mo' ? 30 * 86400e3 : 365 * 86400e3;
-  return Date.now() - n * ms;
-}
-/** "15 Eyl Sal, 21:47" / "15 Eyl 2025 Sal, 21:47" → gün başlangıcı; saat ayrıca alınır */
+const WEEKDAYS: Record<string, number> = { pazar: 0, pazartesi: 1, salı: 2, çarşamba: 3, perşembe: 4, cuma: 5, cumartesi: 6, sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6 };
+/**
+ * XChat gün ayırıcısı → mesaj zamanı (ms). Görülen biçimler: "15 Eyl Sal, 21:47", "13 Oca 2023, 3:59",
+ * "Cumartesi 22:16", "Bugün 10:05", "Dün 9:44". Ayırıcıdaki saat, o gruptaki ilk mesajın saatidir.
+ */
 function parseDayLabel(label: string): number | undefined {
-  const m = label.match(/(\d{1,2})\s+([A-Za-zÇĞİÖŞÜçğıöşü]{3})\w*\.?\s*(\d{4})?/);
+  const s = label.trim();
+  const tm = s.match(/(\d{1,2}):(\d{2})$/);
+  if (!tm) return undefined;
+  const hm = Number(tm[1]) * 3600e3 + Number(tm[2]) * 60e3;
+  const head = s.slice(0, tm.index).replace(/[,\s]+$/, '');
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const lower = head.toLocaleLowerCase('tr');
+  if (/^(bugün|today)$/.test(lower)) return today + hm;
+  if (/^(dün|yesterday)$/.test(lower)) return today - 86400e3 + hm;
+  if (WEEKDAYS[lower] !== undefined) {
+    const back = (now.getDay() - WEEKDAYS[lower] + 7) % 7 || 7; // bugünse geçen hafta değil: bugün "Bugün" yazılır
+    return today - back * 86400e3 + hm;
+  }
+  const m = head.match(/^(\d{1,2})\s+([A-Za-zÇĞİÖŞÜçğıöşü]{3})\w*\.?(?:\s+(\d{4}))?/);
   if (!m) return undefined;
   const mon = TR_MONTHS[m[2].toLocaleLowerCase('tr')];
   if (mon === undefined) return undefined;
-  const now = new Date();
   let d = new Date(m[3] ? Number(m[3]) : now.getFullYear(), mon, Number(m[1]));
   if (!m[3] && d.getTime() > now.getTime() + 86400e3) d = new Date(now.getFullYear() - 1, mon, Number(m[1]));
-  return d.getTime();
+  return d.getTime() + hm;
 }
-/** Önceki yoklamada görülen DOM önizlemesi: değiştiyse sohbet "yeni etkinlik" sayılır */
-const domPreview = new Map<string, string>();
-void fromRelative;
+const DAY_LABEL = /^(?:\d{1,2}\s+\S+(?:\s+\d{4})?(?:\s+\S+)?|Bugün|Dün|Today|Yesterday|Pazartesi|Salı|Çarşamba|Perşembe|Cuma|Cumartesi|Pazar|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+\d{1,2}:\d{2}$/;
+/** Twitter snowflake: id → ms ve tersi (1.1 ucunda max_id ile eski mesaj sayfalama) */
+const SNOWFLAKE_EPOCH = 1288834974657n;
+const snowflakeFromMs = (ms: number) => String((BigInt(Math.max(0, Math.floor(ms))) - SNOWFLAKE_EPOCH) << 22n);
 /** 1.1 ucunda bulunmayan (yalnızca XChat) sohbetler */
 const apiMissing = new Set<string>();
+/** Önceki yoklamada görülen DOM önizlemesi (DB yoksa yedek yol): değiştiyse sohbet "yeni etkinlik" sayılır */
+const domPreview = new Map<string, string>();
 
-async function domInbox(page: Page): Promise<Array<{ id: string; name: string; preview: string; rel: string }>> {
+// ───────────────────────── Kodlayıcılar: CBOR (yerel DB içerikleri) ve Thrift (GraphQL olayları) ─────────────────────────
+type CborValue = unknown;
+/** Küçük CBOR çözücü: yerel veritabanındaki `contents` sütunları ([tipAdı, yük] çiftleri, sonsuz uzunluklu dizi/harita). */
+function cbor(buf: Buffer): CborValue {
+  let p = 0;
+  const arg = (ai: number): number | bigint | undefined => {
+    if (ai < 24) return ai;
+    if (ai === 24) return buf[p++];
+    if (ai === 25) { const v = buf.readUInt16BE(p); p += 2; return v; }
+    if (ai === 26) { const v = buf.readUInt32BE(p); p += 4; return v; }
+    if (ai === 27) { const v = buf.readBigUInt64BE(p); p += 8; return v <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(v) : v; }
+    return undefined; // 31: sonsuz uzunluk
+  };
+  const item = (): CborValue => {
+    const ib = buf[p++];
+    const mt = ib >> 5;
+    const ai = ib & 31;
+    switch (mt) {
+      case 0: return arg(ai);
+      case 1: { const v = arg(ai); return typeof v === 'bigint' ? -1n - v : -1 - (v as number); }
+      case 2: { const n = Number(arg(ai)); const s = buf.subarray(p, p + n); p += n; return s; }
+      case 3: {
+        if (ai === 31) { let s = ''; while (buf[p] !== 0xff) s += String(item()); p++; return s; }
+        const n = Number(arg(ai)); const s = buf.toString('utf8', p, p + n); p += n; return s;
+      }
+      case 4: {
+        const out: CborValue[] = [];
+        if (ai === 31) { while (buf[p] !== 0xff) out.push(item()); p++; } else { const n = Number(arg(ai)); for (let i = 0; i < n; i++) out.push(item()); }
+        return out;
+      }
+      case 5: {
+        const out: Record<string, CborValue> = {};
+        if (ai === 31) { while (buf[p] !== 0xff) { const k = item(); out[String(k)] = item(); } p++; } else { const n = Number(arg(ai)); for (let i = 0; i < n; i++) { const k = item(); out[String(k)] = item(); } }
+        return out;
+      }
+      case 6: arg(ai); return item(); // etiket
+      default: {
+        if (ai === 20) return false;
+        if (ai === 21) return true;
+        if (ai === 22 || ai === 23) return null;
+        if (ai === 25) { p += 2; return undefined; }
+        if (ai === 26) { const v = buf.readFloatBE(p); p += 4; return v; }
+        if (ai === 27) { const v = buf.readDoubleBE(p); p += 8; return v; }
+        return undefined;
+      }
+    }
+  };
+  try { return item(); } catch { return undefined; }
+}
+/** [tipAdı, yük] biçimindeki çokbiçimli CBOR değerini ayır */
+function typed(v: CborValue): { type: string; payload: J } | undefined {
+  if (Array.isArray(v) && typeof v[0] === 'string' && v[1] && typeof v[1] === 'object') return { type: v[0], payload: v[1] as J };
+  return undefined;
+}
+/** Apache Thrift ikili yapı → {alanNo: değer}; şifreli XChat olaylarının üst verisi (kimlik, gönderen, zaman) düz metindir. */
+function thrift(buf: Buffer): Record<number, unknown> | undefined {
+  let p = 0;
+  const val = (t: number): unknown => {
+    switch (t) {
+      case 2: return buf[p++] !== 0;
+      case 3: return buf[p++];
+      case 4: { const v = buf.readDoubleBE(p); p += 8; return v; }
+      case 6: { const v = buf.readInt16BE(p); p += 2; return v; }
+      case 8: { const v = buf.readInt32BE(p); p += 4; return v; }
+      case 10: { const v = buf.readBigInt64BE(p); p += 8; return v; }
+      case 11: { const n = buf.readInt32BE(p); p += 4; const s = buf.subarray(p, p + n); p += n; const txt = s.toString('utf8'); return /^[\x20-\x7e]*$/.test(txt) ? txt : s; }
+      case 12: return struct();
+      case 13: { const kt = buf[p++]; const vt = buf[p++]; const n = buf.readInt32BE(p); p += 4; const m: Record<string, unknown> = {}; for (let i = 0; i < n; i++) { const k = val(kt); m[String(k)] = val(vt); } return m; }
+      case 14: case 15: { const et = buf[p++]; const n = buf.readInt32BE(p); p += 4; const a: unknown[] = []; for (let i = 0; i < n; i++) a.push(val(et)); return a; }
+      default: throw new Error('thrift tip ' + t);
+    }
+  };
+  const struct = (): Record<number, unknown> => { const o: Record<number, unknown> = {}; for (;;) { const t = buf[p++]; if (t === 0 || t === undefined) return o; const id = buf.readInt16BE(p); p += 2; o[id] = val(t); } };
+  try { return struct(); } catch { return undefined; }
+}
+
+// ───────────────────────── XChat üst verisi: sayfanın kendi GraphQL yanıtlarından ─────────────────────────
+/** mesaj uuid → {sıra no, zaman, gönderen}: şifreli olayların düz üst verisi (eski mesajlar kaydırınca gelir) */
+const meta = new Map<string, { seq: string; ts: number; sender: string }>();
+const hooked = new WeakSet<Page>();
+function hookMeta(page: Page): void {
+  if (hooked.has(page)) return;
+  hooked.add(page);
+  page.on('response', (r) => {
+    if (!/\/graphql\/[^/]+\/(GetConversationPageQuery|GetInitialXChatPageQuery)/.test(r.url())) return;
+    void r
+      .json()
+      .then((j: J) => {
+        const evs: unknown[] = j?.data?.get_conversation_page?.encoded_message_events ?? j?.data?.get_initial_chat_page?.encoded_message_events ?? [];
+        for (const e of evs) {
+          if (typeof e !== 'string') continue;
+          const o = thrift(Buffer.from(e, 'base64'));
+          if (!o || typeof o[2] !== 'string' || typeof o[6] !== 'string') continue;
+          meta.set(String(o[2]).toLowerCase(), { seq: String(o[1] ?? ''), ts: Number(o[6]), sender: String(o[3] ?? '') });
+        }
+      })
+      .catch(() => undefined);
+  });
+}
+
+// ───────────────────────── Yerel XChat veritabanı (OPFS backups/chat_<kimlik>.db) ─────────────────────────
+let snap: { db: Database.Database; at: number; mtime: number; file: string; me: string } | undefined;
+/**
+ * OPFS'teki yedek DB dosyasını sayfa bağlamından okuyup (base64) geçici dosyaya yazar ve salt okunur açar.
+ * Profilde birden çok hesabın yedeği olabilir (chat_<kimlik>.db): kendi kimliğimizinki tercih edilir.
+ * Yedek son okumadan beri değişmediyse (lastModified aynı) yeniden aktarılmaz.
+ */
+async function readSnapshot(page: Page): Promise<boolean> {
+  const r = await page
+    .evaluate(async ({ me, since }) => {
+      const root = await navigator.storage.getDirectory();
+      const dir = await root.getDirectoryHandle('backups').catch(() => undefined);
+      if (!dir) return undefined;
+      const files: Array<{ name: string; h: FileSystemFileHandle }> = [];
+      for await (const [name, h] of (dir as unknown as { entries(): AsyncIterable<[string, FileSystemFileHandle]> }).entries()) if (name.endsWith('.db') && h.kind === 'file') files.push({ name, h });
+      const pick = files.find((f) => me && f.name.includes(me)) ?? files[0];
+      if (!pick) return undefined;
+      const f = await pick.h.getFile();
+      if (since && f.lastModified <= since) return { name: pick.name, b64: '', lastModified: f.lastModified };
+      const buf = new Uint8Array(await f.arrayBuffer());
+      let s = '';
+      for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, Array.from(buf.subarray(i, i + 0x8000)));
+      return { name: pick.name, b64: btoa(s), lastModified: f.lastModified };
+    }, { me: meId, since: snap && snap.me === meId ? snap.mtime : 0 })
+    .catch(() => undefined);
+  if (!r) return false;
+  if (!r.b64 && snap) {
+    snap.at = Date.now(); // değişmemiş: eldeki anlık görüntü geçerli
+    return true;
+  }
+  if (!r.b64) return false;
+  const file = path.join(os.tmpdir(), `kavsak-xchat-${meId || 'x'}.db`);
+  snap?.db.close();
+  snap = undefined;
+  fs.writeFileSync(file, Buffer.from(r.b64, 'base64'));
+  try {
+    snap = { db: new Database(file, { readonly: true, fileMustExist: true }), at: Date.now(), mtime: r.lastModified, file, me: meId };
+    // sağlamlık: yedek yazılırken kopyalandıysa açılır ama sorgu patlar; burada yakala
+    snap.db.prepare('select count(*) n from dm_conversation').get();
+    return true;
+  } catch (e) {
+    snap?.db.close();
+    snap = undefined;
+    bus.log('warn', `X yerel veritabanı okunamadı: ${(e as Error).message}`);
+    return false;
+  }
+}
+/** OPFS yedeğinin son değişme zamanı (ms) — eşitleme sonrası yedek yazılana dek beklemek için */
+async function backupModified(page: Page): Promise<number> {
+  return page
+    .evaluate(async () => {
+      const root = await navigator.storage.getDirectory();
+      const dir = await root.getDirectoryHandle('backups').catch(() => undefined);
+      if (!dir) return 0;
+      let max = 0;
+      for await (const [name, h] of (dir as unknown as { entries(): AsyncIterable<[string, FileSystemFileHandle]> }).entries()) if (name.endsWith('.db')) max = Math.max(max, (await h.getFile()).lastModified);
+      return max;
+    })
+    .catch(() => 0);
+}
+/**
+ * /i/chat'i (yeniden) yükle: istemci GetInitialXChatPageQuery ile yeni olayları çekip yerel DB'ye işler ve yedeği yazar.
+ * Yeni olay geldiyse yedek güncellenene dek (en çok 5 sn) bekle, sonra anlık görüntüyü al.
+ */
+async function syncAndSnapshot(page: Page): Promise<boolean> {
+  hookMeta(page);
+  const t0 = Date.now();
+  const synced = page.waitForResponse((r) => /GetInitialXChatPageQuery/.test(r.url()), { timeout: 10_000 }).catch(() => undefined);
+  await page.goto(CHAT, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+  const r = await synced;
+  let fresh = false;
+  try {
+    const j: J | undefined = await r?.json();
+    fresh = (j?.data?.get_initial_chat_page?.encoded_message_events?.length ?? 0) > 0;
+  } catch {
+    /* yanıt okunamadı */
+  }
+  if (fresh) for (let i = 0; i < 16 && (await backupModified(page)) < t0; i++) await page.waitForTimeout(300);
+  else if (!snap) await page.waitForTimeout(1200); // ilk açılış: yedek henüz yazılmamış olabilir
+  return readSnapshot(page);
+}
+async function ensureSnapshot(page: Page): Promise<boolean> {
+  if (snap && snap.me === meId && Date.now() - snap.at < 5 * 60e3) return true;
+  return syncAndSnapshot(page);
+}
+
+/** dm_user.contents (CBOR {user:{…}}) → ad/kullanıcı adı/avatar haritaları */
+function loadUsers(db: Database.Database): void {
+  for (const row of db.prepare('select cast(id as text) id, screen_name, nickname, contents from dm_user').all() as Array<{ id: string; screen_name: string; nickname: string | null; contents: Buffer | null }>) {
+    const u = (row.contents && (cbor(row.contents) as J)?.user) as J | undefined;
+    const name = row.nickname || u?.name || (row.screen_name ? '@' + row.screen_name : row.id);
+    users.set(row.id, String(name));
+    const sn = u?.screenName ?? row.screen_name;
+    if (sn) handles.set(row.id, '@' + sn);
+    if (u?.profileImageUrl) avatars.set(row.id, String(u.profileImageUrl).replace('_normal.', '_bigger.'));
+  }
+}
+const convOf = (threadId: string) => (threadId.startsWith('g') ? threadId : threadId.replace('-', ':'));
+const threadOf = (conv: string) => conv.replace(':', '-');
+/** ton.x.com/pbs.twimg.com adresleri arayüzden doğrudan açılamaz (çerez ister); vekil bunları köprü üzerinden indirir */
+const TON = /^https?:\/\/ton\.(x|twitter)\.com\//;
+const pickVariant = (variants: J[] | undefined): string | undefined => {
+  const vs = (variants ?? []).filter((v) => v.contentType === 'video/mp4' && v.url);
+  vs.sort((a, b) => (a.bitRate ?? 0) - (b.bitRate ?? 0));
+  return vs[Math.min(1, vs.length - 1)]?.url ?? vs[0]?.url;
+};
+/** Paylaşılan gönderi (dm_post_cache) → ek */
+function postAttachment(db: Database.Database, postId: string, pageUrl?: string): Attachment {
+  const page = pageUrl || `https://x.com/i/status/${postId}`;
+  let j: J | undefined;
+  try {
+    const row = db.prepare('select post_json from dm_post_cache where id = ?').get(BigInt(postId)) as { post_json: string } | undefined;
+    j = row ? JSON.parse(row.post_json) : undefined;
+  } catch {
+    /* önbellekte yok */
+  }
+  const cp: J | undefined = j?.canonicalPost ?? j;
+  if (!cp?.author) return { kind: 'other', name: 'Gönderi', link: page, page };
+  const media: J | undefined = cp.media?.[0];
+  const isVideo = media && /Video|Gif/i.test(String(media.type ?? ''));
+  const text = String(cp.text ?? '').replace(/\s+/g, ' ').trim();
+  return {
+    kind: media ? (isVideo ? 'video' : 'image') : 'other',
+    name: `Gönderi · @${cp.author.screenName ?? '?'}${text ? ': ' + (text.length > 90 ? text.slice(0, 89) + '…' : text) : ''}`,
+    url: isVideo ? media.previewImage?.imageUrl : (media?.imageUrl ?? (String(cp.author.profileImageUrl ?? '').replace('_normal.', '_bigger.') || undefined)),
+    link: isVideo ? (pickVariant(media.variants) ?? page) : media?.imageUrl ?? page,
+    page,
+  };
+}
+/** dm_entry.contents → ekler (gönderi paylaşımı, sunucudaki eski medya, şifreli XChat medyası) */
+function entryAttachments(db: Database.Database, conv: string, contents: Buffer | null): { attachments: Attachment[]; text: string } {
+  const out: Attachment[] = [];
+  const top = contents ? typed(cbor(contents)) : undefined;
+  if (!top) return { attachments: out, text: '' };
+  for (const raw of (top.payload.attachments as CborValue[] | undefined) ?? []) {
+    const a = typed(raw);
+    if (!a) continue;
+    const p = a.payload;
+    if (/\.Post$/.test(a.type)) {
+      const pid = p.postId?.value ?? p.postId;
+      const pageUrl = typeof p.url === 'string' ? p.url : undefined;
+      if (!/^\d+$/.test(String(pid ?? '')) && !pageUrl) continue; // ne kimlik ne bağlantı: gösterilecek bir şey yok
+      out.push(postAttachment(db, /^\d+$/.test(String(pid ?? '')) ? String(pid) : '', pageUrl));
+    } else if (/Media/.test(a.type)) {
+      const hint = `${p.type ?? ''} ${p.mimeType ?? ''}`;
+      const kind: Attachment['kind'] = /video|gif/i.test(hint) ? 'video' : /audio/i.test(hint) ? 'audio' : 'image';
+      const full: string | undefined = typeof p.legacyMediaUrl === 'string' ? p.legacyMediaUrl : typeof p.mediaUrl === 'string' ? p.mediaUrl : undefined;
+      const preview: string | undefined = typeof p.legacyPreviewUrl === 'string' ? p.legacyPreviewUrl : full;
+      const attId = p.attachmentId?.id ?? p.attachmentId;
+      // Şifreli XChat medyası: istemci çözülmüş dosyayı OPFS'e yazar; "xc:<sohbet>/<ek>" şeması fetchMedia ile okunur
+      const local = typeof attId === 'string' && !full ? `xc:${threadOf(conv)}/${attId}` : undefined;
+      // ton.x.com: köprü yalnızca url'yi vekile çevirir, link ham kalır ve arayüz görselde ham link'i kullanırdı → görselde link verilmez
+      const link = kind === 'image' && full && TON.test(full) ? undefined : (full ?? local);
+      out.push({ kind, name: kind === 'video' ? 'Video' : kind === 'audio' ? 'Ses' : 'Fotoğraf', mime: typeof p.mimeType === 'string' ? p.mimeType : undefined, size: typeof p.fileSize === 'number' ? p.fileSize : undefined, url: preview ?? local, link });
+    } else if (typeof p.url === 'string') {
+      out.push({ kind: 'other', name: a.type.split('.').pop() ?? 'Bağlantı', link: p.url });
+    }
+  }
+  return { attachments: out, text: typeof top.payload.text === 'string' ? top.payload.text : '' };
+}
+interface EntryRow {
+  entry_id: string;
+  seq: string;
+  timestamp: number;
+  sender_id: string;
+  sender_is_owner: number;
+  plain_text: string | null;
+  contents: Buffer | null;
+}
+/** Yerel DB'den bir sohbetin mesajları (en yeni `limit`; `before` verilirse ondan eskiler) */
+function dbMessages(db: Database.Database, conv: string, limit: number, before?: number): Msg[] {
+  const rows = db
+    .prepare(
+      `select entry_id, cast(sequence_number as text) seq, timestamp, cast(sender_id as text) sender_id, sender_is_owner, plain_text, contents
+       from dm_entry where conversation_id = ? and entry_type = 'message' and (? is null or timestamp < ?) order by timestamp desc limit ?`,
+    )
+    .all(conv, before ?? null, before ?? null, limit) as EntryRow[];
+  return rows.reverse().map((r) => {
+    const { attachments, text } = entryAttachments(db, conv, r.contents);
+    const fromMe = r.sender_is_owner === 1 || r.sender_id === meId;
+    return {
+      id: r.seq || 'xc-' + r.entry_id.toLowerCase(),
+      text: (text || r.plain_text || '').trim(), // plain_text arama için küçük harfe indirilmiş; özgün metin contents'te
+      ts: Number(r.timestamp),
+      fromMe,
+      senderId: r.sender_id,
+      senderName: fromMe ? 'Ben' : (users.get(r.sender_id) ?? 'X kullanıcısı'),
+      senderAvatarUrl: fromMe ? undefined : avatars.get(r.sender_id),
+      attachments: attachments.length ? attachments : undefined,
+    };
+  });
+}
+interface ConvRow {
+  id: string;
+  custom_title: string | null;
+  custom_avatar_url: string | null;
+  lastTs: number | null;
+  lastAt: number | null;
+  unread: number;
+  marked_unread_by_me: number;
+  preview_text: string | null;
+  preview_contents: Buffer | null;
+  preview_owner: number | null;
+}
+/** Yerel DB → sohbet listesi (okunmamış = okundu işaretinden sonraki gelen mesaj sayısı, istemcinin kendi kuralı) */
+function dbThreads(db: Database.Database): Thread[] {
+  loadUsers(db);
+  const rows = db
+    .prepare(
+      `select c.conversation_id id, c.custom_title, c.custom_avatar_url, c.marked_unread_by_me, c.last_received_message_at_msec lastAt,
+         (select max(timestamp) from dm_entry e where e.conversation_id = c.conversation_id and e.affects_sort_order = 1) lastTs,
+         (select count(*) from dm_entry e where e.conversation_id = c.conversation_id and e.affects_read_state = 1 and e.sender_is_owner = 0
+            and (c.last_read_sequence_number is null or e.sequence_number > c.last_read_sequence_number)) unread,
+         (select plain_text from dm_entry e where e.conversation_id = c.conversation_id and e.entry_type = 'message' order by timestamp desc limit 1) preview_text,
+         (select contents from dm_entry e where e.conversation_id = c.conversation_id and e.entry_type = 'message' order by timestamp desc limit 1) preview_contents,
+         (select sender_is_owner from dm_entry e where e.conversation_id = c.conversation_id and e.entry_type = 'message' order by timestamp desc limit 1) preview_owner
+       from dm_conversation c where c.deleted = 0`,
+    )
+    .all() as ConvRow[];
+  const members = new Map<string, string[]>();
+  for (const m of db.prepare('select conversation_id, cast(user_id as text) uid from dm_group_participant where is_current_member = 1').all() as Array<{ conversation_id: string; uid: string }>) {
+    members.set(m.conversation_id, [...(members.get(m.conversation_id) ?? []), m.uid]);
+  }
+  const out: Thread[] = [];
+  for (const c of rows) {
+    const group = c.id.startsWith('g');
+    const ids = group ? (members.get(c.id) ?? []) : c.id.split(':');
+    const others = ids.filter((u) => u !== meId);
+    const participants: Participant[] = ids.map((u) => ({ id: u, name: users.get(u) ?? u, handle: handles.get(u), avatarUrl: avatars.get(u) }));
+    let preview = '';
+    if (c.preview_contents) {
+      const { attachments, text } = entryAttachments(db, c.id, c.preview_contents);
+      preview = text.trim() || (attachments[0] ? `[${attachments[0].name ?? attachments[0].kind}]` : '');
+    }
+    preview ||= (c.preview_text ?? '').trim();
+    if (preview && c.preview_owner === 1) preview = 'Sen: ' + preview;
+    const unread = c.marked_unread_by_me ? Math.max(1, Number(c.unread)) : Number(c.unread);
+    // özel grup avatarı ton.x.com'da (çerez ister, arayüz doğrudan açamaz) → verilmez
+    const avatar = group ? (c.custom_avatar_url && !/ton\.(x|twitter)\.com/.test(c.custom_avatar_url) ? c.custom_avatar_url : undefined) : avatars.get(others[0]);
+    out.push({
+      id: threadOf(c.id),
+      name: group ? c.custom_title || groupName(others) || 'Grup' : (users.get(others[0]) ?? handles.get(others[0]) ?? others[0] ?? 'Sohbet'),
+      kind: group ? 'group' : 'direct',
+      lastTs: Number(c.lastTs ?? c.lastAt ?? 0),
+      preview,
+      unread,
+      avatarUrl: avatar,
+      handle: group ? undefined : handles.get(others[0]),
+      link: group ? undefined : handles.get(others[0]) ? `https://x.com/${handles.get(others[0])!.slice(1)}` : undefined,
+      participants,
+    });
+  }
+  return out;
+}
+
+// ───────────────────────── /i/chat DOM'u: DB yoksa yedek; DB'de olmayan eski XChat mesajları için kaydırarak okuma ─────────────────────────
+async function domInbox(page: Page): Promise<Array<{ id: string; name: string; preview: string; unread: boolean }>> {
   if (!page.url().startsWith(CHAT)) await page.goto(CHAT, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
   await page.waitForSelector('[data-testid^="dm-conversation-item-"]', { timeout: 15_000 }).catch(() => undefined);
-  await page.waitForTimeout(800);
+  await page.waitForTimeout(300);
   return page.evaluate(() => {
-    const out: Array<{ id: string; name: string; preview: string; rel: string }> = [];
+    const out: Array<{ id: string; name: string; preview: string; unread: boolean }> = [];
     for (const el of Array.from(document.querySelectorAll<HTMLElement>('[data-testid^="dm-conversation-item-"]'))) {
-      const raw = el.getAttribute('data-testid')!.slice('dm-conversation-item-'.length);
-      const id = raw.replace(':', '-');
+      const id = el.getAttribute('data-testid')!.slice('dm-conversation-item-'.length).replace(':', '-');
       const lines = el.innerText.split('\n').map((t) => t.trim()).filter(Boolean);
       if (!lines.length) continue;
       const relIdx = lines.findIndex((t, i) => i > 0 && /^\d+\s*(dk|sa|g|ha|ay|y|m|h|d|w|mo)$/i.test(t));
-      const name = lines[0];
-      const rel = relIdx > 0 ? lines[relIdx] : '';
       const preview = lines.slice(relIdx > 0 ? relIdx + 1 : 1).join(' ').replace(/^(You|Sen):\s*/, '');
-      out.push({ id, name, preview, rel });
+      // okunmamış: önizleme kalın ya da isim yanında mavi nokta
+      const leafs = Array.from(el.querySelectorAll<HTMLElement>('*')).filter((e) => e.children.length === 0);
+      const bold = leafs.some((e) => e.innerText?.trim() === preview.slice(0, 20) && Number(getComputedStyle(e).fontWeight) >= 700);
+      const dot = leafs.some((e) => { const r = e.getBoundingClientRect(); return r.width > 4 && r.width <= 12 && r.height <= 12 && /rgb\(29, 155, 240\)|rgb\(30, 156, 241\)/.test(getComputedStyle(e).backgroundColor); });
+      out.push({ id, name: lines[0], preview, unread: bold || dot || /okunmamış|unread/i.test(el.getAttribute('aria-description') ?? '') });
     }
     return out;
   });
 }
-
-async function domMessages(page: Page, threadId: string): Promise<Msg[]> {
-  const url = `${CHAT}/${threadId}`;
-  if (!page.url().startsWith(url)) await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
-  await page.waitForSelector('[data-testid="dm-message-list"]', { timeout: 15_000 }).catch(() => undefined);
-  await page.waitForTimeout(2500);
-  const rows = await page.evaluate(() => {
-    const scroller = document.querySelector<HTMLElement>('[data-testid="dm-message-scroller"]') ?? document.querySelector<HTMLElement>('[data-testid="dm-message-list"]');
-    if (!scroller) return [] as Array<{ id: string; text: string; time: string; day: string; me: boolean; media: boolean }>;
-    const pr = scroller.getBoundingClientRect();
+interface DomRow {
+  id: string;
+  text: string;
+  time: string;
+  day: string;
+  me: boolean;
+  sender: string;
+  top: number;
+  images: string[];
+  videos: string[];
+  post?: { href: string; author: string; text: string; image?: string; video?: string };
+}
+/** Sayfada o an çizili mesajlar (liste sanal: yalnızca görünür pencere). */
+async function domRows(page: Page): Promise<{ rows: DomRow[]; scrollTop: number; atTop: boolean } | undefined> {
+  return page.evaluate((DAY) => {
+    const sc = document.querySelector<HTMLElement>('[data-testid="dm-message-scroller"]') ?? document.querySelector<HTMLElement>('[data-testid="dm-message-list"]');
+    if (!sc) return undefined;
+    const dayRe = new RegExp(DAY);
+    const pr = sc.getBoundingClientRect();
     const mid = pr.left + pr.width / 2;
-    const out: Array<{ id: string; text: string; time: string; day: string; me: boolean; media: boolean }> = [];
-    let day = '';
-    for (const el of Array.from(scroller.querySelectorAll<HTMLElement>('*'))) {
-      const tid = el.getAttribute('data-testid') ?? '';
-      if (tid.startsWith('message-') && !tid.startsWith('message-text-')) {
-        const textEl = el.querySelector<HTMLElement>('[data-testid^="message-text-"]');
-        // metin öğesi saati de içeriyor ("altlar 6000\n22:08"): sondaki saati at
-        const text = (textEl?.innerText ?? '')
-          .split('\n')
-          .map((t) => t.trim())
-          .filter((t) => t && !/^\d{2}:\d{2}$/.test(t) && !/^(Görüldü|Seen|Gönderildi|Sent|Yeni|New)$/i.test(t))
-          .join('\n');
-        const time = (el.innerText.match(/(^|\s)(\d{2}:\d{2})(\s|$)/) ?? [])[2] ?? '';
-        const r = (textEl ?? el).getBoundingClientRect();
-        out.push({ id: tid.slice('message-'.length), text, time, day, me: r.left + r.width / 2 > mid, media: !!el.querySelector('img[src*="pbs.twimg"], video') });
-      } else if (el.children.length === 0 && /^\d{1,2}\s+\S+.*,\s*\d{2}:\d{2}$/.test(el.innerText?.trim() ?? '')) {
-        day = el.innerText.trim();
-      }
+    const seps: Array<{ top: number; label: string }> = [];
+    let atTop = sc.scrollTop < 4;
+    for (const e of Array.from(sc.querySelectorAll<HTMLElement>('div, span'))) {
+      if (e.children.length) continue;
+      const t = (e.textContent ?? '').trim();
+      if (!t) continue;
+      if (dayRe.test(t) && !e.closest('[data-testid^="message-"]')) seps.push({ top: e.getBoundingClientRect().top, label: t });
+      else if (/^(Profili Görüntüle|View profile|tarihinde katıldı|Joined )/.test(t) || /(katıldı|Joined)\b/.test(t)) atTop = true; // en üstte profil kartı: geçmişin başı
     }
-    return out;
+    seps.sort((a, b) => a.top - b.top);
+    const rows: DomRow[] = [];
+    for (const el of Array.from(sc.querySelectorAll<HTMLElement>('[data-testid^="message-"]'))) {
+      const tid = el.getAttribute('data-testid') ?? '';
+      if (tid.startsWith('message-text-') || tid.startsWith('message-list')) continue;
+      const id = tid.slice('message-'.length);
+      if (!/^[0-9a-f-]{20,}$/i.test(id)) continue;
+      const r = el.getBoundingClientRect();
+      const textEl = el.querySelector<HTMLElement>('[data-testid^="message-text-"]');
+      const lines = (textEl?.innerText ?? '').split('\n').map((t) => t.trim()).filter(Boolean);
+      const time = [...lines].reverse().find((t) => /^\d{1,2}:\d{2}$/.test(t)) ?? '';
+      const text = lines.filter((t) => !/^\d{1,2}:\d{2}$/.test(t) && !/^(Görüldü|Seen|Gönderildi|Sent|Yeni|New|Düzenlendi|Edited)$/i.test(t)).join('\n');
+      const bubble = textEl ?? el.querySelector<HTMLElement>('a[href], video, img:not([src*="profile_images"])') ?? el;
+      const br = bubble.getBoundingClientRect();
+      const me = br.left + br.width / 2 > mid;
+      // grupta gönderen adı: mesaj öğesinden önce, aynı satır sarmalayıcısındaki kısa metin
+      let sender = '';
+      const wrap = el.parentElement?.parentElement;
+      if (wrap) {
+        for (const e of Array.from(wrap.querySelectorAll<HTMLElement>('*'))) {
+          if (el.contains(e) || e === el) break;
+          if (e.children.length) continue;
+          const t = (e.textContent ?? '').trim();
+          if (t && t !== '.' && t.length < 40 && !dayRe.test(t) && !/^\d{1,2}:\d{2}$/.test(t)) sender = t;
+        }
+      }
+      const images = Array.from(el.querySelectorAll<HTMLImageElement>('img')).map((i) => i.currentSrc || i.src).filter((s) => /pbs\.twimg\.com\/media|ton\.(x|twitter)\.com/.test(s));
+      const videos = Array.from(el.querySelectorAll<HTMLVideoElement | HTMLSourceElement>('video, video source')).map((v) => v.src).filter((s) => /^https?:/.test(s));
+      let post: DomRow['post'];
+      const card = el.querySelector<HTMLAnchorElement>('a[href*="/status/"]');
+      if (card) {
+        const cl = card.innerText.split('\n').map((t) => t.trim()).filter(Boolean);
+        post = { href: card.href, author: cl[0] ?? '', text: cl.slice(2).join(' '), image: card.querySelector<HTMLImageElement>('img:not([src*="profile_images"])')?.src, video: card.querySelector<HTMLVideoElement>('video')?.src || card.querySelector<HTMLSourceElement>('video source')?.src };
+      }
+      let day = '';
+      for (const s of seps) if (s.top <= r.top + 2) day = s.label;
+      rows.push({ id, text, time, day, me, sender, top: r.top, images, videos, post });
+    }
+    return { rows, scrollTop: sc.scrollTop, atTop };
+  }, DAY_LABEL.source);
+}
+/** DOM satırları → Msg (zaman: GraphQL üst verisi > gün ayırıcısı + mesaj saati > önceki mesaj) */
+function domToMsgs(threadId: string, rows: DomRow[], fallbackTs: number): Msg[] {
+  const others = threadId.startsWith('g') ? [] : threadId.split('-').filter((p) => p !== meId);
+  // yerel DB'de olan satırlar: kimlik (sıra no) ve kesin zaman oradan
+  const known = new Map<string, { seq: string; ts: number; sender: string }>();
+  if (snap) {
+    try {
+      for (const r of snap.db.prepare('select lower(entry_id) e, cast(sequence_number as text) s, timestamp t, cast(sender_id as text) u from dm_entry where conversation_id = ?').all(convOf(threadId)) as Array<{ e: string; s: string; t: number; u: string }>) known.set(r.e, { seq: r.s, ts: Number(r.t), sender: r.u });
+    } catch {
+      /* anlık görüntü kapanmış olabilir */
+    }
+  }
+  rows.sort((a, b) => a.top - b.top);
+  // 1) kesin zamanlar (üst veri / DB / gün ayırıcısı + saat); 2) bilinmeyenler: bir sonraki bilinen satırdan geriye
+  //    (görünür pencerenin üstündeki satırların gün ayırıcısı kaydırılmış olabilir); hiç yoksa fallbackTs'ten geriye.
+  const metas = rows.map((r) => known.get(r.id.toLowerCase()) ?? meta.get(r.id.toLowerCase()));
+  const tss: Array<number | undefined> = rows.map((r, i) => {
+    const m = metas[i];
+    if (m) return m.ts;
+    const dayTs = parseDayLabel(r.day);
+    if (dayTs === undefined) return undefined;
+    const tm = r.time.match(/(\d{1,2}):(\d{2})/);
+    const day0 = new Date(dayTs);
+    day0.setHours(0, 0, 0, 0);
+    return tm ? day0.getTime() + Number(tm[1]) * 3600e3 + Number(tm[2]) * 60e3 : dayTs;
   });
-  const others = threadId.split('-').filter((p) => p !== meId);
-  const senderId = others[0] ?? threadId;
-  return rows
-    .filter((r) => r.text || r.media)
-    .map((r, i) => {
-      const dayTs = parseDayLabel(r.day);
-      const tm = r.time.match(/(\d{2}):(\d{2})/);
-      const ts = dayTs !== undefined && tm ? dayTs + Number(tm[1]) * 3600e3 + Number(tm[2]) * 60e3 : Date.now() - (rows.length - i) * 1000;
-      return { id: 'xc-' + r.id, text: r.text || '[medya]', ts, fromMe: r.me, senderId: r.me ? 'me' : senderId, senderName: r.me ? 'Ben' : (users.get(senderId) ?? 'X kullanıcısı'), senderAvatarUrl: r.me ? undefined : avatars.get(senderId) };
-    });
+  let next: number | undefined;
+  for (let i = tss.length - 1; i >= 0; i--) {
+    if (tss[i] === undefined) tss[i] = next !== undefined ? next - 1 : fallbackTs - (tss.length - 1 - i);
+    next = tss[i];
+  }
+  let cur = 0;
+  const out: Msg[] = [];
+  rows.forEach((r, i) => {
+    const key = r.id.toLowerCase();
+    const m = metas[i];
+    const ts = m ? m.ts : Math.max(tss[i]!, cur ? cur + 1 : 0); // kesin zaman korunur; tahminler sırayı bozmasın
+    cur = Math.max(cur, ts);
+    const fromMe = m ? m.sender === meId : r.me;
+    const senderId = m?.sender || (fromMe ? meId : others[0] ?? (r.sender ? 'name:' + r.sender : threadId));
+    const senderName = fromMe ? 'Ben' : (users.get(senderId) ?? r.sender ?? 'X kullanıcısı');
+    const attachments: Attachment[] = [];
+    if (r.post) {
+      const isVideo = !!r.post.video;
+      attachments.push({ kind: isVideo ? 'video' : r.post.image ? 'image' : 'other', name: `Gönderi · ${r.post.author}${r.post.text ? ': ' + r.post.text.slice(0, 90) : ''}`, url: r.post.image, link: isVideo ? r.post.video : r.post.image ?? r.post.href, page: r.post.href });
+    }
+    // ton.x.com bağlantıları köprüde vekile çevrilmez (yalnızca url çevrilir); arayüz ham link'i <img>'e verirdi → link yok
+    for (const u of r.images) if (!r.post?.image || u !== r.post.image) attachments.push({ kind: 'image', name: 'Fotoğraf', url: u, link: TON.test(u) ? undefined : u });
+    for (const u of r.videos) if (!r.post?.video || u !== r.post.video) attachments.push({ kind: 'video', name: 'Video', link: u });
+    out.push({ id: m?.seq || 'xc-' + key, text: r.text, ts, fromMe, senderId, senderName, senderAvatarUrl: fromMe ? undefined : avatars.get(senderId), attachments: attachments.length ? attachments : undefined });
+  });
+  return out;
+}
+/**
+ * Sohbet sayfasını aç ve `need` kadar, `before`'dan eski mesaj toplanana (ya da geçmişin başına gelinene) dek
+ * yukarı kaydır. Liste sanal olduğundan her adımda görünen satırlar biriktirilir; eski sayfalar istemcinin
+ * GetConversationPageQuery çağrısıyla gelir, zaman/gönderen üst verisi hookMeta ile yakalanır.
+ */
+async function domMessages(page: Page, threadId: string, need: number, before?: number, fallbackTs = Date.now()): Promise<Msg[]> {
+  hookMeta(page);
+  const url = `${CHAT}/${threadId}`;
+  if (page.url().startsWith(url)) await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+  else await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+  await page.waitForSelector('[data-testid="dm-message-scroller"] [data-testid^="message-"]', { timeout: 15_000 }).catch(() => undefined);
+  await page.waitForTimeout(400);
+  const acc = new Map<string, DomRow>();
+  let box: { x: number; y: number } | undefined;
+  let stale = 0;
+  for (let i = 0; i < 40; i++) {
+    const r = await domRows(page);
+    if (!r) break;
+    const beforeN = acc.size;
+    for (const row of r.rows) acc.set(row.id, { ...row, top: row.top - r.scrollTop });
+    if (before === undefined) break; // yalnızca görünenler (son mesajlar)
+    const have = domToMsgs(threadId, [...acc.values()], fallbackTs).filter((m) => m.ts < before).length;
+    if (have >= need || r.atTop) break;
+    stale = acc.size === beforeN ? stale + 1 : 0;
+    if (stale >= 4) break; // kaydırdık, yeni satır gelmedi: geçmişin başı
+    if (!box) box = await page.evaluate(() => { const el = document.querySelector('[data-testid="dm-message-scroller"]')!.getBoundingClientRect(); return { x: el.left + el.width / 2, y: el.top + el.height / 2 }; });
+    await page.mouse.move(box.x, box.y);
+    await page.mouse.wheel(0, -4000);
+    await page.waitForTimeout(650);
+  }
+  if (before !== undefined) await page.waitForTimeout(400); // son GraphQL yanıtı (üst veri) gelsin
+  return domToMsgs(threadId, [...acc.values()], fallbackTs);
 }
 
-export const x: Strategy = {
-  home: 'https://x.com/messages',
+/** 1.1 gelen kutusu Kasım 2025'ten beri donuk: süreç başına bir kez okunur */
+let legacyThreads: Thread[] | undefined;
+let legacyMe = '';
+async function legacyInbox(page: Page, cookies: Record<string, string>): Promise<Thread[]> {
+  if (legacyThreads) return legacyThreads;
+  const data = await xapi(page, cookies, '/1.1/dm/inbox_initial_state.json?include_ext_alt_text=false&include_reply_count=1&tweet_mode=extended&dm_secret_conversations_enabled=false');
+  const state = data.inbox_initial_state ?? {};
+  collectUsers(state);
+  const lastByConv = new Map<string, J>();
+  for (const e of state.entries ?? []) if (e.message) lastByConv.set(e.message.conversation_id, e.message);
+  const out: Thread[] = [];
+  for (const [id, c] of Object.entries(state.conversations ?? {}) as Array<[string, J]>) {
+    const others = (c.participants ?? []).map((p: J) => String(p.user_id)).filter((u: string) => u !== meId);
+    const last = lastByConv.get(id);
+    const participants = (c.participants ?? []).map((p: J) => ({ id: String(p.user_id), name: users.get(String(p.user_id)) ?? String(p.user_id), handle: handles.get(String(p.user_id)), avatarUrl: avatars.get(String(p.user_id)) }));
+    out.push({
+      id,
+      handle: c.type === 'GROUP_DM' ? undefined : handles.get(others[0]),
+      link: c.type === 'GROUP_DM' ? undefined : handles.get(others[0]) ? `https://x.com/${handles.get(others[0])!.slice(1)}` : undefined,
+      participants,
+      name: c.name || groupName(others) || 'Sohbet',
+      kind: c.type === 'GROUP_DM' ? 'group' : 'direct',
+      lastTs: Number(c.sort_timestamp ?? last?.time ?? 0),
+      preview: last?.message_data?.text ?? '',
+      unread: 0, // donuk arşiv: yeni mesaj gelmez, eski okundu imleci güvenilmez
+      avatarUrl: c.type === 'GROUP_DM' ? c.avatar_image_https : avatars.get(others[0]),
+    });
+  }
+  legacyThreads = out;
+  return out;
+}
+
+/** Eski 1.1 ucundan birebir sohbet geçmişi (`before` verilirse max_id ile ondan eskiler) */
+async function legacyMessages(page: Page, cookies: Record<string, string>, threadId: string, limit: number, before?: number): Promise<Msg[]> {
+  if (threadId.startsWith('g') || apiMissing.has(threadId)) return [];
+  try {
+    const q = `count=${Math.min(Math.max(limit, 20), 100)}&include_ext_alt_text=false&tweet_mode=extended${before ? `&max_id=${snowflakeFromMs(before)}` : ''}`;
+    const data = await xapi(page, cookies, `/1.1/dm/conversation/${encodeURIComponent(threadId)}.json?${q}`);
+    const tl = data.conversation_timeline ?? {};
+    collectUsers(tl);
+    return fromEntries(tl.entries ?? [], threadId).reverse();
+  } catch (e) {
+    if (/X 404/.test((e as Error).message)) apiMissing.add(threadId);
+    else bus.log('warn', `X eski DM ucu (${threadId}): ${(e as Error).message}`);
+    return [];
+  }
+}
+
+/**
+ * Aynı mesaj farklı kaynaklarda (DB / 1.1 API / DOM): kimlik (sıra no) eşleşiyorsa ya da başka kaynaktan gelen
+ * bir mesajla metin+yön+±3 dk eşleşiyorsa ilkini tut. Aynı kaynak içindeki tekrarlar ("ok", "ok") gerçek mesajdır, silinmez.
+ */
+function mergeMsgs(...lists: Msg[][]): Msg[] {
+  const out: Array<Msg & { src: number }> = [];
+  const ids = new Set<string>();
+  lists.forEach((list, src) => {
+    for (const m of list) {
+      if (ids.has(m.id)) continue;
+      if (out.some((o) => o.src !== src && o.fromMe === m.fromMe && o.text === m.text && !!o.text && Math.abs(o.ts - m.ts) < 180e3)) continue;
+      ids.add(m.id);
+      out.push({ ...m, src });
+    }
+  });
+  return out.sort((a, b) => a.ts - b.ts).map(({ src: _src, ...m }) => m);
+}
+
+export const x: Strategy & { fetchMedia(page: Page, cookies: Record<string, string>, u: string): Promise<{ body: Buffer; type: string } | undefined> } = {
+  home: CHAT,
   loginHint: 'Açılan pencerede X hesabına giriş yap',
 
   async loggedIn(_page, cookies) {
@@ -243,7 +797,7 @@ export const x: Strategy = {
       users.set(meId, v.name ?? 'Ben');
       return { id: meId, label: v.screen_name ? `@${v.screen_name}` : 'X' };
     } catch {
-      // verify_credentials kapalı olabilir; gelen kutusundaki kullanıcı listesinden adı bul
+      // verify_credentials kapalı; gelen kutusundaki kullanıcı listesinden adı bul
       const data: J = await xapi(page, cookies, '/1.1/dm/inbox_initial_state.json?include_ext_alt_text=false&include_reply_count=1&tweet_mode=extended&dm_secret_conversations_enabled=false').catch(() => ({}) as J);
       const u = data?.inbox_initial_state?.users?.[meId];
       return { id: meId, label: u?.screen_name ? `@${u.screen_name}` : 'X' };
@@ -251,84 +805,85 @@ export const x: Strategy = {
   },
 
   async threads(page, cookies): Promise<Thread[]> {
-    const data = await xapi(page, cookies, '/1.1/dm/inbox_initial_state.json?include_ext_alt_text=false&include_reply_count=1&tweet_mode=extended&dm_secret_conversations_enabled=false');
-    const state = data.inbox_initial_state ?? {};
-    collectUsers(state);
-    const lastByConv = new Map<string, J>();
-    for (const e of state.entries ?? []) if (e.message) lastByConv.set(e.message.conversation_id, e.message);
-    const out: Thread[] = [];
-    for (const [id, c] of Object.entries(state.conversations ?? {}) as Array<[string, J]>) {
-      const others = (c.participants ?? []).map((p: J) => String(p.user_id)).filter((u: string) => u !== meId);
-      const last = lastByConv.get(id);
-      const participants = (c.participants ?? []).map((p: J) => ({ id: String(p.user_id), name: users.get(String(p.user_id)) ?? String(p.user_id), handle: handles.get(String(p.user_id)), avatarUrl: avatars.get(String(p.user_id)) }));
-      out.push({
-        id,
-        handle: c.type === 'GROUP_DM' ? undefined : handles.get(others[0]),
-        link: c.type === 'GROUP_DM' ? undefined : handles.get(others[0]) ? `https://x.com/${handles.get(others[0])!.slice(1)}` : undefined,
-        participants,
-        name: c.name || groupName(others) || 'Sohbet',
-        kind: c.type === 'GROUP_DM' ? 'group' : 'direct',
-        lastTs: Number(c.sort_timestamp ?? last?.time ?? 0),
-        preview: last?.message_data?.text ?? '',
-        unread: last && String(last.message_data?.sender_id) !== meId && Number(c.last_read_event_id ?? 0) < Number(last.id) ? 1 : 0,
-        avatarUrl: c.type === 'GROUP_DM' ? c.avatar_image_https : avatars.get(others[0]),
-      });
-    }
-    // XChat (Kasım 2025 sonrası uçtan uca şifreli sohbetler) 1.1 uçlarında görünmez; /i/chat DOM'undan tamamla
+    meId = meFromCookies(cookies) || meId;
+    if (legacyThreads && legacyMe !== meId) legacyThreads = undefined;
+    legacyMe = meId;
+    const byId = new Map<string, Thread>();
+    // 1) XChat öncesi sohbetler (donuk; bir kez)
     try {
-      const dom = await domInbox(page);
-      for (const d of dom) {
-        const prev = domPreview.get(d.id);
-        domPreview.set(d.id, d.preview);
-        const changed = prev !== undefined && prev !== d.preview;
-        const ex = out.find((t) => t.id === d.id);
-        if (ex) {
-          // göreli süre ("3 g") kaba: var olan sohbetin zamanını yalnızca önizleme değiştiğinde (yeni mesaj) ilerlet
-          if (d.preview && d.preview !== ex.preview.replace(/^(You|Sen):\s*/, '')) {
-            ex.preview = d.preview;
-            if (changed) ex.lastTs = Math.max(ex.lastTs, Date.now());
-          }
-        } else {
-          // göreli süre kaba; zaman mesajlar okununca gerçek değerini alır (ilk görüşte 0), önizleme değişince "şimdi"
-          out.push({ id: d.id, name: d.name || 'Sohbet', kind: d.id.startsWith('g') ? 'group' : 'direct', lastTs: changed ? Date.now() : 0, preview: d.preview, unread: 0 });
-        }
+      for (const t of await legacyInbox(page, cookies)) byId.set(t.id, t);
+    } catch (e) {
+      bus.log('warn', `X eski gelen kutusu okunamadı: ${(e as Error).message}`);
+    }
+    // 2) Yerel XChat veritabanı: güncel liste, gerçek zaman ve okunmamış sayısı (aynı sohbette DB kazanır)
+    let fromDb = false;
+    try {
+      if (await syncAndSnapshot(page)) {
+        const list = dbThreads(snap!.db); // şema uyuşmazlığında burada patlar → DOM yedeğine düş
+        for (const t of list) byId.set(t.id, t);
+        fromDb = true;
       }
     } catch (e) {
-      bus.log('warn', `X sohbet listesi (DOM) okunamadı: ${(e as Error).message}`);
+      bus.log('warn', `X yerel veritabanı: ${(e as Error).message}`);
     }
-    return out;
+    if (!fromDb) {
+      // 3) DB yoksa (ilk açılış/yedek yazılmamış): /i/chat DOM'undan ad, önizleme ve okunmamış işareti
+      try {
+        for (const d of await domInbox(page)) {
+          const prev = domPreview.get(d.id);
+          domPreview.set(d.id, d.preview);
+          const changed = prev !== undefined && prev !== d.preview;
+          const ex = byId.get(d.id);
+          if (ex) {
+            if (d.preview && d.preview !== ex.preview.replace(/^(You|Sen):\s*/, '')) {
+              ex.preview = d.preview;
+              if (changed) ex.lastTs = Math.max(ex.lastTs, Date.now());
+            }
+            ex.unread = d.unread ? Math.max(1, ex.unread) : 0;
+          } else {
+            // DOM'da yalnızca göreli süre var → zaman 0 (mesajlar okununca gerçek değeri alır), önizleme değişince "şimdi"
+            byId.set(d.id, { id: d.id, name: d.name || 'Sohbet', kind: d.id.startsWith('g') ? 'group' : 'direct', lastTs: changed ? Date.now() : 0, preview: d.preview, unread: d.unread ? 1 : 0 });
+          }
+        }
+      } catch (e) {
+        bus.log('warn', `X sohbet listesi (DOM) okunamadı: ${(e as Error).message}`);
+      }
+    }
+    return [...byId.values()];
   },
 
-  async messages(page, cookies, threadId, limit): Promise<Msg[]> {
-    // XChat grup kimlikleri (g…) ve daha önce 404 veren sohbetler 1.1 ucunda yok → yalnızca DOM
-    let api: Msg[] = [];
-    if (!threadId.startsWith('g') && !apiMissing.has(threadId)) {
+  async messages(page, cookies, threadId, limit, before): Promise<Msg[]> {
+    meId = meFromCookies(cookies) || meId;
+    const conv = convOf(threadId);
+    let db: Msg[] = [];
+    try {
+      if (await ensureSnapshot(page)) db = dbMessages(snap!.db, conv, limit, before);
+    } catch (e) {
+      bus.log('warn', `X yerel veritabanı (${threadId}): ${(e as Error).message}`);
+    }
+    // XChat öncesi geçmiş: 1.1 ucu (birebir sohbetler); yalnızca DB yetmezse
+    const api = db.length < limit ? await legacyMessages(page, cookies, threadId, limit, before) : [];
+    let dom: Msg[] = [];
+    // DB'de olmayan eski XChat mesajları yalnızca sayfada: eski mesaj isteğinde (ya da DB hiç yoksa) kaydırarak oku
+    const known = mergeMsgs(db, api);
+    if (before !== undefined ? known.filter((m) => m.ts < before).length < limit : !snap) {
       try {
-        const data = await xapi(page, cookies, `/1.1/dm/conversation/${encodeURIComponent(threadId)}.json?count=${limit}&include_ext_alt_text=false&tweet_mode=extended`);
-        const tl = data.conversation_timeline ?? {};
-        collectUsers(tl);
-        api = fromEntries(tl.entries ?? [], threadId).reverse();
+        const oldest = known[0]?.ts ?? before;
+        dom = await domMessages(page, threadId, before === undefined ? limit : limit - known.filter((m) => m.ts < before).length, before, oldest ? oldest - 1 : undefined);
       } catch (e) {
-        if (/X 404/.test((e as Error).message)) apiMissing.add(threadId);
-        else throw e;
+        bus.log('warn', `X mesajlar (DOM) okunamadı (${threadId}): ${(e as Error).message}`);
       }
     }
-    let dom: Msg[] = [];
-    try {
-      dom = await domMessages(page, threadId);
-    } catch (e) {
-      bus.log('warn', `X mesajlar (DOM) okunamadı (${threadId}): ${(e as Error).message}`);
-    }
-    // aynı mesaj iki kaynakta da olabilir (eski DM'ler): metin + yön + ±3 dk eşleşiyorsa API kaydı kalsın
-    const dup = (m: Msg) => api.some((a) => a.fromMe === m.fromMe && a.text === m.text && Math.abs(a.ts - m.ts) < 180e3);
-    return [...api, ...dom.filter((m) => !dup(m))].sort((a, b) => a.ts - b.ts).slice(-Math.max(limit, 25));
+    const all = mergeMsgs(db, api, dom).filter((m) => before === undefined || m.ts < before);
+    return all.slice(-limit);
   },
 
   async markRead(page, _cookies, threadId) {
-    // /i/chat/<id> sayfasını açmak hem eski DM'leri hem XChat'i okundu işaretler
+    // /i/chat/<id> sayfasını açmak hem eski DM'leri hem XChat'i okundu işaretler (istemci okundu olayı gönderir)
     const url = `${CHAT}/${threadId}`;
     if (!page.url().startsWith(url)) await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
-    await page.waitForTimeout(2500);
+    await page.waitForSelector('[data-testid="dm-message-scroller"]', { timeout: 10_000 }).catch(() => undefined);
+    await page.waitForTimeout(800);
   },
 
   async openDirect(_page, _cookies, p) {
@@ -351,21 +906,57 @@ export const x: Strategy = {
       await page.waitForTimeout(800);
       return undefined;
     };
+    if (threadId.startsWith('g') || apiMissing.has(threadId)) return domSend();
     let r: J;
     try {
       r = await xapi(page, cookies, '/1.1/dm/new2.json?ext=mediaColor,altText&include_ext_alt_text=true&supports_reactions=true', {
-      conversation_id: threadId,
-      recipient_ids: false,
-      request_id: crypto.randomUUID(),
-      text,
-      cards_platform: 'Web-12',
-      include_cards: 1,
-      include_quote_count: true,
-      dm_users: false,
+        conversation_id: threadId,
+        recipient_ids: false,
+        request_id: crypto.randomUUID(),
+        text,
+        cards_platform: 'Web-12',
+        include_cards: 1,
+        include_quote_count: true,
+        dm_users: false,
       });
     } catch {
       return domSend();
     }
     return r?.entries?.[0]?.message?.id ? String(r.entries[0].message.id) : domSend();
+  },
+
+  /**
+   * Şifreli XChat medyası: "xc:<sohbet>/<ekKimliği>" → istemcinin OPFS'e yazdığı çözülmüş dosya
+   * (dm-files-<kimlik>/decrypted-media-v2/<sohbet>/<ek>/<dosya>). Köprü bu kancayı çağırınca çalışır.
+   */
+  async fetchMedia(page, _cookies, u) {
+    const m = u.match(/^xc:([^/]+)\/([^/]+)$/);
+    if (!m) return undefined;
+    const r = await page.evaluate(
+      async ({ me, conv, att }) => {
+        const root = await navigator.storage.getDirectory();
+        const walk = async (dir: FileSystemDirectoryHandle, parts: string[]): Promise<FileSystemDirectoryHandle | undefined> => {
+          let d: FileSystemDirectoryHandle | undefined = dir;
+          for (const p of parts) d = await d?.getDirectoryHandle(p).catch(() => undefined);
+          return d;
+        };
+        const dir = await walk(root, [`dm-files-${me}`, 'decrypted-media-v2', conv, att]);
+        if (!dir) return undefined;
+        for await (const [name, h] of (dir as unknown as { entries(): AsyncIterable<[string, FileSystemFileHandle]> }).entries()) {
+          if (h.kind !== 'file') continue;
+          const f = await h.getFile();
+          const buf = new Uint8Array(await f.arrayBuffer());
+          let s = '';
+          for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, Array.from(buf.subarray(i, i + 0x8000)));
+          return { name, type: f.type, b64: btoa(s) };
+        }
+        return undefined;
+      },
+      { me: meId, conv: m[1], att: m[2] },
+    );
+    if (!r) return undefined;
+    const ext = r.name.split('.').pop()?.toLowerCase() ?? '';
+    const type = r.type || ({ jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', mp4: 'video/mp4', mov: 'video/quicktime', m4a: 'audio/mp4', mp3: 'audio/mpeg' } as Record<string, string>)[ext] || 'application/octet-stream';
+    return { body: Buffer.from(r.b64, 'base64'), type };
   },
 };

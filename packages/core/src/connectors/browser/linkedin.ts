@@ -1,5 +1,6 @@
 import type { Page } from 'playwright';
 import type { Msg, Strategy, Thread } from './bridge.js';
+import type { Attachment } from '../../model.js';
 import { bus } from '../../bus.js';
 
 /**
@@ -40,8 +41,16 @@ async function voyager(page: Page, cookies: Record<string, string>, url: string,
   );
 }
 
-/** Sayfanın yaptığı GraphQL isteklerinden yakalanan URL'ler */
-const captured: { conversations?: string; messages?: string; headers?: Record<string, string> } = {};
+/**
+ * Sayfanın yaptığı GraphQL isteklerinden yakalanan URL'ler.
+ * - messages: sohbetin ilk sayfası (variables=(conversationUrn:…), syncToken YOK — token'lı istek yalnızca
+ *   son değişiklikleri döndürür, şablon olarak kullanılırsa geçmiş boş gelir)
+ * - older: istemcinin listeyi yukarı kaydırınca yaptığı "daha eski" isteği
+ *   (variables=(deliveredAt:<ms>,conversationUrn:…,countBefore:20,countAfter:0) → messengerMessagesByAnchorTimestamp)
+ */
+const captured: { conversations?: string; messages?: string; older?: string; headers?: Record<string, string> } = {};
+/** Yakalanamazsa kullanılacak bilinen "daha eski" sorgu kimliği (istemci sürümüyle değişebilir) */
+const OLDER_QUERY_ID = 'messengerMessages.d8ea76885a52fd5dc5c317078ab7c977';
 const installed = new WeakSet<Page>();
 
 function install(page: Page): void {
@@ -52,7 +61,16 @@ function install(page: Page): void {
     if (!u.includes('voyagerMessagingGraphQL/graphql')) return;
     if (u.includes('messengerConversations') && !u.includes('messengerConversationsBySyncToken')) captured.conversations = u;
     else if (u.includes('messengerConversations')) captured.conversations ??= u;
-    if (u.includes('messengerMessages')) captured.messages = u;
+    if (u.includes('messengerMessages')) {
+      let v = u;
+      try {
+        v = decodeURIComponent(u);
+      } catch {
+        /* bozuk kodlama: ham URL üzerinden sınıflandır */
+      }
+      if (/[(,]deliveredAt:|[(,]countBefore:/.test(v)) captured.older = u;
+      else if (!/[(,]syncToken:/.test(v)) captured.messages = u;
+    }
     // istemcinin gönderdiği başlıkları (x-li-track, page-instance vb.) aynen kullan — yalnızca
     // GET sohbet/mesaj sorgularından; POST'lar (seen-receipts vb.) farklı pem/page-instance taşır
     if (req.method() !== 'GET' || !/messenger(Conversations|Messages)/.test(u)) return;
@@ -72,13 +90,13 @@ async function waitFor(pred: () => boolean, ms: number): Promise<boolean> {
 }
 
 /**
- * Yakalanan mesaj sorgusundaki conversationUrn değerini, istemcinin kullandığı kodlama biçimini
- * koruyarak (parantezler ham ya da %28/%29) başka bir sohbetle değiştir.
+ * Yakalanan sorgu şablonundaki bir Rest.li değişkenini (variables=(ad:değer,…)) değiştir.
+ * Değer, üst düzeydeki ilk ',' ya da ')' karakterine kadar okunur (iç içe parantezler atlanır).
  */
-function withConversation(template: string, conversationUrn: string): string {
-  const key = 'conversationUrn:';
+function varSpan(template: string, name: string): [number, number] | undefined {
+  const key = name + ':';
   const i = template.indexOf(key);
-  if (i < 0) return template;
+  if (i < 0) return undefined;
   const start = i + key.length;
   let depth = 0;
   let end = start;
@@ -90,14 +108,92 @@ function withConversation(template: string, conversationUrn: string): string {
       depth--;
     } else if (ch === ',' && depth === 0) break;
   }
-  const original = template.slice(start, end);
-  const rawParens = original.includes('(');
-  // encodeURIComponent parantezleri kodlamaz; istemci %28/%29 gönderiyor ve Rest.li ham parantezi
-  // kendi sözdizimi sanıp 400 döndürüyor → parantezler her zaman elle kodlanır.
-  const encoded = rawParens
-    ? conversationUrn.replace(/:/g, '%3A').replace(/,/g, '%2C').replace(/=/g, '%3D')
-    : encodeURIComponent(conversationUrn).replace(/\(/g, '%28').replace(/\)/g, '%29');
-  return template.slice(0, start) + encoded + template.slice(end);
+  return [start, end];
+}
+
+function withVar(template: string, name: string, value: string): string {
+  const span = varSpan(template, name);
+  if (!span) return template;
+  return template.slice(0, span[0]) + value + template.slice(span[1]);
+}
+
+/**
+ * Sohbet URN'ini Rest.li için kodla. encodeURIComponent parantezleri kodlamaz; istemci %28/%29
+ * gönderiyor ve Rest.li ham parantezi kendi sözdizimi sanıp 400 döndürüyor → parantezler elle kodlanır.
+ */
+const encodeUrn = (urn: string) => encodeURIComponent(urn).replace(/\(/g, '%28').replace(/\)/g, '%29');
+
+/**
+ * Yakalanan mesaj sorgusundaki conversationUrn değerini, istemcinin kullandığı kodlama biçimini
+ * koruyarak (parantezler ham ya da %28/%29) başka bir sohbetle değiştir.
+ */
+function withConversation(template: string, conversationUrn: string): string {
+  const span = varSpan(template, 'conversationUrn');
+  if (!span) return template;
+  // ham parantezli şablon: mevcut değer '(' içeriyorsa yalnızca iç ayraçlar kodlanır
+  const rawParens = template.slice(span[0], span[1]).includes('(');
+  const encoded = rawParens ? conversationUrn.replace(/:/g, '%3A').replace(/,/g, '%2C').replace(/=/g, '%3D') : encodeUrn(conversationUrn);
+  return template.slice(0, span[0]) + encoded + template.slice(span[1]);
+}
+
+let olderCaptureTried = false;
+let templateCapture: Promise<void> | undefined;
+
+/**
+ * Mesaj sorgu şablonu yoksa bir sohbeti açtır ki istemci kendi messengerMessages isteğini yapsın.
+ * Paralel messages() çağrıları aynı sayfada ayrı ayrı gezinmesin diye tek uçuş paylaşılır.
+ */
+function ensureMessagesTemplate(page: Page, threadId: string): Promise<void> {
+  if (captured.messages) return Promise.resolve();
+  templateCapture ??= (async () => {
+    try {
+      await page.goto(`https://www.linkedin.com/messaging/thread/${encodeURIComponent(convId(threadId))}/`, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+      await waitFor(() => !!captured.messages, 12_000);
+    } finally {
+      templateCapture = undefined;
+    }
+  })();
+  return templateCapture;
+}
+
+/** İstemciye "daha eski" isteğini yaptır: sohbeti aç, mesaj listesini en üste kaydır (en çok ~10 sn). */
+async function captureOlder(page: Page, threadId: string): Promise<void> {
+  await page.goto(`https://www.linkedin.com/messaging/thread/${encodeURIComponent(convId(threadId))}/`, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+  await waitFor(() => false, 2500);
+  for (let i = 0; i < 6 && !captured.older; i++) {
+    const box = await page.$('.msg-s-message-list').catch(() => null);
+    const b = await box?.boundingBox().catch(() => null);
+    if (b) {
+      await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2).catch(() => undefined);
+      await page.mouse.wheel(0, -4000).catch(() => undefined);
+    }
+    await page
+      .evaluate(() => {
+        const el = document.querySelector('.msg-s-message-list');
+        if (el) {
+          el.scrollTop = 0;
+          el.dispatchEvent(new Event('scroll'));
+        }
+      })
+      .catch(() => undefined);
+    await waitFor(() => !!captured.older, 1200);
+  }
+  bus.log('info', captured.older ? 'LinkedIn: "daha eski" sorgu şablonu yakalandı' : 'LinkedIn: "daha eski" sorgu şablonu yakalanamadı');
+}
+
+/** "Daha eski" sorgusu: yakalanan şablon varsa onu, yoksa bilinen sorgu kimliğiyle sentezlenmiş URL'yi kullan. */
+function olderUrl(threadId: string, before: number, limit: number): string | undefined {
+  if (captured.older) {
+    let u = withConversation(captured.older, threadId);
+    u = withVar(u, 'deliveredAt', String(before));
+    u = withVar(u, 'countBefore', String(limit));
+    return u;
+  }
+  const base = captured.messages;
+  if (!base) return undefined;
+  const q = base.indexOf('?');
+  const origin = q < 0 ? base : base.slice(0, q);
+  return `${origin}?queryId=${OLDER_QUERY_ID}&variables=(deliveredAt:${before},conversationUrn:${encodeUrn(threadId)},countBefore:${limit},countAfter:0)`;
 }
 
 /** urn:li:fsd_profile:ABC → ABC ; urn:li:fs_miniProfile:ABC → ABC */
@@ -111,6 +207,7 @@ const convId = (urn: string) => {
 let meId = '';
 let meUrn = '';
 let templateWarned = false;
+let sponsoredLogged = false;
 
 function memberOf(p: J | undefined): { id: string; name: string; avatar?: string; handle?: string } {
   const m = p?.participantType?.member ?? p?.participantType?.organization ?? p?.member ?? {};
@@ -132,17 +229,105 @@ function findElements(data: J, key: string): J[] {
   return (data?.included ?? []).filter((e: J) => e.$type?.includes(key === 'messengerConversations' ? 'Conversation' : 'Message'));
 }
 
-function msgText(m: J): string {
-  const t = m.body?.text ?? m.body ?? '';
-  if (t) return String(t);
+const renderContent = (m: J): J[] => {
   const rc = m.renderContent ?? m.renderContentUnions ?? [];
-  if (Array.isArray(rc) && rc.length) return '[ek]';
-  return '';
+  return Array.isArray(rc) ? rc.filter(Boolean) : [];
+};
+
+/** Sponsorlu (reklam) mesaj: Message Ad ya da Conversation Ad içeriği taşır; mobil uygulama bunları göstermez */
+function isAdMessage(m: J): boolean {
+  if ((m.categories ?? []).some((c: unknown) => /SPONSORED/i.test(String(c)))) return true;
+  return renderContent(m).some((r) => r.messageAdRenderContent || r.conversationAdsMessageContent || r.sponsoredMessageContent);
 }
+
+/**
+ * Sponsorlu sohbet: contentMetadata.conversationAdContent (Sponsored InMail / "LinkedIn Teklifi"),
+ * "Sponsorlu" tür etiketi ya da reklam içerikli mesajlar. Not: yalnızca 'INMAIL' kategorisi yeterli değil —
+ * Premium InMail (gerçek kişilerden, hostUrnData PREMIUM_INMAIL) de bu kategoriyi taşır ve mobilde görünür.
+ */
+function isSponsored(c: J): boolean {
+  if (c.contentMetadata?.conversationAdContent) return true;
+  if ((c.categories ?? []).some((x: unknown) => /SPONSORED/i.test(String(x)))) return true;
+  if (/sponsor/i.test(String(c.conversationTypeText?.text ?? ''))) return true;
+  return (c.messages?.elements ?? []).some(isAdMessage);
+}
+
+/** VectorImage → en büyük artifact'ın tam adresi (artifacts boşsa rootUrl'nin kendisi tam adres) */
+function vectorUrl(vi: J | undefined): string | undefined {
+  if (!vi?.rootUrl) return undefined;
+  const arts: J[] = Array.isArray(vi.artifacts) ? vi.artifacts : [];
+  const art = arts.reduce<J | undefined>((best, a) => (!best || Number(a.width ?? 0) > Number(best.width ?? 0) ? a : best), undefined);
+  return String(vi.rootUrl) + String(art?.fileIdentifyingUrlPathSegment ?? '');
+}
+
+const kindOfMime = (mime: string | undefined): Attachment['kind'] =>
+  /^image\//.test(mime ?? '') ? 'image' : /^video\//.test(mime ?? '') ? 'video' : /^audio\//.test(mime ?? '') ? 'audio' : 'file';
+
+/**
+ * renderContent öğelerinden ekler: vectorImage (görsel), file (dosya/görsel/video/ses), audio (sesli mesaj),
+ * video (VideoPlayMetadata), externalMedia (GIF). Reklam ve hostUrnData (Premium InMail etiketi) atlanır.
+ */
+function attachmentsOf(m: J): Attachment[] {
+  const out: Attachment[] = [];
+  for (const r of renderContent(m)) {
+    if (r.vectorImage) {
+      const url = vectorUrl(r.vectorImage);
+      if (url) out.push({ kind: 'image', name: 'Görsel', url, link: url });
+    } else if (r.file) {
+      const f = r.file;
+      const kind = kindOfMime(f.mediaType);
+      out.push({ kind, name: f.name || 'Dosya', mime: f.mediaType || undefined, size: f.byteSize ? Number(f.byteSize) : undefined, url: kind === 'image' ? f.url : undefined, link: f.url });
+    } else if (r.audio) {
+      out.push({ kind: 'audio', name: 'Sesli mesaj', mime: r.audio.mediaType || undefined, link: r.audio.url });
+    } else if (r.video) {
+      const v = r.video;
+      const streams: J[] = v.progressiveStreams ?? v.videoPlayMetadata?.progressiveStreams ?? [];
+      const best = streams.reduce<J | undefined>((b, s) => (!b || Number(s.width ?? 0) > Number(b.width ?? 0) ? s : b), undefined);
+      const link = best?.streamingLocations?.[0]?.url ?? v.url;
+      out.push({ kind: 'video', name: 'Video', url: vectorUrl(v.thumbnail ?? v.videoPlayMetadata?.thumbnail), link });
+    } else if (r.externalMedia) {
+      const em = r.externalMedia;
+      const url = em.media?.url ?? em.previewMedia?.url;
+      if (url) out.push({ kind: 'image', name: em.title || 'GIF', url, link: url });
+    } else if (r.forwardedMessageContent) {
+      out.push(...attachmentsOf(r.forwardedMessageContent));
+    } else if (r.unavailableContent) {
+      out.push({ kind: 'other', name: 'Kullanılamayan içerik' });
+    }
+    // hostUrnData (PREMIUM_INMAIL etiketi), messageAdRenderContent, conversationAdsMessageContent: ek değil
+  }
+  return out;
+}
+
+function msgText(m: J): string {
+  const t = m.body?.text ?? (typeof m.body === 'string' ? m.body : '') ?? '';
+  if (t) return String(t);
+  const fwd = renderContent(m).find((r) => r.forwardedMessageContent)?.forwardedMessageContent;
+  const fwdText = fwd?.originalMessage?.body?.text ?? fwd?.body?.text;
+  if (fwdText) return `↪ ${fwdText}`;
+  return String(m.renderContentFallbackText ?? '');
+}
+
+/** Sohbet listesi önizlemesi: metin yoksa ekin adı (arayüz ek göstermez) */
+function preview(m: J | undefined): string {
+  if (!m) return '';
+  const t = msgText(m);
+  if (t) return t;
+  const a = attachmentsOf(m)[0];
+  return a?.name ? `[${a.name}]` : '';
+}
+
+/** Okunmamış sayısı: platformun gerçek sayacı; 'read:false' ama sayaç 0 ise en az 1 (kalın gösterim için) */
+const unreadOf = (c: J): number => {
+  const n = Number(c.unreadCount ?? 0);
+  return c.read === false ? Math.max(1, n) : n;
+};
 
 export const linkedin: Strategy = {
   home: HOME,
   loginHint: 'Açılan pencerede LinkedIn hesabına giriş yap',
+  // API tabanlı: mesaj sorguları sayfa gezdirmeden fetch ile yapılır, paralel çağrılabilir
+  parallel: true,
 
   async loggedIn(_page, cookies) {
     return Boolean(cookies.li_at && cookies.JSESSIONID);
@@ -150,6 +335,8 @@ export const linkedin: Strategy = {
 
   async me(page, cookies) {
     install(page);
+    // fetch sayfanın kaynağından yapılır: ilk gezinme başarısız kaldıysa (about:blank) önce ana sayfaya git
+    if (!page.url().startsWith('https://www.linkedin.com/')) await page.goto(HOME, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
     try {
       const me = await voyager(page, cookies, '/me');
       meUrn = String(me.miniProfile?.entityUrn ?? '');
@@ -177,10 +364,15 @@ export const linkedin: Strategy = {
         if (m) meId = m[1];
       }
       const out: Thread[] = [];
+      let sponsored = 0;
       for (const c of els) {
+        if (isSponsored(c)) {
+          sponsored++;
+          continue;
+        }
         const parts = (c.conversationParticipants ?? []).map(memberOf);
         const others = parts.filter((p: { id: string }) => p.id !== meId);
-        const last = c.messages?.elements?.[0];
+        const last = (c.messages?.elements ?? []).find((m: J) => !isAdMessage(m));
         out.push({
           id: String(c.entityUrn ?? ''),
           participants: parts.map((p: ReturnType<typeof memberOf>) => ({ id: p.id, name: p.name, avatarUrl: p.avatar, handle: p.handle })),
@@ -189,12 +381,23 @@ export const linkedin: Strategy = {
           name: c.title || others.map((p: { name: string }) => p.name).join(', ') || 'Sohbet',
           kind: others.length > 1 || c.groupChat ? 'group' : 'direct',
           lastTs: Number(c.lastActivityAt ?? last?.deliveredAt ?? 0),
-          preview: last ? msgText(last) : '',
-          unread: Number(c.unreadCount ?? 0),
+          preview: preview(last),
+          unread: unreadOf(c),
           avatarUrl: others.length === 1 ? others[0].avatar : undefined,
         });
       }
-      if (out.length) return out;
+      if (sponsored && !sponsoredLogged) {
+        sponsoredLogged = true;
+        bus.log('info', `LinkedIn: ${sponsored} sponsorlu sohbet gizlendi`);
+      }
+      if (out.length) {
+        // mesaj şablonu henüz yoksa tek bir sohbeti şimdi açtır: yoklama mesajları 4'lü paralel ister,
+        // her biri ayrı ayrı sayfa gezdirmesin. Okunmuş bir sohbet seçilir: web istemcisi açılan sohbete
+        // görüldü bildirimi gönderir, okunmamış bir sohbet platformda (ve burada) okunmuş sayılmasın.
+        if (!captured.messages) await ensureMessagesTemplate(page, (out.find((t) => !t.unread) ?? out[0]).id);
+        return out;
+      }
+      if (els.length) return out; // hepsi sponsorluysa liste gerçekten boş
       bus.log('warn', 'LinkedIn: GraphQL sohbet listesi boş döndü, eski uç deneniyor');
     }
     // yedek: eski API
@@ -213,48 +416,64 @@ export const linkedin: Strategy = {
         kind: others.length > 1 ? 'group' : 'direct',
         lastTs: Number(c.lastActivityAt ?? last?.createdAt ?? 0),
         preview: lc.attributedBody?.text ?? lc.body ?? '',
-        unread: Number(c.unreadCount ?? 0),
+        unread: unreadOf(c),
       });
     }
     return out;
   },
 
-  async messages(page, cookies, threadId, limit): Promise<Msg[]> {
+  async messages(page, cookies, threadId, limit, before): Promise<Msg[]> {
     install(page);
-    if (!captured.messages) {
-      // bir sohbeti açtır ki istemci mesaj sorgusunu yapsın; URL şablonunu yakala
-      await page.goto(`https://www.linkedin.com/messaging/thread/${encodeURIComponent(convId(threadId))}/`, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
-      await waitFor(() => !!captured.messages, 12_000);
-    }
+    // bir sohbeti açtır ki istemci mesaj sorgusunu yapsın; URL şablonunu yakala (paralel çağrılar tek uçuşu bekler)
+    await ensureMessagesTemplate(page, threadId);
     if (captured.messages) {
-      const url = withConversation(captured.messages, threadId);
-      let data: J;
+      let url = before ? (olderUrl(threadId, before, limit) ?? withConversation(captured.messages, threadId)) : withConversation(captured.messages, threadId);
+      let data: J | undefined;
       try {
         data = await voyager(page, cookies, url, { graphql: true });
       } catch (e) {
-        // şablon ayrıntısı yalnızca ilk kez basılır; köprü zaten yoklama başına tek özet uyarı verir
-        if (!templateWarned) {
-          templateWarned = true;
-          bus.log('warn', `LinkedIn mesaj sorgusu reddedildi; şablon: ${captured.messages.slice(0, 400)} → ${url.slice(0, 400)}`);
+        // "daha eski" bilinen sorgu kimliği reddedildiyse (istemci sürümü değişmiş) şablonu bir kez
+        // istemciden yakalamayı dene: sohbeti aç, listeyi en üste kaydır → sayfa kendi isteğini yapar
+        if (before && !captured.older && !olderCaptureTried) {
+          olderCaptureTried = true;
+          await captureOlder(page, threadId);
+          if (captured.older) {
+            url = olderUrl(threadId, before, limit)!;
+            // yakalanan şablon da reddedilirse aşağıdaki uyarı yoluna düş (özgün hata fırlatılır)
+            data = await voyager(page, cookies, url, { graphql: true }).catch(() => undefined);
+          }
         }
-        throw e;
+        if (!data) {
+          // şablon ayrıntısı yalnızca ilk kez basılır; köprü zaten yoklama başına tek özet uyarı verir
+          if (!templateWarned) {
+            templateWarned = true;
+            bus.log('warn', `LinkedIn mesaj sorgusu reddedildi; şablon: ${(before ? captured.older ?? OLDER_QUERY_ID : captured.messages).slice(0, 400)} → ${url.slice(0, 400)}`);
+          }
+          throw e;
+        }
       }
       const els = findElements(data, 'messengerMessages');
-      return els.map((m: J) => {
-        const from = memberOf(m.sender);
-        return {
-          id: String(m.entityUrn ?? m.backendUrn ?? m.deliveredAt),
-          text: msgText(m),
-          ts: Number(m.deliveredAt ?? Date.now()),
-          fromMe: !!meId && from.id === meId,
-          senderId: from.id,
-          senderName: from.name,
-          senderAvatarUrl: from.avatar,
-        };
-      }).reverse();
+      // ilk sayfa yeniden-eskiye, "daha eski" yanıtı eskiden-yeniye gelir → zaman damgasına göre sırala
+      return els
+        .filter((m: J) => !isAdMessage(m))
+        .filter((m: J) => !before || Number(m.deliveredAt ?? 0) < before)
+        .map((m: J): Msg => {
+          const from = memberOf(m.sender);
+          return {
+            id: String(m.entityUrn ?? m.backendUrn ?? m.deliveredAt),
+            text: msgText(m),
+            ts: Number(m.deliveredAt ?? Date.now()),
+            fromMe: !!meId && from.id === meId,
+            senderId: from.id,
+            senderName: from.name,
+            senderAvatarUrl: from.avatar,
+            attachments: attachmentsOf(m),
+          };
+        })
+        .sort((a: Msg, b: Msg) => a.ts - b.ts);
     }
     // yedek: eski API
-    const data = await voyager(page, cookies, `/messaging/conversations/${encodeURIComponent(threadId.split(':').pop() ?? threadId)}/events?count=${limit}`);
+    const data = await voyager(page, cookies, `/messaging/conversations/${encodeURIComponent(threadId.split(':').pop() ?? threadId)}/events?count=${limit}${before ? `&createdBefore=${before}` : ''}`);
     return (data.elements ?? []).map((ev: J) => {
       const mp = ev.from?.['com.linkedin.voyager.messaging.MessagingMember']?.miniProfile ?? {};
       const c = ev.eventContent?.['com.linkedin.voyager.messaging.event.MessageEvent'] ?? {};

@@ -58,6 +58,12 @@ export interface Strategy {
   openDirect?(page: Page, cookies: Record<string, string>, participant: Participant): Promise<string>;
   /** Platformda okundu işaretle; lastIncomingId depodaki son gelen mesajın kimliği */
   markRead?(page: Page, cookies: Record<string, string>, threadId: string, lastIncomingId?: string): Promise<void>;
+  /** http(s) olmayan özel medya şeması (ör. X'in "xc:<sohbet>/<ek>" çözülmüş OPFS dosyaları): strateji sayfa bağlamından okur */
+  fetchMedia?(page: Page, cookies: Record<string, string>, u: string): Promise<{ body: Buffer; type: string } | undefined>;
+  /** Kayıtlı oturum olsa da "Yeniden bağlan"da görünür pencere gerekiyor mu (ör. Messenger uçtan uca şifreli geçmiş için PIN adımı)? */
+  needsWindow?(page: Page): Promise<boolean>;
+  /** Görünür pencere kapatılmadan önce: kullanıcının tamamlaması gereken ek adım (PIN) için bekle */
+  afterLogin?(page: Page): Promise<void>;
 }
 
 export class BrowserConnector extends BaseConnector {
@@ -91,7 +97,10 @@ export class BrowserConnector extends BaseConnector {
 
     // 1) Kayıtlı oturum var mı? Önce görünmez pencerede dene.
     if (!(await this.launch(true))) return;
-    if (!(await this.isLoggedIn())) {
+    const loggedIn = await this.isLoggedIn();
+    // Giriş var ama platform görünür pencerede ek adım istiyor (Messenger PIN): yalnızca kullanıcı 'Yeniden bağlan' dediyse pencere aç
+    const needsWindow = loggedIn && interactive && !!this.strategy.needsWindow && (await withTimeout(this.strategy.needsWindow(this.page!), 30_000, 'pencere denetimi').catch(() => false));
+    if (!loggedIn || needsWindow) {
       if (!interactive) {
         // Açılışta pencere fırlatma: kullanıcı "Yeniden bağlan" deyince giriş penceresi açılır.
         await this.closeCtx();
@@ -103,6 +112,8 @@ export class BrowserConnector extends BaseConnector {
       if (!(await this.launch(false))) return;
       this.setStatus('pairing', this.strategy.loginHint);
       if (!(await this.waitForLogin())) return;
+      // Platforma özgü son adım (Messenger: "PIN kodunu gir") — pencere hâlâ açıkken
+      if (this.strategy.afterLogin && this.page && !this.page.isClosed()) await this.strategy.afterLogin(this.page).catch(() => undefined);
       bus.log('info', `${this.account.platform}: giriş yapıldı, pencere kapatılıyor`);
       await this.closeCtx();
       if (!(await this.launch(true))) return;
@@ -255,10 +266,20 @@ export class BrowserConnector extends BaseConnector {
       return { body: fs.readFileSync(file), type: fs.readFileSync(file + '.type', 'utf8') };
     }
     if (!this.ctx) return undefined;
-    const r = await this.ctx.request.get(url, { timeout: 25_000, headers: { referer: new URL(this.strategy.home).origin + '/' } });
-    if (!r.ok()) throw new Error(`medya ${r.status()}`);
-    const body = await r.body();
-    const type = r.headers()['content-type'] ?? 'application/octet-stream';
+    let body: Buffer;
+    let type: string;
+    if (!/^https?:\/\//.test(url)) {
+      // özel şema: stratejinin kancası (sayfa bağlamından okur; tek sayfayı paylaştığı için sırayla)
+      if (!this.strategy.fetchMedia || !this.page || this.page.isClosed()) return undefined;
+      const r = await this.serial(async () => this.strategy.fetchMedia!(this.page!, await this.cookies(), url));
+      if (!r) return undefined;
+      ({ body, type } = r);
+    } else {
+      const r = await this.ctx.request.get(url, { timeout: 25_000, headers: { referer: new URL(this.strategy.home).origin + '/' } });
+      if (!r.ok()) throw new Error(`medya ${r.status()}`);
+      body = await r.body();
+      type = r.headers()['content-type'] ?? 'application/octet-stream';
+    }
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(file, body);
     fs.writeFileSync(file + '.type', type);
@@ -267,7 +288,8 @@ export class BrowserConnector extends BaseConnector {
 
   /** Uzak medya adresini çekirdeğin vekil yoluna çevir (arayüz API_BASE ile önekler). */
   private proxied(u: string | undefined): string | undefined {
-    if (!u || !/^https?:\/\//.test(u)) return u;
+    // http(s) adresleri ve stratejiye özel şemalar ("xc:…") vekilden geçer; vekil yolu / data: / blob: olduğu gibi kalır
+    if (!u || u.startsWith('/') || /^(data|blob):/.test(u)) return u;
     return `/api/media/${encodeURIComponent(this.account.id)}?u=${encodeURIComponent(u)}`;
   }
 
@@ -299,7 +321,8 @@ export class BrowserConnector extends BaseConnector {
         // lastTs=0: strateji zaman bilgisi vermiyor (DOM okuyan Messenger) → depodaki değer korunur
         // Kavşak'ta okunan sohbeti platformun eski 'okunmamış' değeri geri açmasın: yalnızca yeni etkinlikte aktar
         const ex = this.store.getChat(chatId(this.account.id, t.id));
-        const fresh = !ex || t.lastTs > ex.lastMessageAt || !ex.lastPreview;
+        // lastTs=0 (DOM okuyan Messenger): çekirdek yeniden başladıysa platformun okunmamış durumu depoya aktarılsın
+        const fresh = !ex || t.lastTs > ex.lastMessageAt || !ex.lastPreview || (t.lastTs === 0 && first && t.unread > 0 && !ex.unread);
         this.upsertChat({ remoteId: t.id, name: t.name, kind: t.kind, unread: fresh ? t.unread : undefined, lastMessageAt: t.lastTs || undefined, lastPreview: fresh ? t.preview || undefined : undefined, avatarUrl: t.avatarUrl, handle: t.handle, link: t.link, participants: t.participants });
         if (!this.known.has(t.id) || (this.known.get(t.id) ?? 0) < t.lastTs) changed.push(t);
       }
@@ -340,6 +363,7 @@ export class BrowserConnector extends BaseConnector {
 
   private ingest(threadId: string, m: Msg, live: boolean): void {
     if (!m.text && !m.attachments?.length) return;
+    // Platformun okunmamış sayısı yetkili (threads() ile yazılır); canlı mesaj burada ayrıca +1 yapmasın (çift sayım)
     this.upsertMessage(
       {
         remoteChatId: threadId,
@@ -353,7 +377,7 @@ export class BrowserConnector extends BaseConnector {
         senderAvatarUrl: m.senderAvatarUrl,
         attachments: m.attachments?.length ? m.attachments.map((a) => ({ ...a, url: this.proxied(a.url), link: isMediaFile(a.link) ? this.proxied(a.link) : a.link })) : undefined,
       },
-      { live },
+      { live, bump: false },
     );
   }
 }
@@ -361,7 +385,8 @@ export class BrowserConnector extends BaseConnector {
 /** Bağlantı bir medya dosyası mı (gönderi sayfası değil)? Bunlar vekil üzerinden, çerezlerle indirilir. */
 function isMediaFile(u: string | undefined): boolean {
   if (!u) return false;
-  return /(ton\.twitter\.com|video\.twimg\.com|pbs\.twimg\.com|cdninstagram\.com|fbcdn\.net|licdn\.com)/.test(u);
+  // fbsbx.com: Instagram/Messenger sesli mesaj ve dosyaları; ton.x.com: X eski DM medyası; linkedin.com/dms: LinkedIn ekleri (çerez ister)
+  return /(ton\.(x|twitter)\.com|video\.twimg\.com|pbs\.twimg\.com|cdninstagram\.com|fbcdn\.net|fbsbx\.com|licdn\.com|linkedin\.com\/dms\/|giphy\.com|tenor\.com)/.test(u);
 }
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

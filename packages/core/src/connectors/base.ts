@@ -92,7 +92,7 @@ export abstract class BaseConnector implements Connector {
 
   protected upsertMessage(
     input: Omit<Message, 'id' | 'chatId'> & { remoteChatId: string },
-    opts: { live?: boolean } = {},
+    opts: { live?: boolean; bump?: boolean } = {},
   ): Message | undefined {
     const cid = chatId(this.account.id, input.remoteChatId);
     if (!this.store.getChat(cid)) {
@@ -100,7 +100,8 @@ export abstract class BaseConnector implements Connector {
     }
     const { remoteChatId: _drop, ...rest } = input;
     const message: Message = { ...rest, id: messageId(cid, input.remoteId), chatId: cid };
-    const inserted = this.store.upsertMessage(message, { bumpUnread: opts.live });
+    // bump: okunmamış sayacını artır (varsayılan canlı mesajlarda); platform sayacı yetkiliyse (tarayıcı köprüsü) kapatılır
+    const inserted = this.store.upsertMessage(message, { bumpUnread: opts.bump ?? opts.live });
     if (inserted && input.fromMe && !input.remoteId.startsWith('local-')) {
       for (const id of this.store.dropLocalDuplicates(cid)) bus.emit({ type: 'message.delete', chatId: cid, messageId: id });
     }

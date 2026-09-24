@@ -26,6 +26,14 @@ export default function App() {
   const [listSearch, setListSearch] = useState(false);
   /** iMessage klasörü: Mesajlar uygulamasındaki Bilinmeyen / İstenmeyen / SMS filtresi / Son silinenler */
   const [imFolder, setImFolder] = useState<'unknown' | 'junk' | 'sms' | 'deleted' | null>(null);
+  /** Telegram: üstteki "Arşiv" sekmesi (chat.meta.archived) */
+  const [tgArchive, setTgArchive] = useState(false);
+  /** Platform seçimi değişince platforma özel sekmeler (iMessage klasörü, Telegram arşivi) sıfırlanır */
+  const selectPlatform = useCallback((p: Platform | null) => {
+    setPlatformFilter(p);
+    setImFolder(null);
+    setTgArchive(false);
+  }, []);
   const [olderBusy, setOlderBusy] = useState(false);
   const [noMoreOlder, setNoMoreOlder] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -113,6 +121,8 @@ export default function App() {
   useEffect(() => {
     // Paketli uygulamada çekirdek arayüzden 1-3 sn sonra ayağa kalkar: hata göstermeden önce bekle
     let cancelled = false;
+    // Açılış eşitlemesi: ilk 60 sn içinde gelen "canlı" mesajlar da bildirim çalmasın (geçmiş yeni gelmiş gibi görünmesin)
+    const bootTs = Date.now();
     (async () => {
       const t0 = Date.now();
       let lastErr = '';
@@ -189,7 +199,7 @@ export default function App() {
         case 'message.upsert':
           queueChat(ev.chat);
           // yalnızca canlı gelen (eşitleme/geçmiş değil) ve yeni mesajlar bildirim çalsın
-          if (ev.live && !ev.message.fromMe && Date.now() - ev.message.ts < 120_000) {
+          if (ev.live && !ev.message.fromMe && Date.now() - bootTs > 60_000 && Date.now() - ev.message.ts < 120_000) {
             void windowFocused().then((focused) => {
               if (!focused || ev.message.chatId !== selectedRef.current) {
                 desktopNotify(ev.chat.name, (ev.message.text || ev.message.attachments?.[0]?.name || 'Yeni mesaj').slice(0, 140));
@@ -289,17 +299,24 @@ export default function App() {
   // ---- türetilmiş listeler ----
   const allChats = useMemo(() => [...chats.values()], [chats]);
   const activeChats = useMemo(() => allChats.filter((c) => !isSnoozed(c.id)), [allChats, isSnoozed]);
+  /**
+   * Gelen kutusu, sayaçlar ve odak için sohbetler: arşivlenmiş (Telegram) ve klasörlenmiş (iMessage bilinmeyen/istenmeyen/SMS)
+   * sohbetler dışarıda kalır; onlar yalnızca kendi sekmelerinde görünür.
+   */
+  const inboxChats = useMemo(() => activeChats.filter((c) => !c.meta?.archived && !(c.platform === 'imessage' && c.meta?.folder)), [activeChats]);
+  const archivedCount = useMemo(() => activeChats.filter((c) => c.platform === platformFilter && !!c.meta?.archived).length, [activeChats, platformFilter]);
   const snoozedChats = useMemo(() => allChats.filter((c) => isSnoozed(c.id)).sort((a, b) => snoozes[a.id] - snoozes[b.id]), [allChats, isSnoozed, snoozes]);
-  const waitingChats = useMemo(() => activeChats.filter(isWaiting).sort((a, b) => b.lastMessageAt - a.lastMessageAt), [activeChats]);
+  const waitingChats = useMemo(() => inboxChats.filter(isWaiting).sort((a, b) => b.lastMessageAt - a.lastMessageAt), [inboxChats]);
   const [storyPlatform, setStoryPlatform] = useState<Platform | null>(null);
   const storyChats = useMemo(() => (storyPlatform ? waitingChats.filter((c) => c.platform === storyPlatform) : waitingChats), [waitingChats, storyPlatform]);
   const storyPlatforms = useMemo(() => [...new Set(waitingChats.map((c) => c.platform))], [waitingChats]);
 
   const chatList = useMemo(() => {
-    let list = [...activeChats];
+    // Telegram "Arşiv" sekmesi yalnızca arşivlenmişleri, iMessage klasör sekmeleri o klasörü; diğer her görünüm gelen kutusunu listeler
+    const imActive = platformFilter === 'imessage' ? imFolder : null;
+    let list = platformFilter === 'telegram' && tgArchive ? activeChats.filter((c) => c.platform === 'telegram' && !!c.meta?.archived) : imActive ? activeChats : [...inboxChats];
     if (platformFilter) list = list.filter((c) => c.platform === platformFilter);
     // iMessage klasörleri: filtrelenmiş sohbetler (bilinmeyen/istenmeyen/SMS) gelen kutusunda görünmez; klasör seçilince yalnızca o klasör
-    const imActive = platformFilter === 'imessage' ? imFolder : null;
     list = list.filter((c) => {
       if (c.platform !== 'imessage') return true;
       const folder = c.meta?.folder as string | undefined;
@@ -309,39 +326,44 @@ export default function App() {
       return !folder;
     });
     if (tagFilter) list = list.filter((c) => c.tags.includes(tagFilter));
-    if (filter === 'unread') list = list.filter((c) => c.unread > 0);
-    if (filter === 'waiting') list = list.filter(isWaiting);
+    // iMessage'da Okunmamış/Bekleyen sekmeleri yok (Mesajlar uygulamasındaki klasörler var)
+    const effFilter = platformFilter === 'imessage' ? 'all' : filter;
+    if (effFilter === 'unread') list = list.filter((c) => c.unread > 0);
+    if (effFilter === 'waiting') list = list.filter(isWaiting);
     if (query.trim()) {
       const q = query.toLowerCase();
       list = list.filter((c) => c.name.toLowerCase().includes(q) || c.lastPreview.toLowerCase().includes(q));
     }
     list.sort((a, b) => (smartSort ? score(b) - score(a) : 0) || b.lastMessageAt - a.lastMessageAt);
     return list;
-  }, [activeChats, filter, platformFilter, tagFilter, query, smartSort, imFolder]);
+  }, [activeChats, inboxChats, filter, platformFilter, tagFilter, query, smartSort, imFolder, tgArchive]);
+
+  /** Boş liste metni: hangi sekme/filtre boşsa ona göre anlamlı bir açıklama */
+  const emptyText = imFolder || tgArchive ? 'Bu klasörde sohbet yok.' : query.trim() ? 'Aramayla eşleşen sohbet yok.' : filter === 'unread' && platformFilter !== 'imessage' ? 'Okunmamış sohbet yok.' : filter === 'waiting' && platformFilter !== 'imessage' ? 'Yanıt bekleyen sohbet yok.' : tagFilter ? 'Bu etikette sohbet yok.' : platformFilter ? 'Bu kanalda henüz sohbet yok.' : 'Bu filtreye uyan sohbet yok.';
 
   const totals = useMemo(() => {
     let unread = 0;
-    for (const c of activeChats) if (c.kind !== 'channel') unread += c.unread; // kanallardaki binlerce okunmamış rozeti şişirmesin
+    for (const c of inboxChats) unread += countable(c);
     return { unread, waiting: waitingChats.length };
-  }, [activeChats, waitingChats]);
+  }, [inboxChats, waitingChats]);
   /** Başlıktaki "N yeni": yalnızca görüntülenen kapsam (platform/etiket) */
   const scoped = useMemo(() => {
     let unread = 0;
     let waiting = 0;
-    for (const c of activeChats) {
+    for (const c of inboxChats) {
       if (platformFilter && c.platform !== platformFilter) continue;
       if (tagFilter && !c.tags.includes(tagFilter)) continue;
-      if (c.kind !== 'channel') unread += c.unread;
+      unread += countable(c);
       if (isWaiting(c)) waiting++;
     }
     return { unread, waiting };
-  }, [activeChats, platformFilter, tagFilter]);
+  }, [inboxChats, platformFilter, tagFilter]);
 
   const perPlatform = useMemo(() => {
     const m = new Map<Platform, number>();
-    for (const c of activeChats) if (c.kind !== 'channel') m.set(c.platform, (m.get(c.platform) ?? 0) + c.unread);
+    for (const c of inboxChats) m.set(c.platform, (m.get(c.platform) ?? 0) + countable(c));
     return m;
-  }, [activeChats]);
+  }, [inboxChats]);
 
   const allTags = useMemo(() => {
     const m = new Map<string, number>();
@@ -351,7 +373,7 @@ export default function App() {
 
   // ---- masaüstü ----
   useEffect(() => {
-    void setBadge(totals.unread);
+    void setBadge(Math.min(totals.unread, 999));
     if (!isTauri && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => undefined);
   }, [totals.unread]);
   useEffect(() => {
@@ -408,7 +430,7 @@ export default function App() {
         <button
           key={a.id}
           className={`chan b ${platformFilter === a.platform ? 'active' : ''}`}
-          onClick={() => (setView('inbox'), setPlatformFilter(platformFilter === a.platform ? null : a.platform), setFilter('all'))}
+          onClick={() => (setView('inbox'), selectPlatform(platformFilter === a.platform ? null : a.platform), setFilter('all'))}
           onContextMenu={(e) => {
             e.preventDefault();
             setMenu({ x: e.clientX, y: e.clientY, account: a });
@@ -420,7 +442,7 @@ export default function App() {
             {PLATFORMS[a.platform].name}
             {handleOf(a) && <span className="handle"> ({handleOf(a)})</span>}
           </span>
-          <span className="count">{perPlatform.get(a.platform) || ''}</span>
+          <span className="count">{fmtCount(perPlatform.get(a.platform) ?? 0)}</span>
           <span className={`dot ${a.status}`} style={{ marginLeft: 8 }} />
         </button>  );
 
@@ -429,7 +451,7 @@ export default function App() {
   const goInbox = (f: Filter = 'all') => {
     setView('inbox');
     setFilter(f);
-    setPlatformFilter(null);
+    selectPlatform(null);
     setTagFilter(null);
   };
   const openChat = (id: string) => {
@@ -565,7 +587,7 @@ export default function App() {
       )}
       <div className="surface">
         {view === 'focus' ? (
-          <Focus waiting={waitingChats} chats={activeChats} ai={ai} notify={notify} onOpen={openChat} onSnooze={snooze} onComplete={complete} onBack={() => setView('inbox')} />
+          <Focus waiting={waitingChats} chats={inboxChats} ai={ai} notify={notify} onOpen={openChat} onSnooze={snooze} onComplete={complete} onBack={() => setView('inbox')} />
         ) : (
           <>
             <section className="list" aria-label="Sohbet listesi">
@@ -573,7 +595,7 @@ export default function App() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   {platformFilter && view !== 'snoozed' && <Chip platform={platformFilter} size={26} />}
                   <h1>{view === 'snoozed' ? 'Ertelenenler' : platformFilter ? PLATFORMS[platformFilter].name : tagFilter ? capitalize(tagFilter) : 'Gelen kutusu'}</h1>
-                  {view !== 'snoozed' && scoped.unread > 0 && <span className="pill">{scoped.unread} yeni</span>}
+                  {view !== 'snoozed' && scoped.unread > 0 && <span className="pill">{fmtCount(scoped.unread)} yeni</span>}
                   <span style={{ flexGrow: 1 }} />
                   <button className={`btn icon b b2 ${listSearch || query ? 'soft' : ''}`} aria-label="Sohbetlerde ara" title="Sohbetlerde ara" onClick={() => (setListSearch(!listSearch), listSearch && setQuery(''))}>
                     <Icon name="search" size={15} sw={2} />
@@ -594,12 +616,23 @@ export default function App() {
                     )}
                   </label>
                 )}
+                {view === 'inbox' && platformFilter === 'telegram' && (
+                  <div className="tabs" role="tablist" aria-label="Telegram klasörleri">
+                    <button role="tab" aria-selected={!tgArchive} className={!tgArchive ? 'active' : ''} onClick={() => setTgArchive(false)}>
+                      Sohbetler
+                    </button>
+                    <button role="tab" aria-selected={tgArchive} className={tgArchive ? 'active' : ''} onClick={() => (setTgArchive(true), setFilter('all'))}>
+                      Arşiv {archivedCount > 0 && <span className="c">{archivedCount}</span>}
+                    </button>
+                  </div>
+                )}
                 {view === 'inbox' && (
-                  <div className="tabs" role="tablist">
-                    {(['all', 'unread', 'waiting'] as Filter[]).map((f) => (
+                  <div className="tabs" role="tablist" aria-label={platformFilter === 'imessage' ? 'Mesajlar klasörleri' : 'Filtreler'}>
+                    {/* iMessage: Okunmamış/Bekleyen yerine Mesajlar uygulamasındaki klasörler */}
+                    {(platformFilter === 'imessage' ? (['all'] as Filter[]) : (['all', 'unread', 'waiting'] as Filter[])).map((f) => (
                       <button key={f} role="tab" aria-selected={filter === f && !imFolder} className={filter === f && !imFolder ? 'active' : ''} onClick={() => (setFilter(f), setImFolder(null))}>
                         {f === 'all' ? (platformFilter === 'imessage' ? 'Mesajlar' : 'Tümü') : f === 'unread' ? 'Okunmamış ' : 'Bekleyen '}
-                        {f === 'unread' && scoped.unread > 0 && <span className="c">{scoped.unread}</span>}
+                        {f === 'unread' && scoped.unread > 0 && <span className="c">{fmtCount(scoped.unread)}</span>}
                         {f === 'waiting' && scoped.waiting > 0 && <span className="c amber">{scoped.waiting}</span>}
                       </button>
                     ))}
@@ -650,7 +683,7 @@ export default function App() {
                         Bir kanal bağlayınca mesajlar burada görünür.
                       </>
                     ) : (
-                      'Bu filtreye uyan sohbet yok.'
+                      emptyText
                     )}
                   </div>
                 ) : (
@@ -717,16 +750,29 @@ export default function App() {
                 olderBusy={olderBusy}
                 hasOlder={noMoreOlder !== current.id}
                 onLoadOlder={async () => {
-                  const oldest = messages[0];
-                  if (!oldest || olderBusy) return;
+                  const oldest = currentMessages[0];
+                  if (olderBusy) return;
                   setOlderBusy(true);
                   try {
+                    if (!oldest) {
+                      // hiç mesaj yok: platformdan geçmişi iste ve depodan yeniden oku
+                      await api.loadHistory(current.id, undefined, 100);
+                      const m = await api.messages(current.id);
+                      if (selectedRef.current !== current.id) return; // bu arada başka sohbete geçildi: eski sohbetin mesajları yeni seçime yazılmasın
+                      if (m.length === 0) {
+                        setNoMoreOlder(current.id);
+                        notify('Platform bu sohbet için mesaj vermedi');
+                      }
+                      setMessages(m);
+                      return;
+                    }
                     // önce depodaki daha eski mesajlar; depoda yoksa platformdan iste (WhatsApp/Telegram/Instagram/…)
                     let more = await api.messages(current.id, 300, oldest.ts);
                     if (more.length === 0) {
                       await api.loadHistory(current.id, oldest.ts, 100);
                       more = await api.messages(current.id, 300, oldest.ts);
                     }
+                    if (selectedRef.current !== current.id) return; // sohbet değişti: eski mesajlar yeni sohbete karışmasın
                     if (more.length === 0) {
                       setNoMoreOlder(current.id);
                       notify('Daha eski mesaj yok');
@@ -799,7 +845,7 @@ export default function App() {
                       api
                         .removeAccount(acc.id)
                         .then(() => {
-                          if (platformFilter === acc.platform) setPlatformFilter(null);
+                          if (platformFilter === acc.platform) selectPlatform(null);
                           setSelected((sel) => (sel && chats.get(sel)?.accountId === acc.id ? null : sel));
                           notify('Kanal kaldırıldı');
                           return refresh();
@@ -819,7 +865,11 @@ export default function App() {
           </div>
         </div>
       )}
-      {toast && <div className={`toast ${toast.err ? 'err' : ''}`}>{toast.text}</div>}
+      {toast && (
+        <div className={`toast ${toast.err ? 'err' : ''}`} role="status" aria-live="polite">
+          {toast.text}
+        </div>
+      )}
     </div>
   );
 }
@@ -835,6 +885,24 @@ function handleOf(a: Account): string {
   if (label && label.toLowerCase() !== pn && label.toLowerCase() !== a.platform) return label;
   if (a.status === 'connected' && a.detail && /^[+@]/.test(a.detail)) return a.detail;
   return '';
+}
+
+/**
+ * Toplam sayaçlara (gelen kutusu, "N yeni", kanal satırı, Dock rozeti) bir sohbetin katkısı: sohbetin kendi rozeti gerçek
+ * sayıyı gösterir, ama kanallar sayılmaz ve gruplar (Telegram'da yüz binlerce okunmamışlı süper gruplar) en çok 99 sayılır;
+ * yoksa tek bir topluluk grubu tüm sayaçları anlamsızlaştırır.
+ */
+function countable(c: Chat): number {
+  if (c.kind === 'channel' || c.unread <= 0) return 0;
+  return c.kind === 'group' ? Math.min(c.unread, 99) : c.unread;
+}
+function fmtCount(n: number): string {
+  return n > 999 ? '999+' : n > 0 ? String(n) : '';
+}
+/** Sohbet rozeti: gerçek sayı; kanallarda 99+, binler "305K" gibi (Telegram'ın gösterimi) */
+function fmtBadge(c: Chat): string {
+  if (c.kind === 'channel' && c.unread > 99) return '99+';
+  return c.unread > 999 ? `${Math.floor(c.unread / 1000)}K` : String(c.unread);
 }
 
 /** Son mesaj karşı taraftan geldiyse ve 20 dakikadır cevaplanmadıysa "yanıt bekliyor". */
@@ -882,7 +950,7 @@ function NavItem({ icon, label, count, active, onClick, badge, title }: { icon: 
         {label}
         {badge && <span className="pill lime" style={{ fontSize: 10, padding: '1px 5px', borderRadius: 5 }}>{badge}</span>}
       </span>
-      {count > 0 && <span className="count">{count}</span>}
+      {count > 0 && <span className="count">{fmtCount(count)}</span>}
     </button>
   );
 }
@@ -904,9 +972,9 @@ function ChatRow({
   snoozedUntil?: number;
   onUnsnooze?: () => void;
 }) {
-  const waiting = isWaiting(chat);
+  const waiting = chat.platform !== 'imessage' && isWaiting(chat); // Mesajlar'da "bekleyen" kavramı yok
   return (
-    <div className={`row ${selected ? 'selected' : ''} ${chat.unread ? 'unread' : ''}`} onClick={onClick} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onClick()}>
+    <div className={`row ${selected ? 'selected' : ''} ${chat.unread > 0 ? 'unread' : ''}`} onClick={onClick} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onClick()}>
       <span className="avwrap">
         <Avatar name={chat.name} size={44} url={chat.avatarUrl} />
         <Chip platform={chat.platform} size={17} ring={selected ? '#fff' : '#f7f6fa'} />
@@ -918,7 +986,7 @@ function ChatRow({
         </span>
         <span className="top">
           <span className="prev">{chat.lastPreview || '…'}</span>
-          {chat.unread > 0 && <span className="badge">{chat.unread}</span>}
+          {chat.unread > 0 && <span className="badge" aria-label={`${chat.unread} okunmamış`}>{fmtBadge(chat)}</span>}
         </span>
         {(chat.tags.length > 0 || waiting) && (
           <span className="tags">
