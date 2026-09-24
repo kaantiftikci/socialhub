@@ -57,6 +57,7 @@ async function ensureInbox(page: Page): Promise<Frame | undefined> {
 }
 
 export const icloud: Strategy = {
+  unloadWhenIdle: true,
   home: HOME,
   loginHint: 'Açılan pencerede "Giriş Yap"a bas, Apple hesabına gir (iki adımlı doğrulama dahil; "Oturumumu açık tut"u işaretle); Mail görününce pencere kendiliğinden kapanır',
 

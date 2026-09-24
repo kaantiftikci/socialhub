@@ -52,6 +52,8 @@ export interface Msg {
 export interface Strategy {
   home: string;
   loginHint: string;
+  /** Yoklama bitince sayfayı about:blank'e al (ağır siteler boşta bellek tutmasın); strateji her çağrıda kendi sayfasına döner */
+  unloadWhenIdle?: boolean;
   /** Giriş yapılmış mı? (çerezler Node tarafında okunur, sayfa da verilir) */
   /** passive=true: görünür giriş penceresi açıkken çağrılır — sayfayı YÖNLENDİRME, yalnızca çerez/URL'ye bak (kullanıcının girişini bölmemek için) */
   loggedIn(page: Page, cookies: Record<string, string>, passive?: boolean): Promise<boolean>;
@@ -174,7 +176,20 @@ export class BrowserConnector extends BaseConnector {
         executablePath: process.env.KAVSAK_CHROMIUM || undefined,
         viewport: { width: 1180, height: 820 },
         locale: 'tr-TR',
-        args: ['--disable-blink-features=AutomationControlled'],
+        // bellek: GPU/uzantı/arka plan ağ süreçleri kapalı, render süreci sınırı, JS yığın üst sınırı, geri-ileri önbelleği kapalı
+        args: [
+          '--disable-blink-features=AutomationControlled',
+          '--disable-gpu',
+          '--disable-extensions',
+          '--disable-background-networking',
+          '--disable-component-update',
+          '--disable-default-apps',
+          '--disable-sync',
+          '--mute-audio',
+          '--renderer-process-limit=2',
+          '--js-flags=--max-old-space-size=512',
+          '--disable-features=Translate,MediaRouter,OptimizationHints,BackForwardCache,InterestFeedContentSuggestions,AutofillServerCommunication',
+        ],
       });
     } catch (e) {
       const msg = (e as Error).message;
@@ -378,6 +393,10 @@ export class BrowserConnector extends BaseConnector {
     this.polling = true;
     try {
       await this.serial(() => this.pollInner(first));
+      // boşta boşaltma: ağır siteler (Gmail/Outlook) açık dururken 1 GB'ı aşıyor; bir sonraki çağrı sayfayı yeniden yükler
+      if (this.strategy.unloadWhenIdle && this.page && !this.page.isClosed() && this.account.status === 'connected') {
+        await this.serial(() => this.page!.goto('about:blank', { timeout: 10_000 }).then(() => undefined)).catch(() => undefined);
+      }
     } finally {
       this.polling = false;
     }

@@ -135,7 +135,7 @@ export class Registry {
         // Gmail: varsayılan tarayıcı girişi (uygulama şifresi/OAuth istemcisi gerekmez); IMAP yapılandırması (token) verildiyse eski yol
         const tokenFile = path.join(sessionDir(account.id), 'token');
         if (!fs.existsSync(tokenFile)) {
-          c = new BrowserConnector(account, this.store, gmail, 30_000);
+          c = new BrowserConnector(account, this.store, gmail, 60_000); // boşta boşaltma: her yoklama sayfa yükü, 1 dk yeter
           break;
         }
         let cfg: MailConfig = { user: '' };
@@ -152,7 +152,7 @@ export class Registry {
         // Outlook.com / iCloud Mail: varsayılan tarayıcı girişi; IMAP yapılandırması (token) verildiyse eski yol
         const tokenFile = path.join(sessionDir(account.id), 'token');
         if (!fs.existsSync(tokenFile)) {
-          c = new BrowserConnector(account, this.store, account.platform === 'outlook' ? outlook : icloud, 30_000);
+          c = new BrowserConnector(account, this.store, account.platform === 'outlook' ? outlook : icloud, 60_000);
           break;
         }
         let cfg: MailConfig = { user: '' };
