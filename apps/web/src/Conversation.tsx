@@ -108,11 +108,15 @@ export function Conversation({
   // Alta yapışma: kullanıcı en alttayken sonradan yüklenen foto/video/önizlemeler içeriği uzatınca görünüm yukarıda
   // kalmasın (Instagram'da sohbet açılınca "yukarı atma" hissi buydu). Kullanıcı yukarı kaydırınca yapışma bırakılır.
   const stickRef = useRef(true);
+  /** Yukarı çıkınca görünen "en alta in" oku */
+  const [showDown, setShowDown] = useState(false);
   useEffect(() => {
     const el = msgsRef.current;
     if (!el) return;
     const onScroll = () => {
-      stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+      stickRef.current = gap < 80;
+      setShowDown(gap > 360);
       heightRef.current = el.scrollHeight;
     };
     // medya yüklenmesi (load olayları kabarcıklanmaz; yakalama evresinde dinlenir)
@@ -352,6 +356,24 @@ export function Conversation({
             </div>
           )}
           <div ref={endRef} />
+          {showDown && (
+            <div className="downwrap">
+              <button
+                className="downbtn b"
+                aria-label="En alta in"
+                title="En alta in"
+                onClick={() => {
+                  const el = msgsRef.current;
+                  if (!el) return;
+                  stickRef.current = true;
+                  el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+                }}
+              >
+                <Icon name="chev" size={18} sw={2.2} />
+                {chat.unread > 0 && <span className="badge">{chat.unread > 99 ? '99+' : chat.unread}</span>}
+              </button>
+            </div>
+          )}
         </div>
 
         <div className={`composer ${draft ? 'ai' : ''} ${isMail ? 'mail' : ''}`}>

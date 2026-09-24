@@ -30,6 +30,8 @@ export class TelegramConnector extends BaseConnector {
   private pending = new Map<'phone' | 'code' | 'password', Pending>();
   private entities = new Map<string, Entity>();
   private meId = '';
+  private watchTimer?: NodeJS.Timeout;
+  private polling = false;
 
   private get sessionFile(): string {
     return path.join(sessionDir(this.account.id), 'session.txt');
@@ -98,9 +100,51 @@ export class TelegramConnector extends BaseConnector {
     // Telefonda/başka istemcide okununca okunmamış sayacı burada da düşsün
     client.addEventHandler((u: Api.TypeUpdate) => this.onRead(u), new Raw({ types: [Api.UpdateReadHistoryInbox, Api.UpdateReadChannelInbox, Api.UpdateFolderPeers, Api.UpdateReadHistoryOutbox, Api.UpdateReadChannelOutbox, Api.UpdateUserTyping, Api.UpdateChatUserTyping, Api.UpdateChannelUserTyping] }));
     await this.backfill(client);
+    // GramJS'in güncelleme akışı bağlantı kopunca ya da uzun boşlukta sessizce kesilebiliyor (bilinen sorun): 30 sn'de bir
+    // bağlantıyı denetle ve son sohbetlerde kaçan mesaj varsa çek. Kaçan mesajlar canlı sayılır (bildirim + sayaç).
+    if (this.watchTimer) clearInterval(this.watchTimer);
+    this.watchTimer = setInterval(() => void this.poll(), 30_000);
+    this.watchTimer.unref?.();
+  }
+
+  /** Bağlantı bekçisi + kaçan mesaj yoklaması */
+  private async poll(): Promise<void> {
+    const client = this.client;
+    if (!client || this.polling) return;
+    this.polling = true;
+    try {
+      if (!client.connected) {
+        bus.log('warn', 'Telegram: bağlantı kopmuş, yeniden bağlanılıyor');
+        await client.connect();
+        if (!client.connected) return;
+      }
+      const dialogs = await client.getDialogs({ limit: 25 });
+      for (const d of dialogs) {
+        if (!d.id || !d.entity || !d.message) continue;
+        const rid = String(d.id);
+        this.entities.set(rid, d.entity);
+        const chat = this.store.getChat(`${this.account.id}/${rid}`);
+        if (chat && (d.unreadCount ?? 0) !== chat.unread) this.upsertChat({ remoteId: rid, name: chat.name, unread: d.unreadCount ?? 0 });
+        if (this.hasMessage(rid, String(d.message.id))) continue;
+        const name = chat?.name || d.title || d.name || rid;
+        const msgs = await client.getMessages(d.entity, { limit: 20 });
+        for (const m of [...msgs].reverse()) {
+          if (this.hasMessage(rid, String(m.id))) continue;
+          let senderName: string | undefined;
+          if (!m.out && !d.isUser) senderName = entityName((m as { sender?: unknown }).sender) || undefined;
+          this.ingest(m, rid, name, true, senderName);
+        }
+      }
+    } catch (e) {
+      bus.log('warn', `Telegram yoklama: ${(e as Error).message}`);
+    } finally {
+      this.polling = false;
+    }
   }
 
   async stop(): Promise<void> {
+    if (this.watchTimer) clearInterval(this.watchTimer);
+    this.watchTimer = undefined;
     await this.client?.disconnect();
     this.client = undefined;
     this.setStatus('disconnected');

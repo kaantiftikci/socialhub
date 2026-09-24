@@ -79,6 +79,14 @@ export default function App() {
   };
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<Array<{ message: Message; chat: Chat }>>([]);
+  /** Kenar çubuğunda kanal sırası (hesap kimlikleri) */
+  const [chanOrder, setChanOrder] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('kavsak.chanOrder') ?? '[]') as string[];
+    } catch {
+      return [];
+    }
+  });
   /** Daha eski sohbet listesi (e-postalar): platform seçiliyken listenin sonuna gelince */
   const [moreBusy, setMoreBusy] = useState(false);
   const moreDone = useRef<Set<string>>(new Set());
@@ -506,13 +514,59 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [chatList, selected, view, connectOpen, complete, snooze]);
 
-  const chatAccounts = accounts.filter((a) => !PLATFORMS[a.platform].category);
-  const mailAccounts = accounts.filter((a) => PLATFORMS[a.platform].category === 'mail');
-  const shopAccounts = accounts.filter((a) => PLATFORMS[a.platform].category === 'shop');
+  const orderedAccounts = useMemo(() => {
+    const idx = new Map(chanOrder.map((id, i) => [id, i]));
+    return [...accounts].sort((a, b) => (idx.get(a.id) ?? 1e9) - (idx.get(b.id) ?? 1e9));
+  }, [accounts, chanOrder]);
+  const chatAccounts = orderedAccounts.filter((a) => !PLATFORMS[a.platform].category);
+  const mailAccounts = orderedAccounts.filter((a) => PLATFORMS[a.platform].category === 'mail');
+  const shopAccounts = orderedAccounts.filter((a) => PLATFORMS[a.platform].category === 'shop');
+  /** Kanalı listede taşı: hedefin önüne (aynı kategori içinde) */
+  const moveChan = (id: string, targetId: string, after = false) => {
+    if (id === targetId) return;
+    const ids = orderedAccounts.map((a) => a.id).filter((x) => x !== id);
+    const at = ids.indexOf(targetId);
+    ids.splice(after ? at + 1 : at, 0, id);
+    setChanOrder(ids);
+    try {
+      localStorage.setItem('kavsak.chanOrder', JSON.stringify(ids));
+    } catch {
+      /* yok */
+    }
+  };
+  const nudgeChan = (a: Account, dir: -1 | 1) => {
+    const group = PLATFORMS[a.platform].category === 'mail' ? mailAccounts : PLATFORMS[a.platform].category === 'shop' ? shopAccounts : chatAccounts;
+    const i = group.findIndex((x) => x.id === a.id);
+    const target = group[i + dir];
+    if (target) moveChan(a.id, target.id, dir === 1);
+  };
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState<string | null>(null);
   const renderChan = (a: Account) => (
         <button
           key={a.id}
-          className={`chan b ${platformFilter === a.platform ? 'active' : ''}`}
+          className={`chan b ${platformFilter === a.platform ? 'active' : ''} ${dragOver === a.id && dragId !== a.id ? 'dragover' : ''} ${dragId === a.id ? 'dragging' : ''}`}
+          draggable
+          onDragStart={(e) => {
+            setDragId(a.id);
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', a.id);
+          }}
+          onDragOver={(e) => {
+            if (!dragId || dragId === a.id) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            if (dragOver !== a.id) setDragOver(a.id);
+          }}
+          onDragLeave={() => dragOver === a.id && setDragOver(null)}
+          onDrop={(e) => {
+            e.preventDefault();
+            const src = dragId ?? e.dataTransfer.getData('text/plain');
+            if (src) moveChan(src, a.id);
+            setDragId(null);
+            setDragOver(null);
+          }}
+          onDragEnd={() => (setDragId(null), setDragOver(null))}
           onClick={() => (setView('inbox'), selectPlatform(platformFilter === a.platform ? null : a.platform), setFilter('all'))}
           onContextMenu={(e) => {
             e.preventDefault();
@@ -963,6 +1017,14 @@ export default function App() {
             <button onClick={() => (setMenu(null), api.restartAccount(menu.account.id).then(() => notify('Yeniden bağlanılıyor')).catch((e) => notify(e.message, true)))}>
               <Icon name="refresh" size={14} sw={2} /> Yeniden bağlan
             </button>
+            <div style={{ display: 'flex', gap: 4 }}>
+              <button style={{ flex: 1 }} onClick={() => (nudgeChan(menu.account, -1), setMenu(null))}>
+                <Icon name="chevup" size={14} sw={2} /> Yukarı taşı
+              </button>
+              <button style={{ flex: 1 }} onClick={() => (nudgeChan(menu.account, 1), setMenu(null))}>
+                <Icon name="chev" size={14} sw={2} /> Aşağı taşı
+              </button>
+            </div>
             {menu.confirm ? (
               <div className="menu-confirm">
                 <div>Bağlantı ve bu kanala ait yerel mesaj kayıtları silinecek.</div>
@@ -1110,17 +1172,22 @@ function ChatRow({
   typing?: string | null;
 }) {
   const waiting = chat.platform !== 'imessage' && isWaiting(chat); // Mesajlar'da "bekleyen" kavramı yok
+  const isMail = PLATFORMS[chat.platform].category === 'mail';
+  // E-posta: üstte gönderen, ortada konu, altta özet (posta istemcisi düzeni)
+  const mailSender = isMail ? (chat.participants?.[0]?.name || chat.handle || '').replace(/<.*>/, '').trim() : '';
+  const mailPreview = isMail && mailSender && chat.lastPreview?.startsWith(mailSender + ':') ? chat.lastPreview.slice(mailSender.length + 1).trim() : chat.lastPreview;
   return (
-    <div className={`row ${selected ? 'selected' : ''} ${chat.unread > 0 ? 'unread' : ''}`} onClick={onClick} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onClick()}>
+    <div className={`row ${selected ? 'selected' : ''} ${chat.unread > 0 ? 'unread' : ''} ${isMail ? 'mailrow' : ''}`} onClick={onClick} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onClick()}>
       <span className="avwrap">
-        <Avatar name={chat.name} size={44} url={chat.avatarUrl} />
+        <Avatar name={isMail && mailSender ? mailSender : chat.name} size={44} url={chat.avatarUrl} />
         <Chip platform={chat.platform} size={17} ring={selected ? '#fff' : '#f7f6fa'} />
       </span>
       <span className="body">
         <span className="top">
-          <span className="name">{chat.name}</span>
+          <span className="name">{isMail && mailSender ? mailSender : chat.name}</span>
           <span className="time">{snoozedUntil ? `⏰ ${fmtTime(snoozedUntil)}` : fmtTime(chat.lastMessageAt)}</span>
         </span>
+        {isMail && mailSender && <span className="subj">{chat.name}</span>}
         <span className="top">
           {typing != null ? (
             <span className="prev typing-text">
@@ -1128,7 +1195,7 @@ function ChatRow({
               <span className="tdots"><i /><i /><i /></span>
             </span>
           ) : (
-            <span className="prev">{chat.lastPreview || '…'}</span>
+            <span className="prev">{(isMail ? mailPreview : chat.lastPreview) || '…'}</span>
           )}
           {chat.unread > 0 && <span className="badge" aria-label={`${chat.unread} okunmamış`}>{fmtBadge(chat)}</span>}
         </span>
