@@ -301,6 +301,79 @@ function msgKey(threadId: string, ts: number | string, sender: string, text: str
 
 /** Son görülen önizleme: değişmediyse lastTs=0 döner (depodaki zaman korunur), değiştiyse "şimdi". */
 const lastPreview = new Map<string, string>();
+/** threads()/moreThreads ile depoya yazılmış sohbetler (moreThreads yalnızca yenilerini döndürür) */
+const listed = new Set<string>();
+
+interface SidebarRow {
+  id: string;
+  name: string;
+  preview: string;
+  unread: boolean;
+  avatarUrl?: string;
+}
+
+/** Kenar çubuğundaki sohbet satırları (`/t/<id>/` bağlantıları; sohbet penceresi içindekiler hariç) */
+function readSidebarRows(page: Page): Promise<SidebarRow[]> {
+  return page.evaluate(() => {
+    const out: Array<{ id: string; name: string; preview: string; unread: boolean; avatarUrl?: string }> = [];
+    const seen = new Set<string>();
+    const mainLeft = document.querySelector('[role="main"]')?.getBoundingClientRect().left ?? window.innerWidth;
+    for (const a of Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href^="/t/"]'))) {
+      const m = a.getAttribute('href')?.match(/^\/t\/(\d+)\/?$/);
+      if (!m || seen.has(m[1])) continue;
+      if (a.getBoundingClientRect().left >= mainLeft) continue; // sohbet penceresi içindeki bağlantılar
+      seen.add(m[1]);
+      const spans = Array.from(a.querySelectorAll('span'))
+        .map((s) => ({ t: s.textContent?.trim() ?? '', w: Number(getComputedStyle(s).fontWeight) || 400 }))
+        // durum ("Şu An Aktif") ve zaman etiketleri ("4y", "12 dk", "14:32", "Çar") önizleme değildir
+        .filter((s) => s.t.length > 0 && !/^(Şu An Aktif|Active now)$/i.test(s.t) && !/^(\d{1,2}:\d{2}|\d+\s?(sn|dk|sa|g|h|y|m|w|d|s)|Pzt|Sal|Çar|Per|Cum|Cmt|Paz|Mon|Tue|Wed|Thu|Fri|Sat|Sun|·)$/i.test(s.t));
+      const nameSpan = spans.find((s) => s.w >= 500) ?? spans[0];
+      const name = nameSpan?.t ?? m[1];
+      let preview = spans.find((s) => s.t !== name)?.t ?? '';
+      const unreadPrefix = /^(Okunmamış mesaj|Unread message):\s*/i;
+      // okunmamış: ad kalın (Messenger 600; okunmuşta 500) ya da erişilebilirlik öneki. Sayı verilmez → 1
+      const unread = (nameSpan?.w ?? 400) >= 600 || unreadPrefix.test(preview);
+      preview = preview.replace(unreadPrefix, '').replace(/\s+/g, ' ').slice(0, 200);
+      const avatarUrl = Array.from(a.querySelectorAll('img')).map((i) => i.getAttribute('src') ?? '').find((s) => /^https?:\/\//.test(s) && !/emoji/.test(s));
+      out.push({ id: m[1], name, preview, unread, avatarUrl });
+    }
+    return out;
+  });
+}
+
+/** Ham satır → sohbet; önizleme değiştiyse "şimdi", ilk görüşte/değişmediyse 0 (depodaki zaman kalır) */
+function rowToThread(r: SidebarRow): Thread {
+  const prev = lastPreview.get(r.id);
+  lastPreview.set(r.id, r.preview);
+  // ilk görüşte 0 → mesajlar çekilince gerçek zaman yazılır; sonraki yoklamada önizleme değiştiyse yeni mesaj (şimdi)
+  const lastTs = prev !== undefined && prev !== r.preview ? Date.now() : 0;
+  return { id: r.id, name: r.name, kind: 'direct' as const, lastTs, preview: r.preview, unread: r.unread ? 1 : 0, avatarUrl: r.avatarUrl };
+}
+
+/**
+ * Kenar çubuğundaki sohbet listesini sona kaydır. Kap: bir sohbet satırının overflow:auto olan en yakın atası
+ * (soldaki gezinme çubuğundaki "Sohbetler" bağlantısı da /t/ ile başlar; o yüzden satır role=row içinden aranır).
+ * Kaydırılabilir kap yoksa false.
+ */
+function scrollSidebar(page: Page): Promise<boolean> {
+  return page
+    .evaluate(() => {
+      const mainLeft = document.querySelector('[role="main"]')?.getBoundingClientRect().left ?? window.innerWidth;
+      const row = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href^="/t/"]')).find((a) => /^\/t\/\d+\/?$/.test(a.getAttribute('href') ?? '') && a.getBoundingClientRect().left < mainLeft && a.closest('[role="row"], [role="grid"]'));
+      let el: HTMLElement | null = row ?? null;
+      while (el && el !== document.body) {
+        const oy = getComputedStyle(el).overflowY;
+        if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 4) {
+          el.scrollTop = el.scrollHeight;
+          el.dispatchEvent(new Event('scroll', { bubbles: true }));
+          return true;
+        }
+        el = el.parentElement;
+      }
+      return false;
+    })
+    .catch(() => false);
+}
 
 /** Kenar çubuğundaki ilk sohbeti aç ve PIN penceresinin açılıp açılmadığını bildir (ilk sohbet yoksa false). */
 async function pinPendingOnFirstThread(page: Page): Promise<boolean> {
@@ -371,41 +444,68 @@ export const messenger: Strategy & PinHooks = {
       stable = n === prevCount ? stable + 1 : 0;
       prevCount = n;
     }
-    const rows = await page.evaluate(() => {
-      const out: Array<{ id: string; name: string; preview: string; unread: boolean; avatarUrl?: string }> = [];
-      const seen = new Set<string>();
-      const mainLeft = document.querySelector('[role="main"]')?.getBoundingClientRect().left ?? window.innerWidth;
-      for (const a of Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href^="/t/"]'))) {
-        const m = a.getAttribute('href')?.match(/^\/t\/(\d+)\/?$/);
-        if (!m || seen.has(m[1])) continue;
-        if (a.getBoundingClientRect().left >= mainLeft) continue; // sohbet penceresi içindeki bağlantılar
-        seen.add(m[1]);
-        const spans = Array.from(a.querySelectorAll('span'))
-          .map((s) => ({ t: s.textContent?.trim() ?? '', w: Number(getComputedStyle(s).fontWeight) || 400 }))
-          // durum ("Şu An Aktif") ve zaman etiketleri ("4y", "12 dk", "14:32", "Çar") önizleme değildir
-          .filter((s) => s.t.length > 0 && !/^(Şu An Aktif|Active now)$/i.test(s.t) && !/^(\d{1,2}:\d{2}|\d+\s?(sn|dk|sa|g|h|y|m|w|d|s)|Pzt|Sal|Çar|Per|Cum|Cmt|Paz|Mon|Tue|Wed|Thu|Fri|Sat|Sun|·)$/i.test(s.t));
-        const nameSpan = spans.find((s) => s.w >= 500) ?? spans[0];
-        const name = nameSpan?.t ?? m[1];
-        let preview = spans.find((s) => s.t !== name)?.t ?? '';
-        const unreadPrefix = /^(Okunmamış mesaj|Unread message):\s*/i;
-        // okunmamış: ad kalın (Messenger 600; okunmuşta 500) ya da erişilebilirlik öneki. Sayı verilmez → 1
-        const unread = (nameSpan?.w ?? 400) >= 600 || unreadPrefix.test(preview);
-        preview = preview.replace(unreadPrefix, '').replace(/\s+/g, ' ').slice(0, 200);
-        const avatarUrl = Array.from(a.querySelectorAll('img')).map((i) => i.getAttribute('src') ?? '').find((s) => /^https?:\/\//.test(s) && !/emoji/.test(s));
-        out.push({ id: m[1], name, preview, unread, avatarUrl });
-      }
-      return out;
-    });
+    const rows = await readSidebarRows(page);
     if (rows.length === 0) bus.log('warn', `Messenger: gelen kutusu açık ama sohbet bağlantısı okunamadı (${page.url()})`);
-    const now = Date.now();
-    return rows.map((r) => {
-      const prev = lastPreview.get(r.id);
-      lastPreview.set(r.id, r.preview);
-      // ilk görüşte ya da önizleme değiştiyse "şimdi"; yoksa 0 → depodaki zaman kalır (sohbet üste fırlamaz)
-      // ilk görüşte 0 → mesajlar çekilince gerçek zaman yazılır; sonraki yoklamada önizleme değiştiyse yeni mesaj (şimdi)
-      const lastTs = prev !== undefined && prev !== r.preview ? now : 0;
-      return { id: r.id, name: r.name, kind: 'direct' as const, lastTs, preview: r.preview, unread: r.unread ? 1 : 0, avatarUrl: r.avatarUrl };
-    });
+    for (const r of rows) listed.add(r.id);
+    return rows.map(rowToThread);
+  },
+
+  /**
+   * Daha eski sohbetler: kenar çubuğundaki sohbet listesinin kaydırma kabı (bir sohbet satırının overflow:auto atası;
+   * soldaki gezinme çubuğu değil) sona kaydırılır, Messenger yeni satırları ekler (liste sanal değil, büyür).
+   * Daha önce listelenmemiş satırlar döner; kaydırma yeni satır getirmiyorsa boş dizi.
+   * (Profil kopyasıyla doğrulandı: 14 → 19 → 24 sohbet.)
+   */
+  async moreThreads(page): Promise<Thread[]> {
+    if (!page.url().startsWith(BASE)) await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    if (!(await ensureInbox(page))) return [];
+    let fresh: SidebarRow[] = [];
+    // Messenger ilk kaydırmada her zaman yüklemez (gözlem: 1. tur 14→14, 2. tur 14→19): art arda iki tur boş kalınca durulur
+    for (let round = 0, idle = 0; round < 6 && !fresh.length && idle < 2; round++) {
+      const before = await page.locator(CHAT_LINK).count().catch(() => 0);
+      if (!(await scrollSidebar(page))) break;
+      // yeni bağlantılar gelene dek en çok 3 sn bekle
+      let grew = false;
+      for (const t0 = Date.now(); Date.now() - t0 < 3000 && !grew; ) {
+        await page.waitForTimeout(400);
+        grew = (await page.locator(CHAT_LINK).count().catch(() => 0)) > before;
+      }
+      idle = grew ? 0 : idle + 1;
+      if (!grew) continue;
+      await page.waitForTimeout(600); // satırlar parça parça çiziliyor
+      fresh = (await readSidebarRows(page)).filter((r) => !listed.has(r.id));
+    }
+    for (const r of fresh) listed.add(r.id);
+    return fresh.map(rowToThread);
+  },
+
+  /**
+   * Dosya/fotoğraf: sohbet açıkken yazı kutusunun yanındaki gizli `input[type=file]` (multiple, accept yok;
+   * "Boyutu en fazla 25 MB olan bir dosya ekle" düğmesi) dosyayı alır, önizleme çizilince Enter gönderir.
+   * Açıklama varsa aynı mesajda metin olarak gider. (Giriş profil kopyasıyla doğrulandı; gönderim canlı denenmedi.)
+   */
+  async sendFile(page, _cookies, threadId, file, caption) {
+    await openThread(page, threadId);
+    const box = page.locator('[role="main"] div[role="textbox"][contenteditable="true"]').first();
+    await box.waitFor({ timeout: 15_000 });
+    const input = page.locator('[role="main"] input[type="file"]').last();
+    if (!(await input.count().catch(() => 0))) throw new Error('Messenger: sohbette dosya girişi bulunamadı');
+    await input.setInputFiles(file.path);
+    await page.waitForTimeout(1500); // önizleme (küçük resim / dosya kartı)
+    const now = new Date();
+    if (caption) await box.fill(caption, { timeout: 10_000 });
+    else await box.focus().catch(() => undefined);
+    await page.keyboard.press('Enter');
+    // yükleme bitene dek: kutu boşalır ve önizleme kalkar (en fazla ~dosya boyutuna göre)
+    const maxMs = Math.max(8_000, Math.min(180_000, file.size / 50));
+    for (const t0 = Date.now(); Date.now() - t0 < maxMs; ) {
+      await page.waitForTimeout(400);
+      const text = (await box.innerText({ timeout: 1_000 }).catch(() => '')).trim();
+      const previews = await page.locator('[role="main"] [aria-label*="Eki kaldır"], [role="main"] [aria-label*="Remove attachment"], [role="main"] [aria-label*="Kaldır"], [role="main"] [aria-label*="Remove"]').count().catch(() => 0);
+      if (!text && previews === 0) break;
+    }
+    const minute = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), now.getMinutes()).getTime();
+    return hashId(msgKey(threadId, minute, 'me', caption ?? ''));
   },
 
   /**

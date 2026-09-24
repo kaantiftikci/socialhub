@@ -1,5 +1,6 @@
 import type { Page } from 'playwright';
 import type { Msg, Strategy, Thread } from './bridge.js';
+import { pickFileInput } from './outlook.js';
 import type { Attachment } from '../../model.js';
 import { bus } from '../../bus.js';
 
@@ -227,6 +228,90 @@ function itemText(it: J): string {
   return text || (attachments[0]?.name ? `[${attachments[0].name}]` : '');
 }
 
+/** Sohbet sayfasındaki dosya girişi: dosya türünü accept listesi kabul ediyorsa (uzantı ya da mime) */
+export async function dmFileInput(page: Page, file: { name: string; mime: string }) {
+  for (let i = 0; i < 20; i++) {
+    const inputs = page.locator('[role="main"] input[type="file"], input[type="file"]');
+    const n = await inputs.count().catch(() => 0);
+    if (n) {
+      const accepts: Array<{ accept: string | null }> = [];
+      for (let k = 0; k < n; k++) accepts.push({ accept: await inputs.nth(k).getAttribute('accept').catch(() => null) });
+      const idx = pickFileInput(accepts, file);
+      return idx >= 0 ? inputs.nth(idx) : undefined;
+    }
+    await page.waitForTimeout(250);
+  }
+  return undefined;
+}
+
+/**
+ * Gelen kutusu sayfası. thread_message_limit=10: her sohbetin son mesajları da gelir → okunmamış sayısı gerçekten
+ * hesaplanır (inbox yanıtında unseen_count yok; read_state yalnızca 0/1 veriyor). Instagram bazen geniş isteğe
+ * (limit=40, thread_message_limit=10) 500 'Oops' döndürüyor: dar parametrelerle (tek mesaj) yedek. `cursor`: sonraki sayfa.
+ */
+async function fetchInbox(page: Page, cookies: Record<string, string>, cursor?: string): Promise<J> {
+  const q = (tml: number) => `/api/v1/direct_v2/inbox/?persistentBadging=true&folder=&limit=20&thread_message_limit=${tml}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+  return ig(page, cookies, q(10)).catch(async (e: Error) => {
+    if (!/Instagram 5\d\d/.test(e.message)) throw e;
+    return ig(page, cookies, q(1));
+  });
+}
+
+/** Gelen kutusu sayfalama zinciri: k. sayfanın (0 = ilk) sonraki imleci ve daha eski var mı */
+const inboxCursors: Array<{ cursor?: string; hasOlder: boolean }> = [];
+function rememberInboxCursor(k: number, data: J): void {
+  const ib: J = data.inbox ?? {};
+  const raw = ib.oldest_cursor;
+  const cursor = raw === undefined || raw === null ? undefined : typeof raw === 'string' ? raw : JSON.stringify(raw);
+  inboxCursors.length = k; // bu sayfadan sonrası artık geçersiz (liste değişmiş olabilir)
+  inboxCursors[k] = { cursor, hasOlder: ib.has_older !== false && !!cursor && (ib.threads?.length ?? 0) > 0 };
+}
+
+/** Testler için: sayfalama zincirini sıfırla */
+export function _resetInboxCursors(): void {
+  inboxCursors.length = 0;
+}
+
+/** inbox yanıtı → sohbet listesi */
+function inboxThreads(data: J): Thread[] {
+  if (data.viewer?.pk) viewerId = String(data.viewer.pk);
+  const out: Thread[] = [];
+  for (const t of data.inbox?.threads ?? []) {
+    rememberUsers(t.users);
+    const items: J[] = Array.isArray(t.items) ? t.items : [];
+    // önizleme: son GÖRÜNÜR mesaj (son öğe "Bir mesajı beğendi" tepki kaydıysa önizleme boş kalıyordu)
+    const last = items.find((i) => !isLogItem(i)) ?? t.last_permanent_item ?? items[0];
+    const participants = (t.users ?? []).map((u: J) => ({ id: String(u.pk), name: u.full_name || u.username, handle: u.username ? '@' + u.username : undefined, avatarUrl: u.profile_pic_url }));
+    const solo = !t.is_group && t.users?.[0];
+    // Okunmamış: platformun sayısı varsa o; yoksa viewer'ın son gördüğü andan (last_seen_at) sonra gelen,
+    // kendisinin göndermediği mesajları say (sistem satırları hariç). read_state=0 ise 0.
+    let unread = 0;
+    if (Number(t.read_state ?? 0) > 0) {
+      const seenTs = Number(t.last_seen_at?.[viewerId]?.timestamp ?? 0);
+      const counted = items.filter((i) => String(i.user_id) !== viewerId && !i.is_sent_by_viewer && i.item_type !== 'action_log' && (!seenTs || Number(i.timestamp ?? 0) > seenTs)).length;
+      unread = typeof t.unseen_count === 'number' && t.unseen_count > 0 ? t.unseen_count : Math.max(1, counted);
+    }
+    // karşı tarafların son gördüğü an (görüldü bilgisi): viewer dışındaki last_seen_at'lerin en büyüğü (µs → ms)
+    const seenOthers = Math.max(0, ...Object.entries((t.last_seen_at ?? {}) as Record<string, { timestamp?: string | number }>).filter(([uid]) => uid !== viewerId).map(([, v]) => Number(v?.timestamp ?? 0)));
+    if (seenOthers) otherSeenMs.set(String(t.thread_id), Math.floor(seenOthers / 1000));
+    out.push({
+      readByOthersUpTo: seenOthers ? Math.floor(seenOthers / 1000) : undefined,
+      handle: solo?.username ? '@' + solo.username : undefined,
+      link: solo?.username ? `https://www.instagram.com/${solo.username}/` : undefined,
+      participants,
+      id: String(t.thread_id),
+      name: t.thread_title || (t.users ?? []).map((u: J) => u.full_name || u.username).join(', ') || 'Sohbet',
+      kind: t.is_group ? 'group' : 'direct',
+      lastTs: tsMs(t.last_activity_at ?? last?.timestamp),
+      preview: last ? itemText(last) || (isLogItem(last) ? String(last.action_log?.description ?? '') : '') : '',
+      unread,
+      // grup: özel grup fotoğrafı varsa o, yoksa ilk üyenin fotoğrafı
+      avatarUrl: t.is_group ? (t.thread_image?.url ?? t.thread_image_url ?? t.users?.[0]?.profile_pic_url) : t.users?.[0]?.profile_pic_url,
+    });
+  }
+  return out;
+}
+
 export const instagram: Strategy = {
   home: 'https://www.instagram.com/direct/inbox/',
   loginHint: 'Açılan pencerede Instagram hesabına giriş yap',
@@ -264,50 +349,51 @@ export const instagram: Strategy = {
   parallel: true,
 
   async threads(page, cookies): Promise<Thread[]> {
-    // thread_message_limit=10: her sohbetin son mesajları da gelir → okunmamış sayısı gerçekten hesaplanır
-    // (inbox yanıtında unseen_count yok; read_state yalnızca 0/1 veriyor)
-    // Instagram bazen geniş isteğe (limit=40, thread_message_limit=10) 500 'Oops' döndürüyor: eski dar parametrelerle yedek
-    // limit=40 sunucuda 500 veriyor; 20 sohbet × 10 mesaj okunmamış sayısı için yeterli (yedek: tek mesaj)
-    const data = await ig(page, cookies, '/api/v1/direct_v2/inbox/?persistentBadging=true&folder=&limit=20&thread_message_limit=10').catch(async (e: Error) => {
-      if (!/Instagram 5\d\d/.test(e.message)) throw e;
-      return ig(page, cookies, '/api/v1/direct_v2/inbox/?persistentBadging=true&folder=&limit=20&thread_message_limit=1');
-    });
-    if (data.viewer?.pk) viewerId = String(data.viewer.pk);
-    const out: Thread[] = [];
-    for (const t of data.inbox?.threads ?? []) {
-      rememberUsers(t.users);
-      const items: J[] = Array.isArray(t.items) ? t.items : [];
-      // önizleme: son GÖRÜNÜR mesaj (son öğe "Bir mesajı beğendi" tepki kaydıysa önizleme boş kalıyordu)
-      const last = items.find((i) => !isLogItem(i)) ?? t.last_permanent_item ?? items[0];
-      const participants = (t.users ?? []).map((u: J) => ({ id: String(u.pk), name: u.full_name || u.username, handle: u.username ? '@' + u.username : undefined, avatarUrl: u.profile_pic_url }));
-      const solo = !t.is_group && t.users?.[0];
-      // Okunmamış: platformun sayısı varsa o; yoksa viewer'ın son gördüğü andan (last_seen_at) sonra gelen,
-      // kendisinin göndermediği mesajları say (sistem satırları hariç). read_state=0 ise 0.
-      let unread = 0;
-      if (Number(t.read_state ?? 0) > 0) {
-        const seenTs = Number(t.last_seen_at?.[viewerId]?.timestamp ?? 0);
-        const counted = items.filter((i) => String(i.user_id) !== viewerId && !i.is_sent_by_viewer && i.item_type !== 'action_log' && (!seenTs || Number(i.timestamp ?? 0) > seenTs)).length;
-        unread = typeof t.unseen_count === 'number' && t.unseen_count > 0 ? t.unseen_count : Math.max(1, counted);
-      }
-      // karşı tarafların son gördüğü an (görüldü bilgisi): viewer dışındaki last_seen_at'lerin en büyüğü (µs → ms)
-      const seenOthers = Math.max(0, ...Object.entries((t.last_seen_at ?? {}) as Record<string, { timestamp?: string | number }>).filter(([uid]) => uid !== viewerId).map(([, v]) => Number(v?.timestamp ?? 0)));
-      if (seenOthers) otherSeenMs.set(String(t.thread_id), Math.floor(seenOthers / 1000));
-      out.push({
-        readByOthersUpTo: seenOthers ? Math.floor(seenOthers / 1000) : undefined,
-        handle: solo?.username ? '@' + solo.username : undefined,
-        link: solo?.username ? `https://www.instagram.com/${solo.username}/` : undefined,
-        participants,
-        id: String(t.thread_id),
-        name: t.thread_title || (t.users ?? []).map((u: J) => u.full_name || u.username).join(', ') || 'Sohbet',
-        kind: t.is_group ? 'group' : 'direct',
-        lastTs: tsMs(t.last_activity_at ?? last?.timestamp),
-        preview: last ? itemText(last) || (isLogItem(last) ? String(last.action_log?.description ?? '') : '') : '',
-        unread,
-        // grup: özel grup fotoğrafı varsa o, yoksa ilk üyenin fotoğrafı
-        avatarUrl: t.is_group ? (t.thread_image?.url ?? t.thread_image_url ?? t.users?.[0]?.profile_pic_url) : t.users?.[0]?.profile_pic_url,
-      });
+    const data = await fetchInbox(page, cookies);
+    rememberInboxCursor(0, data);
+    return inboxThreads(data);
+  },
+
+  /**
+   * Gelen kutusunun sonraki sayfaları: `inbox.oldest_cursor` (dizge) `cursor=` ile verilir, `has_older=false`
+   * sayfalamanın sonu. İmleç zinciri süreç belleğinde tutulur (k. sayfanın imleci = k. yanıtın oldest_cursor'ı);
+   * bilinmeyen sayfa istenirse zincir bilinen son halkadan ilerletilir. (Profil kopyasıyla doğrulandı: 20+20 sohbet, 0 çakışma.)
+   */
+  async moreThreads(page, cookies, pageIndex): Promise<Thread[]> {
+    if (!inboxCursors.length) rememberInboxCursor(0, await fetchInbox(page, cookies));
+    // pageIndex. sayfa için imleç: (pageIndex-1). sayfanın oldest_cursor'ı (0 = ilk sayfa)
+    for (let k = inboxCursors.length; k <= pageIndex - 1; k++) {
+      const prev = inboxCursors[k - 1];
+      if (!prev?.hasOlder || !prev.cursor) return [];
+      rememberInboxCursor(k, await fetchInbox(page, cookies, prev.cursor));
     }
-    return out;
+    const prev = inboxCursors[pageIndex - 1];
+    if (!prev?.hasOlder || !prev.cursor) return [];
+    const data = await fetchInbox(page, cookies, prev.cursor);
+    rememberInboxCursor(pageIndex, data);
+    return inboxThreads(data);
+  },
+
+  /**
+   * Fotoğraf/video: web istemcisinin DM sayfasındaki gizli `input[type=file]` (accept "audio/*,.mp4,.mov,.png,.jpg,.jpeg",
+   * profil kopyasıyla doğrulandı) dosyayı alır, önizleme çizilince Enter gönderir. Açıklama varsa ayrı metin mesajı
+   * olarak API ile gider (Instagram DM'de medyaya altyazı yok). Kabul edilmeyen türde hata. (Gönderim canlı denenmedi.)
+   */
+  async sendFile(page, cookies, threadId, file, caption) {
+    const url = `https://www.instagram.com/direct/t/${threadId}/`;
+    if (!page.url().startsWith(url)) await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    const box = page.locator('[role="main"] div[role="textbox"][contenteditable="true"], div[role="textbox"][contenteditable="true"], textarea').first();
+    await box.waitFor({ timeout: 20_000 });
+    const input = await dmFileInput(page, file);
+    if (!input) throw new Error(`Instagram: bu dosya türü DM'de gönderilemiyor (${file.mime || file.name})`);
+    await input.setInputFiles(file.path);
+    // önizleme (composer'da küçük resim) çizilsin; sonra Enter gönderir
+    await page.waitForTimeout(1500);
+    await box.click({ timeout: 5000 }).catch(() => undefined);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(2500);
+    if (caption) await this.send(page, cookies, threadId, caption);
+    return undefined;
   },
 
   /**

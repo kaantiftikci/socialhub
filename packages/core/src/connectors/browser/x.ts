@@ -807,10 +807,27 @@ async function domMessages(page: Page, threadId: string, need: number, before?: 
 /** 1.1 gelen kutusu Kasım 2025'ten beri donuk: süreç başına bir kez okunur */
 let legacyThreads: Thread[] | undefined;
 let legacyMe = '';
+const LEGACY_Q = 'include_ext_alt_text=false&include_reply_count=1&tweet_mode=extended&dm_secret_conversations_enabled=false';
+/**
+ * 1.1 gelen kutusu zaman çizelgesi (trusted) sayfalama zinciri: [0] = inbox_initial_state'in min_entry_id'si,
+ * [k] = k. inbox_timeline sayfasının min_entry_id'si; '' = AT_END (daha eski sohbet yok).
+ */
+const timelineCursors: string[] = [];
+function rememberTimeline(k: number, tl: J | undefined): void {
+  timelineCursors.length = k;
+  timelineCursors[k] = tl && tl.status !== 'AT_END' && tl.min_entry_id ? String(tl.min_entry_id) : '';
+}
 async function legacyInbox(page: Page, cookies: Record<string, string>): Promise<Thread[]> {
   if (legacyThreads) return legacyThreads;
-  const data = await xapi(page, cookies, '/1.1/dm/inbox_initial_state.json?include_ext_alt_text=false&include_reply_count=1&tweet_mode=extended&dm_secret_conversations_enabled=false');
+  const data = await xapi(page, cookies, `/1.1/dm/inbox_initial_state.json?${LEGACY_Q}`);
   const state = data.inbox_initial_state ?? {};
+  rememberTimeline(0, state.inbox_timelines?.trusted ?? state.inbox_timeline);
+  legacyThreads = legacyThreadsOf(state);
+  return legacyThreads;
+}
+
+/** inbox_initial_state / inbox_timeline yanıtındaki sohbetler → Thread (donuk arşiv: okunmamış 0) */
+export function legacyThreadsOf(state: J): Thread[] {
   collectUsers(state);
   const lastByConv = new Map<string, J>();
   for (const e of state.entries ?? []) if (e.message) lastByConv.set(e.message.conversation_id, e.message);
@@ -835,8 +852,53 @@ async function legacyInbox(page: Page, cookies: Record<string, string>): Promise
       avatarUrl: c.type === 'GROUP_DM' ? c.avatar_image_https : avatars.get(others[0]),
     });
   }
-  legacyThreads = out;
   return out;
+}
+
+/**
+ * Eski (1.1) gelen kutusunun sonraki sayfası: `/1.1/dm/inbox_timeline/trusted.json?max_id=<min_entry_id>`
+ * (profil kopyasıyla doğrulandı: HAS_MORE, 15 sohbet, ilk sayfayla çakışma yok). XChat (şifreli) listesi zaten
+ * tam geldiğinden yalnızca 1.1 arşivi sayfalanır; AT_END'de boş dizi. 1.1 grubu yerel XChat DB'sinde "g<id>" olarak
+ * varsa o kimlikle (takma ad eski kimlik) döner ki köprü aynı sohbeti ikinci kez yaratmasın.
+ */
+async function legacyTimelinePage(page: Page, cookies: Record<string, string>, pageIndex: number): Promise<Thread[]> {
+  if (!timelineCursors.length) await legacyInbox(page, cookies);
+  for (let k = timelineCursors.length; k <= pageIndex - 1; k++) {
+    const prev = timelineCursors[k - 1];
+    if (!prev) return [];
+    const j = await xapi(page, cookies, `/1.1/dm/inbox_timeline/trusted.json?max_id=${encodeURIComponent(prev)}&${LEGACY_Q}`);
+    rememberTimeline(k, j.inbox_timeline);
+  }
+  const cursor = timelineCursors[pageIndex - 1];
+  if (!cursor) return [];
+  const j = await xapi(page, cookies, `/1.1/dm/inbox_timeline/trusted.json?max_id=${encodeURIComponent(cursor)}&${LEGACY_Q}`);
+  const tl: J = j.inbox_timeline ?? {};
+  rememberTimeline(pageIndex, tl);
+  const out = legacyThreadsOf(tl);
+  for (const t of out) {
+    if (t.kind !== 'group' || t.id.startsWith('g')) continue;
+    let inXchat = false;
+    try {
+      inXchat = !!snap?.db.prepare('select 1 from dm_conversation where conversation_id = ?').get('g' + t.id);
+    } catch {
+      /* anlık görüntü yok */
+    }
+    if (inXchat) {
+      t.aliases = [...(t.aliases ?? []), t.id];
+      t.id = 'g' + t.id;
+    }
+  }
+  return out;
+}
+
+/** moreThreads'in tükettiği 1.1 zaman çizelgesi sayfası sayısı (0 = henüz yok) */
+let timelineConsumed = 0;
+
+/** Testler için: zaman çizelgesi zincirini ve eski gelen kutusu önbelleğini sıfırla */
+export function _resetLegacyInbox(): void {
+  timelineCursors.length = 0;
+  timelineConsumed = 0;
+  legacyThreads = undefined;
 }
 
 /** Eski 1.1 ucundan birebir sohbet geçmişi (`before` verilirse max_id ile ondan eskiler) */
@@ -1042,6 +1104,65 @@ export const x: Strategy & { fetchMedia(page: Page, cookies: Record<string, stri
     const a = BigInt(meId);
     const b = BigInt(p.id);
     return a < b ? `${a}-${b}` : `${b}-${a}`;
+  },
+
+  /**
+   * Daha eski sohbetler: yalnızca eski 1.1 gelen kutusu sayfalanır (max_id); XChat listesi (yerel DB) zaten tam gelir.
+   * 1.1 sayfaları çoğunlukla XChat'e taşınmış (DB'de olan, threads() ile zaten yazılmış) sohbetleri döndürür; bunlar
+   * elenir ve DB'de olmayan bir sohbet bulunana (ya da zincir bitene) dek en çok 6 sayfa ilerlenir. Köprünün
+   * pageIndex'i yerine kendi konumu tutulur: aynı çağrı yinelense de kaldığı yerden sürer.
+   */
+  async moreThreads(page, cookies): Promise<Thread[]> {
+    meId = meFromCookies(cookies) || meId;
+    const known = (id: string): boolean => {
+      try {
+        return !!snap?.db.prepare('select 1 from dm_conversation where conversation_id = ?').get(convOf(id));
+      } catch {
+        return false;
+      }
+    };
+    for (let i = 0; i < 6; i++) {
+      const pageNo = timelineConsumed + 1;
+      const got = await legacyTimelinePage(page, cookies, pageNo);
+      if (!got.length) return [];
+      timelineConsumed = pageNo;
+      const fresh = got.filter((t) => !known(t.id));
+      if (fresh.length) return fresh;
+    }
+    return [];
+  },
+
+  /**
+   * Dosya/fotoğraf: /i/chat/<id> düzenleyicisindeki gizli `input[data-testid="dm-composer-file-input"]` (multiple,
+   * accept yok; "Dosya ekle" düğmesi; profil kopyasıyla doğrulandı) dosyayı alır — XChat istemcisi şifreleyip yükler.
+   * Önizleme çizilince açıklama yazılır ve Enter gönderir. (Gönderim canlı denenmedi.)
+   */
+  async sendFile(page, _cookies, threadId, file, caption) {
+    const url = `${CHAT}/${threadId}`;
+    if (!page.url().startsWith(url)) await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    const box = page.locator('[data-testid="dm-composer-textarea"]').first();
+    await box.waitFor({ timeout: 15_000 });
+    const input = page.locator('[data-testid="dm-composer-file-input"], [data-testid="dm-composer-container"] input[type="file"]').first();
+    if (!(await input.count().catch(() => 0))) throw new Error('X: sohbet düzenleyicisinde dosya girişi bulunamadı');
+    await input.setInputFiles(file.path);
+    // önizleme (composer'da küçük resim / dosya kartı) çizilene dek en çok 20 sn
+    const container = page.locator('[data-testid="dm-composer-container"]');
+    for (const t0 = Date.now(); Date.now() - t0 < 20_000; ) {
+      await page.waitForTimeout(400);
+      if ((await container.locator('img, video, [data-testid*="attachment"], [aria-label*="Kaldır"], [aria-label*="Remove"]').count().catch(() => 0)) > 0) break;
+    }
+    await box.click();
+    if (caption) await box.fill(caption);
+    await page.keyboard.press('Enter');
+    // gönderim: kutu boşalır ve önizleme kalkar (en fazla dosya boyutuna göre)
+    const maxMs = Math.max(8_000, Math.min(180_000, file.size / 50));
+    for (const t0 = Date.now(); Date.now() - t0 < maxMs; ) {
+      await page.waitForTimeout(400);
+      const text = (await box.inputValue({ timeout: 1000 }).catch(async () => box.innerText({ timeout: 1000 }).catch(() => ''))).trim();
+      const previews = await container.locator('img, video, [data-testid*="attachment"]').count().catch(() => 0);
+      if (!text && previews === 0) break;
+    }
+    return undefined;
   },
 
   async send(page, cookies, threadId, text) {

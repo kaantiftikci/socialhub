@@ -50,6 +50,47 @@ export async function persistSessionCookies(ctx: BrowserContext, domains: RegExp
   return n;
 }
 
+/**
+ * `accept` özniteliği (ör. "image/*,.pdf,.docx") verilen dosyayı kabul eder mi? Boş accept her şeyi alır.
+ * Tarayıcı köprüsündeki tüm stratejiler için ortak (düzenleyicide birden çok gizli dosya girişi olabiliyor:
+ * LinkedIn'de resim/dosya, Outlook'ta resim/ek).
+ */
+export function acceptsMime(accept: string | null | undefined, file: { name: string; mime: string }): boolean {
+  const a = (accept ?? '').trim();
+  if (!a) return true;
+  const mime = file.mime.toLowerCase();
+  const ext = (file.name.match(/\.[a-z0-9]+$/i)?.[0] ?? '').toLowerCase();
+  return a
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+    .some((rule) => {
+      if (rule.startsWith('.')) return rule === ext;
+      if (rule.endsWith('/*')) return mime.startsWith(rule.slice(0, -1));
+      return rule === mime;
+    });
+}
+
+/**
+ * Dosyayı kabul eden girişin dizini: önce en dar (özel) eşleşen kural, sonra her şeyi alan boş accept.
+ * Hiçbiri kabul etmiyorsa -1 (ör. Instagram DM'e PDF).
+ */
+export function pickFileInput(inputs: Array<{ accept: string | null | undefined }>, file: { name: string; mime: string }): number {
+  let best = -1;
+  let bestScore = -1;
+  inputs.forEach((inp, i) => {
+    if (!acceptsMime(inp.accept, file)) return;
+    const a = (inp.accept ?? '').trim();
+    // özel kural (image/* ya da uzantı) > her şeyi alan giriş; eşitlikte sonuncusu (en son çizilen, açık düzenleyici)
+    const score = a ? 2 : 1;
+    if (score >= bestScore) {
+      best = i;
+      bestScore = score;
+    }
+  });
+  return best;
+}
+
 const WEEKDAYS: Record<string, number> = {
   paz: 0, pzt: 1, sal: 2, çar: 3, per: 4, cum: 5, cmt: 6,
   sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6,
@@ -252,34 +293,39 @@ export const outlook: Strategy = {
       return [];
     }
     if (!meEmail) await this.me(page, {});
-    const raw = await page.evaluate((sel) => {
-      const out: OutlookRawRow[] = [];
-      const seen = new Set<string>();
-      for (const el of Array.from(document.querySelectorAll<HTMLElement>(sel))) {
-        const id = el.getAttribute('data-convid') ?? '';
-        if (!id || seen.has(id)) continue;
-        seen.add(id);
-        const label = el.getAttribute('aria-label') ?? '';
-        const unread = /^(Okunmamış|Unread)\b/i.test(label) || !!el.querySelector('[aria-label="Okunmamış"], [aria-label="Unread"]');
-        const from = el.querySelector<HTMLElement>('span[title*="@"]');
-        const titles = Array.from(el.querySelectorAll<HTMLElement>('[title]')).map((s) => s.getAttribute('title') ?? '').filter(Boolean);
-        const lines = el.innerText.split('\n').map((t) => t.trim()).filter(Boolean);
-        out.push({ id, label, unread, senderName: from?.innerText.trim() ?? '', senderEmail: from?.getAttribute('title') ?? '', titles, lines });
+    // moreThreads listeyi aşağı kaydırmışsa (liste sanal: üstteki satırlar DOM'dan düşer) başa dön
+    if (await scrollList(page, 'top')) await page.waitForTimeout(1200);
+    const raw = await readListRows(page);
+    for (const r of raw) listed.add(r.id);
+    return raw.map(rawToThread);
+  },
+
+  /**
+   * Daha eski iletiler: ileti listesinin kaydırma kabı (satırın overflow:auto atası) sona kaydırılır, OWA yeni
+   * satırları yükler (liste sanal; eski satırlar DOM'dan düşer). Daha önce görülmemiş satırlar döner; kaydırma
+   * yeni satır getirmiyorsa boş dizi. (Profil kopyasıyla doğrulandı: 11 → 18 satır.)
+   */
+  async moreThreads(page): Promise<Thread[]> {
+    if ((await inboxState(page)) !== 'ok') return [];
+    const fresh: OutlookRawRow[] = [];
+    for (let round = 0; round < 4 && !fresh.length; round++) {
+      const before = (await readListRows(page)).length;
+      if (!(await scrollList(page, 'bottom'))) break;
+      // yeni satırlar gelene dek (en çok 4 sn) bekle
+      const t0 = Date.now();
+      while (Date.now() - t0 < 4000) {
+        await page.waitForTimeout(400);
+        const rows = await readListRows(page);
+        const unseen = rows.filter((r) => !listed.has(r.id));
+        if (unseen.length) {
+          fresh.push(...unseen);
+          break;
+        }
+        if (rows.length !== before) break; // satırlar değişti ama hepsi biliniyor: bir tur daha kaydır
       }
-      return out;
-    }, LIST);
-    return raw.map((r) => {
-      const x = outlookRow(r);
-      return {
-        id: r.id,
-        name: x.subject,
-        kind: 'direct' as const,
-        lastTs: x.ts,
-        preview: `${x.sender}: ${x.preview}`.slice(0, 200),
-        unread: x.unread ? 1 : 0,
-        participants: x.sender || x.email ? [{ id: x.email || x.sender, name: x.sender || x.email, handle: x.email || undefined }] : undefined,
-      };
-    });
+    }
+    for (const r of fresh) listed.add(r.id);
+    return fresh.map(rawToThread);
   },
 
   async messages(page, _cookies, threadId, limit): Promise<Msg[]> {
@@ -330,20 +376,144 @@ export const outlook: Strategy = {
   },
 
   async send(page, _cookies, threadId, text) {
-    if (!(await openThread(page, threadId))) throw new Error('İleti açılamadı');
-    const reply = page.locator(REPLY_BTN).last();
-    await reply.click({ timeout: 8000 });
-    const body = page.locator(EDITOR).last();
-    await body.waitFor({ timeout: 10_000 });
+    const body = await openReply(page, threadId);
     await body.click();
     await body.fill(text);
-    const sendBtn = page.locator(SEND_BTN).last();
-    await sendBtn.click({ timeout: 8000 });
-    await page.waitForTimeout(1500);
+    await clickSend(page);
     return hashId(threadId + '|' + text + '|' + Date.now());
+  },
+
+  /**
+   * Ekli yanıt: yanıt düzenleyicisi açılınca şeritte gizli `input[type=file][data-testid="local-computer-filein"]`
+   * girişleri çizilir (biri image/*, diğerleri her tür; profil kopyasıyla doğrulandı). Dosya türüne uyan girişe
+   * setInputFiles, yükleme bitince metin ve Gönder. (Gönderim canlı denenmedi.)
+   */
+  async sendFile(page, _cookies, threadId, file, caption) {
+    const body = await openReply(page, threadId);
+    const input = await composeFileInput(page, file);
+    if (!input) throw new Error('Outlook: yanıt düzenleyicisinde dosya girişi bulunamadı');
+    await input.setInputFiles(file.path);
+    await waitUploadDone(page, Math.max(30_000, Math.min(300_000, file.size / 50)));
+    if (caption) {
+      await body.click();
+      await body.fill(caption);
+    }
+    await clickSend(page);
+    return hashId(threadId + '|' + file.name + '|' + Date.now());
   },
 };
 
 export const REPLY_BTN = 'button[aria-label="Yanıtla"], button[aria-label="Reply"], button[name="Yanıtla"], button[name="Reply"]';
 export const EDITOR = 'div[aria-label*="İleti gövdesi"][contenteditable="true"], div[aria-label*="Message body"][contenteditable="true"], div[role="textbox"][contenteditable="true"]';
 export const SEND_BTN = 'button[aria-label="Gönder"], button[aria-label="Send"], button[name="Gönder"], button[name="Send"]';
+export const FILE_INPUT = 'input[type="file"][data-testid="local-computer-filein"], input[type="file"]';
+
+/** threads()/moreThreads ile depoya yazılmış satır kimlikleri (moreThreads yalnızca yenilerini döndürür) */
+const listed = new Set<string>();
+
+/** DOM'daki liste satırlarını ham alanlarıyla oku */
+function readListRows(page: Page): Promise<OutlookRawRow[]> {
+  return page.evaluate((sel) => {
+    const out: OutlookRawRow[] = [];
+    const seen = new Set<string>();
+    for (const el of Array.from(document.querySelectorAll<HTMLElement>(sel))) {
+      const id = el.getAttribute('data-convid') ?? '';
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const label = el.getAttribute('aria-label') ?? '';
+      const unread = /^(Okunmamış|Unread)\b/i.test(label) || !!el.querySelector('[aria-label="Okunmamış"], [aria-label="Unread"]');
+      const from = el.querySelector<HTMLElement>('span[title*="@"]');
+      const titles = Array.from(el.querySelectorAll<HTMLElement>('[title]')).map((s) => s.getAttribute('title') ?? '').filter(Boolean);
+      const lines = el.innerText.split('\n').map((t) => t.trim()).filter(Boolean);
+      out.push({ id, label, unread, senderName: from?.innerText.trim() ?? '', senderEmail: from?.getAttribute('title') ?? '', titles, lines });
+    }
+    return out;
+  }, LIST);
+}
+
+function rawToThread(r: OutlookRawRow): Thread {
+  const x = outlookRow(r);
+  return {
+    id: r.id,
+    name: x.subject,
+    kind: 'direct' as const,
+    lastTs: x.ts,
+    preview: `${x.sender}: ${x.preview}`.slice(0, 200),
+    unread: x.unread ? 1 : 0,
+    participants: x.sender || x.email ? [{ id: x.email || x.sender, name: x.sender || x.email, handle: x.email || undefined }] : undefined,
+  };
+}
+
+/**
+ * İleti listesinin kaydırma kabını (bir satırın overflow:auto olan en yakın atası) başa/sona kaydır.
+ * Kaydırılabilir kap yoksa ya da zaten oradaysa false.
+ */
+function scrollList(page: Page, to: 'top' | 'bottom'): Promise<boolean> {
+  return page
+    .evaluate(
+      ({ sel, to }) => {
+        let el = document.querySelector<HTMLElement>(sel)?.parentElement ?? null;
+        while (el && el !== document.body) {
+          const oy = getComputedStyle(el).overflowY;
+          if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 4) {
+            const target = to === 'top' ? 0 : el.scrollHeight;
+            if (Math.abs(el.scrollTop - target) < 2 && to === 'top') return false;
+            el.scrollTop = target;
+            el.dispatchEvent(new Event('scroll', { bubbles: true }));
+            return true;
+          }
+          el = el.parentElement;
+        }
+        return false;
+      },
+      { sel: LIST, to },
+    )
+    .catch(() => false);
+}
+
+/** İletiyi aç, Yanıtla'ya bas, gövde düzenleyicisini döndür */
+async function openReply(page: Page, threadId: string) {
+  if (!(await openThread(page, threadId))) throw new Error('İleti açılamadı');
+  const reply = page.locator(REPLY_BTN).last();
+  await reply.click({ timeout: 8000 });
+  const body = page.locator(EDITOR).last();
+  await body.waitFor({ timeout: 10_000 });
+  return body;
+}
+
+async function clickSend(page: Page): Promise<void> {
+  const sendBtn = page.locator(SEND_BTN).last();
+  await sendBtn.click({ timeout: 8000 });
+  await page.waitForTimeout(1500);
+}
+
+/** Açık düzenleyicinin dosya türüne uyan gizli dosya girişi (accept'e göre; yoksa undefined) */
+export async function composeFileInput(page: Page, file: { name: string; mime: string }) {
+  for (let i = 0; i < 20; i++) {
+    const inputs = page.locator(FILE_INPUT);
+    const n = await inputs.count().catch(() => 0);
+    if (n) {
+      const accepts: Array<{ accept: string | null }> = [];
+      for (let k = 0; k < n; k++) accepts.push({ accept: await inputs.nth(k).getAttribute('accept').catch(() => null) });
+      const idx = pickFileInput(accepts, file);
+      if (idx >= 0) return inputs.nth(idx);
+      return undefined;
+    }
+    await page.waitForTimeout(250);
+  }
+  return undefined;
+}
+
+/** Ek yükleme bitene dek bekle: görünür ilerleme çubuğu kalmayınca ve 1,5 sn sessiz kalınca döner */
+async function waitUploadDone(page: Page, maxMs: number): Promise<void> {
+  const t0 = Date.now();
+  let quiet = 0;
+  while (Date.now() - t0 < maxMs) {
+    await page.waitForTimeout(500);
+    const busy = await page
+      .evaluate(() => Array.from(document.querySelectorAll<HTMLElement>('[role="progressbar"]')).some((e) => e.offsetParent !== null && e.getAttribute('aria-valuenow') !== e.getAttribute('aria-valuemax')))
+      .catch(() => false);
+    quiet = busy ? 0 : quiet + 1;
+    if (quiet >= 3) return;
+  }
+}

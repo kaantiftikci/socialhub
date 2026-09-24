@@ -1,7 +1,7 @@
-import type { Frame, Page } from 'playwright';
+import type { Frame, Locator, Page } from 'playwright';
 import { hashId, type Msg, type Strategy, type Thread } from './bridge.js';
 import { bus } from '../../bus.js';
-import { parseOutlookDate, persistSessionCookies } from './outlook.js';
+import { parseOutlookDate, persistSessionCookies, pickFileInput } from './outlook.js';
 
 /**
  * iCloud Mail (tarayıcı oturumu): kullanıcı görünür pencerede Apple hesabına girer (2FA dahil), sonra
@@ -166,15 +166,67 @@ export const icloud: Strategy = {
   },
 
   async send(page, _cookies, threadId, text) {
-    await this.messages(page, _cookies, threadId, 1); // iletiyi aç
-    const btn = page.locator('[aria-label="Yanıtla"], [aria-label="Reply"], button:has-text("Yanıtla"), button:has-text("Reply")').first();
-    await btn.click({ timeout: 8000 });
-    const box = page.locator('[contenteditable="true"][role="textbox"], [contenteditable="true"]').last();
-    await box.waitFor({ timeout: 10_000 });
+    const box = await openReply(page, threadId);
     await box.click();
     await box.fill(text);
-    await page.locator('[aria-label="Gönder"], [aria-label="Send"], button:has-text("Gönder"), button:has-text("Send")').last().click({ timeout: 8000 });
-    await page.waitForTimeout(1500);
+    await clickSend(page);
     return hashId(threadId + '|' + text + '|' + Date.now());
   },
+
+  /**
+   * Ekli yanıt: yanıt düzenleyicisi açıldıktan sonra tüm çerçevelerde `input[type=file]` aranır (iCloud Mail
+   * içerik iframe'lerinde çalışır), dosya türüne uyan girişe setInputFiles, sonra metin ve Gönder.
+   * DOĞRULANMADI: bu makinede iCloud oturumu yok; seçiciler ilk gerçek girişte günlükle ayarlanmalı.
+   */
+  async sendFile(page, _cookies, threadId, file, caption) {
+    const box = await openReply(page, threadId);
+    let input: Locator | undefined;
+    for (let i = 0; i < 20 && !input; i++) {
+      for (const f of page.frames()) {
+        const inputs = f.locator('input[type="file"]');
+        const n = await inputs.count().catch(() => 0);
+        if (!n) continue;
+        const accepts: Array<{ accept: string | null }> = [];
+        for (let k = 0; k < n; k++) accepts.push({ accept: await inputs.nth(k).getAttribute('accept').catch(() => null) });
+        const idx = pickFileInput(accepts, file);
+        if (idx >= 0) {
+          input = inputs.nth(idx);
+          break;
+        }
+      }
+      if (!input) await page.waitForTimeout(250);
+    }
+    if (!input) throw new Error('iCloud Mail: yanıt düzenleyicisinde dosya girişi bulunamadı (seçici doğrulanmadı)');
+    await input.setInputFiles(file.path);
+    // yükleme: ilerleme çubuğu kaybolana dek (en çok dosya boyutuna göre)
+    const t0 = Date.now();
+    const maxMs = Math.max(30_000, Math.min(300_000, file.size / 50));
+    for (let quiet = 0; quiet < 3 && Date.now() - t0 < maxMs; ) {
+      await page.waitForTimeout(500);
+      let busy = false;
+      for (const f of page.frames()) busy ||= await f.evaluate(() => Array.from(document.querySelectorAll<HTMLElement>('[role="progressbar"]')).some((e) => e.offsetParent !== null)).catch(() => false);
+      quiet = busy ? 0 : quiet + 1;
+    }
+    if (caption) {
+      await box.click();
+      await box.fill(caption);
+    }
+    await clickSend(page);
+    return hashId(threadId + '|' + file.name + '|' + Date.now());
+  },
 };
+
+/** İletiyi aç, Yanıtla'ya bas, düzenleyici kutusunu döndür */
+async function openReply(page: Page, threadId: string): Promise<Locator> {
+  await icloud.messages(page, {}, threadId, 1); // iletiyi aç
+  const btn = page.locator('[aria-label="Yanıtla"], [aria-label="Reply"], button:has-text("Yanıtla"), button:has-text("Reply")').first();
+  await btn.click({ timeout: 8000 });
+  const box = page.locator('[contenteditable="true"][role="textbox"], [contenteditable="true"]').last();
+  await box.waitFor({ timeout: 10_000 });
+  return box;
+}
+
+async function clickSend(page: Page): Promise<void> {
+  await page.locator('[aria-label="Gönder"], [aria-label="Send"], button:has-text("Gönder"), button:has-text("Send")').last().click({ timeout: 8000 });
+  await page.waitForTimeout(1500);
+}

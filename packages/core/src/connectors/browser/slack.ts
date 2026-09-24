@@ -351,7 +351,79 @@ export const slackStrategy: Strategy = {
     const r = await slack(page, 'conversations.open', { users: p.id });
     return String(r.channel?.id ?? '');
   },
+
+  /**
+   * Dosya: iki adımlı yükleme (files.upload kapalı). 1) files.getUploadURLExternal {filename, length} → upload_url + file_id;
+   * 2) dosya baytları upload_url'ye POST (Node tarafı context.request; olmazsa sayfa fetch'i — her ikisi de profil
+   * kopyasıyla 200 döndü); 3) files.completeUploadExternal {files:[{id,title}], channel_id, initial_comment} mesajı
+   * kanala paylaşır. Dönen kimlik: paylaşımın ts'si (yoksa dosya kimliği).
+   */
+  async sendFile(page, _cookies, threadId, file, caption) {
+    const r = await slack(page, 'files.getUploadURLExternal', { filename: file.name, length: file.size });
+    const uploadUrl = String(r.upload_url ?? '');
+    const fileId = String(r.file_id ?? '');
+    if (!uploadUrl || !fileId) throw new Error('Slack: yükleme adresi alınamadı');
+    await uploadToSlack(page, uploadUrl, file);
+    const done = await slack(page, 'files.completeUploadExternal', {
+      files: JSON.stringify([{ id: fileId, title: file.name }]),
+      channel_id: threadId,
+      ...(caption ? { initial_comment: caption } : {}),
+    });
+    return completedShareTs(done, threadId) ?? fileId;
+  },
 };
+
+/** completeUploadExternal yanıtındaki paylaşımın mesaj ts'si (files[].shares.public|private[channel][0].ts) */
+export function completedShareTs(r: J, channel: string): string | undefined {
+  for (const f of (r?.files ?? []) as J[]) {
+    for (const scope of ['public', 'private']) {
+      const s = f.shares?.[scope]?.[channel];
+      if (Array.isArray(s) && s[0]?.ts) return String(s[0].ts);
+    }
+  }
+  return undefined;
+}
+
+/** Dosya baytlarını Slack'in yükleme adresine gönder: önce Node tarafı (büyük dosyada base64 gerekmez), olmazsa sayfa fetch'i */
+async function uploadToSlack(page: Page, uploadUrl: string, file: { path: string; name: string; mime: string; size: number }): Promise<void> {
+  const fs = await import('node:fs');
+  const body = fs.readFileSync(file.path);
+  const mime = file.mime || 'application/octet-stream';
+  const ctx = typeof (page as { context?: unknown }).context === 'function' ? page.context() : undefined;
+  if (ctx?.request) {
+    try {
+      const res = await ctx.request.post(uploadUrl, { data: body, headers: { 'content-type': mime }, timeout: Math.max(60_000, file.size / 20) });
+      if (res.ok()) return;
+      throw new Error(`HTTP ${res.status()}`);
+    } catch (e) {
+      // sayfa bağlamından dene (CORS: files.slack.com app.slack.com kaynağına izin veriyor)
+      const first = (e as Error).message;
+      const r = await page.evaluate(
+        async ({ url, b64, mime }) => {
+          const bin = atob(b64);
+          const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          const res = await fetch(url, { method: 'POST', body: new Blob([bytes], { type: mime }) });
+          return { ok: res.ok, status: res.status };
+        },
+        { url: uploadUrl, b64: body.toString('base64'), mime },
+      );
+      if (!r.ok) throw new Error(`Slack yükleme başarısız: ${first}; sayfa: HTTP ${r.status}`);
+      return;
+    }
+  }
+  const r = await page.evaluate(
+    async ({ url, b64, mime }) => {
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const res = await fetch(url, { method: 'POST', body: new Blob([bytes], { type: mime }) });
+      return { ok: res.ok, status: res.status };
+    },
+    { url: uploadUrl, b64: body.toString('base64'), mime },
+  );
+  if (!r.ok) throw new Error(`Slack yükleme başarısız: HTTP ${r.status}`);
+}
 
 /** Testler için: iç önbellekleri sıfırla */
 export function _resetSlackState(): void {

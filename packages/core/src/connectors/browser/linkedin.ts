@@ -2,6 +2,7 @@ import type { Page } from 'playwright';
 import type { Msg, Strategy, Thread } from './bridge.js';
 import type { Attachment } from '../../model.js';
 import { bus } from '../../bus.js';
+import { pickFileInput } from './outlook.js';
 
 /**
  * LinkedIn: web istemcisinin kullandığı iç "Voyager" API'si, tarayıcı oturumunun çerezleriyle.
@@ -235,6 +236,30 @@ function nextCursorOf(data: J): string | undefined {
 
 let pagingWarned = false;
 /**
+ * PRIMARY_INBOX sayfalarının imleç zinciri: pageCursors[i] = i. sayfanın (0 = imleçsiz ilk sayfa) yanıtındaki
+ * nextCursor; '' = zincir bitti. olderConversations ilk sayfaları doldurur, moreThreads oradan devam eder.
+ */
+const pageCursors: string[] = [];
+
+/** i. PRIMARY_INBOX sayfasını getir (gerekirse önceki sayfaların imleçleri sırayla alınır); zincir bittiyse undefined */
+async function fetchConversationPage(page: Page, cookies: Record<string, string>, i: number): Promise<J[] | undefined> {
+  if (!captured.conversations || !meId) return undefined;
+  let cursor: string | undefined;
+  if (i > 0) {
+    if (pageCursors[i - 1] === undefined) {
+      if (!(await fetchConversationPage(page, cookies, i - 1))) return undefined;
+    }
+    cursor = pageCursors[i - 1];
+    if (!cursor) return undefined; // '' : önceki sayfa sonuncuydu
+  }
+  const data = await voyager(page, cookies, conversationsPageUrl(captured.conversations, `urn:li:fsd_profile:${meId}`, cursor, captured.conversationsPage), { graphql: true });
+  const got = findElements(data, 'messengerConversations');
+  pageCursors.length = i;
+  pageCursors[i] = got.length ? (nextCursorOf(data) ?? '') : '';
+  return got;
+}
+
+/**
  * İlk sayfanın (en yeni 20, sponsorlular dahil) ötesindeki sohbetler: PRIMARY_INBOX sayfaları nextCursor ile
  * (imleçsiz ilk istek ilk sayfayla büyük ölçüde örtüşür). Çakışanlar çağıran tarafta elenir. Hata ölümcül değil (ilk sayfa yine döner).
  */
@@ -242,14 +267,12 @@ async function olderConversations(page: Page, cookies: Record<string, string>): 
   if (!captured.conversations || !meId) return [];
   if (olderPages && Date.now() - olderPages.at < PAGE_TTL) return olderPages.els;
   const els: J[] = [];
-  let cursor: string | undefined;
   try {
     for (let i = 0; i <= MAX_CONV_PAGES; i++) {
-      const data = await voyager(page, cookies, conversationsPageUrl(captured.conversations, `urn:li:fsd_profile:${meId}`, cursor, captured.conversationsPage), { graphql: true });
-      const got = findElements(data, 'messengerConversations');
+      const got = await fetchConversationPage(page, cookies, i);
+      if (!got) break;
       els.push(...got);
-      cursor = nextCursorOf(data);
-      if (!cursor || !got.length) break;
+      if (!got.length || !pageCursors[i]) break;
     }
   } catch (e) {
     if (!pagingWarned) {
@@ -394,6 +417,33 @@ const unreadOf = (c: J): number => {
   return c.read === false ? Math.max(1, n) : n;
 };
 
+/** GraphQL sohbet öğesi → sohbet (katılımcılar, tek kişiyse profil bağlantısı/avatar, son mesaj önizlemesi) */
+export function conversationToThread(c: J, me: string): Thread {
+  const parts = (c.conversationParticipants ?? []).map(memberOf);
+  const others = parts.filter((p: { id: string }) => p.id !== me);
+  const last = (c.messages?.elements ?? []).find((m: J) => !isAdMessage(m));
+  return {
+    id: String(c.entityUrn ?? ''),
+    participants: parts.map((p: ReturnType<typeof memberOf>) => ({ id: p.id, name: p.name, avatarUrl: p.avatar, handle: p.handle })),
+    handle: others.length === 1 ? others[0].handle : undefined,
+    link: others.length === 1 && others[0].handle ? `https://www.linkedin.com/in/${others[0].handle}/` : undefined,
+    name: c.title || others.map((p: { name: string }) => p.name).join(', ') || 'Sohbet',
+    kind: others.length > 1 || c.groupChat ? 'group' : 'direct',
+    lastTs: Number(c.lastActivityAt ?? last?.deliveredAt ?? 0),
+    preview: preview(last),
+    unread: unreadOf(c),
+    avatarUrl: others.length === 1 ? others[0].avatar : undefined,
+  };
+}
+
+/** Testler için: yakalanan sohbet listesi şablonunu ve kimliği ayarla, imleç zincirini sıfırla */
+export function _seedLinkedinForTests(conversationsUrl: string, me: string): void {
+  captured.conversations = conversationsUrl;
+  meId = me;
+  pageCursors.length = 0;
+  olderPages = undefined;
+}
+
 export const linkedin: Strategy = {
   home: HOME,
   loginHint: 'Açılan pencerede LinkedIn hesabına giriş yap',
@@ -450,21 +500,7 @@ export const linkedin: Strategy = {
           sponsored++;
           continue;
         }
-        const parts = (c.conversationParticipants ?? []).map(memberOf);
-        const others = parts.filter((p: { id: string }) => p.id !== meId);
-        const last = (c.messages?.elements ?? []).find((m: J) => !isAdMessage(m));
-        out.push({
-          id: String(c.entityUrn ?? ''),
-          participants: parts.map((p: ReturnType<typeof memberOf>) => ({ id: p.id, name: p.name, avatarUrl: p.avatar, handle: p.handle })),
-          handle: others.length === 1 ? others[0].handle : undefined,
-          link: others.length === 1 && others[0].handle ? `https://www.linkedin.com/in/${others[0].handle}/` : undefined,
-          name: c.title || others.map((p: { name: string }) => p.name).join(', ') || 'Sohbet',
-          kind: others.length > 1 || c.groupChat ? 'group' : 'direct',
-          lastTs: Number(c.lastActivityAt ?? last?.deliveredAt ?? 0),
-          preview: preview(last),
-          unread: unreadOf(c),
-          avatarUrl: others.length === 1 ? others[0].avatar : undefined,
-        });
+        out.push(conversationToThread(c, meId));
       }
       if (sponsored && !sponsoredLogged) {
         sponsoredLogged = true;
@@ -600,4 +636,67 @@ export const linkedin: Strategy = {
     const r = await voyager(page, cookies, `/messaging/conversations/${encodeURIComponent(threadId.split(':').pop() ?? threadId)}/events?action=create`, { method: 'POST', body });
     return r?.value?.eventUrn ? String(r.value.eventUrn) : undefined;
   },
+
+  /**
+   * Sohbet listesinin sonraki sayfaları: threads() ilk MAX_CONV_PAGES+1 PRIMARY_INBOX sayfasını zaten birleştirir;
+   * pageIndex=1 ondan sonraki sayfadır (nextCursor zinciriyle). Zincir bitmişse boş dizi. Sponsorlu sohbetler elenir.
+   */
+  async moreThreads(page, cookies, pageIndex): Promise<Thread[]> {
+    install(page);
+    if (!captured.conversations) {
+      await page.goto(HOME, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+      await waitFor(() => !!captured.conversations, 12_000);
+    }
+    if (!captured.conversations) throw new Error('LinkedIn: sohbet listesi sorgu şablonu yakalanamadı');
+    if (!meId) {
+      const m = decodeURIComponent(captured.conversations).match(/mailboxUrn:urn:li:fsd_profile:([^,)]+)/);
+      if (m) meId = m[1];
+    }
+    const got = await fetchConversationPage(page, cookies, MAX_CONV_PAGES + pageIndex);
+    return (got ?? []).filter((c) => !isSponsored(c)).map((c) => conversationToThread(c, meId));
+  },
+
+  /**
+   * Dosya/görsel: mesaj düzenleyicisindeki gizli `input.msg-form__attachment-upload-input` girişleri (biri image/*,
+   * diğeri .pdf/.docx/… + video; profil kopyasıyla doğrulandı) dosyayı alır; ek kartı çizilip Gönder etkinleşince
+   * açıklama yazılır ve Gönder'e basılır. (Gönderim canlı denenmedi.)
+   */
+  async sendFile(page, _cookies, threadId, file, caption) {
+    await page.goto(`https://www.linkedin.com/messaging/thread/${encodeURIComponent(convId(threadId))}/`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    const editor = page.locator('.msg-form__contenteditable, .msg-form div[role="textbox"][contenteditable="true"]').first();
+    await editor.waitFor({ timeout: 20_000 });
+    const input = await attachmentInput(page, file);
+    if (!input) throw new Error(`LinkedIn: bu dosya türü mesajda gönderilemiyor (${file.mime || file.name})`);
+    await input.setInputFiles(file.path);
+    // yükleme: Gönder düğmesi etkinleşene dek (en çok dosya boyutuna göre)
+    const send = page.locator('.msg-form__send-button, button.msg-form__send-btn').last();
+    const maxMs = Math.max(20_000, Math.min(300_000, file.size / 50));
+    for (const t0 = Date.now(); Date.now() - t0 < maxMs; ) {
+      await page.waitForTimeout(500);
+      if (await send.isEnabled().catch(() => false)) break;
+    }
+    if (caption) {
+      await editor.click();
+      await editor.fill(caption);
+    }
+    await send.click({ timeout: 8000 });
+    await page.waitForTimeout(1500);
+    return undefined;
+  },
 };
+
+/** Düzenleyicideki, dosya türünü kabul eden gizli ataç girişi (LinkedIn: image/* ve genel; accept'e göre seçilir) */
+export async function attachmentInput(page: Page, file: { name: string; mime: string }) {
+  for (let i = 0; i < 20; i++) {
+    const inputs = page.locator('input.msg-form__attachment-upload-input, .msg-form input[type="file"], form[class*="msg-form"] input[type="file"]');
+    const n = await inputs.count().catch(() => 0);
+    if (n) {
+      const accepts: Array<{ accept: string | null }> = [];
+      for (let k = 0; k < n; k++) accepts.push({ accept: await inputs.nth(k).getAttribute('accept').catch(() => null) });
+      const idx = pickFileInput(accepts, file);
+      return idx >= 0 ? inputs.nth(idx) : undefined;
+    }
+    await page.waitForTimeout(250);
+  }
+  return undefined;
+}

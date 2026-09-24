@@ -102,26 +102,166 @@ export function isInboxListUrl(url: string): boolean {
 }
 
 /**
+ * Liste başlığındaki sayfa aralığı: "2.631 satırdan 51–100 arası" / "51–100 of 2,631" / "1-50 / 2631".
+ * Gmail'in yeni arayüzü `#inbox/p2` adresini yok sayıp hep 1. sayfayı gösterir; sayfalar "Daha eski"/"Daha yeni"
+ * düğmeleriyle gezilir ve hangi sayfada olunduğu yalnızca bu metinden anlaşılır.
+ */
+export function parseGmailPager(text: string | undefined | null): { from: number; to: number; total: number } | undefined {
+  if (!text) return undefined;
+  const t = text.replace(/[\u200e\u200f\u202a-\u202e\u00a0]/g, ' ').replace(/\s+/g, ' ').trim();
+  const num = (s: string) => Number(s.replace(/[.,\s]/g, ''));
+  const range = t.match(/(\d[\d.,]*)\s*[–\-]\s*(\d[\d.,]*)/);
+  if (!range) return undefined;
+  const from = num(range[1]);
+  const to = num(range[2]);
+  // toplam: aralık dışında kalan (en büyük) sayı; yoksa `to`
+  const rest = t.replace(range[0], ' ').match(/\d[\d.,]*/g)?.map(num).filter((n) => Number.isFinite(n)) ?? [];
+  const total = rest.length ? Math.max(...rest) : to;
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from < 1 || to < from) return undefined;
+  return { from, to, total: Math.max(total, to) };
+}
+
+/** Sayfa numarası (1 tabanlı): aralığın başı ve sayfa boyutundan */
+export function gmailPageOf(from: number, pageSize: number): number {
+  return pageSize > 0 ? Math.floor((from - 1) / pageSize) + 1 : 1;
+}
+
+/** Görünür sayfa aralığı ("Daha eski/yeni" düğmeleriyle aynı araç çubuğundaki .Dj metni) */
+async function readPager(page: Page): Promise<{ from: number; to: number; total: number } | undefined> {
+  const text = await page
+    .evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLElement>('.Dj'))
+        .filter((e) => e.offsetParent !== null)
+        .map((e) => e.innerText)
+        .join(' | '),
+    )
+    .catch(() => '');
+  return parseGmailPager(text.split(' | ')[0]);
+}
+
+/** İlk sayfanın (1–N) satır sayısı: sayfalama adımı. Kullanıcı ayarına göre 25/50/100. */
+let pageSize = 0;
+const OLDER_BTN = '[role="button"][aria-label="Daha eski"], [role="button"][aria-label="Older"]';
+const NEWER_BTN = '[role="button"][aria-label="Daha yeni"], [role="button"][aria-label="Newer"]';
+
+/** Görünür sayfalama düğmesine tıkla; aria-disabled ise false (liste sonu / başı) */
+async function clickPager(page: Page, selector: string): Promise<boolean> {
+  return page
+    .evaluate((sel) => {
+      const b = Array.from(document.querySelectorAll<HTMLElement>(sel)).find((e) => e.offsetParent !== null);
+      if (!b || b.getAttribute('aria-disabled') === 'true') return false;
+      b.click();
+      return true;
+    }, selector)
+    .catch(() => false);
+}
+
+/** Sayfa aralığı `pred`'i sağlayana dek bekle (en çok ms) */
+async function waitPager(page: Page, pred: (p: { from: number; to: number; total: number }) => boolean, ms: number): Promise<{ from: number; to: number; total: number } | undefined> {
+  const t0 = Date.now();
+  for (;;) {
+    const p = await readPager(page);
+    if (p && pred(p)) return p;
+    if (Date.now() - t0 > ms) return p;
+    await page.waitForTimeout(300);
+  }
+}
+
+/**
  * Liste görünümüne dön ve görünür satırları bekle. messages()/markRead bir diziyi açınca sayfa #inbox/<id>'de
  * kalır; o görünümde gelen kutusu satırları DOM'da ama gizlidir → görünür tr.zA hiç gelmez. Önce SPA içinde
- * hash'i değiştir (hızlı), olmazsa sayfayı yeniden yükle.
+ * hash'i değiştir (hızlı), olmazsa sayfayı yeniden yükle. moreThreads eski bir sayfada bıraktıysa 1. sayfaya dön
+ * (yoklama en yeni sohbetleri okumalı).
  */
-async function ensureInbox(page: Page): Promise<boolean> {
+async function ensureInbox(page: Page, firstPage = true): Promise<boolean> {
   const visibleRows = (ms: number) =>
     page
       .waitForSelector('tr.zA', { state: 'visible', timeout: ms })
       .then(() => true)
       .catch(() => false);
+  let ok = false;
   if (page.url().startsWith(BASE)) {
     if (!isInboxListUrl(page.url())) {
       await page.evaluate(() => {
         location.hash = '#inbox';
       }).catch(() => undefined);
     }
-    if (await visibleRows(10_000)) return true;
+    ok = await visibleRows(10_000);
   }
-  await page.goto(HOME, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
-  return visibleRows(20_000);
+  if (!ok) {
+    await page.goto(HOME, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+    ok = await visibleRows(20_000);
+  }
+  if (!ok) return false;
+  const pager = await readPager(page);
+  if (pager?.from === 1) pageSize = pager.to - pager.from + 1 || pageSize;
+  if (firstPage && pager && pager.from > 1) {
+    // "Daha yeni" ile başa dön (hash değişimi Gmail'de sayfayı sıfırlamıyor)
+    for (let i = 0; i < 60; i++) {
+      const cur = await readPager(page);
+      if (!cur || cur.from <= 1) break;
+      if (!(await clickPager(page, NEWER_BTN))) break;
+      await waitPager(page, (p) => p.from < cur.from, 8_000);
+    }
+    await visibleRows(5_000);
+  }
+  return true;
+}
+
+/** Gelen kutusu satırlarını (görünür tr.zA) ham alanlarıyla oku */
+interface GmailRawRow {
+  id: string;
+  name: string;
+  email: string;
+  subject: string;
+  snippet: string;
+  time: string;
+  unread: boolean;
+  count: number;
+}
+function readInboxRows(page: Page): Promise<GmailRawRow[]> {
+  return page.evaluate(() => {
+    const out: Array<{ id: string; name: string; email: string; subject: string; snippet: string; time: string; unread: boolean; count: number }> = [];
+    const seen = new Set<string>();
+    // gizli görünümlerdeki (önceki arama/etiket) satırlar karışmasın: yalnızca görünür satırlar
+    const all = Array.from(document.querySelectorAll<HTMLElement>('tr.zA'));
+    const visible = all.filter((tr) => tr.offsetParent !== null);
+    for (const tr of visible.length ? visible : all) {
+      const idEl = tr.querySelector<HTMLElement>('[data-legacy-thread-id]');
+      const id = idEl?.getAttribute('data-legacy-thread-id') ?? '';
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const senders = Array.from(tr.querySelectorAll<HTMLElement>('span[email]'));
+      const last = senders[senders.length - 1];
+      const countTxt = tr.querySelector<HTMLElement>('.bA4 .bx0')?.innerText ?? '';
+      out.push({
+        id,
+        name: last?.getAttribute('name') ?? last?.innerText ?? '',
+        email: (last?.getAttribute('email') ?? '').toLowerCase(),
+        subject: tr.querySelector<HTMLElement>('span.bog')?.innerText?.trim() ?? '(konu yok)',
+        snippet: tr.querySelector<HTMLElement>('span.y2')?.innerText?.replace(/^\s*-\s*/, '').trim() ?? '',
+        time: tr.querySelector<HTMLElement>('td.xW span[title]')?.getAttribute('title') ?? tr.querySelector<HTMLElement>('td.xW span')?.innerText ?? '',
+        unread: tr.classList.contains('zE'),
+        count: Number(countTxt.replace(/\D/g, '')) || 1,
+      });
+    }
+    return out;
+  });
+}
+
+/** Ham satır → sohbet (gönderen ben isem "Ben") */
+export function gmailRowToThread(r: GmailRawRow, me: string): Thread {
+  const others = r.email && r.email !== me ? { name: r.name || r.email, email: r.email } : { name: r.name || 'Ben', email: r.email };
+  return {
+    id: r.id,
+    name: r.subject,
+    kind: 'direct' as const,
+    lastTs: parseGmailDate(r.time) ?? 0,
+    preview: `${others.name}: ${r.snippet}`.slice(0, 200),
+    unread: r.unread ? 1 : 0,
+    handle: others.email || undefined,
+    participants: others.email ? [{ id: others.email, name: others.name, handle: others.email }] : undefined,
+  };
 }
 
 async function openThread(page: Page, id: string): Promise<boolean> {
@@ -184,46 +324,36 @@ export const gmail: Strategy = {
       return [];
     }
     if (!meEmail) await this.me(page, {});
-    const rows = await page.evaluate(() => {
-      const out: Array<{ id: string; name: string; email: string; subject: string; snippet: string; time: string; unread: boolean; count: number }> = [];
-      const seen = new Set<string>();
-      // gizli görünümlerdeki (önceki arama/etiket) satırlar karışmasın: yalnızca görünür satırlar
-      const all = Array.from(document.querySelectorAll<HTMLElement>('tr.zA'));
-      const visible = all.filter((tr) => tr.offsetParent !== null);
-      for (const tr of visible.length ? visible : all) {
-        const idEl = tr.querySelector<HTMLElement>('[data-legacy-thread-id]');
-        const id = idEl?.getAttribute('data-legacy-thread-id') ?? '';
-        if (!id || seen.has(id)) continue;
-        seen.add(id);
-        const senders = Array.from(tr.querySelectorAll<HTMLElement>('span[email]'));
-        const last = senders[senders.length - 1];
-        const countTxt = tr.querySelector<HTMLElement>('.bA4 .bx0')?.innerText ?? '';
-        out.push({
-          id,
-          name: last?.getAttribute('name') ?? last?.innerText ?? '',
-          email: (last?.getAttribute('email') ?? '').toLowerCase(),
-          subject: tr.querySelector<HTMLElement>('span.bog')?.innerText?.trim() ?? '(konu yok)',
-          snippet: tr.querySelector<HTMLElement>('span.y2')?.innerText?.replace(/^\s*-\s*/, '').trim() ?? '',
-          time: tr.querySelector<HTMLElement>('td.xW span[title]')?.getAttribute('title') ?? tr.querySelector<HTMLElement>('td.xW span')?.innerText ?? '',
-          unread: tr.classList.contains('zE'),
-          count: Number(countTxt.replace(/\D/g, '')) || 1,
-        });
-      }
-      return out;
-    });
-    return rows.map((r) => {
-      const others = r.email && r.email !== meEmail ? { name: r.name || r.email, email: r.email } : { name: r.name || 'Ben', email: r.email };
-      return {
-        id: r.id,
-        name: r.subject,
-        kind: 'direct' as const,
-        lastTs: parseGmailDate(r.time) ?? 0,
-        preview: `${others.name}: ${r.snippet}`.slice(0, 200),
-        unread: r.unread ? 1 : 0,
-        handle: others.email || undefined,
-        participants: others.email ? [{ id: others.email, name: others.name, handle: others.email }] : undefined,
-      };
-    });
+    return (await readInboxRows(page)).map((r) => gmailRowToThread(r, meEmail));
+  },
+
+  /**
+   * Gelen kutusunun `pageIndex + 1`. sayfası. Gmail'in yeni arayüzü `#inbox/p<N>` adresini yok sayar (hep 1. sayfa;
+   * profil kopyasıyla doğrulandı) → "Daha eski" düğmesine basılarak gezilir; hangi sayfada olunduğu araç
+   * çubuğundaki "2.631 satırdan 51–100 arası" metninden okunur. Zaten bir önceki sayfadaysa tek tık yeter.
+   * Düğme devre dışıysa (son sayfa) boş dizi.
+   */
+  async moreThreads(page, _cookies, pageIndex): Promise<Thread[]> {
+    const target = pageIndex + 1;
+    let pager = await readPager(page);
+    const onList = page.url().startsWith(BASE) && isInboxListUrl(page.url()) && !!pager;
+    let cur = onList && pager && pageSize ? gmailPageOf(pager.from, pageSize) : 0;
+    if (!onList || cur < 1 || cur > target) {
+      if (!(await ensureInbox(page, true))) return [];
+      pager = await readPager(page);
+      cur = pager && pageSize ? gmailPageOf(pager.from, pageSize) : 1;
+    }
+    if (!meEmail) await this.me(page, {});
+    for (let guard = 0; cur < target && guard < 200; guard++) {
+      const from = pager?.from ?? 0;
+      if (!(await clickPager(page, OLDER_BTN))) return []; // devre dışı: daha eski sayfa yok
+      pager = await waitPager(page, (p) => p.from > from, 10_000);
+      if (!pager || pager.from <= from) return [];
+      cur = pageSize ? gmailPageOf(pager.from, pageSize) : cur + 1;
+    }
+    await page.waitForSelector('tr.zA', { state: 'visible', timeout: 10_000 }).catch(() => undefined);
+    await page.waitForTimeout(500);
+    return (await readInboxRows(page)).map((r) => gmailRowToThread(r, meEmail));
   },
 
   async messages(page, _cookies, threadId, limit, before): Promise<Msg[]> {
@@ -273,17 +403,71 @@ export const gmail: Strategy = {
   },
 
   async send(page, _cookies, threadId, text) {
-    if (!(await openThread(page, threadId))) throw new Error('İleti dizisi açılamadı');
-    // son iletinin "Yanıtla" bağlantısı (tr/en)
-    const reply = page.locator('span.ams.bkH, [aria-label="Yanıtla"], [aria-label="Reply"], [data-tooltip="Yanıtla"], [data-tooltip="Reply"]').last();
-    await reply.click({ timeout: 8000 });
-    const body = page.locator('div[aria-label="Mesaj Gövdesi"], div[aria-label="Message Body"], div[role="textbox"][contenteditable="true"]').last();
-    await body.waitFor({ timeout: 10_000 });
+    const body = await openReply(page, threadId);
     await body.click();
     await body.fill(text);
-    const sendBtn = page.locator('div[role="button"][aria-label^="Gönder"], div[role="button"][aria-label^="Send"], div[role="button"][data-tooltip^="Gönder"], div[role="button"][data-tooltip^="Send"]').last();
-    await sendBtn.click({ timeout: 8000 });
-    await page.waitForTimeout(1500);
+    await clickSend(page);
     return hashId(threadId + '|' + text + '|' + Date.now());
   },
+
+  /**
+   * Ekli yanıt: yanıt düzenleyicisindeki gizli `input[type=file][name="Filedata"]` (Gmail'in "Dosya ekle" düğmesi,
+   * command="Files") dosyayı alır; yükleme ilerleme çubuğu kaybolana dek beklenir, sonra metin ve Gönder.
+   * (Girişin varlığı/adı profil kopyasıyla doğrulandı; gönderim canlı denenmedi.)
+   */
+  async sendFile(page, _cookies, threadId, file, caption) {
+    const body = await openReply(page, threadId);
+    const input = await composeFileInput(page);
+    if (!input) throw new Error('Gmail: yanıt düzenleyicisinde dosya girişi bulunamadı');
+    await input.setInputFiles(file.path);
+    await waitUploadDone(page, Math.max(30_000, Math.min(300_000, file.size / 50)));
+    if (caption) {
+      await body.click();
+      await body.fill(caption);
+    }
+    await clickSend(page);
+    return hashId(threadId + '|' + file.name + '|' + Date.now());
+  },
 };
+
+/** Diziyi aç, son iletinin "Yanıtla" bağlantısına bas, gövde düzenleyicisini döndür */
+async function openReply(page: Page, threadId: string) {
+  if (!(await openThread(page, threadId))) throw new Error('İleti dizisi açılamadı');
+  // son iletinin "Yanıtla" bağlantısı (tr/en)
+  const reply = page.locator('span.ams.bkH, [aria-label="Yanıtla"], [aria-label="Reply"], [data-tooltip="Yanıtla"], [data-tooltip="Reply"]').last();
+  await reply.click({ timeout: 8000 });
+  const body = page.locator('div[aria-label="Mesaj Gövdesi"], div[aria-label="Message Body"], div[role="textbox"][contenteditable="true"]').last();
+  await body.waitFor({ timeout: 10_000 });
+  return body;
+}
+
+async function clickSend(page: Page): Promise<void> {
+  const sendBtn = page.locator('div[role="button"][aria-label^="Gönder"], div[role="button"][aria-label^="Send"], div[role="button"][data-tooltip^="Gönder"], div[role="button"][data-tooltip^="Send"]').last();
+  await sendBtn.click({ timeout: 8000 });
+  await page.waitForTimeout(1500);
+}
+
+/** Açık yanıt düzenleyicisinin dosya girişi (Gmail: name="Filedata", multiple; düzenleyici açılınca DOM'a gelir) */
+export async function composeFileInput(page: Page) {
+  const sel = 'input[type="file"][name="Filedata"], form input[type="file"], [role="main"] input[type="file"]';
+  for (let i = 0; i < 20; i++) {
+    const loc = page.locator(sel).last();
+    if (await loc.count().catch(() => 0)) return loc;
+    await page.waitForTimeout(250);
+  }
+  return undefined;
+}
+
+/** Ek yükleme bitene dek bekle: düzenleyicideki ilerleme çubuğu kaybolur ve 1 sn boyunca geri gelmez */
+async function waitUploadDone(page: Page, maxMs: number): Promise<void> {
+  const t0 = Date.now();
+  let quiet = 0;
+  while (Date.now() - t0 < maxMs) {
+    await page.waitForTimeout(500);
+    const busy = await page
+      .evaluate(() => Array.from(document.querySelectorAll<HTMLElement>('[role="progressbar"]')).some((e) => e.offsetParent !== null && e.getAttribute('aria-valuenow') !== e.getAttribute('aria-valuemax')))
+      .catch(() => false);
+    quiet = busy ? 0 : quiet + 1;
+    if (quiet >= 3) return;
+  }
+}
