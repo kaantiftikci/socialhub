@@ -14,7 +14,7 @@ setInterval(() => {
     decryptFails = 0;
   }
 }, 60_000).unref();
-for (const k of ['error', 'log', 'warn'] as const) {
+for (const k of ['error', 'log', 'warn', 'info', 'debug'] as const) {
   const orig = console[k].bind(console);
   console[k] = (...args: unknown[]) => {
     const first = String(args[0] ?? '');
@@ -23,7 +23,7 @@ for (const k of ['error', 'log', 'warn'] as const) {
       return;
     }
     // libsignal oturum nesnesini (anahtarlarla birlikte!) ayrı bir çağrıyla döküyor: günlüğe yazma
-    if (args.some((x) => x && typeof x === 'object' && ('ephemeralKeyPair' in (x as object) || 'indexInfo' in (x as object) || 'pendingPreKey' in (x as object)))) return;
+    if (args.some((x) => x && typeof x === 'object' && ('ephemeralKeyPair' in (x as object) || 'indexInfo' in (x as object) || 'pendingPreKey' in (x as object) || 'currentRatchet' in (x as object) || '_chains' in (x as object)))) return;
     orig(...args);
   };
 }
