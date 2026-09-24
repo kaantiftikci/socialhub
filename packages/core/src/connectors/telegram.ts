@@ -96,7 +96,7 @@ export class TelegramConnector extends BaseConnector {
 
     client.addEventHandler((ev: NewMessageEvent) => void this.onNew(ev), new NewMessage({}));
     // Telefonda/başka istemcide okununca okunmamış sayacı burada da düşsün
-    client.addEventHandler((u: Api.TypeUpdate) => this.onRead(u), new Raw({ types: [Api.UpdateReadHistoryInbox, Api.UpdateReadChannelInbox, Api.UpdateFolderPeers] }));
+    client.addEventHandler((u: Api.TypeUpdate) => this.onRead(u), new Raw({ types: [Api.UpdateReadHistoryInbox, Api.UpdateReadChannelInbox, Api.UpdateFolderPeers, Api.UpdateReadHistoryOutbox, Api.UpdateReadChannelOutbox, Api.UpdateUserTyping, Api.UpdateChatUserTyping, Api.UpdateChannelUserTyping] }));
     await this.backfill(client);
   }
 
@@ -226,6 +226,25 @@ export class TelegramConnector extends BaseConnector {
 
   /** UpdateReadHistoryInbox / UpdateReadChannelInbox: başka istemcide okundu → platformun verdiği kalan sayıyı yaz */
   private onRead(u: Api.TypeUpdate): void {
+    // Karşı taraf yazıyor (birebir / grup / kanal)
+    if (u instanceof Api.UpdateUserTyping || u instanceof Api.UpdateChatUserTyping || u instanceof Api.UpdateChannelUserTyping) {
+      const rid = u instanceof Api.UpdateUserTyping ? String(u.userId) : u instanceof Api.UpdateChatUserTyping ? String(-Number(u.chatId)) : getPeerId(new Api.PeerChannel({ channelId: u.channelId }));
+      const typing = !(u.action instanceof Api.SendMessageCancelAction);
+      const from = u instanceof Api.UpdateUserTyping ? String(u.userId) : u.fromId instanceof Api.PeerUser ? String(u.fromId.userId) : undefined;
+      const who = from ? this.store.getChat(`${this.account.id}/${from}`)?.name : undefined;
+      if (rid) this.typing(rid, typing, who);
+      return;
+    }
+    // Gönderdiklerim karşı tarafça okundu (maxId'ye kadar)
+    if (u instanceof Api.UpdateReadHistoryOutbox || u instanceof Api.UpdateReadChannelOutbox) {
+      const rid = u instanceof Api.UpdateReadHistoryOutbox ? getPeerId(u.peer) : getPeerId(new Api.PeerChannel({ channelId: u.channelId }));
+      if (rid) {
+        const cid = `${this.account.id}/${rid}`;
+        const t = this.store.markOutgoingReadUpToId(cid, u.maxId);
+        if (t) bus.emit({ type: 'messages.read', chatId: cid, before: t });
+      }
+      return;
+    }
     // Arşive alma / arşivden çıkarma anında yansısın
     if (u instanceof Api.UpdateFolderPeers) {
       for (const fp of u.folderPeers) {

@@ -28,6 +28,8 @@ export interface Connector {
   openDirect?(participant: Participant): Promise<string>;
   /** Platform tarafında da oturumu kapat (örn. WhatsApp "bağlı cihazlar"dan düş). */
   logout?(): Promise<void>;
+  /** Sohbet açıkken çağrılır: yazıyor/çevrimiçi bilgisi için platforma abone ol (WhatsApp presenceSubscribe vb.) */
+  watch?(remoteChatId: string): Promise<void>;
   /** Sohbet Kavşak'ta açılınca platformda da okundu işaretle (telefon/diğer istemcilerde okunmamış kalmasın) */
   markRead?(remoteChatId: string): Promise<void>;
   /** Platforma özel işlem (örn. Shopier siparişi kargo bilgisiyle kapatma) */
@@ -44,6 +46,17 @@ export abstract class BaseConnector implements Connector {
   abstract stop(): Promise<void>;
   abstract sendText(remoteChatId: string, text: string): Promise<{ remoteId: string }>;
   openDirect?(participant: Participant): Promise<string>;
+
+  /** Karşı taraf yazıyor (true) / bıraktı (false) — arayüz 6 sn sonra kendiliğinden düşürür */
+  protected typing(remoteChatId: string, typing: boolean, name?: string): void {
+    bus.emit({ type: 'chat.typing', chatId: chatId(this.account.id, remoteChatId), typing, name });
+  }
+
+  /** Gönderdiğim mesajlar `before` (ms) zamanına kadar görüldü: depoyu güncelle, arayüze bildir */
+  protected outgoingRead(remoteChatId: string, before: number): void {
+    const cid = chatId(this.account.id, remoteChatId);
+    if (this.store.markOutgoingRead(cid, before) > 0) bus.emit({ type: 'messages.read', chatId: cid, before });
+  }
 
   protected setStatus(status: AccountStatus, detail?: string): void {
     this.account.status = status;

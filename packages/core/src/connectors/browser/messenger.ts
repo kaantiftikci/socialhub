@@ -163,6 +163,8 @@ interface RawRow {
   aria: string;
   text: string;
   isDateBreak: boolean;
+  /** sohbette "Görüldü" işareti var (giden mesajlar okundu) */
+  seen?: boolean;
   me: boolean | undefined;
   avatar?: string;
   attachments: Attachment[];
@@ -237,7 +239,7 @@ function readRows(page: Page): Promise<RawRow[]> {
       const isDateBreak = !aria && !!el.querySelector('[data-scope="date_break"]');
       // geometri yedeği: sağa yaslı balon = ben
       const me = r.width > 0 ? r.left + r.width > mainRect.left + mainRect.width * 0.6 : undefined;
-      out.push({ aria, text, isDateBreak, me, avatar: avatar?.getAttribute('src') ?? undefined, attachments });
+      out.push({ aria, text, isDateBreak, me, avatar: avatar?.getAttribute('src') ?? undefined, attachments, seen: !!document.querySelector('[role="main"] [aria-label^="Görüldü"], [role="main"] [aria-label^="Seen"], [role="main"] img[alt^="Görüldü"], [role="main"] img[alt^="Seen"]') });
     }
     return out;
   }, ROW);
@@ -280,6 +282,8 @@ function toMessages(threadId: string, rows: RawRow[]): Msg[] {
       senderName: fromMe ? 'Ben' : parsed.sender || 'Karşı taraf',
       senderAvatarUrl: fromMe ? undefined : r.avatar,
       attachments: r.attachments.length ? r.attachments : undefined,
+      // sohbetin altında "Görüldü" işareti varsa benim tüm mesajlarım görülmüş demektir
+      status: fromMe ? (rows.some((x) => x.seen) ? 'read' : 'sent') : 'delivered',
     });
   }
   if (unparsedSample && !dateWarned) {

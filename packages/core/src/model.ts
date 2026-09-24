@@ -91,6 +91,10 @@ export type CoreEvent =
   | { type: 'chat.delete'; chatId: string }
   | { type: 'message.upsert'; message: Message; chat: Chat; live?: boolean }
   | { type: 'message.delete'; chatId: string; messageId: string }
+  /** Karşı taraf yazıyor / yazmayı bıraktı */
+  | { type: 'chat.typing'; chatId: string; typing: boolean; name?: string }
+  /** Gönderdiğim mesajlar `before` zamanına kadar karşı tarafça görüldü */
+  | { type: 'messages.read'; chatId: string; before: number }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; text: string };
 
 export function chatId(accountId: string, remoteId: string): string {

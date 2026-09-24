@@ -204,6 +204,19 @@ export class Store {
       .run(name, avatar ?? null, senderId, accountId + '/%', name);
   }
 
+  /** Gönderdiğim mesajlar `before` zamanına kadar karşı tarafça görüldü; değişen satır sayısını döndürür */
+  markOutgoingRead(chatId: string, before: number): number {
+    return this.db.prepare("UPDATE messages SET status = 'read' WHERE chat_id = ? AND from_me = 1 AND ts <= ? AND status <> 'read'").run(chatId, before).changes;
+  }
+
+  /** Telegram gibi sayısal artan mesaj kimliği olan platformlarda: kimliği <= maxId olan giden mesajlar görüldü; en yeni etkilenen ts döner */
+  markOutgoingReadUpToId(chatId: string, maxId: number): number | undefined {
+    const r = this.db.prepare("SELECT MAX(ts) AS t FROM messages WHERE chat_id = ? AND from_me = 1 AND CAST(remote_id AS INTEGER) <= ? AND status <> 'read'").get(chatId, maxId) as { t: number | null };
+    if (!r?.t) return undefined;
+    this.db.prepare("UPDATE messages SET status = 'read' WHERE chat_id = ? AND from_me = 1 AND CAST(remote_id AS INTEGER) <= ? AND status <> 'read'").run(chatId, maxId);
+    return r.t;
+  }
+
   /** Bir gönderen kimliğini başka bir kimliğe taşı (lid → telefon numarası öğrenilince). */
   rewriteSender(accountId: string, fromId: string, toId: string): void {
     if (fromId === toId) return;

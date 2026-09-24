@@ -404,6 +404,21 @@ export class WhatsAppConnector extends BaseConnector {
       }
     });
 
+    // Yazıyor / ses kaydediyor: sohbet açıkken watch() ile abone olunur (birebir), gruplarda kendiliğinden gelir
+    sock.ev.on('presence.update', ({ id, presences }) => {
+      const chat = this.canon(id);
+      let typingName: string | undefined;
+      let typing = false;
+      for (const [jid, p] of Object.entries(presences ?? {})) {
+        const who = this.canon(jid);
+        if (p.lastKnownPresence === 'composing' || p.lastKnownPresence === 'recording') {
+          typing = true;
+          typingName = chat.endsWith('@g.us') ? this.nameOf(who) : undefined;
+        }
+      }
+      this.typing(chat, typing, typingName);
+    });
+
     sock.ev.on('messages.upsert', ({ messages, type }) => {
       if (messages.length > 1) this.store.transaction(() => messages.forEach((m) => this.ingest(m, type === 'notify')));
       else for (const m of messages) this.ingest(m, type === 'notify');
@@ -712,6 +727,12 @@ export class WhatsAppConnector extends BaseConnector {
 
   async openDirect(p: Participant): Promise<string> {
     return p.id;
+  }
+
+  /** Sohbet açıkken karşı tarafın yazıyor/çevrimiçi bilgisine abone ol */
+  async watch(remoteChatId: string): Promise<void> {
+    if (!this.sock || remoteChatId.endsWith('@g.us')) return;
+    await this.sock.presenceSubscribe(remoteChatId).catch(() => undefined);
   }
 
   /** Son gelen mesajları telefonda da okundu işaretle (mavi tik / okunmamış rozeti düşer) */

@@ -36,6 +36,8 @@ async function ig(page: Page, cookies: Record<string, string>, path: string, for
 }
 
 let viewerId = '';
+/** thread → karşı tarafın son gördüğü an (ms) */
+const otherSeenMs = new Map<string, number>();
 const userNames = new Map<string, string>();
 const userPics = new Map<string, string>();
 let debugged = 0;
@@ -287,7 +289,11 @@ export const instagram: Strategy = {
         const counted = items.filter((i) => String(i.user_id) !== viewerId && !i.is_sent_by_viewer && i.item_type !== 'action_log' && (!seenTs || Number(i.timestamp ?? 0) > seenTs)).length;
         unread = typeof t.unseen_count === 'number' && t.unseen_count > 0 ? t.unseen_count : Math.max(1, counted);
       }
+      // karşı tarafların son gördüğü an (görüldü bilgisi): viewer dışındaki last_seen_at'lerin en büyüğü (µs → ms)
+      const seenOthers = Math.max(0, ...Object.entries((t.last_seen_at ?? {}) as Record<string, { timestamp?: string | number }>).filter(([uid]) => uid !== viewerId).map(([, v]) => Number(v?.timestamp ?? 0)));
+      if (seenOthers) otherSeenMs.set(String(t.thread_id), Math.floor(seenOthers / 1000));
       out.push({
+        readByOthersUpTo: seenOthers ? Math.floor(seenOthers / 1000) : undefined,
         handle: solo?.username ? '@' + solo.username : undefined,
         link: solo?.username ? `https://www.instagram.com/${solo.username}/` : undefined,
         participants,
@@ -330,10 +336,13 @@ export const instagram: Strategy = {
       .filter((it) => !seen.has(String(it.item_id)) && seen.add(String(it.item_id)))
       .sort((a, b) => Number(a.timestamp ?? 0) - Number(b.timestamp ?? 0))
       .slice(-pageSize);
+    const seenMs = otherSeenMs.get(String(threadId)) ?? 0;
     return ordered.map((it: J) => {
       const uid = String(it.user_id);
       const { text, attachments } = itemContent(it);
+      const mine = uid === viewerId || it.is_sent_by_viewer === true;
       return {
+        status: mine ? (seenMs && tsMs(it.timestamp) <= seenMs ? ('read' as const) : ('sent' as const)) : ('delivered' as const),
         id: String(it.item_id),
         text,
         attachments,

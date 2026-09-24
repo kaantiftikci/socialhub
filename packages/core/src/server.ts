@@ -142,6 +142,8 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     const id = decodeURIComponent(p.id);
     const before = store.getChat(id);
     store.markRead(id);
+    // sohbet açık: yazıyor/çevrimiçi aboneliği (WhatsApp presence vb.)
+    { const c0 = store.getChat(id); if (c0) void registry.get(c0.accountId)?.watch?.(c0.remoteId).catch(() => undefined); }
     const chat = store.getChat(id);
     if (chat) {
       bus.emit({ type: 'chat.upsert', chat });

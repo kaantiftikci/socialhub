@@ -21,6 +21,7 @@ export function Conversation({
   hasOlder = false,
   olderBusy = false,
   onBack,
+  typing,
 }: {
   chat: Chat;
   messages: Message[];
@@ -38,6 +39,8 @@ export function Conversation({
   olderBusy?: boolean;
   /** Dar ekranda listeye dön */
   onBack?: () => void;
+  /** Karşı taraf yazıyor: null hayır, '' evet, 'Ad' grupta kim */
+  typing?: string | null;
 }) {
   const [search, setSearch] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -183,7 +186,7 @@ export function Conversation({
             <span className="sub">
               <Chip platform={chat.platform} size={15} />
               {platform.name}
-              {chat.kind !== 'direct' ? ` · ${chat.kind === 'group' ? 'grup' : 'kanal'}` : ' · sohbet'}
+              {typing != null ? <span className="typing-text"> · {typing ? `${typing.split(' ')[0]} yazıyor` : 'yazıyor'}<span className="tdots"><i /><i /><i /></span></span> : chat.kind !== 'direct' ? ` · ${chat.kind === 'group' ? 'grup' : 'kanal'}` : ' · sohbet'}
             </span>
           </div>
           <button className={`btn icon b b2 ${search !== null ? 'on' : ''}`} onClick={() => setSearch(search === null ? '' : null)} title="Sohbette ara" aria-label="Ara">
@@ -280,6 +283,16 @@ export function Conversation({
                   <button className="btn soft xs b b2" disabled title="Yakında">Göreve ekle</button>
                 </div>
               ))}
+            </div>
+          )}
+          {typing != null && (
+            <div className="grp typing-grp">
+              <Avatar name={typing || chat.name} size={28} url={typing ? undefined : chat.kind === 'direct' ? chat.avatarUrl : undefined} />
+              <div className="col">
+                <div className="bub typing-bub" aria-label="yazıyor">
+                  <span className="tdots"><i /><i /><i /></span>
+                </div>
+              </div>
             </div>
           )}
           <div ref={endRef} />
@@ -835,7 +848,7 @@ function statusLabel(s: Message['status']) {
   if (s === 'read')
     return (
       <>
-        · Okundu <Icon name="checks" size={14} color="#6C47FF" sw={2} />
+        · Görüldü <Icon name="checks" size={14} color="#6C47FF" sw={2} />
       </>
     );
   if (s === 'delivered') return <> · İletildi</>;

@@ -42,6 +42,8 @@ async function xapi(page: Page, cookies: Record<string, string>, path: string, b
 }
 
 let meId = '';
+/** sohbet → karşı tarafın son okuduğu olay kimliği */
+const otherLastRead = new Map<string, string>();
 const users = new Map<string, string>();
 const avatars = new Map<string, string>();
 const handles = new Map<string, string>();
@@ -129,7 +131,10 @@ function fromEntries(entries: J[], convId?: string): Msg[] {
       for (const u of strip) text = text.replace(u, '');
       // metindeki t.co kısaltmalarını açık adresle değiştir
       for (const u of md.entities?.urls ?? []) if (u.url && u.expanded_url) text = text.replace(u.url, u.expanded_url);
+      const lr = convId ? otherLastRead.get(convId) : undefined;
+      const seen = sid === meId && !!lr && /^\d+$/.test(String(m.id)) && BigInt(String(m.id)) <= BigInt(lr);
       return {
+        status: sid === meId ? (seen ? ('read' as const) : ('sent' as const)) : ('delivered' as const),
         id: String(m.id),
         text: text.trim(),
         ts: Number(m.time ?? md.time ?? Date.now()),
@@ -812,6 +817,9 @@ async function legacyInbox(page: Page, cookies: Record<string, string>): Promise
   const out: Thread[] = [];
   for (const [id, c] of Object.entries(state.conversations ?? {}) as Array<[string, J]>) {
     const others = (c.participants ?? []).map((p: J) => String(p.user_id)).filter((u: string) => u !== meId);
+    // görüldü: karşı tarafların son okuduğu olay kimliği (snowflake, artan) → messages() bununla karşılaştırır
+    const lastReadOthers = (c.participants ?? []).filter((p: J) => String(p.user_id) !== meId).map((p: J) => String(p.last_read_event_id ?? '')).filter(Boolean).sort((a: string, b: string) => (BigInt(a) < BigInt(b) ? 1 : -1))[0];
+    if (lastReadOthers) otherLastRead.set(id, lastReadOthers);
     const last = lastByConv.get(id);
     const participants = (c.participants ?? []).map((p: J) => ({ id: String(p.user_id), name: users.get(String(p.user_id)) ?? String(p.user_id), handle: handles.get(String(p.user_id)), avatarUrl: avatars.get(String(p.user_id)) }));
     out.push({

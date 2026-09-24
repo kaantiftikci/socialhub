@@ -30,6 +30,8 @@ export interface Thread {
   handle?: string;
   link?: string;
   participants?: Participant[];
+  /** Karşı tarafın son gördüğü an (ms): bundan eski giden mesajlar 'görüldü' olur */
+  readByOthersUpTo?: number;
   /** Aynı sohbetin eski kimlikleri (ör. X'te eski DM grubu "<id>" → XChat "g<id>"): depoda varsa bu sohbete birleştirilir */
   aliases?: string[];
 }
@@ -43,6 +45,8 @@ export interface Msg {
   senderName: string;
   attachments?: Attachment[];
   senderAvatarUrl?: string;
+  /** Platform iletim/görülme bilgisi veriyorsa (varsayılan: benimkiler 'sent', gelenler 'delivered') */
+  status?: 'sent' | 'delivered' | 'read';
 }
 
 export interface Strategy {
@@ -356,7 +360,9 @@ export class BrowserConnector extends BaseConnector {
         // lastTs=0 (DOM okuyan Messenger): çekirdek yeniden başladıysa platformun okunmamış durumu depoya aktarılsın
         // ilk yoklamada (açılış) platformun okunmamış/önizleme değeri yetkili; sonra yalnızca yeni etkinlikte
         const fresh = first || !ex || t.lastTs > ex.lastMessageAt || !ex.lastPreview;
-        this.upsertChat({ remoteId: t.id, name: t.name, kind: t.kind, unread: fresh ? t.unread : undefined, lastMessageAt: t.lastTs || undefined, lastPreview: fresh ? t.preview || undefined : undefined, avatarUrl: t.avatarUrl, handle: t.handle, link: t.link, participants: t.participants });
+        // okunmamış her zaman platformun değeri: telefonda okunan sohbet burada da okundu olur (Kavşak'ta okunan platforma markRead ile gider)
+        this.upsertChat({ remoteId: t.id, name: t.name, kind: t.kind, unread: t.unread, lastMessageAt: t.lastTs || undefined, lastPreview: fresh ? t.preview || undefined : undefined, avatarUrl: t.avatarUrl, handle: t.handle, link: t.link, participants: t.participants });
+        if (t.readByOthersUpTo) this.outgoingRead(t.id, t.readByOthersUpTo);
         // eski kimlikli kopya (hedef sohbet yukarıda yazıldı)
         for (const a of t.aliases ?? []) {
           const from = chatId(this.account.id, a);
@@ -414,7 +420,7 @@ export class BrowserConnector extends BaseConnector {
         fromMe: m.fromMe,
         text: m.text,
         ts: m.ts,
-        status: m.fromMe ? 'sent' : 'delivered',
+        status: m.status ?? (m.fromMe ? 'sent' : 'delivered'),
         senderAvatarUrl: m.senderAvatarUrl,
         attachments: m.attachments?.length ? m.attachments.map((a) => ({ ...a, url: this.proxied(a.url), link: isMediaFile(a.link) ? this.proxied(a.link) : a.link })) : undefined,
       },

@@ -83,6 +83,23 @@ export default function App() {
   }, [query]);
   const [connectOpen, setConnectOpen] = useState(false);
   const [qr, setQr] = useState<Record<string, string>>({});
+  /** Karşı taraf yazıyor: sohbet → {ad, düşme zamanı}; 6 sn'de kendiliğinden düşer */
+  const [typing, setTyping] = useState<Record<string, { name?: string; until: number }>>({});
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      const now = Date.now();
+      setTyping((prev) => {
+        const next: typeof prev = {};
+        let changed = false;
+        for (const [id, v] of Object.entries(prev)) {
+          if (v.until > now) next[id] = v;
+          else changed = true;
+        }
+        return changed ? next : prev;
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  }, []);
   const [prompts, setPrompts] = useState<Record<string, { prompt: 'phone' | 'code' | 'password'; message: string }>>({});
   const [ai, setAi] = useState(false);
   const [online, setOnline] = useState(false);
@@ -203,6 +220,20 @@ export default function App() {
           pendingDeletes.add(ev.chatId);
           if (flushTimer === undefined) flushTimer = window.setTimeout(flushChats, 150);
           setSelected((sel) => (sel === ev.chatId ? null : sel));
+          break;
+        case 'chat.typing':
+          setTyping((prev) => {
+            if (!ev.typing) {
+              if (!(ev.chatId in prev)) return prev;
+              const next = { ...prev };
+              delete next[ev.chatId];
+              return next;
+            }
+            return { ...prev, [ev.chatId]: { name: ev.name, until: Date.now() + 6000 } };
+          });
+          break;
+        case 'messages.read':
+          if (ev.chatId === selectedRef.current) setMessages((prev) => prev.map((m) => (m.fromMe && m.ts <= ev.before && m.status !== 'read' ? { ...m, status: 'read' } : m)));
           break;
         case 'message.delete':
           if (ev.chatId === selectedRef.current) setMessages((prev) => prev.filter((m) => m.id !== ev.messageId));
@@ -456,6 +487,11 @@ export default function App() {
           </span>
           <span className="count">{fmtCount(perPlatform.get(a.platform) ?? 0)}</span>
           <span className={`dot ${a.status}`} style={{ marginLeft: 8 }} />
+          {(a.status === 'connecting' || a.status === 'pairing' || /%\d+/.test(a.detail ?? '')) && (
+            <span className="syncbar" aria-hidden="true">
+              <span className={/%\d+/.test(a.detail ?? '') ? 'fill' : 'fill indeterminate'} style={/%\d+/.test(a.detail ?? '') ? { width: `${Math.min(100, Number((a.detail ?? '').match(/%(\d+)/)?.[1] ?? 0))}%` } : undefined} />
+            </span>
+          )}
         </button>  );
 
   const current = selected ? chats.get(selected) : undefined;
@@ -621,6 +657,11 @@ export default function App() {
         ) : (
           <>
             <section className="list" aria-label="Sohbet listesi">
+              {(booting || accounts.some((a) => a.status === 'connecting' || a.status === 'pairing' || /%\d+/.test(a.detail ?? ''))) && (
+                <div className="syncbar top" role="progressbar" aria-label="Eşitleniyor">
+                  <span className="fill indeterminate" />
+                </div>
+              )}
               <div className="list-head">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   {platformFilter && view !== 'snoozed' && <Chip platform={platformFilter} size={26} />}
@@ -723,7 +764,7 @@ export default function App() {
                         <span className="label">{day}</span>
                       </div>
                       {items.map((c) => (
-                        <ChatRow key={c.id} chat={c} selected={c.id === selected} onClick={() => setSelected(c.id)} onComplete={() => complete(c.id)} onSnooze={() => snooze(c.id)} />
+                        <ChatRow key={c.id} chat={c} selected={c.id === selected} onClick={() => setSelected(c.id)} onComplete={() => complete(c.id)} onSnooze={() => snooze(c.id)} typing={typing[c.id] ? typing[c.id].name ?? '' : null} />
                       ))}
                     </div>
                   ))
@@ -778,6 +819,7 @@ export default function App() {
                 showDetails={isMobile ? false : showDetails}
                 onToggleDetails={() => setShowDetails(!showDetails)}
                 onBack={isMobile ? () => setSelected(null) : undefined}
+                typing={typing[current.id] ? typing[current.id].name ?? '' : null}
                 olderBusy={olderBusy}
                 hasOlder={noMoreOlder !== current.id}
                 onLoadOlder={async () => {
@@ -994,6 +1036,7 @@ function ChatRow({
   onSnooze,
   snoozedUntil,
   onUnsnooze,
+  typing,
 }: {
   chat: Chat;
   selected: boolean;
@@ -1002,6 +1045,8 @@ function ChatRow({
   onSnooze?: () => void;
   snoozedUntil?: number;
   onUnsnooze?: () => void;
+  /** yazıyor: null = hayır, "" = evet, "Ad" = grupta kim */
+  typing?: string | null;
 }) {
   const waiting = chat.platform !== 'imessage' && isWaiting(chat); // Mesajlar'da "bekleyen" kavramı yok
   return (
@@ -1016,7 +1061,14 @@ function ChatRow({
           <span className="time">{snoozedUntil ? `⏰ ${fmtTime(snoozedUntil)}` : fmtTime(chat.lastMessageAt)}</span>
         </span>
         <span className="top">
-          <span className="prev">{chat.lastPreview || '…'}</span>
+          {typing != null ? (
+            <span className="prev typing-text">
+              {typing ? `${typing.split(' ')[0]} yazıyor` : 'yazıyor'}
+              <span className="tdots"><i /><i /><i /></span>
+            </span>
+          ) : (
+            <span className="prev">{chat.lastPreview || '…'}</span>
+          )}
           {chat.unread > 0 && <span className="badge" aria-label={`${chat.unread} okunmamış`}>{fmtBadge(chat)}</span>}
         </span>
         {(chat.tags.length > 0 || waiting) && (

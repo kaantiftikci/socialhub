@@ -71,6 +71,8 @@ export type CoreEvent =
   | { type: 'chat.delete'; chatId: string }
   | { type: 'message.upsert'; message: Message; chat: Chat; live?: boolean }
   | { type: 'message.delete'; chatId: string; messageId: string }
+  | { type: 'chat.typing'; chatId: string; typing: boolean; name?: string }
+  | { type: 'messages.read'; chatId: string; before: number }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; text: string };
 
 export interface DraftResult {

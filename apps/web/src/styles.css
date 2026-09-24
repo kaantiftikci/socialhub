@@ -438,3 +438,44 @@ nav.side { position: relative; }
 
 .booting { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 50; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px; background: var(--ink); color: #fff; font-size: 12.5px; box-shadow: 0 10px 30px -10px rgba(0,0,0,.5); }
 .toast { white-space: pre-wrap; max-width: 560px; font-family: inherit; }
+
+/* ---------- hareket: balonlar, satırlar, paneller, pencereler ---------- */
+@keyframes bubIn { from { opacity: 0; transform: translateY(6px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes rowIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes panelIn { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
+@keyframes modalIn { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes toastIn { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes tdot { 0%, 60%, 100% { transform: translateY(0); opacity: .45; } 30% { transform: translateY(-3px); opacity: 1; } }
+@keyframes slide { 0% { left: -40%; } 100% { left: 100%; } }
+.grp { animation: bubIn .22s cubic-bezier(.2,.8,.2,1) both; }
+.row { animation: rowIn .18s ease-out both; }
+.ctx { animation: panelIn .22s cubic-bezier(.2,.8,.2,1) both; }
+.settings, .menu { animation: modalIn .16s ease-out both; }
+.overlay { animation: fadeIn .16s ease-out both; }
+.overlay .modal, .lightbox .box { animation: modalIn .2s cubic-bezier(.2,.8,.2,1) both; }
+.toast { animation: toastIn .18s ease-out both; }
+.btn, .chan, .tabs button, .chip, .tagbtn { transition: background .15s ease, color .15s ease, box-shadow .15s ease, transform .12s ease; }
+.btn:active, .chan:active, .tabs button:active { transform: scale(.97); }
+.avatar { transition: transform .15s ease; }
+.row:hover .avatar { transform: scale(1.04); }
+/* yazıyor */
+.typing-text { color: var(--v-txt); font-style: italic; display: inline-flex; align-items: center; gap: 3px; }
+.tdots { display: inline-flex; gap: 3px; margin-left: 4px; align-items: center; }
+.tdots i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; display: inline-block; animation: tdot 1.2s infinite ease-in-out; }
+.tdots i:nth-child(2) { animation-delay: .15s; }
+.tdots i:nth-child(3) { animation-delay: .3s; }
+.typing-bub { padding: 12px 16px; }
+.typing-bub .tdots { margin: 0; }
+.typing-bub .tdots i { width: 7px; height: 7px; background: var(--text3); }
+/* eşitleme çubuğu (temaya uygun: mor → lime) */
+.syncbar { position: absolute; left: 10px; right: 10px; bottom: 1px; height: 3px; border-radius: 3px; background: var(--v-soft); overflow: hidden; }
+.chan { position: relative; }
+.syncbar .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 3px; background: linear-gradient(90deg, var(--v), var(--lime)); transition: width .4s ease; }
+.syncbar .fill.indeterminate { width: 40%; animation: slide 1.4s ease-in-out infinite; }
+.syncbar.top { position: relative; left: 0; right: 0; margin: 0 0 -3px; height: 3px; border-radius: 0; background: transparent; }
+.syncbar.top .fill { border-radius: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .grp, .row, .ctx, .settings, .menu, .overlay, .overlay .modal, .lightbox .box, .toast { animation: none; }
+  .tdots i, .syncbar .fill.indeterminate { animation-duration: 0s; }
+}
