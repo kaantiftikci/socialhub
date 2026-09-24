@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process';
 import type { BrowserContext, Page } from 'playwright';
 import { BaseConnector, type StartOptions } from '../base.js';
 import { chatId } from '../../model.js';
+import { persistSessionCookies } from './outlook.js';
 import { bus } from '../../bus.js';
 import { sessionDir } from '../../config.js';
 import type { Account, Attachment, ChatKind, Participant } from '../../model.js';
@@ -116,6 +117,12 @@ export class BrowserConnector extends BaseConnector {
       if (!(await this.waitForLogin())) return;
       // Platforma özgü son adım (Messenger: "PIN kodunu gir") — pencere hâlâ açıkken
       if (this.strategy.afterLogin && this.page && !this.page.isClosed()) await this.strategy.afterLogin(this.page).catch(() => undefined);
+      // Görünür pencereden görünmeze geçişte süresiz (oturum) çerezleri silinir → Microsoft/Google/Apple oturumu düşer.
+      // Pencere kapanmadan tüm oturum çerezlerini 30 günlük çereze çevir (tüm tarayıcı kanalları)
+      if (this.ctx) {
+        const n = await persistSessionCookies(this.ctx, /./).catch(() => 0);
+        if (n) bus.log('info', `${this.account.platform}: ${n} oturum çerezi kalıcı yapıldı`);
+      }
       bus.log('info', `${this.account.platform}: giriş yapıldı, pencere kapatılıyor`);
       await this.closeCtx();
       if (!(await this.launch(true))) return;

@@ -1,15 +1,28 @@
 import type { Frame, Page } from 'playwright';
 import { hashId, type Msg, type Strategy, type Thread } from './bridge.js';
 import { bus } from '../../bus.js';
-import { parseOutlookDate } from './outlook.js';
+import { parseOutlookDate, persistSessionCookies } from './outlook.js';
 
 /**
  * iCloud Mail (tarayıcı oturumu): kullanıcı görünür pencerede Apple hesabına girer (2FA dahil), sonra
  * icloud.com/mail görünmez pencerede açık kalır. iCloud web uygulaması içerik iframe'leri kullanır; ileti listesi
  * ve okuma bölmesi ARIA rolleriyle (listbox/option, article) tüm çerçevelerde aranır.
  * Uygulamaya özel şifre gerekmez. Deneysel: seçiciler ilk gerçek girişten sonra günlükteki tanıya göre ayarlanır.
+ *
+ * Oturumsuz durum (2026-09 doğrulandı): www.icloud.com/mail/ adresi değişmeden tanıtım sayfası gösterir
+ * (`ui-button.sign-in-button` "Giriş Yap"); tıklanınca giriş formu idmsa.apple.com iframe'inde açılır. Bu yüzden
+ * adres /mail olsa da oturum var sayılmaz. X-APPLE-WEBAUTH-TOKEN "Oturumumu açık tut" seçilmezse oturum çerezidir;
+ * görünür → görünmez geçişte tarayıcı yeniden başladığı için Outlook'taki gibi kalıcılaştırılır.
  */
 const HOME = 'https://www.icloud.com/mail/';
+const APPLE_COOKIE_DOMAINS = /(^|\.)(icloud\.com|apple\.com)$/;
+
+/** Giriş ekranı görünüyor mu (tanıtım sayfasındaki "Giriş Yap" düğmesi ya da Apple giriş iframe'i)? */
+async function signInVisible(page: Page): Promise<boolean> {
+  if (page.frames().some((f) => /^https:\/\/(idmsa|appleid)\.apple\.com\//.test(f.url()))) return true;
+  if (/^https:\/\/(idmsa|appleid)\.apple\.com\//.test(page.url())) return true;
+  return (await page.locator('ui-button.sign-in-button, .sign-in-button').count().catch(() => 0)) > 0;
+}
 
 let meEmail = '';
 
@@ -22,32 +35,53 @@ async function mailFrame(page: Page): Promise<Frame | undefined> {
   return undefined;
 }
 
-async function ensureInbox(page: Page): Promise<Frame | undefined> {
+/** Mail'i aç; ileti listesinin çerçevesini ya da 'signin' (oturum yok/düşmüş) döndür. */
+async function openMail(page: Page): Promise<Frame | 'signin' | undefined> {
   if (!page.url().startsWith('https://www.icloud.com/mail')) await page.goto(HOME, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+  let signin = 0;
   for (let i = 0; i < 25; i++) {
     const f = await mailFrame(page);
     if (f) return f;
+    // açılışta tanıtım sayfası bir an görünebilir: 8 sn sürerse oturum yok say
+    if (await signInVisible(page)) {
+      if (++signin >= 8) return 'signin';
+    } else signin = 0;
     await page.waitForTimeout(1000);
   }
-  return undefined;
+  return (await signInVisible(page)) ? 'signin' : undefined;
+}
+
+async function ensureInbox(page: Page): Promise<Frame | undefined> {
+  const r = await openMail(page);
+  return r === 'signin' ? undefined : r;
 }
 
 export const icloud: Strategy = {
   home: HOME,
-  loginHint: 'Açılan pencerede Apple hesabına giriş yap (iki adımlı doğrulama dahil); Mail görününce pencere kendiliğinden kapanır',
+  loginHint: 'Açılan pencerede "Giriş Yap"a bas, Apple hesabına gir (iki adımlı doğrulama dahil; "Oturumumu açık tut"u işaretle); Mail görününce pencere kendiliğinden kapanır',
 
-  async loggedIn(page, _cookies, passive) {
-    const url = page.url();
-    if (/appleid\.apple\.com|idmsa\.apple\.com|icloud\.com\/?(#|$)/.test(url) && !/\/mail/.test(url)) return false;
-    if (/icloud\.com\/mail/.test(url)) {
-      // giriş ekranı da /mail altında olabilir: oturum çerezi (X-APPLE-WEBAUTH-USER) ya da listbox varlığı
-      if (_cookies['X-APPLE-WEBAUTH-USER'] || _cookies['X-APPLE-WEBAUTH-TOKEN']) return true;
-      return !!(await mailFrame(page));
+  async loggedIn(page, cookies, passive) {
+    if (passive) {
+      // giriş penceresi: yönlendirme yok. Oturum belirteci geldi ve giriş ekranı kalktıysa ya da liste çizildiyse tamam
+      if (!/icloud\.com\/mail/.test(page.url())) return false;
+      if (await mailFrame(page)) return true;
+      return !!cookies['X-APPLE-WEBAUTH-TOKEN'] && !(await signInVisible(page));
     }
-    if (passive) return false;
-    await page.goto(HOME, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
-    await page.waitForTimeout(3000);
-    return !!(_cookies['X-APPLE-WEBAUTH-USER'] || (await mailFrame(page)));
+    // X-APPLE-WEBAUTH-USER oturum bittikten sonra da kalır: kanıt değildir. Sayfanın gerçekten ne gösterdiğine bak.
+    const r = await openMail(page);
+    if (r === 'signin') return false;
+    if (r) {
+      await persistSessionCookies(page.context(), APPLE_COOKIE_DOMAINS).catch(() => 0);
+      return true;
+    }
+    // ne liste ne giriş ekranı (seçiciler eskimiş olabilir): belirteç varsa bağlı say, günlük tanıyı gösterir
+    return !!cookies['X-APPLE-WEBAUTH-TOKEN'];
+  },
+
+  async afterLogin(page) {
+    await page.waitForTimeout(1500);
+    const n = await persistSessionCookies(page.context(), APPLE_COOKIE_DOMAINS).catch(() => 0);
+    bus.log('info', `iCloud Mail: ${n} oturum çerezi kalıcı yapıldı (görünmez tarayıcıda oturum sürsün diye)`);
   },
 
   async me(page) {
@@ -60,7 +94,11 @@ export const icloud: Strategy = {
   },
 
   async threads(page): Promise<Thread[]> {
-    const f = await ensureInbox(page);
+    const r = await openMail(page);
+    // "bağlı ama boş" kalmasın: hata → köprü isLoggedIn ile denetler ve "Yeniden bağlan" durumuna geçer
+    if (r === 'signin') throw new Error('iCloud oturumu düşmüş (giriş ekranı görünüyor) — kanala sağ tık → Yeniden bağlan');
+    const f = r;
+    if (f) await persistSessionCookies(page.context(), APPLE_COOKIE_DOMAINS).catch(() => 0);
     if (!f) {
       const frames = page.frames().map((x) => x.url().slice(0, 60)).join(' | ');
       bus.log('warn', `iCloud Mail: ileti listesi bulunamadı (sayfa: ${page.url()}; çerçeveler: ${frames}). Kanala sağ tık → Yeniden bağlan ile pencereyi açıp kontrol et.`);
