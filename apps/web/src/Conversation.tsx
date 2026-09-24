@@ -315,7 +315,7 @@ export function Conversation({
   const needsReply = !!lastIncoming && messages[messages.length - 1]?.id === lastIncoming.id;
   const [mediaOpen, setMediaOpen] = useState(false);
   const mediaP = useClosing(mediaOpen || null);
-  const detailsP = useClosing(showDetails || null);
+  const detailsP = useClosing(showDetails || null, 240); // kapanış animasyonu (ctxOut .22s) bitmeden kaldırılmasın
   useEffect(() => setMediaOpen(false), [chat.id]);
   const allShared = useMemo(() => {
     const out: Array<{ att: Attachment; m: Message }> = [];
