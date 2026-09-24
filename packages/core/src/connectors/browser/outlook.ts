@@ -170,6 +170,19 @@ type InboxState = 'ok' | 'empty' | 'login' | 'missing';
  * Gelen kutusunu aç ve durumunu bildir. ok: satırlar var; empty: uygulama kabuğu (klasör ağacı) çizildi ama satır yok
  * (boş kutu ya da seçici eskidi); login: giriş/pazarlama sayfasında kalındı (oturum yok ya da düşmüş); missing: bilinmiyor.
  */
+/** Açık ileti listeyi örtüyorsa (adres …/inbox/id/…; satırlar visibility:hidden) gelen kutusuna dön: yeni gelen mailler
+ * ancak liste görünürken taze okunur (profil kopyasıyla: goto ~600 ms, "Kapat"/Escape işe yaramıyor) */
+async function ensureListVisible(page: Page): Promise<boolean> {
+  const vis = () => page.evaluate((s) => Array.from(document.querySelectorAll<HTMLElement>(s)).some((r) => getComputedStyle(r).visibility !== 'hidden' && r.getBoundingClientRect().width > 0), LIST).catch(() => false);
+  if (!/\/id\//.test(page.url()) && (await vis())) return true;
+  await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+  for (let i = 0; i < 30; i++) {
+    if (await vis()) return true;
+    await page.waitForTimeout(500);
+  }
+  return false;
+}
+
 async function inboxState(page: Page): Promise<InboxState> {
   if (!onMailUrl(page.url())) await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
   let onLogin = 0;
@@ -324,6 +337,7 @@ export const outlook: Strategy = {
   },
 
   async threads(page): Promise<Thread[]> {
+    if (onMailUrl(page.url())) await ensureListVisible(page);
     const st = await inboxState(page);
     if (st === 'login') {
       // "bağlı ama boş" kalmasın: hata fırlat → köprü isLoggedIn ile denetleyip "Yeniden bağlan" durumuna geçer

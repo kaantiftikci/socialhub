@@ -45,6 +45,8 @@ export class WhatsAppConnector extends BaseConnector {
   private appliedSender = new Map<string, string>();
   /** loadHistory: telefondan istenen geçmiş paketi (ON_DEMAND) gelince çözülecek bekleyiciler (sohbet jid → resolve'lar) */
   private historyWaiters = new Map<string, Array<() => void>>();
+  private gapTimer?: NodeJS.Timeout;
+  private gapBusy = false;
   /**
    * Baileys 'chats.update' unreadCount'u canlı mesajlarda ARTIŞ bildirir (+n); aynı olay demetinde gelen 'notify' mesajı için
    * base.upsertMessage zaten +1 yapar. İkisi aynı tick'te mahsuplaşır: kalan artış (çevrimdışıyken gelen 'append' mesajlar) uygulanır.
@@ -182,6 +184,8 @@ export class WhatsAppConnector extends BaseConnector {
       }
       if (u.connection === 'open') {
         this.opened = true;
+        // geçmiş paketi gelmezse (zaten eşleşik açılış) boşluk denetimi 2 dk sonra; paket gelirse yeniden zamanlanır
+        this.scheduleGapFill(120_000);
         this.failedBeforeOpen = 0;
         const me = sock.user?.id ? jidNormalizedUser(sock.user.id) : '';
         const meLid = sock.user?.lid ? jidNormalizedUser(sock.user.lid) : '';
@@ -348,6 +352,7 @@ export class WhatsAppConnector extends BaseConnector {
         }
       }
       this.scheduleRefresh();
+      if (!onDemand && (isLatest || (progress ?? 0) >= 100)) this.scheduleGapFill(20_000);
       void this.fetchAvatars(sock, (chats ?? []).map((c) => c.id).filter((id): id is string => !!id && isChatJid(id)).map((id) => this.canon(id)).slice(0, 60));
     });
 
@@ -358,6 +363,7 @@ export class WhatsAppConnector extends BaseConnector {
       if (status === 'paused')
         bus.log('warn', `WhatsApp: telefon geçmiş göndermeyi durdurdu (tür ${syncType}); telefonda WhatsApp'ı açık tutup bekle — eksik kalırsa cihazı kaldırıp yeniden eşleştir`);
       else bus.log('info', `WhatsApp: geçmiş eşitlemesi tamamlandı (tür ${syncType}${explicit ? '' : ', zaman aşımıyla'})`);
+      if (syncType !== WAProto.HistorySync.HistorySyncType.ON_DEMAND) this.scheduleGapFill(20_000);
     });
     sock.ev.on('contacts.upsert', (cs) => {
       for (const c of cs) this.learnContact(c);
@@ -560,6 +566,13 @@ export class WhatsAppConnector extends BaseConnector {
     const cid = chatIdOf(this.account.id, remoteChatId);
     const oldest = this.oldestMessage(cid, before);
     if (!oldest) return;
+    await this.requestHistory(remoteChatId, limit, oldest);
+  }
+
+  /** Verilen mesajdan öncesini telefondan iste; paket geldiyse true (25 sn içinde yanıt yoksa false) */
+  private async requestHistory(remoteChatId: string, limit: number, oldest: Message): Promise<boolean> {
+    const sock = this.sock;
+    if (!sock || !this.opened || !sock.ws.isOpen) return false;
     // Telefon eski dilimi mesajın özgün anahtarıyla bulur: LID ile konuşulan sohbette remoteJid @lid, LID gruplarında katılımcı @lid
     const key = {
       remoteJid: this.wireOf(remoteChatId),
@@ -568,8 +581,12 @@ export class WhatsAppConnector extends BaseConnector {
       participant: remoteChatId.endsWith('@g.us') ? this.participantOf(remoteChatId, oldest.fromMe ? 'me' : oldest.senderId) : undefined,
     };
     let resolveWait: () => void = () => undefined;
+    let arrived = false;
     const waited = new Promise<void>((resolve) => {
-      resolveWait = resolve;
+      resolveWait = () => {
+        arrived = true;
+        resolve();
+      };
     });
     const list = this.historyWaiters.get(remoteChatId) ?? [];
     list.push(resolveWait);
@@ -586,12 +603,81 @@ export class WhatsAppConnector extends BaseConnector {
     } catch (e) {
       drop();
       bus.log('warn', `WhatsApp: geçmiş istenemedi (${remoteChatId}): ${(e as Error).message}`);
-      return;
+      return false;
     }
     let timer: NodeJS.Timeout | undefined;
     await Promise.race([waited, new Promise<void>((resolve) => (timer = setTimeout(resolve, 25_000)))]);
     if (timer) clearTimeout(timer);
     drop();
+    return arrived;
+  }
+
+  private scheduleGapFill(ms: number): void {
+    if (this.gapTimer) clearTimeout(this.gapTimer);
+    this.gapTimer = setTimeout(() => void this.fillGaps(), ms);
+    this.gapTimer.unref?.();
+  }
+
+  /**
+   * Geçmiş boşlukları: telefonun ilk eşitlemesi son günleri ve çok eski dilimleri getirip aradakileri (aylar) atlayabiliyor.
+   * Son 14 günde etkin sohbetlerde en yeni blok ile ondan önceki mesaj arasında 3 günden uzun boşluk varsa (ya da sohbetin
+   * yalnızca son günleri varsa) sınırdaki mesajdan geriye istek üzerine geçmiş (200'lük dilimler) istenir; boşluk kapanana,
+   * telefon boş dönene ya da sohbet başına 12 dilime kadar. Telefon iki kez yanıt vermezse 30 dk sonra yeniden denenir.
+   */
+  private async fillGaps(): Promise<void> {
+    if (this.gapBusy || this.stopping || !this.sock?.ws.isOpen) return;
+    this.gapBusy = true;
+    const DAY = 86_400_000;
+    const GAP = 3 * DAY;
+    const cutoff = Date.now() - 14 * DAY;
+    let total = 0;
+    let fails = 0;
+    try {
+      const chats = this.store
+        .listChatsOf(this.account.id)
+        .filter((c) => c.lastMessageAt >= cutoff && isChatJid(c.remoteId))
+        .sort((a, b) => b.lastMessageAt - a.lastMessageAt)
+        .slice(0, 30);
+      let touched = 0;
+      for (const chat of chats) {
+        if (this.stopping) break;
+        for (let round = 0; round < 12; round++) {
+          const msgs = this.store.listMessages(chat.id, 1500); // artan sırada, en yeni 1500
+          if (!msgs.length) break;
+          let boundary = -1;
+          for (let i = msgs.length - 1; i > 0; i--) {
+            if (msgs[i].ts - msgs[i - 1].ts > GAP) {
+              boundary = i;
+              break;
+            }
+          }
+          if (boundary < 0 && msgs[0].ts >= cutoff && msgs.length < 1500) boundary = 0;
+          if (boundary < 0) break;
+          const anchor = msgs.slice(boundary).find((m) => !m.remoteId.startsWith('local-'));
+          if (!anchor) break;
+          if (round === 0) touched++;
+          const ok = await this.requestHistory(chat.remoteId, 200, anchor);
+          if (!ok) {
+            if (++fails >= 2) {
+              bus.log('warn', `WhatsApp: boşluk doldurma duraklatıldı (telefon yanıt vermiyor; ${total} mesaj alındı) — 30 dk sonra yeniden denenir`);
+              this.scheduleGapFill(30 * 60_000);
+              return;
+            }
+            break;
+          }
+          fails = 0;
+          const got = this.store.listMessages(chat.id, 1500).length - msgs.length;
+          total += Math.max(0, got);
+          if (got <= 0) break;
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+      }
+      if (touched) bus.log('info', `WhatsApp: boşluk doldurma — ${touched} sohbet denetlendi, ${total} eski mesaj telefondan alındı`);
+    } catch (e) {
+      bus.log('warn', `WhatsApp boşluk doldurma: ${(e as Error).message}`);
+    } finally {
+      this.gapBusy = false;
+    }
   }
 
   /** Depodaki en eski gerçek (sunucu kimlikli) mesaj; `before` verildiyse ondan yeni olmayanlar arasında */
@@ -611,6 +697,8 @@ export class WhatsAppConnector extends BaseConnector {
   async stop(): Promise<void> {
     this.stopping = true;
     if (this.retryTimer) clearTimeout(this.retryTimer);
+    if (this.gapTimer) clearTimeout(this.gapTimer);
+    this.gapTimer = undefined;
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.refreshTimer = undefined;
     if (this.unreadSettleTimer) clearTimeout(this.unreadSettleTimer);

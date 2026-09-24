@@ -517,6 +517,8 @@ nav.side { position: relative; }
 .chan .grip:hover { color: var(--text); background: var(--bg2); }
 .chan.dragging { opacity: .45; }
 .chan.dragover { box-shadow: inset 0 2px 0 var(--purple); }
+.chan.dragover-after { box-shadow: inset 0 -2px 0 var(--purple); }
+.chan .grip { touch-action: none; user-select: none; -webkit-user-select: none; }
 /* en alta in oku */
 .downwrap { position: sticky; bottom: 4px; align-self: flex-end; height: 0; z-index: 3; }
 .downbtn { position: absolute; right: 0; bottom: 0; width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--text); box-shadow: var(--shadow-2, 0 6px 18px rgba(20,16,40,.14)); display: inline-flex; align-items: center; justify-content: center; animation: modalIn .18s ease-out both; }

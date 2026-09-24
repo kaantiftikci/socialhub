@@ -545,26 +545,12 @@ export default function App() {
     }
   };
   const [dragId, setDragId] = useState<string | null>(null);
-  const [dragOver, setDragOver] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState<{ id: string; after: boolean } | null>(null);
   const renderChan = (a: Account) => (
         <button
           key={a.id}
-          className={`chan b ${platformFilter === a.platform ? 'active' : ''} ${dragOver === a.id && dragId !== a.id ? 'dragover' : ''} ${dragId === a.id ? 'dragging' : ''}`}
-          onDragOver={(e) => {
-            if (!dragId || dragId === a.id) return;
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'move';
-            if (dragOver !== a.id) setDragOver(a.id);
-          }}
-          onDragLeave={() => dragOver === a.id && setDragOver(null)}
-          onDrop={(e) => {
-            e.preventDefault();
-            const src = dragId ?? e.dataTransfer.getData('text/plain');
-            if (src) moveChan(src, a.id);
-            setDragId(null);
-            setDragOver(null);
-          }}
-          onDragEnd={() => (setDragId(null), setDragOver(null))}
+          className={`chan b ${platformFilter === a.platform ? 'active' : ''} ${dragOver?.id === a.id && dragId !== a.id ? (dragOver.after ? 'dragover-after' : 'dragover') : ''} ${dragId === a.id ? 'dragging' : ''}`}
+          data-acc={a.id}
           onClick={() => (setView('inbox'), selectPlatform(platformFilter === a.platform ? null : a.platform), setFilter('all'))}
           onContextMenu={(e) => {
             e.preventDefault();
@@ -576,17 +562,33 @@ export default function App() {
             className="grip"
             title="Sürükleyip sırala"
             aria-label="Sırala"
-            draggable
             onClick={(e) => e.stopPropagation()}
-            onDragStart={(e) => {
+            // HTML5 sürükle-bırak WKWebView/Tauri'de güvenilir değil: işaretçi olaylarıyla (pointer capture) sıralama
+            onPointerDown={(e) => {
+              e.preventDefault();
               e.stopPropagation();
+              (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
               setDragId(a.id);
-              e.dataTransfer.effectAllowed = 'move';
-              e.dataTransfer.setData('text/plain', a.id);
-              // sürükleme görüntüsü olarak satırın tamamı
-              const row = (e.currentTarget as HTMLElement).closest('.chan') as HTMLElement | null;
-              if (row) e.dataTransfer.setDragImage(row, 20, 15);
             }}
+            onPointerMove={(e) => {
+              if (dragId !== a.id) return;
+              const el = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('.chan[data-acc]');
+              const id = el?.dataset.acc;
+              if (!el || !id || id === a.id) {
+                if (dragOver) setDragOver(null);
+                return;
+              }
+              const r = el.getBoundingClientRect();
+              const after = e.clientY > r.top + r.height / 2;
+              if (dragOver?.id !== id || dragOver.after !== after) setDragOver({ id, after });
+            }}
+            onPointerUp={(e) => {
+              (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+              if (dragId === a.id && dragOver && dragOver.id !== a.id) moveChan(a.id, dragOver.id, dragOver.after);
+              setDragId(null);
+              setDragOver(null);
+            }}
+            onPointerCancel={() => (setDragId(null), setDragOver(null))}
           >
             <Icon name="grip" size={13} sw={2} />
           </span>
