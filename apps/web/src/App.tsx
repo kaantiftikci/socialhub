@@ -894,7 +894,8 @@ export default function App() {
                 )}
               </div>
 
-              <div className="rows" onScroll={onRowsScroll}>
+              {/* anahtar: uygulama/sekme/etiket değişince liste yeniden kurulur ve satırlar kademeli belirir */}
+              <div className="rows" key={`${view}|${platformFilter ?? ''}|${filter}|${tagFilter ?? ''}`} onScroll={onRowsScroll}>
                 {view === 'snoozed' ? (
                   snoozedChats.length === 0 ? (
                     <div className="empty">

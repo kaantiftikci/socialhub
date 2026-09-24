@@ -584,7 +584,13 @@ nav.side { position: relative; }
 @keyframes tdot { 0%, 60%, 100% { transform: translateY(0); opacity: .45; } 30% { transform: translateY(-3px); opacity: 1; } }
 @keyframes slide { 0% { left: -40%; } 100% { left: 100%; } }
 .grp { animation: bubIn .22s cubic-bezier(.2,.8,.2,1) both; }
-.row { animation: rowIn .18s ease-out both; }
+/* sohbet listesi: satırlar kademeli belirir (uygulama seçince liste yeniden kurulur) */
+@keyframes rowStagger { from { opacity: 0; transform: translateY(10px) scale(.985); } to { opacity: 1; transform: none; } }
+.row { animation: rowStagger .32s cubic-bezier(.2,.8,.2,1) both; }
+.row:nth-child(2) { animation-delay: 30ms; } .row:nth-child(3) { animation-delay: 60ms; } .row:nth-child(4) { animation-delay: 90ms; }
+.row:nth-child(5) { animation-delay: 120ms; } .row:nth-child(6) { animation-delay: 150ms; } .row:nth-child(7) { animation-delay: 180ms; }
+.row:nth-child(8) { animation-delay: 210ms; } .row:nth-child(9) { animation-delay: 240ms; } .row:nth-child(10) { animation-delay: 270ms; }
+.row:nth-child(n+11) { animation-delay: 300ms; }
 /* sağ panel: genişleyerek açılır, daralarak kapanır (sohbet alanı zıplamaz); içerik hafif gecikmeyle belirir */
 @keyframes ctxIn { from { width: 0; padding-left: 0; padding-right: 0; border-left-width: 0; } to { width: var(--w-ctx, 320px); padding-left: 14px; padding-right: 14px; border-left-width: 1px; } }
 @keyframes ctxOut { from { width: var(--w-ctx, 320px); padding-left: 14px; padding-right: 14px; } to { width: 0; padding-left: 0; padding-right: 0; border-left-width: 0; } }
