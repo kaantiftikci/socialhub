@@ -175,6 +175,8 @@ export class BrowserConnector extends BaseConnector {
         channel: process.env.KAVSAK_CHROMIUM ? undefined : 'chromium',
         executablePath: process.env.KAVSAK_CHROMIUM || undefined,
         viewport: { width: 1180, height: 820 },
+        // boşta boşaltılan kanallarda service worker sekme kapansa da render sürecini (Outlook 470 MB) hayatta tutuyor: engelle
+        serviceWorkers: this.strategy.unloadWhenIdle ? 'block' : 'allow',
         locale: 'tr-TR',
         // bellek: GPU/uzantı/arka plan ağ süreçleri kapalı, render süreci sınırı, JS yığın üst sınırı, geri-ileri önbelleği kapalı
         args: [
