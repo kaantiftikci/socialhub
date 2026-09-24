@@ -582,7 +582,12 @@ nav.side { position: relative; }
 @keyframes slide { 0% { left: -40%; } 100% { left: 100%; } }
 .grp { animation: bubIn .22s cubic-bezier(.2,.8,.2,1) both; }
 .row { animation: rowIn .18s ease-out both; }
-.ctx { animation: panelIn .22s cubic-bezier(.2,.8,.2,1) both; }
+/* sağ panel: genişleyerek açılır, daralarak kapanır (sohbet alanı zıplamaz); içerik hafif gecikmeyle belirir */
+@keyframes ctxIn { from { width: 0; padding-left: 0; padding-right: 0; border-left-width: 0; } to { width: var(--w-ctx, 320px); padding-left: 14px; padding-right: 14px; border-left-width: 1px; } }
+@keyframes ctxOut { from { width: var(--w-ctx, 320px); padding-left: 14px; padding-right: 14px; } to { width: 0; padding-left: 0; padding-right: 0; border-left-width: 0; } }
+@keyframes ctxContentIn { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
+.ctx { animation: ctxIn .3s cubic-bezier(.2,.8,.2,1) both; overflow-x: hidden; }
+.ctx > * { animation: ctxContentIn .28s cubic-bezier(.2,.8,.2,1) .12s both; min-width: calc(var(--w-ctx, 320px) - 28px); }
 .settings, .menu { animation: modalIn .16s ease-out both; }
 .overlay { animation: fadeIn .16s ease-out both; }
 .overlay .modal, .lightbox .box { animation: modalIn .2s cubic-bezier(.2,.8,.2,1) both; }
@@ -693,7 +698,8 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .auth-card input:focus { border-color: var(--v); box-shadow: 0 0 0 4px rgba(108,71,255,.12); }
 .auth-card .btn.primary { height: 42px; margin-top: 4px; font-weight: 700; }
 .auth-error { font-size: 13px; color: #c2261a; background: #fdecea; border-radius: 10px; padding: 8px 10px; }
-.ctx.closing { animation: panelOut .18s ease-in both; pointer-events: none; }
+.ctx.closing { animation: ctxOut .22s cubic-bezier(.4,0,.6,1) both; pointer-events: none; }
+.ctx.closing > * { animation: none; opacity: 0; transition: opacity .12s; }
 .downwrap.closing .downbtn { animation: modalOut .14s ease-in both; }
 .psounds { animation: rowIn .16s ease-out both; }
 
