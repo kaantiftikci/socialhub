@@ -849,12 +849,12 @@ export default function App() {
                         <Icon name="grip" size={16} sw={2} />
                       </button>
                       <span className="m-brand" aria-hidden="true">
-                        <Logo size={24} />
+                        <Logo size={34} />
                       </span>
                     </>
                   )}
                   <div className="list-title">
-                    {platformFilter && view !== 'snoozed' && <Chip platform={platformFilter} size={isMobile ? 34 : 26} />}
+                    {platformFilter && view !== 'snoozed' && <Chip platform={platformFilter} size={26} />}
                     <h1>{view === 'snoozed' ? 'Ertelenenler' : platformFilter ? PLATFORMS[platformFilter].name : tagFilter ? capitalize(tagFilter) : 'Gelen kutusu'}</h1>
                     {view !== 'snoozed' && scoped.unread > 0 && <span className="pill">{fmtCount(scoped.unread)} yeni</span>}
                   </div>
