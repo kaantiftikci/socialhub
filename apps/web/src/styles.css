@@ -281,6 +281,21 @@ button:focus-visible, a:focus-visible, .sw:focus-visible { outline: 2px solid va
 .att-audio { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .att-audio audio { height: 32px; max-width: 240px; }
 .att-card video { display: block; width: 100%; max-height: 360px; background: #000; }
+/* Sade video oynatıcı */
+.vp { position: relative; display: block; background: #000; }
+.vp video { cursor: pointer; }
+.vp-play { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 54px; height: 54px; border-radius: 50%; border: 0; background: rgba(17,16,22,.55); backdrop-filter: blur(4px); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding-left: 4px; }
+.vp-play svg { fill: #fff; }
+.vp-play:hover { background: rgba(17,16,22,.72); }
+.vp-bar { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 8px; padding: 6px 10px 7px; background: linear-gradient(transparent, rgba(0,0,0,.55)); color: #fff; opacity: 0; transition: opacity .15s ease; }
+.vp:hover .vp-bar, .vp:not(.playing) .vp-bar { opacity: 1; }
+.vp-time { font-size: 10.5px; font-variant-numeric: tabular-nums; min-width: 28px; }
+.vp-track { flex: 1; height: 3px; border-radius: 3px; background: rgba(255,255,255,.35); cursor: pointer; position: relative; }
+.vp-track::before { content: ""; position: absolute; inset: -8px 0; }
+.vp-fill { display: block; height: 100%; border-radius: 3px; background: #fff; }
+.vp-btn { width: 22px; height: 22px; border-radius: 6px; border: 0; background: transparent; color: #fff; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; opacity: .9; }
+.vp-btn:hover { background: rgba(255,255,255,.18); }
+.bub:has(.att-card) .bt { z-index: 2; }
 .att-video { cursor: default; }
 a.att-card { cursor: pointer; }
 .att-card .att-cap a:hover { opacity: 1; }
@@ -948,3 +963,5 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .mailform textarea { border: 0; outline: 0; resize: vertical; min-height: 160px; padding: 12px 14px; font: inherit; font-size: 14px; line-height: 1.55; color: var(--text); background: transparent; }
 .newchat .from { font-size: 12px; color: var(--text3); display: flex; align-items: center; gap: 6px; }
 .qacts.one { grid-template-columns: 1fr; }
+/* Video kartında saat rozeti alt çubukla çakışmasın: sağ üst */
+.bub:has(.att-video) .bt { top: 12px; bottom: auto; }

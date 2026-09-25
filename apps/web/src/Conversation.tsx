@@ -1619,7 +1619,7 @@ function AttachmentView({ a, onOpen }: { a: Attachment; onOpen: (a: Attachment) 
   if (a.kind === 'video' && link && isMediaFile(a.link)) {
     return (
       <span className="att-card att-video">
-        <video src={link} poster={url} controls preload="metadata" playsInline />
+        <VideoPlayer src={link} poster={url} />
         <span className="att-cap">
           <Icon name="play" size={13} />
           {a.name ?? attLabel(a.kind)}
@@ -1674,6 +1674,70 @@ function AttachmentView({ a, onOpen }: { a: Attachment; onOpen: (a: Attachment) 
 function fmtClock(secs: number) {
   const s = Math.max(0, Math.round(secs));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+/**
+ * Sade video oynatıcı: yerel kontroller yerine ortada oynat/duraklat, altta ince ilerleme çubuğu (tıklayınca sarar),
+ * köşede ses ve tam ekran. Tarayıcının dağınık kontrol çubuğu görünmez.
+ */
+function VideoPlayer({ src, poster }: { src: string; poster?: string }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [prog, setProg] = useState(0);
+  const [dur, setDur] = useState(0);
+  const toggle = () => {
+    const v = ref.current;
+    if (!v) return;
+    if (v.paused) void v.play().catch(() => undefined);
+    else v.pause();
+  };
+  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  return (
+    <span className={`vp ${playing ? 'playing' : ''}`}>
+      <video
+        ref={ref}
+        src={src}
+        poster={poster}
+        preload="metadata"
+        playsInline
+        muted={muted}
+        onClick={toggle}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => setPlaying(false)}
+        onLoadedMetadata={(e) => setDur(e.currentTarget.duration || 0)}
+        onTimeUpdate={(e) => setProg(e.currentTarget.duration ? e.currentTarget.currentTime / e.currentTarget.duration : 0)}
+      />
+      {!playing && (
+        <button type="button" className="vp-play" onClick={toggle} aria-label="Oynat">
+          <Icon name="play" size={26} color="#fff" sw={0} />
+        </button>
+      )}
+      <span className="vp-bar">
+        <span className="vp-time">{playing || prog > 0 ? fmt((ref.current?.currentTime ?? 0)) : dur ? fmt(dur) : ''}</span>
+        <span
+          className="vp-track"
+          role="slider"
+          aria-label="İlerleme"
+          aria-valuenow={Math.round(prog * 100)}
+          onClick={(e) => {
+            const v = ref.current;
+            const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            if (v && v.duration) v.currentTime = ((e.clientX - r.left) / r.width) * v.duration;
+          }}
+        >
+          <span className="vp-fill" style={{ width: `${prog * 100}%` }} />
+        </span>
+        <button type="button" className="vp-btn" onClick={() => setMuted((m) => !m)} aria-label={muted ? 'Sesi aç' : 'Sesi kapat'} title={muted ? 'Sesi aç' : 'Sesi kapat'}>
+          <Icon name={muted ? 'mute' : 'volume'} size={13} sw={2} />
+        </button>
+        <button type="button" className="vp-btn" onClick={() => void ref.current?.requestFullscreen?.().catch(() => undefined)} aria-label="Tam ekran" title="Tam ekran">
+          <Icon name="external" size={12} sw={2} />
+        </button>
+      </span>
+    </span>
+  );
 }
 
 function attLabel(k: string) {
