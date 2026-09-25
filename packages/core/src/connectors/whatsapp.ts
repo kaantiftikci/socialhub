@@ -46,6 +46,7 @@ export class WhatsAppConnector extends BaseConnector {
   /** loadHistory: telefondan istenen geçmiş paketi (ON_DEMAND) gelince çözülecek bekleyiciler (sohbet jid → resolve'lar) */
   private historyWaiters = new Map<string, Array<() => void>>();
   private gapTimer?: NodeJS.Timeout;
+  private presenceTimer?: NodeJS.Timeout;
   private gapBusy = false;
   /**
    * Baileys 'chats.update' unreadCount'u canlı mesajlarda ARTIŞ bildirir (+n); aynı olay demetinde gelen 'notify' mesajı için
@@ -194,6 +195,13 @@ export class WhatsAppConnector extends BaseConnector {
         this.account.label = 'WhatsApp';
         this.setStatus('connected', me ? `+${me.split('@')[0]}` : undefined);
         bus.log('info', 'WhatsApp bağlandı; telefon geçmişi gönderiyor (ilk seferde 10-60 sn sürebilir)');
+        // Telefon bildirimleri: bağlı cihaz "aktif" görünürse WhatsApp telefona bildirim göndermez. Bağlantıda ve her 4 dk'da
+        // bir açıkça çevrimdışı (unavailable) bildir; yoklamayı kesen bir durumda telefonun sessiz kalmasını önler.
+        const offline = () => sock.sendPresenceUpdate('unavailable').catch(() => undefined);
+        void offline();
+        if (this.presenceTimer) clearInterval(this.presenceTimer);
+        this.presenceTimer = setInterval(() => void offline(), 4 * 60_000);
+        this.presenceTimer.unref?.();
         void this.syncGroups(sock);
         setTimeout(() => void this.syncGroups(sock), 20_000);
         // Rehber adları uygulama durumu (app state) eşitlemesindeki contactAction kayıtlarından gelir; bazı hesaplarda
@@ -699,6 +707,8 @@ export class WhatsAppConnector extends BaseConnector {
     if (this.retryTimer) clearTimeout(this.retryTimer);
     if (this.gapTimer) clearTimeout(this.gapTimer);
     this.gapTimer = undefined;
+    if (this.presenceTimer) clearInterval(this.presenceTimer);
+    this.presenceTimer = undefined;
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.refreshTimer = undefined;
     if (this.unreadSettleTimer) clearTimeout(this.unreadSettleTimer);
