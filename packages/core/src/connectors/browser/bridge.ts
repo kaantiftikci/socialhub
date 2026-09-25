@@ -8,6 +8,7 @@ import { chatId } from '../../model.js';
 import { persistSessionCookies } from './outlook.js';
 import { bus } from '../../bus.js';
 import { sessionDir } from '../../config.js';
+import { mediaHostAllowed, MEDIA_MAX } from '../../media-hosts.js';
 import type { Account, Attachment, ChatKind, Participant } from '../../model.js';
 import type { Store } from '../../store.js';
 
@@ -60,6 +61,17 @@ export const NEEDS_PAGE = 'NEEDS_PAGE';
 export function apiOf(page: Page): ApiHandle | undefined {
   return (page as unknown as { __api?: ApiHandle }).__api;
 }
+/** Günlük için adres: sorgu/parça (OAuth code, nonce vb.) atılır */
+export function safeUrl(u: string | undefined): string {
+  if (!u) return '';
+  try {
+    const x = new URL(u);
+    return (x.origin + x.pathname).slice(0, 90);
+  } catch {
+    return u.slice(0, 40);
+  }
+}
+
 export function needsPage(page: Page): void {
   if (apiOf(page)) throw new Error(NEEDS_PAGE);
 }
@@ -112,6 +124,8 @@ export class BrowserConnector extends BaseConnector {
   private timer?: NodeJS.Timeout;
   private stopping = false;
   private polling = false;
+  /** 429/hız sınırı sonrası bu zamana kadar yoklama yok (oturum kilitlenmesin) */
+  private backoffUntil = 0;
   /** unloadWhenIdle: yoklamalar arasında tarayıcı kapalı (bellek); bir sonraki yoklama/işlem yeniden açar */
   private idleClosed = false;
   private known = new Map<string, number>(); // threadId → son görülen ts
@@ -390,11 +404,11 @@ export class BrowserConnector extends BaseConnector {
       }
       if (await this.isLoggedIn(true)) break;
       // ilerleme görünür olsun: 20 sn'de bir hangi sayfada beklendiği
-      if (++ticks % 10 === 0) bus.log('info', `${this.account.platform}: giriş bekleniyor (${this.page.url().slice(0, 90)})`);
+      if (++ticks % 10 === 0) bus.log('info', `${this.account.platform}: giriş bekleniyor (${safeUrl(this.page.url())})`);
       await sleep(2000);
     }
     if (this.stopping) return false;
-    bus.log('info', `${this.account.platform}: giriş algılandı (${this.page?.url().slice(0, 90)}), izin adımları için bekleniyor`);
+    bus.log('info', `${this.account.platform}: giriş algılandı (${safeUrl(this.page?.url())}), izin adımları için bekleniyor`);
     // izin ekranları: URL 4 sn boyunca değişmeyene ve giriş hâlâ geçerli olana kadar bekle (en fazla 60 sn)
     let lastUrl = '';
     let stableFor = 0;
@@ -511,9 +525,26 @@ export class BrowserConnector extends BaseConnector {
       if (!r) return undefined;
       ({ body, type } = r);
     } else {
-      const r = await (this.api ?? this.ctx!.request).get(url, { timeout: 25_000, headers: { referer: new URL(this.strategy.home).origin + '/' } });
-      if (!r.ok()) throw new Error(`medya ${r.status()}`);
+      // Yönlendirmeler elle takip edilir: her sıçramada host allowlist'e vurulur (açık yönlendirme → iç ağ/SSRF olmasın)
+      const client = this.api ?? this.ctx!.request;
+      let cur = url;
+      let r: Awaited<ReturnType<typeof client.get>> | undefined;
+      for (let hop = 0; hop < 5; hop++) {
+        r = await client.get(cur, { timeout: 25_000, maxRedirects: 0, headers: { referer: new URL(this.strategy.home).origin + '/' } });
+        const loc = r.headers()['location'];
+        if (r.status() >= 300 && r.status() < 400 && loc) {
+          const next = new URL(loc, cur);
+          if (!/^https?:$/.test(next.protocol) || !mediaHostAllowed(this.account.platform, next.hostname)) throw new Error(`yönlendirme izinli değil: ${next.hostname}`);
+          cur = next.toString();
+          continue;
+        }
+        break;
+      }
+      if (!r || !r.ok()) throw new Error(`medya ${r?.status() ?? '?'}`);
+      const len = Number(r.headers()['content-length'] ?? 0);
+      if (len > MEDIA_MAX) throw new Error('medya çok büyük');
       body = await r.body();
+      if (body.length > MEDIA_MAX) throw new Error('medya çok büyük');
       type = r.headers()['content-type'] ?? 'application/octet-stream';
     }
     fs.mkdirSync(dir, { recursive: true });
@@ -541,7 +572,7 @@ export class BrowserConnector extends BaseConnector {
   }
 
   private async poll(first: boolean): Promise<void> {
-    if (this.polling) return;
+    if (this.polling || Date.now() < this.backoffUntil) return;
     if ((!this.page || this.page.isClosed()) && !this.pageless && !(await this.ensureOpen())) return;
     this.polling = true;
     try {
@@ -615,6 +646,11 @@ export class BrowserConnector extends BaseConnector {
       if (first) bus.log('info', `${this.account.platform}: ${threads.length} sohbet yüklendi`);
     } catch (e) {
       bus.log('warn', `${this.account.platform} yoklama: ${(e as Error).message}`);
+      if (/\b429\b|rate.?limit|too many/i.test((e as Error).message)) {
+        this.backoffUntil = Date.now() + 5 * 60_000;
+        bus.log('warn', `${this.account.platform}: hız sınırı, 5 dk beklenecek`);
+        return;
+      }
       if (!(await this.isLoggedIn())) {
         bus.log('warn', `${this.account.platform}: oturum düşmüş, yeniden giriş gerekli`);
         if (this.timer) clearInterval(this.timer);

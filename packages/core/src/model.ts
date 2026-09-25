@@ -5,6 +5,7 @@
  */
 
 export type Platform = 'whatsapp' | 'telegram' | 'slack' | 'linkedin' | 'x' | 'imessage' | 'instagram' | 'messenger' | 'gmail' | 'outlook' | 'yahoo' | 'icloud' | 'imap' | 'shopier' | 'trendyol' | 'hepsiburada' | 'etsy' | 'shopify' | 'n11' | 'amazon' | 'demo';
+export const ALL_PLATFORMS: readonly Platform[] = ['whatsapp', 'telegram', 'slack', 'linkedin', 'x', 'imessage', 'instagram', 'messenger', 'gmail', 'outlook', 'yahoo', 'icloud', 'imap', 'shopier', 'trendyol', 'hepsiburada', 'etsy', 'shopify', 'n11', 'amazon', 'demo'];
 export const MAIL_PLATFORMS: Platform[] = ['gmail', 'outlook', 'yahoo', 'icloud', 'imap'];
 
 export type AccountStatus = 'disconnected' | 'connecting' | 'pairing' | 'connected' | 'error';

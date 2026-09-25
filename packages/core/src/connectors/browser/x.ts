@@ -280,6 +280,7 @@ function hookMeta(page: Page): void {
           const o = thrift(Buffer.from(e, 'base64'));
           if (!o || typeof o[2] !== 'string' || typeof o[6] !== 'string') continue;
           meta.set(String(o[2]).toLowerCase(), { seq: String(o[1] ?? ''), ts: Number(o[6]), sender: String(o[3] ?? '') });
+          if (meta.size > 20_000) for (const k of [...meta.keys()].slice(0, 5_000)) meta.delete(k); // sınırsız büyümesin
         }
       })
       .catch(() => undefined);
@@ -322,7 +323,7 @@ async function readSnapshot(page: Page): Promise<boolean> {
   cleanStaleSnapshots();
   snap?.db.close();
   snap = undefined;
-  fs.writeFileSync(file, Buffer.from(r.b64, 'base64'));
+  fs.writeFileSync(file, Buffer.from(r.b64, 'base64'), { mode: 0o600 }); // çözülmüş DM kopyası yalnızca bu kullanıcıya okunur
   try {
     snap = { db: new Database(file, { readonly: true, fileMustExist: true }), at: Date.now(), mtime: r.lastModified, file, me: meId };
     // sağlamlık: yedek yazılırken kopyalandıysa açılır ama sorgu patlar; burada yakala

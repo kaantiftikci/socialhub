@@ -22,6 +22,10 @@ function readRemoteCore(): string {
       const t = h.get('token');
       if (t) localStorage.setItem('kavsak.token', t);
       history.replaceState(null, '', location.pathname + location.search);
+    } else if (h.get('token')) {
+      // LAN QR bağlantısı: belirteç adres parçasında (sunucuya/tarihçeye gitmez), sakla ve temizle
+      localStorage.setItem('kavsak.token', h.get('token') as string);
+      history.replaceState(null, '', location.pathname + location.search);
     }
     return localStorage.getItem('kavsak.core') ?? '';
   } catch {

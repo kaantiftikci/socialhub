@@ -1200,7 +1200,8 @@ export class WhatsAppConnector extends BaseConnector {
         bus.log('info', `WhatsApp: içeriği alınamayan mesaj: tür=${keys}${ctxOnly ? ' (yalnız messageContextInfo)' : ''} stub=${m.messageStubType ?? '-'} sohbet=${jid} gönderen=${m.key.participant ?? '-'} fromMe=${!!m.key.fromMe}`);
         // tanı: protobuf'ta tanınmayan sarmal alanlar düşer; elde kalan ne varsa bir kez günlüğe
         try {
-          bus.log('info', `WhatsApp ham: ${JSON.stringify({ alanlar: Object.keys(m), message: m.message, stubParams: m.messageStubParameters, type: (m as { messageType?: string }).messageType }).slice(0, 700)}`);
+          // içerik günlüğe yazılmaz: yalnız alan adları ve tür
+          bus.log('info', `WhatsApp ham: ${JSON.stringify({ alanlar: Object.keys(m), mesajAlanlari: Object.keys(m.message ?? {}), stub: m.messageStubType ?? null, type: (m as { messageType?: string }).messageType })}`);
         } catch {
           /* yok */
         }

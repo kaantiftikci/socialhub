@@ -31,6 +31,11 @@ import { AmazonConnector } from './connectors/amazon.js';
 import { MAIL_PLATFORMS } from './model.js';
 
 /** Hesap ↔ connector eşlemesi. Açılışta kayıtlı hesapları kaldırır, yenilerini oluşturur. */
+/** Asılı kalan stop()/logout() HTTP isteğini sonsuza dek bekletmesin */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([p, new Promise<T>((_, reject) => setTimeout(() => reject(new Error('zaman aşımı')), ms).unref?.())]);
+}
+
 export class Registry {
   private connectors = new Map<string, Connector>();
 
@@ -73,16 +78,24 @@ export class Registry {
     };
     this.store.upsertAccount(account);
     if (opts.token) fs.writeFileSync(path.join(sessionDir(account.id), 'token'), opts.token, { mode: 0o600 });
-    await this.spawn(account);
+    try {
+      await this.spawn(account);
+    } catch (e) {
+      // connector kurulamadıysa hayalet hesap kalmasın
+      this.store.deleteAccount(account.id);
+      fs.rmSync(sessionDir(account.id), { recursive: true, force: true });
+      throw e;
+    }
     return account;
   }
 
   async remove(id: string): Promise<void> {
+    if (!this.store.getAccount(id) && !this.connectors.has(id)) throw new Error('Hesap yok');
     const c = this.connectors.get(id);
     if (c) {
-      await c.logout?.().catch((e) => bus.log('warn', `${id} platform çıkışı yapılamadı: ${(e as Error).message}`));
-      await c.stop().catch(() => undefined);
       this.connectors.delete(id);
+      await withTimeout(c.logout?.() ?? Promise.resolve(), 15_000).catch((e) => bus.log('warn', `${id} platform çıkışı yapılamadı: ${(e as Error).message}`));
+      await withTimeout(c.stop(), 15_000).catch(() => undefined);
     }
     this.store.deleteAccount(id);
     fs.rmSync(sessionDir(id), { recursive: true, force: true });
@@ -93,7 +106,7 @@ export class Registry {
     const a = this.store.getAccount(id);
     if (!a) throw new Error('Hesap yok');
     const c = this.connectors.get(id);
-    if (c) await c.stop().catch(() => undefined);
+    if (c) await withTimeout(c.stop(), 15_000).catch(() => undefined);
     await this.spawn(a);
   }
 

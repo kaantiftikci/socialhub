@@ -13,6 +13,8 @@ import type { Connector } from './connectors/base.js';
 import { resolveOAuth } from './connectors/mail.js';
 import { bus } from './bus.js';
 import { aiEnabled, draftReply } from './ai.js';
+import { ALL_PLATFORMS } from './model.js';
+import { MEDIA_HOSTS, PLATFORM_MEDIA_HOSTS, MEDIA_MAX } from './media-hosts.js';
 import type { Platform } from './model.js';
 
 /**
@@ -49,11 +51,10 @@ function loadToken(): string {
   return t;
 }
 
-const LOCAL_ORIGIN = /^(https?:\/\/(localhost|127\.0\.0\.1|tauri\.localhost)(:\d+)?|tauri:\/\/localhost|asset:\/\/localhost)$/;
-/** Vekilden indirilebilecek uzak medya sunucuları (oturum çerezleriyle istek yapıldığı için sınırlı) */
-// fbsbx.com: Instagram/Messenger sesli mesaj ve dosyaları; giphy/tenor: DM GIF'leri
-const MEDIA_HOSTS = /(^|\.)(twimg\.com|twitter\.com|x\.com|cdninstagram\.com|fbcdn\.net|fbsbx\.com|facebook\.com|messenger\.com|licdn\.com|linkedin\.com|slack-edge\.com|slack-files\.com|files\.slack\.com|whatsapp\.net|telegram\.org|shopier\.com|giphy\.com|tenor\.com|mail\.google\.com|googleusercontent\.com|outlook\.live\.com|outlook\.office\.com|icloud\.com|icloud-content\.com)$/i;
-
+/** Belirteçsiz güvenilen yerel kaynaklar: Vite (5173), çekirdeğin kendi portu ve Tauri. Makinedeki BAŞKA yerel web uygulamaları
+ * (Jupyter, başka dev sunucu, kötücül paket) artık belirteçsiz geçemez. */
+const localOriginRe = (port: number) => new RegExp(`^(https?://(localhost|127\\.0\\.0\\.1):(5173|${port})|https?://tauri\\.localhost(:\\d+)?|tauri://localhost|asset://localhost)$`);
+let LOCAL_ORIGIN = localOriginRe(7788);
 /** ~/.kavsak/settings.json: { lan: boolean } — telefondan (aynı Wi‑Fi) erişim */
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 function readSettings(): { lan?: boolean } {
@@ -74,6 +75,14 @@ const isLoopback = (addr: string | undefined) => !addr || addr === '127.0.0.1' |
 export function createServer(store: Store, registry: Registry, port: number): http.Server {
   const token = loadToken();
   let lanEnabled = !!readSettings().lan;
+  LOCAL_ORIGIN = localOriginRe(port);
+  // açılışta eski outbox artıkları (çekirdek kapanırken silinememiş dosyalar)
+  try {
+    const ob = path.join(DATA_DIR, 'outbox');
+    if (fs.existsSync(ob)) for (const f of fs.readdirSync(ob)) if (Date.now() - fs.statSync(path.join(ob, f)).mtimeMs > 3_600_000) fs.rmSync(path.join(ob, f), { force: true });
+  } catch {
+    /* yok */
+  }
   const givenToken = (req: http.IncomingMessage): string => {
     const u = new URL(req.url ?? '/', 'http://x');
     return (req.headers['x-kavsak-token'] as string | undefined) ?? u.searchParams.get('token') ?? '';
@@ -96,8 +105,20 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     if (!origin || LOCAL_ORIGIN.test(origin)) return true;
     return givenToken(req) === token;
   };
+  /** Uzak (LAN/tünel) istemciden hesap ekleme/silme/LAN ayarı yapılamaz: belirteç sızsa da yıkıcı işlemler bu Mac'te kalır */
+  const isRemote = (req: http.IncomingMessage) => !isLoopback(req.socket.remoteAddress) || !!(req.headers['x-forwarded-for'] || req.headers['cf-connecting-ip'] || req.headers['x-forwarded-host']);
+  const localOnly = (req: http.IncomingMessage) => {
+    if (isRemote(req)) throw new HttpError(403, 'Bu işlem yalnızca bu bilgisayardan yapılabilir');
+  };
+  const dec = (s: string): string => {
+    try {
+      return decodeURIComponent(s);
+    } catch {
+      throw new HttpError(400, 'Geçersiz kimlik');
+    }
+  };
   const lanInfo = async () => {
-    const urls = lanAddresses().map((ip) => `http://${ip}:${port}/?token=${token}`);
+    const urls = lanAddresses().map((ip) => `http://${ip}:${port}/#token=${token}`);
     return { enabled: lanEnabled, urls, qr: urls[0] ? await QRCode.toDataURL(urls[0], { margin: 1, width: 220 }) : undefined };
   };
   // Bekleyen QR kodları: arayüz sonradan açılsa da eşleşme ekranı boş kalmasın
@@ -114,17 +135,20 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   });
 
   route('GET', '/api/accounts', () => registry.list().map((a) => ({ ...a, qrDataUrl: pendingQr.get(a.id) })));
-  route('POST', '/api/accounts', async (_r, _s, _p, body) => {
+  route('POST', '/api/accounts', async (r, _s, _p, body) => {
+    localOnly(r);
     const b = body as { platform?: Platform; token?: string; label?: string };
-    if (!b.platform) throw new HttpError(400, 'platform gerekli');
-    return registry.add(b.platform, { token: b.token, label: b.label });
+    if (!b.platform || !ALL_PLATFORMS.includes(b.platform)) throw new HttpError(400, 'Geçersiz platform');
+    return registry.add(b.platform, { token: typeof b.token === 'string' ? b.token : undefined, label: typeof b.label === 'string' ? b.label.slice(0, 80) : undefined });
   });
-  route('DELETE', '/api/accounts/:id', async (_r, _s, p) => {
-    await registry.remove(decodeURIComponent(p.id));
+  route('DELETE', '/api/accounts/:id', async (r, _s, p) => {
+    localOnly(r);
+    await registry.remove(dec(p.id));
     return { ok: true };
   });
-  route('POST', '/api/accounts/:id/restart', async (_r, _s, p) => {
-    await registry.restart(decodeURIComponent(p.id));
+  route('POST', '/api/accounts/:id/restart', async (r, _s, p) => {
+    localOnly(r);
+    await registry.restart(dec(p.id));
     return { ok: true };
   });
   route('POST', '/api/accounts/:id/input', (_r, _s, p, body) => {
@@ -185,7 +209,8 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     try {
       return await c.sendMedia(chat.remoteId, { path: file, name: safe, mime: String(b.mime || 'application/octet-stream'), size: buf.length }, b.caption ? String(b.caption) : undefined);
     } finally {
-      setTimeout(() => fs.rmSync(file, { force: true }), 10 * 60_000).unref();
+      // connector'lar dosyayı gönderim sırasında okur/kopyalar: hemen sil (kimlik belgesi vb. diskte kalmasın)
+      setTimeout(() => fs.rmSync(file, { force: true }), 5_000).unref();
     }
   });
   // Sohbet listesinin sonraki sayfası (daha eski e-postalar/sohbetler)
@@ -242,7 +267,8 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   route('GET', '/api/logs', () => bus.recent.slice(-200));
   // Telefondan erişim (aynı Wi‑Fi): bağlantı + QR; açma/kapama
   route('GET', '/api/lan', () => lanInfo());
-  route('POST', '/api/lan', async (_r, _s, _p, body) => {
+  route('POST', '/api/lan', async (r, _s, _p, body) => {
+    localOnly(r);
     lanEnabled = !!(body as { enabled?: boolean }).enabled;
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify({ ...readSettings(), lan: lanEnabled }), { mode: 0o600 });
     bus.log('info', lanEnabled ? `Telefondan erişim açıldı: ${lanAddresses().map((ip) => `http://${ip}:${port}`).join(', ')}` : 'Telefondan erişim kapatıldı');
@@ -287,22 +313,41 @@ export function createServer(store: Store, registry: Registry, port: number): ht
       }
       // Medya vekili: /api/media/<hesap>?u=<uzak adres> — çerezli oturumla indirir, önbelleğe alır
       if (req.method === 'GET' && url.pathname.startsWith('/api/media/')) {
-        const id = decodeURIComponent(url.pathname.slice('/api/media/'.length));
+        const id = dec(url.pathname.slice('/api/media/'.length));
         const u = url.searchParams.get('u') ?? '';
         const c = registry.get(id);
         if (!c?.fetchMedia) throw new HttpError(404, 'Bu hesap medya sunmuyor');
         if (!u) throw new HttpError(400, 'u gerekli');
         if (/^https?:\/\//.test(u)) {
-          const host = new URL(u).hostname;
-          if (!MEDIA_HOSTS.test(host)) throw new HttpError(403, `Bu sunucudan medya indirilmez: ${host}`);
+          let host = '';
+          try {
+            host = new URL(u).hostname;
+          } catch {
+            throw new HttpError(400, 'Geçersiz adres');
+          }
+          const acc = registry.list().find((a) => a.id === id);
+          const allow = (acc && PLATFORM_MEDIA_HOSTS[acc.platform]) ?? MEDIA_HOSTS;
+          if (!allow.test(host)) throw new HttpError(403, `Bu sunucudan medya indirilmez: ${host}`);
         }
-        // Uzak sunucu hatası (süresi dolmuş CDN bağlantısı → 403 vb.) 500 gibi yığın dökmesin
+        // Uzak sunucu hatası (süresi dolmuş CDN bağlantısı → 403 vb.) 500 gibi yığın dökmesin; ayrıntı yalnızca günlüğe
         const m = await c.fetchMedia(u).catch((e: Error) => {
           const code = (e as { response?: { status?: number } }).response?.status;
-          throw new HttpError(502, `Medya indirilemedi${code ? ` (${code})` : ''}: ${e.message.split('\n')[0].slice(0, 160)}`);
+          bus.log('warn', `Medya indirilemedi (${id}): ${e.message.split('\n')[0].slice(0, 200)}`);
+          throw new HttpError(502, `Medya indirilemedi${code ? ` (${code})` : ''}`);
         });
         if (!m) throw new HttpError(503, 'Oturum açık değil');
-        res.writeHead(200, { 'content-type': m.type, 'content-length': m.body.length, 'cache-control': 'private, max-age=86400' });
+        if (m.body.length > MEDIA_MAX) throw new HttpError(413, 'Medya çok büyük');
+        // Saldırgan denetimli content-type (text/html ekli e-posta/belge) API origin'inde çalışmasın: yalnızca görsel/ses/video/PDF
+        // satır içi, gerisi indirme; nosniff + sandbox CSP
+        const inline = /^(image\/(?!svg)|video\/|audio\/)/i.test(m.type) || m.type === 'application/pdf';
+        res.writeHead(200, {
+          'content-type': inline ? m.type : 'application/octet-stream',
+          'content-length': m.body.length,
+          'x-content-type-options': 'nosniff',
+          'content-disposition': inline ? 'inline' : 'attachment',
+          'content-security-policy': "default-src 'none'; sandbox",
+          'cache-control': 'private, max-age=86400',
+        });
         return void res.end(m.body);
       }
       for (const r of routes) {
@@ -323,7 +368,8 @@ export function createServer(store: Store, registry: Registry, port: number): ht
       const status = e instanceof HttpError ? e.status : 500;
       if (status === 500) bus.log('error', `API: ${(e as Error).stack ?? e}`);
       res.writeHead(status, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: (e as Error).message }));
+      // iç hata ayrıntısı (yığın/yol) istemciye gitmesin
+      res.end(JSON.stringify({ error: status === 500 ? 'Sunucu hatası (ayrıntı Günlük\'te)' : (e as Error).message }));
     }
   });
 
@@ -339,9 +385,36 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   });
   const unsub = bus.on((ev) => {
     const payload = JSON.stringify(ev);
-    for (const client of wss.clients) if (client.readyState === WebSocket.OPEN) client.send(payload);
+    for (const client of wss.clients) {
+      if (client.readyState !== WebSocket.OPEN) continue;
+      // yavaş/ölü istemcide tampon şişmesin (geçmiş eşitlemesinde binlerce olay)
+      if (client.bufferedAmount > 8_000_000) {
+        client.terminate();
+        continue;
+      }
+      client.send(payload);
+    }
   });
-  server.on('close', unsub);
+  const alive = new WeakSet<WebSocket>();
+  wss.on('connection', (client) => {
+    alive.add(client);
+    client.on('pong', () => alive.add(client));
+  });
+  const pingTimer = setInterval(() => {
+    for (const client of wss.clients) {
+      if (!alive.has(client)) {
+        client.terminate();
+        continue;
+      }
+      alive.delete(client);
+      client.ping();
+    }
+  }, 30_000);
+  pingTimer.unref();
+  server.on('close', () => {
+    unsub();
+    clearInterval(pingTimer);
+  });
 
   // 0.0.0.0: telefondan erişim için; uzak istemciler yalnızca LAN modu + belirteçle geçer (authorized)
   server.listen(port, '0.0.0.0', () => bus.log('info', `Yerel API hazır: http://127.0.0.1:${port}  (ws: /ws)${lanEnabled ? ' · telefondan: ' + lanAddresses().map((ip) => `http://${ip}:${port}`).join(', ') : ''}`));
@@ -356,13 +429,15 @@ function readJson(req: http.IncomingMessage): Promise<unknown> {
       data += c;
       if (data.length > (req.url?.includes('/send-file') ? 80_000_000 : 1_000_000)) {
         reject(new HttpError(413, 'İstek gövdesi çok büyük'));
-        req.destroy();
+        req.pause(); // bağlantıyı koparmak yerine 413 yanıtı yazılabilsin
       }
     });
     req.on('end', () => {
       if (!data) return resolve({});
       try {
-        resolve(JSON.parse(data));
+        const v: unknown = JSON.parse(data);
+        if (v === null || typeof v !== 'object' || Array.isArray(v)) return reject(new HttpError(400, 'JSON nesnesi bekleniyor'));
+        resolve(v);
       } catch {
         reject(new HttpError(400, 'Geçersiz JSON'));
       }
@@ -386,6 +461,6 @@ function serveStatic(dir: string, pathname: string, res: http.ServerResponse): v
   let file = path.join(dir, path.normalize(pathname).replace(/^(\.\.[/\\])+/, ''));
   if (!file.startsWith(dir)) file = path.join(dir, 'index.html');
   if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(dir, 'index.html');
-  res.writeHead(200, { 'content-type': MIME[path.extname(file)] ?? 'application/octet-stream' });
+  res.writeHead(200, { 'content-type': MIME[path.extname(file)] ?? 'application/octet-stream', 'x-content-type-options': 'nosniff' });
   fs.createReadStream(file).pipe(res);
 }

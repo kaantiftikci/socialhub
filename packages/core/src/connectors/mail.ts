@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { ImapFlow } from 'imapflow';
 import nodemailer, { type SendMailOptions } from 'nodemailer';
 import { simpleParser, type AddressObject, type ParsedMail } from 'mailparser';
@@ -200,7 +200,7 @@ export class MailConnector extends BaseConnector {
       const ok = await this.googleToken({ grant_type: 'refresh_token', refresh_token: this.cfg.refreshToken }).catch(() => false);
       if (ok) return;
     }
-    const state = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    const state = randomBytes(16).toString('hex');
     const url =
       `${GOOGLE_AUTH}?` +
       new URLSearchParams({ client_id: this.cfg.clientId, redirect_uri: CALLBACK, response_type: 'code', scope: GOOGLE_SCOPE, access_type: 'offline', prompt: 'consent', state, login_hint: this.cfg.user }).toString();
@@ -385,7 +385,8 @@ export class MailConnector extends BaseConnector {
       unread: (existing?.unread ?? 0) + (live ? 0 : unreadDelta),
       lastMessageAt: (m.date ?? new Date()).getTime(),
       handle: counterpart?.address,
-      participants: [...uniq.values()],
+      // mevcut katılımcıları ezme: sahte References ile diziye düşen bir ileti alıcı listesini değiştiremesin
+      participants: [...new Map([...(existing?.participants ?? []), ...uniq.values()].map((p) => [p.id, p])).values()],
     });
     const text = (m.text ?? htmlToText(m.html || '')).replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim();
     const attachments: Attachment[] = [];
@@ -440,7 +441,9 @@ export class MailConnector extends BaseConnector {
     if (!chat) throw new Error('Sohbet yok');
     const last = this.store.listMessages(chat.id, 50).filter((x) => !x.fromMe).pop();
     const me = this.cfg.user.toLowerCase();
-    const to = (chat.participants ?? []).map((p) => p.id).filter((a) => a !== me);
+    // birebir dizide yanıt son gelen iletinin gönderenine gider (dizi ele geçirme önlemi); grupta tüm katılımcılara
+    const lastFrom = last?.senderId && last.senderId.includes('@') && last.senderId !== me ? last.senderId : undefined;
+    const to = chat.kind === 'direct' && lastFrom ? [lastFrom] : (chat.participants ?? []).map((p) => p.id).filter((a) => a !== me);
     if (!to.length) throw new Error('Alıcı yok');
     if (this.cfg.accessToken) await this.ensureOAuth();
     const info = await this.createTransport().sendMail({

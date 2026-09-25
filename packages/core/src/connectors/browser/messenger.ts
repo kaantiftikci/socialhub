@@ -97,13 +97,13 @@ async function pinDialogOpen(page: Page): Promise<boolean> {
  * dek yoklanır (~1,5-2,5 sn). Tıklama yerine goto: PIN penceresi açıkken Playwright tıklamaları engellenir.
  */
 async function openThread(page: Page, id: string): Promise<void> {
-  const here = new RegExp(`/t/${id}/?(?:[?#]|$)`).test(page.url());
+  const here = new RegExp(`/t/${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/?(?:[?#]|$)`).test(page.url());
   if (!here) await page.goto(`${BASE}/t/${id}/`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
   const n = await waitForRows(page, here ? 5_000 : 15_000);
   if (n === 0 && !here) {
     // ara sayfa geç açılmış olabilir: gelen kutusunu bekle, sonra bir kez daha dene
     if (await ensureInbox(page, 10_000)) {
-      if (!new RegExp(`/t/${id}/?(?:[?#]|$)`).test(page.url())) await page.goto(`${BASE}/t/${id}/`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      if (!new RegExp(`/t/${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/?(?:[?#]|$)`).test(page.url())) await page.goto(`${BASE}/t/${id}/`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
       await waitForRows(page, 10_000);
     }
   }
