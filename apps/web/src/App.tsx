@@ -854,7 +854,7 @@ export default function App() {
                     </>
                   )}
                   <div className="list-title">
-                    {platformFilter && view !== 'snoozed' && <Chip platform={platformFilter} size={26} />}
+                    {platformFilter && view !== 'snoozed' && <Chip platform={platformFilter} size={isMobile ? 34 : 26} />}
                     <h1>{view === 'snoozed' ? 'Ertelenenler' : platformFilter ? PLATFORMS[platformFilter].name : tagFilter ? capitalize(tagFilter) : 'Gelen kutusu'}</h1>
                     {view !== 'snoozed' && scoped.unread > 0 && <span className="pill">{fmtCount(scoped.unread)} yeni</span>}
                   </div>
