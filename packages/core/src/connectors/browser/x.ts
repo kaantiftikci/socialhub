@@ -1089,10 +1089,11 @@ export const x: Strategy & { fetchMedia(page: Page, cookies: Record<string, stri
     // /i/chat/<id> sayfasını açmak okundu işaretler: istemci şifreli okundu olayını SendMessageEventMutation ile gönderir
     // (profil kopyasıyla doğrulandı; olay sayfa açıldıktan 1-3 sn sonra gidiyor, eskiden 0,8 sn beklenip kapatılıyordu).
     // Sayfa zaten açıksa yeniden yükle: aradaki yeni mesajlar için olay yeniden gönderilsin.
+    // #mivelo-visible: gizli sekme taklidi kapatılır (istemci okundu olayını görünür sekmede gönderir)
     const url = `${CHAT}/${threadId}`;
     const sent = page.waitForRequest((r) => /SendMessageEventMutation|mark_read|markRead/i.test(r.url()), { timeout: 6_000 }).catch(() => undefined);
     if (page.url().startsWith(url)) await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
-    else await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+    else await page.goto(`${url}#mivelo-visible`, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
     await page.waitForSelector('[data-testid="dm-message-scroller"]', { timeout: 10_000 }).catch(() => undefined);
     await sent;
     await page.waitForTimeout(500);

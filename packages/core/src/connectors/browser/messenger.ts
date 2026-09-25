@@ -525,7 +525,11 @@ export const messenger: Strategy & PinHooks = {
   },
 
   async markRead(page, _cookies, threadId) {
-    await openThread(page, threadId); // sohbeti açmak Messenger'da okundu sayılır
+    // Sohbeti açmak Messenger'da okundu sayılır; istemci okundu olayını yalnız sekme görünürken gönderir → görünür aç
+    // (köprünün gizli sekme taklidi #mivelo-visible ile kapatılır), sonra normal sayfaya dönülür
+    await page.goto(`${BASE}/t/${threadId}/#mivelo-visible`, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+    await waitForRows(page, 15_000);
+    await page.waitForTimeout(2500);
   },
 
   async send(page, _cookies, threadId, text) {
