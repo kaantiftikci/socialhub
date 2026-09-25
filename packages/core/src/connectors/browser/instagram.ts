@@ -407,10 +407,11 @@ export const instagram: Strategy = {
 
   async markRead(page, _cookies, threadId) {
     needsPage(page);
-    // /items/<id>/seen/ ucu web'de 404; web istemcisi okunduyu useIGDMarkThreadAsReadMutation ile gönderiyor.
-    // Sohbet sayfasını açmak bu mutation'ı tetikliyor (profil kopyasıyla doğrulandı: read_state 1 → 0).
-    await page.goto(`https://www.instagram.com/direct/t/${threadId}/`, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
-    await page.waitForTimeout(6000);
+    // /items/<id>/seen/ ve mark_seen uçları web oturumuyla 404/400 (25 Eyl 2026'da yeniden denendi); web istemcisi okunduyu
+    // GraphQL mutation ile gönderiyor. Sohbet sayfasını GÖRÜNÜR olarak açmak bu mutation'ı tetikler: köprünün gizli sekme
+    // taklidi (visibilityState=hidden) istemcinin okundu göndermesini engelliyordu → #mivelo-visible ile taklit kapatılır.
+    await page.goto(`https://www.instagram.com/direct/t/${threadId}/#mivelo-visible`, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+    await page.waitForTimeout(7000);
   },
 
   /** API tabanlı: mesaj çağrıları paralel yapılabilir (köprü 4'lü paralel çağırır) */

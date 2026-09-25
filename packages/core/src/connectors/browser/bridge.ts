@@ -335,6 +335,8 @@ export class BrowserConnector extends BaseConnector {
         await this.ctx
           .addInitScript(() => {
             try {
+              // #mivelo-visible: strateji sayfayı bilerek "görünür" açar (okundu işaretleme gibi görünürlük isteyen işler)
+              if (location.hash.includes('mivelo-visible')) return;
               Object.defineProperty(document, 'visibilityState', { get: () => 'hidden', configurable: true });
               Object.defineProperty(document, 'hidden', { get: () => true, configurable: true });
               document.hasFocus = () => false;
@@ -520,7 +522,14 @@ export class BrowserConnector extends BaseConnector {
     return added;
   }
 
+  /**
+   * Mivelo'da okunan sohbetler: platform yoklaması bir süre eski 'okunmamış' değeriyle geri açmasın (platform okunduyu
+   * geç işler ya da işaretleme başarısız olursa yeniden denenir). remoteId → {at, lastTs, retries}
+   */
+  private localRead = new Map<string, { at: number; lastTs: number; retries: number }>();
   async markRead(remoteChatId: string): Promise<void> {
+    const chat = this.store.getChat(chatId(this.account.id, remoteChatId));
+    this.localRead.set(remoteChatId, { at: Date.now(), lastTs: chat?.lastMessageAt ?? Date.now(), retries: 0 });
     if (!this.strategy.markRead || (!this.pageless && !(await this.ensureOpen()))) return;
     const last = this.store.listMessages(chatId(this.account.id, remoteChatId), 30).filter((m) => !m.fromMe).pop();
     await this.serial(async () => this.run((p, c) => this.strategy.markRead!(p, c, remoteChatId, last?.remoteId)));
@@ -638,6 +647,7 @@ export class BrowserConnector extends BaseConnector {
       const threads = await withTimeout(this.strategy.threads(page, cookies), 120_000, 'sohbet listesi');
       if (first) this.syncProgress(70, `${threads.length} sohbet, mesajlar alınıyor`);
       const changed: Thread[] = [];
+      const retryRead: string[] = [];
       for (const t of threads) {
         // lastTs=0: strateji zaman bilgisi vermiyor (DOM okuyan Messenger) → depodaki değer korunur
         // Mivelo'da okunan sohbeti platformun eski 'okunmamış' değeri geri açmasın: yalnızca yeni etkinlikte aktar
@@ -645,8 +655,22 @@ export class BrowserConnector extends BaseConnector {
         // lastTs=0 (DOM okuyan Messenger): çekirdek yeniden başladıysa platformun okunmamış durumu depoya aktarılsın
         // ilk yoklamada (açılış) platformun okunmamış/önizleme değeri yetkili; sonra yalnızca yeni etkinlikte
         const fresh = first || !ex || t.lastTs > ex.lastMessageAt || !ex.lastPreview;
-        // okunmamış her zaman platformun değeri: telefonda okunan sohbet burada da okundu olur (Mivelo'da okunan platforma markRead ile gider)
-        this.upsertChat({ remoteId: t.id, name: t.name, kind: t.kind, unread: t.unread, lastMessageAt: t.lastTs || undefined, lastPreview: fresh ? t.preview || undefined : undefined, avatarUrl: t.avatarUrl, handle: t.handle, link: t.link, participants: t.participants, meta: this.folderMeta(t.id, t.meta) });
+        // okunmamış platformun değeri (telefonda okunan burada da okunur); Mivelo'da yeni okunmuş ve o zamandan beri yeni mesaj
+        // gelmemiş sohbette platform hâlâ 'okunmamış' diyorsa 30 dk boyunca 0 tutulur ve işaretleme en çok 2 kez yinelenir
+        let unread = t.unread;
+        const lr = this.localRead.get(t.id);
+        if (lr) {
+          if (t.lastTs > lr.lastTs + 1000) this.localRead.delete(t.id);
+          else if (t.unread === 0) this.localRead.delete(t.id);
+          else if (Date.now() - lr.at < 30 * 60_000) {
+            unread = 0;
+            if (lr.retries < 2) {
+              lr.retries++;
+              retryRead.push(t.id);
+            }
+          } else this.localRead.delete(t.id);
+        }
+        this.upsertChat({ remoteId: t.id, name: t.name, kind: t.kind, unread, lastMessageAt: t.lastTs || undefined, lastPreview: fresh ? t.preview || undefined : undefined, avatarUrl: t.avatarUrl, handle: t.handle, link: t.link, participants: t.participants, meta: this.folderMeta(t.id, t.meta) });
         if (t.readByOthersUpTo) this.outgoingRead(t.id, t.readByOthersUpTo);
         // eski kimlikli kopya (hedef sohbet yukarıda yazıldı)
         for (const a of t.aliases ?? []) {
@@ -657,6 +681,15 @@ export class BrowserConnector extends BaseConnector {
           }
         }
         if (!this.known.has(t.id) || (this.known.get(t.id) ?? 0) < t.lastTs) changed.push(t);
+      }
+      for (const id of retryRead.slice(0, 3)) {
+        try {
+          const last = this.store.listMessages(chatId(this.account.id, id), 30).filter((m) => !m.fromMe).pop();
+          if (this.strategy.markRead) await this.run((p, c) => this.strategy.markRead!(p, c, id, last?.remoteId));
+          bus.log('info', `${this.account.platform}: okundu işareti yinelendi (${id.slice(0, 24)})`);
+        } catch (e) {
+          bus.log('warn', `${this.account.platform}: okundu yinelenemedi: ${(e as Error).message.split('\n')[0].slice(0, 120)}`);
+        }
       }
       const batch = changed.slice(0, first ? 16 : 8);
       const failed: string[] = [];

@@ -176,6 +176,8 @@ export default function App() {
   const [, tick] = useState(0);
   const selectedRef = useRef<string | null>(null);
   selectedRef.current = selected;
+  /** sohbet → son yeniden 'okundu' işaretleme zamanı */
+  const reReadAt = useRef(new Map<string, number>());
   const searchRef = useRef<HTMLInputElement>(null);
 
   const notify = useCallback((text: string, err = false) => {
@@ -275,6 +277,12 @@ export default function App() {
           break;
         case 'chat.upsert':
           queueChat(ev.chat);
+          // Açık ve önde olan sohbete platform yoklaması 'okunmamış' geri yazdıysa (platform okunduyu geç işledi) yeniden işaretle;
+          // sohbet başına en çok dakikada bir (döngü olmasın)
+          if (ev.chat.id === selectedRef.current && ev.chat.unread > 0 && Date.now() - (reReadAt.current.get(ev.chat.id) ?? 0) > 60_000) {
+            reReadAt.current.set(ev.chat.id, Date.now());
+            void windowFocused().then((f) => f && api.markRead(ev.chat.id)).catch(() => undefined);
+          }
           break;
         case 'chat.delete':
           pendingChats.delete(ev.chatId);
