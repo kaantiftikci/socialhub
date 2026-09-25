@@ -533,7 +533,8 @@ export class BrowserConnector extends BaseConnector {
   }
 
   async loadHistory(remoteChatId: string, limit = 50, before?: number): Promise<void> {
-    if (!this.page) return;
+    // Sayfasız modda (Instagram, Slack) this.page yoktur: istek Node'dan atılır; sayfalı modda tarayıcı açık olmalı
+    if (!this.pageless && !(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
     const msgs = await this.serial(async () => this.run((p, c) => this.strategy.messages(p, c, remoteChatId, limit, before)));
     for (const m of msgs) this.ingest(remoteChatId, m, false);
   }
