@@ -323,7 +323,11 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     const c = registry.get(chat.accountId);
     const b = body as { limit?: number; before?: number };
     const before = Number(b.before);
-    if (c?.loadHistory) await c.loadHistory(chat.remoteId, Math.min(500, Math.max(1, Number(b.limit) || 50)), Number.isFinite(before) && before > 0 ? before : undefined);
+    try {
+      if (c?.loadHistory) await c.loadHistory(chat.remoteId, Math.min(500, Math.max(1, Number(b.limit) || 50)), Number.isFinite(before) && before > 0 ? before : undefined);
+    } catch (e) {
+      throw new HttpError(502, `Geçmiş yüklenemedi: ${(e as Error).message.split('\n')[0].slice(0, 160)}`);
+    }
     return { ok: true };
   });
   route('POST', '/api/chats/:id/draft', async (_r, _s, p, body) => {
