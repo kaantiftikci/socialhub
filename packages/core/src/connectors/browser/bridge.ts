@@ -69,6 +69,8 @@ export interface Strategy {
   loginHint: string;
   /** API tabanlı: giriş sonrası tarayıcı kapanır, istekler Node'dan (Playwright request bağlamı, kayıtlı çerezler) atılır */
   pageless?: boolean;
+  /** Görünmez sekme "arka planda" tanıtılmasın (site gizli sekmede içerik yüklemiyorsa) */
+  keepVisible?: boolean;
   /** Yoklama bitince sayfayı about:blank'e al (ağır siteler boşta bellek tutmasın); strateji her çağrıda kendi sayfasına döner */
   unloadWhenIdle?: boolean;
   /** Giriş yapılmış mı? (çerezler Node tarafında okunur, sayfa da verilir) */
@@ -303,6 +305,21 @@ export class BrowserConnector extends BaseConnector {
           '--disable-features=Translate,MediaRouter,OptimizationHints,BackForwardCache,InterestFeedContentSuggestions,AutofillServerCommunication',
         ],
       });
+      // Görünmez oturum: sayfa kendini "arka planda/odaksız" tanıtsın. Messenger, X, LinkedIn gibi siteler görünür ve odaklı
+      // sekmeyi "aktif" sayıp telefona bildirim göndermeyi kesiyor; gizli sekme (WhatsApp Web'deki gibi) bunu yapmıyor.
+      if (hidden && !this.strategy.keepVisible) {
+        await this.ctx
+          .addInitScript(() => {
+            try {
+              Object.defineProperty(document, 'visibilityState', { get: () => 'hidden', configurable: true });
+              Object.defineProperty(document, 'hidden', { get: () => true, configurable: true });
+              document.hasFocus = () => false;
+            } catch {
+              /* yok */
+            }
+          })
+          .catch(() => undefined);
+      }
     } catch (e) {
       const msg = (e as Error).message;
       // Önceki çekirdekten kalan Chromium profil kilidini tutuyorsa: o süreci kapat, kilidi sil, bir kez daha dene

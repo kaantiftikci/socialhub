@@ -95,6 +95,8 @@ export class TelegramConnector extends BaseConnector {
     this.meId = String(me.id);
     this.account.label = me.username ? `@${me.username}` : [me.firstName, me.lastName].filter(Boolean).join(' ');
     this.setStatus('connected');
+    // Telefon bildirimleri: başka bir oturum "çevrimiçi" görünürse Telegram telefona bildirim göndermeyebilir; açıkça çevrimdışı ol
+    await client.invoke(new Api.account.UpdateStatus({ offline: true })).catch(() => undefined);
 
     client.addEventHandler((ev: NewMessageEvent) => void this.onNew(ev), new NewMessage({}));
     // Telefonda/başka istemcide okununca okunmamış sayacı burada da düşsün
@@ -108,6 +110,7 @@ export class TelegramConnector extends BaseConnector {
   }
 
   /** Bağlantı bekçisi + kaçan mesaj yoklaması */
+  private pollTick = 0;
   private async poll(): Promise<void> {
     const client = this.client;
     if (!client || this.polling) return;
@@ -118,6 +121,8 @@ export class TelegramConnector extends BaseConnector {
         await client.connect();
         if (!client.connected) return;
       }
+      // her 4 dk'da bir çevrimdışı durumunu tazele (okuma/gönderme çevrimiçi sayabiliyor)
+      if (++this.pollTick % 8 === 0) await client.invoke(new Api.account.UpdateStatus({ offline: true })).catch(() => undefined);
       const dialogs = await client.getDialogs({ limit: 25 });
       for (const d of dialogs) {
         if (!d.id || !d.entity || !d.message) continue;
