@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, connectEvents } from './api';
-import { PLATFORMS, type Account, type Chat, type CoreEvent, type Message, type Platform, DEFAULT_TAGS } from './types';
+import { PLATFORMS, type Account, type Chat, type ChatFlags, type CoreEvent, type Message, type Platform, DEFAULT_TAGS } from './types';
 import { Avatar, Chip, Icon, Logo, Resizer, SyncBar, Tag, ago, fmtTime, loadPaneSizes, useClosing } from './ui';
 import { Conversation, startScheduledSends } from './Conversation';
 import { ConnectModal } from './Connect';
@@ -9,7 +9,12 @@ import { isTauri, notify as desktopNotify, onDesktopEvent, playPing, SOUNDS, get
 import { PROFILE_NAME, STATIC_DEMO } from './profile';
 import { leaveDemoPanel } from './demo-session';
 
-export type View = 'inbox' | 'focus' | 'snoozed';
+export type View = 'inbox' | 'focus' | 'snoozed' | 'archived' | 'muted' | 'hidden';
+const FLAG_VIEWS: Array<{ view: View; flag: 'archived' | 'muted' | 'hidden'; label: string; icon: string; empty: string }> = [
+  { view: 'archived', flag: 'archived', label: 'Arşiv', icon: 'archive', empty: 'Arşivlenmiş sohbet yok. Sağ paneldeki Eylemler’den arşivleyebilirsin.' },
+  { view: 'muted', flag: 'muted', label: 'Sessiz', icon: 'mute', empty: 'Sessize alınmış sohbet yok.' },
+  { view: 'hidden', flag: 'hidden', label: 'Gizli', icon: 'eyeoff', empty: 'Gizlenmiş sohbet yok.' },
+];
 export type Filter = 'all' | 'unread' | 'waiting';
 export type Snoozes = Record<string, number>; // chatId → uyanma zamanı (ms)
 
@@ -314,7 +319,7 @@ export default function App() {
         case 'message.upsert':
           queueChat(ev.chat);
           // yalnızca canlı gelen (eşitleme/geçmiş değil) ve yeni mesajlar bildirim çalsın
-          if (ev.live && !ev.message.fromMe && Date.now() - bootTs > 60_000 && Date.now() - ev.message.ts < 120_000) {
+          if (ev.live && !ev.message.fromMe && !ev.chat.muted && !ev.chat.hidden && !ev.chat.archived && Date.now() - bootTs > 60_000 && Date.now() - ev.message.ts < 120_000) {
             void windowFocused().then((focused) => {
               if (!focused || ev.message.chatId !== selectedRef.current) {
                 const body = (ev.message.text || ev.message.attachments?.[0]?.name || 'Yeni mesaj').slice(0, 140);
@@ -415,7 +420,28 @@ export default function App() {
    * Gelen kutusu, sayaçlar ve odak için sohbetler: arşivlenmiş (Telegram) ve klasörlenmiş (iMessage bilinmeyen/istenmeyen/SMS)
    * sohbetler dışarıda kalır; onlar yalnızca kendi sekmelerinde görünür.
    */
-  const inboxChats = useMemo(() => activeChats.filter((c) => !c.meta?.archived && !(c.platform === 'imessage' && c.meta?.folder === 'junk')), [activeChats]);
+  const inboxChats = useMemo(() => activeChats.filter((c) => !c.meta?.archived && !c.archived && !c.muted && !c.hidden && !(c.platform === 'imessage' && c.meta?.folder === 'junk')), [activeChats]);
+  /** Arşiv / Sessiz / Gizli görünümleri (yerel bayraklar) */
+  const flagged = useMemo(() => {
+    const by = (k: 'archived' | 'muted' | 'hidden') => allChats.filter((c) => c[k]).sort((a, b) => b.lastMessageAt - a.lastMessageAt);
+    return { archived: by('archived'), muted: by('muted'), hidden: by('hidden') };
+  }, [allChats]);
+  const pinnedChats = useMemo(() => inboxChats.filter((c) => c.pinned).sort((a, b) => b.lastMessageAt - a.lastMessageAt), [inboxChats]);
+  const setFlags = useCallback(
+    (id: string, f: ChatFlags) => {
+      api
+        .setFlags(id, f)
+        .then((c) => {
+          setChats((p) => new Map(p).set(c.id, c));
+          const what = f.pinned === true ? 'Sabitlendi' : f.pinned === false ? 'Sabitleme kaldırıldı' : f.archived === true ? 'Arşivlendi' : f.archived === false ? 'Arşivden çıkarıldı' : f.muted === true ? 'Sessize alındı' : f.muted === false ? 'Ses açıldı' : f.hidden === true ? 'Gizlendi' : f.hidden === false ? 'Gizleme kaldırıldı' : 'Güncellendi';
+          notify(what);
+        })
+        .catch((e) => notify((e as Error).message, true));
+    },
+    [notify],
+  );
+  const [newChatOpen, setNewChatOpen] = useState(false);
+  const newChatP = useClosing(newChatOpen || null);
   const archivedCount = useMemo(() => activeChats.filter((c) => c.platform === platformFilter && !!c.meta?.archived).length, [activeChats, platformFilter]);
   const snoozedChats = useMemo(() => allChats.filter((c) => isSnoozed(c.id)).sort((a, b) => snoozes[a.id] - snoozes[b.id]), [allChats, isSnoozed, snoozes]);
   const waitingChats = useMemo(() => inboxChats.filter(isWaiting).sort((a, b) => b.lastMessageAt - a.lastMessageAt), [inboxChats]);
@@ -447,7 +473,7 @@ export default function App() {
       const q = query.toLowerCase();
       list = list.filter((c) => c.name.toLowerCase().includes(q) || c.lastPreview.toLowerCase().includes(q));
     }
-    list.sort((a, b) => (smartSort ? score(b) - score(a) : 0) || b.lastMessageAt - a.lastMessageAt);
+    list.sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || (smartSort ? score(b) - score(a) : 0) || b.lastMessageAt - a.lastMessageAt);
     return list;
   }, [activeChats, inboxChats, filter, platformFilter, tagFilter, query, smartSort, imFolder, tgArchive]);
 
@@ -733,6 +759,9 @@ export default function App() {
           <NavItem icon="sparkle" label="Odak" badge="AI" count={totals.waiting} active={view === 'focus'} onClick={() => setView('focus')} />
           <NavItem icon="bell" label="Ertelenenler" count={snoozedChats.length} active={view === 'snoozed'} onClick={() => setView('snoozed')} />
           <NavItem icon="archive" label="Okunmamış" count={totals.unread} active={view === 'inbox' && filter === 'unread' && !platformFilter && !tagFilter} onClick={() => goInbox('unread')} />
+          {FLAG_VIEWS.filter((f) => f.view === 'archived' || flagged[f.flag].length > 0).map((f) => (
+            <NavItem key={f.view} icon={f.icon} label={f.label} count={flagged[f.flag].length} active={view === f.view} onClick={() => setView(f.view)} />
+          ))}
         </div>
         <div className="side-scroll">
           {(chatAccounts.length > 0 || accounts.length === 0) && (
@@ -775,6 +804,23 @@ export default function App() {
             </div>
           </div>
         )}
+        <div className="hotkey-card" aria-hidden="true">
+          <span className="keys">
+            {isTauri ? (
+              <>
+                <span className="kbd">⌘</span>
+                <span className="kbd">⇧</span>
+                <span className="kbd">K</span>
+              </>
+            ) : (
+              <>
+                <span className="kbd">⌘</span>
+                <span className="kbd">K</span>
+              </>
+            )}
+          </span>
+          <span className="txt">{isTauri ? 'Mivelo’yu her yerden göster/gizle' : 'sohbetlerde ara · J/K gezin'}</span>
+        </div>
         <div className="me">
           <Avatar name={PROFILE_NAME} size={32} />
           <span style={{ flexGrow: 1 }}>
@@ -859,11 +905,16 @@ export default function App() {
               <div className="list-head">
                 <div className="list-top" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div className="list-title">
-                    {platformFilter && view !== 'snoozed' && <Chip platform={platformFilter} size={26} />}
-                    <h1>{view === 'snoozed' ? 'Ertelenenler' : platformFilter ? PLATFORMS[platformFilter].name : tagFilter ? capitalize(tagFilter) : 'Gelen kutusu'}</h1>
-                    {view !== 'snoozed' && scoped.unread > 0 && <span className="pill">{fmtCount(scoped.unread)} yeni</span>}
+                    {platformFilter && view === 'inbox' && <Chip platform={platformFilter} size={26} />}
+                    <h1>{view === 'snoozed' ? 'Ertelenenler' : FLAG_VIEWS.find((f) => f.view === view)?.label ?? (platformFilter ? PLATFORMS[platformFilter].name : tagFilter ? capitalize(tagFilter) : 'Gelen kutusu')}</h1>
+                    {view === 'inbox' && scoped.unread > 0 && <span className="pill">{fmtCount(scoped.unread)} yeni</span>}
                   </div>
                   <span style={{ flexGrow: 1 }} />
+                  {accounts.some((a) => a.status === 'connected' && NEW_CHAT_PLATFORMS.has(a.platform)) && (
+                    <button className="btn icon b b2" aria-label="Yeni sohbet" title="Yeni sohbet başlat" onClick={() => setNewChatOpen(true)}>
+                      <Icon name="pen" size={15} sw={2} />
+                    </button>
+                  )}
                   <button className={`btn icon b b2 ${listSearch || query ? 'soft' : ''}`} aria-label="Sohbetlerde ara" title="Sohbetlerde ara" onClick={() => (setListSearch(!listSearch), listSearch && setQuery(''))}>
                     <Icon name="search" size={15} sw={2} />
                   </button>
@@ -909,6 +960,20 @@ export default function App() {
                 )}
               </div>
 
+              {view === 'inbox' && !platformFilter && !tagFilter && !query && pinnedChats.length > 0 && (
+                <div className="quick" aria-label="Sabitlenenler">
+                  {pinnedChats.slice(0, 8).map((c) => (
+                    <button key={c.id} className={`qc b ${c.id === selected ? 'on' : ''}`} onClick={() => setSelected(c.id)} title={c.lastPreview}>
+                      {c.unread > 0 && <span className="qc-bub">{c.lastPreview.replace(/^Sen: /, '')}</span>}
+                      <span className="avwrap">
+                        <Avatar name={c.name} size={46} url={c.avatarUrl} />
+                        <Chip platform={c.platform} size={17} ring="#f7f6fa" />
+                      </span>
+                      <span className="qc-nm">{c.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
               {/* anahtar: uygulama/sekme/etiket değişince liste yeniden kurulur ve satırlar kademeli belirir */}
               <div className="rows" key={`${view}|${platformFilter ?? ''}|${filter}|${tagFilter ?? ''}`} onScroll={onRowsScroll}>
                 {view === 'snoozed' ? (
@@ -923,6 +988,16 @@ export default function App() {
                       <ChatRow key={c.id} chat={c} selected={c.id === selected} onClick={() => setSelected(c.id)} snoozedUntil={snoozes[c.id]} onUnsnooze={() => unsnooze(c.id)} />
                     ))
                   )
+                ) : FLAG_VIEWS.some((f) => f.view === view) ? (
+                  (() => {
+                    const f = FLAG_VIEWS.find((x) => x.view === view)!;
+                    const list = flagged[f.flag];
+                    return list.length === 0 ? (
+                      <div className="empty">{f.empty}</div>
+                    ) : (
+                      list.map((c) => <ChatRow key={c.id} chat={c} selected={c.id === selected} onClick={() => setSelected(c.id)} onSnooze={() => snooze(c.id)} />)
+                    );
+                  })()
                 ) : chatList.length === 0 ? (
                   <div className="empty">
                     {chats.size === 0 ? (
@@ -942,7 +1017,7 @@ export default function App() {
                         <span className="label">{day}</span>
                       </div>
                       {items.map((c) => (
-                        <ChatRow key={c.id} chat={c} selected={c.id === selected} onClick={() => setSelected(c.id)} onSnooze={() => snooze(c.id)} typing={typing[c.id] ? typing[c.id].name ?? '' : null} />
+                        <ChatRow key={c.id} chat={c} selected={c.id === selected} onClick={() => setSelected(c.id)} onSnooze={() => snooze(c.id)} onPin={() => setFlags(c.id, { pinned: !c.pinned })} typing={typing[c.id] ? typing[c.id].name ?? '' : null} />
                       ))}
                     </div>
                   ))
@@ -993,6 +1068,7 @@ export default function App() {
                 snoozedUntil={snoozes[current.id]}
                 onUnsnooze={() => unsnooze(current.id)}
                 onTags={(tags) => api.setTags(current.id, tags).then((c) => setChats((p) => new Map(p).set(c.id, c))).catch((e) => notify(e.message, true))}
+                onFlags={(f) => setFlags(current.id, f)}
                 showDetails={isMobile ? mobileDetails : showDetails}
                 onToggleDetails={() => (isMobile ? setMobileDetails((v) => !v) : setShowDetails(!showDetails))}
                 onBack={isMobile ? () => setSelected(null) : undefined}
@@ -1191,6 +1267,19 @@ export default function App() {
           </div>
         ) : null;
       })()}
+      {newChatP.value && (
+        <NewChatModal
+          closing={newChatP.closing}
+          accounts={accounts.filter((a) => a.status === 'connected' && NEW_CHAT_PLATFORMS.has(a.platform))}
+          chats={allChats}
+          onClose={() => setNewChatOpen(false)}
+          onOpen={(id) => {
+            setNewChatOpen(false);
+            openChat(id);
+          }}
+          notify={notify}
+        />
+      )}
       {inToasts.length > 0 && (
         <div className="msgtoasts" aria-live="polite">
           {inToasts.map((t) => (
@@ -1229,6 +1318,95 @@ export default function App() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Tanıtıcı (numara / @kullanıcı) yazarak yeni sohbet açılabilen platformlar */
+const NEW_CHAT_PLATFORMS = new Set<Platform>(['whatsapp', 'telegram', 'demo']);
+
+/** Yeni sohbet: mevcut sohbetlerde ara ya da bağlı bir hesapta numara/@kullanıcı ile sohbet aç */
+function NewChatModal({ closing, accounts, chats, onClose, onOpen, notify }: { closing: boolean; accounts: Account[]; chats: Chat[]; onClose: () => void; onOpen: (chatId: string) => void; notify: (t: string, err?: boolean) => void }) {
+  const [q, setQ] = useState('');
+  const [acc, setAcc] = useState<string>(accounts[0]?.id ?? '');
+  const [busy, setBusy] = useState(false);
+  const account = accounts.find((a) => a.id === acc) ?? accounts[0];
+  const s = q.trim().toLocaleLowerCase('tr-TR');
+  const matches = s ? chats.filter((c) => c.name.toLocaleLowerCase('tr-TR').includes(s) || (c.handle ?? '').toLocaleLowerCase('tr-TR').includes(s)).slice(0, 8) : [];
+  const ident = q.trim();
+  const isPhone = /^\+?\d[\d\s-]{6,}$/.test(ident);
+  const isUser = /^@?[a-z0-9_.]{3,}$/i.test(ident) && !isPhone;
+  const canStart = !!account && (account.platform === 'whatsapp' ? isPhone : account.platform === 'telegram' ? isPhone || isUser : ident.length > 1);
+  async function start() {
+    if (!account || !canStart || busy) return;
+    setBusy(true);
+    try {
+      const id = account.platform === 'whatsapp' ? `${ident.replace(/\D/g, '')}@s.whatsapp.net` : ident;
+      const c = await api.openChat(account.id, { id, name: ident, handle: ident });
+      onOpen(c.id);
+    } catch (e) {
+      notify((e as Error).message, true);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className={`overlay ${closing ? 'closing' : ''}`} onClick={onClose}>
+      <div className="modal newchat" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Yeni sohbet">
+        <div className="mh">
+          <h2>Yeni sohbet</h2>
+          <button className="btn ghost xs icon b" onClick={onClose} aria-label="Kapat">
+            <Icon name="x" size={14} sw={2} />
+          </button>
+        </div>
+        <label className="search" style={{ margin: 0 }}>
+          <Icon name="search" size={15} />
+          <input
+            autoFocus
+            placeholder="Ad, +90 numara ya da @kullanıcı"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') onClose();
+              if (e.key === 'Enter') (matches[0] && !canStart ? onOpen(matches[0].id) : void start());
+            }}
+          />
+        </label>
+        {accounts.length > 1 && (
+          <div className="nc-accs" role="radiogroup" aria-label="Hesap">
+            {accounts.map((a) => (
+              <button key={a.id} role="radio" aria-checked={a.id === account?.id} className={`nc-acc b ${a.id === account?.id ? 'on' : ''}`} onClick={() => setAcc(a.id)}>
+                <Chip platform={a.platform} size={16} /> {PLATFORMS[a.platform].name}
+                <span className="lbl">{a.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {matches.length > 0 && (
+          <div className="nc-list">
+            <span className="label">Mevcut sohbetler</span>
+            {matches.map((c) => (
+              <button key={c.id} className="nc-row b" onClick={() => onOpen(c.id)}>
+                <span className="avwrap">
+                  <Avatar name={c.name} size={32} url={c.avatarUrl} />
+                  <Chip platform={c.platform} size={14} ring="#fff" />
+                </span>
+                <span className="nm">
+                  {c.name}
+                  {c.handle && c.handle !== c.name && <span className="hd">{c.handle}</span>}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+        {account && (
+          <button className="btn primary b nc-start" disabled={!canStart || busy} onClick={() => void start()}>
+            {busy ? <span className="spin" /> : <Icon name="pen" size={14} sw={2} />}
+            {canStart ? `${PLATFORMS[account.platform].name}'da ${ident} ile sohbet başlat` : account.platform === 'whatsapp' ? 'WhatsApp için +90… numara yaz' : 'Numara ya da @kullanıcı adı yaz'}
+          </button>
+        )}
+        <span className="nc-hint">Sohbet açılır, ilk mesajı sen yazarsın. {account?.platform === 'telegram' ? 'Telegram’da rehberinde olmayan numaralar bulunamayabilir.' : ''}</span>
+      </div>
     </div>
   );
 }
@@ -1322,6 +1500,7 @@ function ChatRow({
   snoozedUntil,
   onUnsnooze,
   typing,
+  onPin,
 }: {
   chat: Chat;
   selected: boolean;
@@ -1331,6 +1510,7 @@ function ChatRow({
   onUnsnooze?: () => void;
   /** yazıyor: null = hayır, "" = evet, "Ad" = grupta kim */
   typing?: string | null;
+  onPin?: () => void;
 }) {
   const waiting = chat.platform !== 'imessage' && isWaiting(chat); // Mesajlar'da "bekleyen" kavramı yok
   const isMail = PLATFORMS[chat.platform].category === 'mail';
@@ -1345,6 +1525,7 @@ function ChatRow({
       </span>
       <span className="body">
         <span className="top">
+          {chat.pinned && <Icon name="pin" size={12} color="#8c889b" />}
           <span className="name">{isMail && mailSender ? mailSender : chat.name}</span>
           {chat.tags.slice(0, 2).map((t) => (
             <Tag key={t} name={t} mini />
@@ -1365,6 +1546,11 @@ function ChatRow({
         </span>
       </span>
       <span className="qa" onClick={(e) => e.stopPropagation()}>
+        {onPin && (
+          <button title={chat.pinned ? 'Sabitlemeyi kaldır' : 'Üstte sabitle'} onClick={onPin}>
+            <Icon name="pin" size={13} sw={2} />
+          </button>
+        )}
         {onUnsnooze ? (
           <button title="Erteleyi kaldır" onClick={onUnsnooze}>
             <Icon name="bell" size={13} sw={2} />

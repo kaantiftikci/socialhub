@@ -10,6 +10,7 @@ import { StringSession } from 'telegram/sessions/index.js';
 import { NewMessage, Raw, type NewMessageEvent } from 'telegram/events/index.js';
 import { getPeerId } from 'telegram/Utils.js';
 import { BaseConnector, type OutFile } from './base.js';
+import type { Reaction } from '../model.js';
 import { bus } from '../bus.js';
 import { sessionDir, TELEGRAM_API_ID, TELEGRAM_API_HASH } from '../config.js';
 import type { Attachment, ChatKind } from '../model.js';
@@ -100,7 +101,7 @@ export class TelegramConnector extends BaseConnector {
 
     client.addEventHandler((ev: NewMessageEvent) => void this.onNew(ev), new NewMessage({}));
     // Telefonda/başka istemcide okununca okunmamış sayacı burada da düşsün
-    client.addEventHandler((u: Api.TypeUpdate) => this.onRead(u), new Raw({ types: [Api.UpdateReadHistoryInbox, Api.UpdateReadChannelInbox, Api.UpdateFolderPeers, Api.UpdateReadHistoryOutbox, Api.UpdateReadChannelOutbox, Api.UpdateUserTyping, Api.UpdateChatUserTyping, Api.UpdateChannelUserTyping] }));
+    client.addEventHandler((u: Api.TypeUpdate) => this.onRead(u), new Raw({ types: [Api.UpdateReadHistoryInbox, Api.UpdateReadChannelInbox, Api.UpdateFolderPeers, Api.UpdateReadHistoryOutbox, Api.UpdateReadChannelOutbox, Api.UpdateUserTyping, Api.UpdateChatUserTyping, Api.UpdateChannelUserTyping, Api.UpdateMessageReactions] }));
     await this.backfill(client);
     // GramJS'in güncelleme akışı bağlantı kopunca ya da uzun boşlukta sessizce kesilebiliyor (bilinen sorun): 30 sn'de bir
     // bağlantıyı denetle ve son sohbetlerde kaçan mesaj varsa çek. Kaçan mesajlar canlı sayılır (bildirim + sayaç).
@@ -191,6 +192,24 @@ export class TelegramConnector extends BaseConnector {
     const id = String(sent.id);
     this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent' });
     return { remoteId: id };
+  }
+
+  /** Yeni sohbet: @kullanıcıadı, +telefon ya da sayısal kimlik → varlık çözülür, sohbet kimliği (kullanıcı id) döner */
+  async openDirect(p: { id: string; name: string }): Promise<string> {
+    if (!this.client) throw new Error('Telegram bağlı değil');
+    const raw = p.id.trim();
+    if (/^-?\d+$/.test(raw)) return raw;
+    const key = raw.startsWith('@') ? raw : /^\+?\d[\d\s-]{6,}$/.test(raw) ? raw.replace(/[\s-]/g, '') : '@' + raw;
+    const ent = await this.client.getEntity(key).catch(() => undefined);
+    if (!ent || !('id' in ent)) throw new Error(`Telegram'da bulunamadı: ${raw} (kullanıcı adı ya da rehberdeki numara olmalı)`);
+    this.entities.set(String(ent.id), ent as never);
+    return String(ent.id);
+  }
+
+  async react(remoteChatId: string, remoteMsgId: string, emoji: string, remove: boolean): Promise<void> {
+    if (!this.client) throw new Error('Telegram bağlı değil');
+    const peer = await this.entityOf(remoteChatId);
+    await this.client.invoke(new Api.messages.SendReaction({ peer, msgId: Number(remoteMsgId), reaction: remove ? [] : [new Api.ReactionEmoji({ emoticon: emoji })] }));
   }
 
   /**
@@ -306,6 +325,13 @@ export class TelegramConnector extends BaseConnector {
 
   /** UpdateReadHistoryInbox / UpdateReadChannelInbox: başka istemcide okundu → platformun verdiği kalan sayıyı yaz */
   private onRead(u: Api.TypeUpdate): void {
+    if (u instanceof Api.UpdateMessageReactions) {
+      const rid = getPeerId(u.peer);
+      const chat = this.store.getChat(`${this.account.id}/${rid}`);
+      const m = chat && this.store.setReactions(`${chat.id}#${u.msgId}`, tgReactions(u.reactions, chat.kind === 'direct' ? chat.name : ''));
+      if (m && chat) bus.emit({ type: 'message.upsert', message: m, chat });
+      return;
+    }
     // Karşı taraf yazıyor (birebir / grup / kanal)
     if (u instanceof Api.UpdateUserTyping || u instanceof Api.UpdateChatUserTyping || u instanceof Api.UpdateChannelUserTyping) {
       const rid = u instanceof Api.UpdateUserTyping ? String(u.userId) : u instanceof Api.UpdateChatUserTyping ? String(-Number(u.chatId)) : getPeerId(new Api.PeerChannel({ channelId: u.channelId }));
@@ -472,6 +498,7 @@ export class TelegramConnector extends BaseConnector {
         status: m.out ? 'sent' : 'delivered',
         // Boş dizi de yazılır: eski sürümün bağlantı önizlemesi için bıraktığı içi boş {kind:'other'} eki temizlensin
         attachments: attachments ?? undefined,
+        reactions: tgReactions(m.reactions, chat.kind === 'direct' ? chatName : ''),
       },
       { live },
     );
@@ -537,6 +564,33 @@ export function tgSendFileParams(file: { path: string; name: string; mime: strin
   // voice: mikrofon kaydı → Telegram "sesli mesaj" (yuvarlak dalga biçimli balon); GramJS ogg/opus bekler ama diğer biçimleri de kabul eder
   if (file.voice) return { file: file.path, caption: caption || undefined, forceDocument: false, voiceNote: true };
   return { file: file.path, caption: caption || undefined, forceDocument: !native };
+}
+
+/**
+ * Telegram tepkileri → Reaction[]: recentReactions varsa kişi bazlı (my → benim); yoksa results sayaçları
+ * (chosenOrder → benim, kalanlar kimliksiz). Birebir sohbette karşı tarafın adı otherName.
+ */
+export function tgReactions(r: Api.TypeMessageReactions | undefined | null, otherName: string): Reaction[] | undefined {
+  if (!(r instanceof Api.MessageReactions)) return undefined;
+  const emojiOf = (x: Api.TypeReaction) => (x instanceof Api.ReactionEmoji ? x.emoticon : x instanceof Api.ReactionCustomEmoji ? '⭐' : '');
+  const out: Reaction[] = [];
+  if (r.recentReactions?.length) {
+    for (const x of r.recentReactions) {
+      const e = emojiOf(x.reaction);
+      if (!e) continue;
+      const pid = getPeerId(x.peerId);
+      out.push({ emoji: e, senderId: x.my ? 'me' : pid, senderName: x.my ? 'Ben' : otherName, fromMe: !!x.my });
+    }
+    if (out.length) return out;
+  }
+  for (const c of r.results ?? []) {
+    const e = emojiOf(c.reaction);
+    if (!e) continue;
+    const mine = c.chosenOrder != null;
+    if (mine) out.push({ emoji: e, senderId: 'me', senderName: 'Ben', fromMe: true });
+    for (let i = mine ? 1 : 0; i < c.count; i++) out.push({ emoji: e, senderId: otherName && c.count - (mine ? 1 : 0) === 1 ? 'other' : `tg#${e}#${i}`, senderName: otherName, fromMe: false });
+  }
+  return out.length ? out : undefined;
 }
 
 /** Kullanıcı/grup/kanal varlığının görünen adı (ad soyad → kullanıcı adı → başlık); bilinmiyorsa '' */

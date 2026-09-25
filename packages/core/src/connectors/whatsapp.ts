@@ -10,7 +10,7 @@ import type { WASocket, WAMessage, Contact, proto } from '@whiskeysockets/bailey
 import { BaseConnector, type OutFile, type StartOptions } from './base.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
-import { chatId as chatIdOf, type Attachment, type Message, type Participant } from '../model.js';
+import { chatId as chatIdOf, messageId as messageIdOf, type Attachment, type Message, type Participant } from '../model.js';
 import { macContacts } from '../contacts-mac.js';
 
 // Baileys CJS olarak yayınlanıyor; ESM'den yüklenince default export iç içe gelebilir.
@@ -785,6 +785,19 @@ export class WhatsAppConnector extends BaseConnector {
     return { remoteId: id };
   }
 
+  /** Emoji tepkisi: hedef mesajın anahtarı (fromMe, grupta katılımcı) depodaki kayıttan türetilir */
+  async react(remoteChatId: string, remoteMsgId: string, emoji: string, remove: boolean): Promise<void> {
+    if (!this.sock) throw new Error('WhatsApp bağlı değil');
+    const m = this.store.getMessage(messageIdOf(chatIdOf(this.account.id, remoteChatId), remoteMsgId));
+    const key = {
+      remoteJid: this.wireOf(remoteChatId),
+      id: remoteMsgId,
+      fromMe: !!m?.fromMe,
+      participant: remoteChatId.endsWith('@g.us') ? this.participantOf(remoteChatId, !m || m.fromMe ? 'me' : m.senderId) : undefined,
+    };
+    await this.sock.sendMessage(this.wireOf(remoteChatId), { react: { text: remove ? '' : emoji, key } });
+  }
+
   /** En yeni sohbetlerin profil fotoğraflarını (varsa) çek. */
   private async fetchAvatars(sock: WASocket, jids: string[]): Promise<void> {
     for (const jid of jids) {
@@ -1186,6 +1199,14 @@ export class WhatsAppConnector extends BaseConnector {
     if (raw.endsWith('@g.us') && (k.addressingMode === 'lid' || part?.endsWith('@lid')) && !this.lidGroups.has(raw)) {
       this.lidGroups.add(raw);
       this.scheduleSaveNames();
+    }
+    const reaction = m.message?.reactionMessage;
+    if (reaction?.key?.id) {
+      // Emoji tepkisi: hedef mesaja işlenir (text '' → kaldırıldı); mesaj depoda yoksa atlanır
+      const senderJid = m.key.fromMe ? 'me' : this.canon(part ?? jid);
+      const name = m.key.fromMe ? 'Ben' : this.nameOf(senderJid) || m.pushName || senderJid.split('@')[0];
+      this.applyReaction(jid, reaction.key.id, { emoji: reaction.text ?? '', senderId: senderJid, senderName: name, fromMe: !!m.key.fromMe }, !reaction.text);
+      return;
     }
     const content = unwrap(m.message);
     const text = textOf(content);

@@ -1,5 +1,6 @@
 import type { Page } from 'playwright';
-import type { Attachment } from '../../model.js';
+import type { Attachment, Reaction } from '../../model.js';
+import type { SendOptions } from '../base.js';
 import { apiOf, needsPage, type Msg, type Strategy, type Thread } from './bridge.js';
 
 /**
@@ -259,6 +260,35 @@ export function fileToAttachment(f: J): Attachment {
 /** Sistem alt türleri (katılma/ayrılma/başlık) mesaj değildir; bot, dosya, düzenlenmiş vb. mesajlardır */
 const SKIP_SUBTYPES = new Set(['channel_join', 'channel_leave', 'group_join', 'group_leave', 'channel_topic', 'channel_purpose', 'channel_name', 'channel_archive', 'channel_unarchive', 'pinned_item', 'unpinned_item', 'tombstone', 'joiner_notification', 'reminder_add', 'bot_add', 'bot_remove', 'huddle_thread']);
 
+/** Slack emoji adı ↔ karakter (tepki çipleri ve reactions.add için; bilinmeyen adlar :ad: olarak gösterilir) */
+export const SLACK_EMOJI: Record<string, string> = {
+  '+1': '👍', thumbsup: '👍', '-1': '👎', heart: '❤️', joy: '😂', fire: '🔥', clap: '👏', open_mouth: '😮', white_check_mark: '✅',
+  eyes: '👀', tada: '🎉', pray: '🙏', 100: '💯', rocket: '🚀', raised_hands: '🙌', heart_eyes: '😍', smile: '😄', sob: '😭',
+  thinking_face: '🤔', ok_hand: '👌', wave: '👋', cry: '😢', grinning: '😀', laughing: '😆', sunglasses: '😎', star: '⭐',
+  muscle: '💪', partying_face: '🥳', hugging_face: '🤗', sweat_smile: '😅', rolling_on_the_floor_laughing: '🤣', x: '❌',
+  warning: '⚠️', point_up: '☝️', heavy_check_mark: '✔️', bulb: '💡', coffee: '☕', sparkles: '✨',
+};
+const EMOJI_NAME: Record<string, string> = {};
+for (const [n, e] of Object.entries(SLACK_EMOJI)) if (!EMOJI_NAME[e]) EMOJI_NAME[e] = n; // ilk tanım kazanır (+1)
+export function slackEmojiName(emoji: string): string {
+  return EMOJI_NAME[emoji] ?? EMOJI_NAME[emoji.replace(/\uFE0F/g, '')] ?? emoji.replace(/^:|:$/g, '');
+}
+function slackReactions(list: J[] | undefined): Reaction[] | undefined {
+  if (!list?.length) return undefined;
+  const out: Reaction[] = [];
+  for (const r of list) {
+    const name = String(r.name ?? '').split('::')[0];
+    const emoji = SLACK_EMOJI[name] ?? `:${name}:`;
+    const ids = ((r.users ?? []) as string[]).slice(0, 50);
+    for (const uid of ids) out.push({ emoji, senderId: uid, senderName: users.get(uid)?.name ?? uid, fromMe: !!meId && uid === meId });
+    // users listesi kırpılmışsa kalan sayı kimliksiz
+    for (let i = ids.length; i < Number(r.count ?? ids.length); i++) out.push({ emoji, senderId: `${name}#${i}`, senderName: '', fromMe: false });
+  }
+  return out.length ? out : undefined;
+}
+/** Yanıtları çekilen iş parçacıkları: üst ts → latest_reply (değişmediyse yeniden istenmez) */
+const threadsSeen = new Map<string, string>();
+
 async function toMsg(page: Page, m: J): Promise<Msg | undefined> {
   if (m.subtype && SKIP_SUBTYPES.has(String(m.subtype))) return undefined;
   const uid = String(m.user ?? m.bot_id ?? '');
@@ -275,6 +305,9 @@ async function toMsg(page: Page, m: J): Promise<Msg | undefined> {
     senderName: u.name,
     senderAvatarUrl: u.avatar,
     attachments: files.length ? files.map(fileToAttachment) : undefined,
+    reactions: slackReactions(m.reactions as J[] | undefined),
+    threadId: m.thread_ts && String(m.thread_ts) !== String(m.ts) ? String(m.thread_ts) : undefined,
+    replyCount: m.reply_count ? Number(m.reply_count) : undefined,
   };
 }
 
@@ -370,7 +403,25 @@ export const slackStrategy: Strategy = {
       const msg = await toMsg(page, m);
       if (msg) msgs.push(msg);
     }
-    return msgs.reverse();
+    // İş parçacığı yanıtları history'de görünmez: reply_count'lu üst mesajların yanıtları (yeni yanıt geldiyse) ayrıca çekilir
+    for (const m of (r.messages ?? []) as J[]) {
+      if (!m.reply_count || !m.ts) continue;
+      const key = `${threadId}/${m.ts}`;
+      const latest = String(m.latest_reply ?? m.reply_count);
+      if (threadsSeen.get(key) === latest) continue;
+      try {
+        const rep = await slack(page, 'conversations.replies', { channel: threadId, ts: String(m.ts), limit: 40 });
+        for (const x of (rep.messages ?? []) as J[]) {
+          if (String(x.ts) === String(m.ts)) continue;
+          const msg = await toMsg(page, x);
+          if (msg) msgs.push({ ...msg, threadId: String(m.ts) });
+        }
+        threadsSeen.set(key, latest);
+      } catch {
+        /* yanıtlar alınamadı; sonraki yoklamada yeniden denenir */
+      }
+    }
+    return msgs.sort((a, b) => a.ts - b.ts);
   },
 
   async markRead(page, _cookies, threadId, lastIncomingId) {
@@ -381,9 +432,15 @@ export const slackStrategy: Strategy = {
     lastRead.set(threadId, String(ts));
   },
 
-  async send(page, _cookies, threadId, text) {
-    const r = await slack(page, 'chat.postMessage', { channel: threadId, text, as_user: true });
+  async send(page, _cookies, threadId, text, opts?: SendOptions) {
+    const params: Record<string, string | boolean> = { channel: threadId, text, as_user: true };
+    if (opts?.threadId) params.thread_ts = opts.threadId;
+    const r = await slack(page, 'chat.postMessage', params);
     return r?.ts ? String(r.ts) : undefined;
+  },
+
+  async react(page, _cookies, threadId, msgId, emoji, remove) {
+    await slack(page, remove ? 'reactions.remove' : 'reactions.add', { channel: threadId, timestamp: msgId, name: slackEmojiName(emoji) });
   },
 
   async openDirect(page, _cookies, p) {

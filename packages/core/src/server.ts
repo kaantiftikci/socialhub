@@ -15,6 +15,7 @@ import { bus } from './bus.js';
 import { aiEnabled, draftReply } from './ai.js';
 import { ALL_PLATFORMS } from './model.js';
 import { MEDIA_HOSTS, PLATFORM_MEDIA_HOSTS, MEDIA_MAX } from './media-hosts.js';
+import { fetchPreview } from './link-preview.js';
 import type { Platform } from './model.js';
 
 /**
@@ -240,11 +241,48 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     const id = dec(p.id);
     const chat = store.getChat(id);
     if (!chat) throw new HttpError(404, 'Sohbet yok');
-    const text = String((body as { text?: string }).text ?? '').trim();
+    const b = body as { text?: string; threadId?: string };
+    const text = String(b.text ?? '').trim();
     if (!text) throw new HttpError(400, 'Boş mesaj');
     const c = registry.get(chat.accountId);
     if (!c) throw new HttpError(409, 'Hesap bağlı değil');
-    return c.sendText(chat.remoteId, text);
+    return c.sendText(chat.remoteId, text, b.threadId ? { threadId: String(b.threadId).slice(0, 64) } : undefined);
+  });
+  // Emoji tepkisi: aynı emoji zaten benimse kaldırır (toggle); platforma iletilir, depo hemen güncellenir
+  route('POST', '/api/chats/:id/react', async (_r, _s, p, body) => {
+    const id = dec(p.id);
+    const chat = store.getChat(id);
+    if (!chat) throw new HttpError(404, 'Sohbet yok');
+    const b = body as { messageId?: string; emoji?: string };
+    const emoji = String(b.emoji ?? '').trim();
+    if (!b.messageId || !emoji || emoji.length > 16) throw new HttpError(400, 'messageId ve emoji gerekli');
+    const m = store.getMessage(String(b.messageId));
+    if (!m || m.chatId !== id) throw new HttpError(404, 'Mesaj yok');
+    const c = registry.get(chat.accountId);
+    if (!c?.react) throw new HttpError(400, 'Bu platformda tepki desteklenmiyor');
+    const mine = m.reactions?.find((r) => r.fromMe);
+    const remove = mine?.emoji === emoji;
+    await c.react(chat.remoteId, m.remoteId, emoji, remove);
+    const next = store.setReaction(m.id, { emoji, senderId: 'me', senderName: 'Ben', fromMe: true }, remove);
+    if (next) bus.emit({ type: 'message.upsert', message: next, chat: store.getChat(id)! });
+    return next;
+  });
+  // Yerel bayraklar: sabitle / arşivle / sessize al / gizle (platforma yansımaz)
+  route('POST', '/api/chats/:id/flags', (_r, _s, p, body) => {
+    const id = dec(p.id);
+    const b = (body ?? {}) as Record<string, unknown>;
+    const flags: Record<string, boolean> = {};
+    for (const k of ['pinned', 'archived', 'muted', 'hidden']) if (typeof b[k] === 'boolean') flags[k] = b[k] as boolean;
+    const chat = store.setFlags(id, flags);
+    if (!chat) throw new HttpError(404, 'Sohbet yok');
+    bus.emit({ type: 'chat.upsert', chat });
+    return chat;
+  });
+  // Bağlantı önizlemesi (Open Graph); güvenli getirici link-preview.ts
+  route('GET', '/api/preview', async (req) => {
+    const url = new URL(req.url ?? '/', 'http://x').searchParams.get('url') ?? '';
+    if (!/^https?:\/\//i.test(url) || url.length > 2048) throw new HttpError(400, 'url gerekli');
+    return (await fetchPreview(url)) ?? { url, none: true };
   });
   route('POST', '/api/chats/open', async (_r, _s, _p, body) => {
     const b = body as { accountId?: string; participant?: { id: string; name: string; handle?: string; avatarUrl?: string } };

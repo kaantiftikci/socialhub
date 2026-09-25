@@ -1,6 +1,6 @@
 import { bus } from '../bus.js';
 import type { Store } from '../store.js';
-import { chatId, messageId, type Account, type AccountStatus, type Chat, type ChatKind, type Message, type Participant } from '../model.js';
+import { chatId, messageId, type Reaction, type Account, type AccountStatus, type Chat, type ChatKind, type Message, type Participant } from '../model.js';
 
 /**
  * Her platform adapter'ının uyguladığı arayüz. Adapter'lar platform nesnelerini
@@ -9,6 +9,10 @@ import { chatId, messageId, type Account, type AccountStatus, type Chat, type Ch
  */
 export interface StartOptions {
   interactive?: boolean;
+}
+
+export interface SendOptions {
+  threadId?: string;
 }
 
 /** Gönderilecek dosya (server send-file → connector.sendMedia) */
@@ -26,7 +30,10 @@ export interface Connector {
   /** interactive=false: açılışta arka planda başlat; kullanıcıdan giriş isteyen pencere/QR açma. */
   start(opts?: StartOptions): Promise<void>;
   stop(): Promise<void>;
-  sendText(remoteChatId: string, text: string): Promise<{ remoteId: string }>;
+  /** opts.threadId: Slack iş parçacığına yanıt (üst mesajın remoteId'si) */
+  sendText(remoteChatId: string, text: string, opts?: SendOptions): Promise<{ remoteId: string }>;
+  /** Mesaja emoji tepkisi ver/kaldır (WhatsApp, Telegram, Slack) */
+  react?(remoteChatId: string, remoteMsgId: string, emoji: string, remove: boolean): Promise<void>;
   /** Telegram gibi etkileşimli girişlerde (telefon, kod, 2FA) arayüzden gelen değeri iletir. */
   provideInput?(kind: 'phone' | 'code' | 'password', value: string): void;
   /** Belirli bir sohbetin geçmişini (daha eski mesajları) ister. */
@@ -61,7 +68,7 @@ export abstract class BaseConnector implements Connector {
 
   abstract start(opts?: StartOptions): Promise<void>;
   abstract stop(): Promise<void>;
-  abstract sendText(remoteChatId: string, text: string): Promise<{ remoteId: string }>;
+  abstract sendText(remoteChatId: string, text: string, opts?: SendOptions): Promise<{ remoteId: string }>;
   openDirect?(participant: Participant): Promise<string>;
 
   /** Karşı taraf yazıyor (true) / bıraktı (false) — arayüz 6 sn sonra kendiliğinden düşürür */
@@ -143,6 +150,14 @@ export abstract class BaseConnector implements Connector {
     });
     bus.emit({ type: 'chat.upsert', chat });
     return chat;
+  }
+
+  /** Platformdan gelen tepkiyi depoya işle ve yayınla (mesaj henüz yoksa sessizce atlanır) */
+  protected applyReaction(remoteChatId: string, remoteMsgId: string, r: Reaction, remove = false): void {
+    const cid = chatId(this.account.id, remoteChatId);
+    const m = this.store.setReaction(messageId(cid, remoteMsgId), r, remove);
+    const chat = this.store.getChat(cid);
+    if (m && chat) bus.emit({ type: 'message.upsert', message: m, chat });
   }
 
   protected upsertMessage(

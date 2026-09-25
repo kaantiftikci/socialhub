@@ -29,6 +29,29 @@ export interface Chat {
   link?: string;
   participants?: Participant[];
   meta?: Record<string, unknown>;
+  /** Yerel bayraklar (yalnızca Mivelo'da) */
+  pinned?: boolean;
+  archived?: boolean;
+  muted?: boolean;
+  hidden?: boolean;
+}
+
+export type ChatFlags = Pick<Chat, 'pinned' | 'archived' | 'muted' | 'hidden'>;
+
+export interface Reaction {
+  emoji: string;
+  senderId: string;
+  senderName: string;
+  fromMe: boolean;
+}
+
+export interface LinkPreview {
+  url: string;
+  site?: string;
+  title?: string;
+  description?: string;
+  image?: string;
+  none?: boolean;
 }
 
 export interface Participant {
@@ -61,6 +84,10 @@ export interface Message {
   status: 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
   attachments?: Attachment[];
   senderAvatarUrl?: string;
+  reactions?: Reaction[];
+  /** Slack iş parçacığı yanıtı: üst mesajın remoteId'si */
+  threadId?: string;
+  replyCount?: number;
 }
 
 export type CoreEvent =
@@ -113,4 +140,50 @@ export const TAG_COLORS: Record<string, [string, string]> = {
   kişisel: ['#FFE8F1', '#A3195B'],
 };
 
-export const DEFAULT_TAGS = ['müşteri', 'fırsat', 'ekip', 'kişisel', 'sessiz'];
+export const DEFAULT_TAGS = ['müşteri', 'fırsat', 'ekip', 'kişisel'];
+
+/** Emoji tepkisi verilebilen platformlar */
+export const REACT_PLATFORMS = new Set<Platform>(['whatsapp', 'telegram', 'slack', 'demo']);
+/** Hızlı tepki çubuğu */
+export const QUICK_REACTIONS = ['👍', '❤️', '😂', '🔥', '👏', '😮'];
+
+/**
+ * Sohbeti kendi uygulamasında/web'inde açacak bağlantı. Platform sağladıysa chat.link; yoksa kimlikten türetilir.
+ * Grup tanıtıcıları (WhatsApp @g.us vb.) için yalnızca uygulama şeması.
+ */
+const OPEN_LABEL: Partial<Record<Platform, string>> = { whatsapp: "WhatsApp'ta aç", telegram: "Telegram'da aç", slack: "Slack'te aç", instagram: "Instagram'da aç", messenger: "Messenger'da aç", x: "X'te aç", linkedin: "LinkedIn'de aç", imessage: "Mesajlar'da aç", gmail: "Gmail'de aç", outlook: "Outlook'ta aç", icloud: "iCloud'da aç", demo: 'Uygulamada aç' };
+export function openInAppLink(c: Chat): { href: string; label: string } | null {
+  const label = OPEN_LABEL[c.platform] ?? `${PLATFORMS[c.platform]?.name ?? c.platform} · aç`;
+  const id = c.remoteId;
+  switch (c.platform) {
+    case 'whatsapp': {
+      if (id.endsWith('@g.us')) return { href: 'whatsapp://', label };
+      const num = id.split('@')[0].replace(/\D/g, '');
+      return num ? { href: `https://wa.me/${num}`, label } : null;
+    }
+    case 'telegram':
+      return { href: c.link || (c.handle?.startsWith('@') ? `https://t.me/${c.handle.slice(1)}` : `tg://user?id=${id.replace(/^-100/, '')}`), label };
+    case 'slack': {
+      const team = (c.meta?.team as string | undefined) ?? '';
+      return { href: team ? `slack://channel?team=${team}&id=${id}` : `https://app.slack.com/client/${id}`, label };
+    }
+    case 'instagram':
+      return { href: c.link || `https://www.instagram.com/direct/t/${id}/`, label };
+    case 'messenger':
+      return { href: c.link || `https://www.messenger.com/t/${id}`, label };
+    case 'x':
+      return { href: c.link || `https://x.com/messages/${id}`, label };
+    case 'linkedin':
+      return { href: c.link || `https://www.linkedin.com/messaging/thread/${encodeURIComponent(id)}/`, label };
+    case 'imessage':
+      return { href: `imessage://${encodeURIComponent(c.handle ?? id)}`, label };
+    case 'gmail':
+      return { href: `https://mail.google.com/mail/u/0/#all/${id}`, label };
+    case 'outlook':
+      return { href: 'https://outlook.live.com/mail/0/', label };
+    case 'icloud':
+      return { href: 'https://www.icloud.com/mail/', label };
+    default:
+      return c.link ? { href: c.link, label } : null;
+  }
+}

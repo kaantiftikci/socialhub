@@ -3,13 +3,13 @@ import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import type { APIRequestContext, BrowserContext, Page } from 'playwright';
-import { BaseConnector, type StartOptions } from '../base.js';
+import { BaseConnector, type SendOptions, type StartOptions } from '../base.js';
 import { chatId } from '../../model.js';
 import { persistSessionCookies } from './outlook.js';
 import { bus } from '../../bus.js';
 import { sessionDir } from '../../config.js';
 import { mediaHostAllowed, MEDIA_MAX } from '../../media-hosts.js';
-import type { Account, Attachment, ChatKind, Participant } from '../../model.js';
+import type { Account, Attachment, ChatKind, Participant, Reaction } from '../../model.js';
 import type { Store } from '../../store.js';
 
 /**
@@ -48,6 +48,10 @@ export interface Msg {
   senderAvatarUrl?: string;
   /** Platform iletim/görülme bilgisi veriyorsa (varsayılan: benimkiler 'sent', gelenler 'delivered') */
   status?: 'sent' | 'delivered' | 'read';
+  reactions?: Reaction[];
+  /** Slack iş parçacığı: üst mesajın kimliği / yanıt sayısı */
+  threadId?: string;
+  replyCount?: number;
 }
 
 /** Sayfasız (tarayıcısız) modda stratejiye verilen sahte sayfanın taşıdığı istek bağlamı */
@@ -95,7 +99,9 @@ export interface Strategy {
   messages(page: Page, cookies: Record<string, string>, threadId: string, limit: number, before?: number): Promise<Msg[]>;
   /** true: API tabanlı strateji, mesaj çağrıları paralel yapılabilir (DOM okuyanlar tek sayfayı paylaştığı için sıralı) */
   parallel?: boolean;
-  send(page: Page, cookies: Record<string, string>, threadId: string, text: string): Promise<string | undefined>;
+  send(page: Page, cookies: Record<string, string>, threadId: string, text: string, opts?: SendOptions): Promise<string | undefined>;
+  /** Emoji tepkisi ver/kaldır (Slack reactions.add/remove) */
+  react?(page: Page, cookies: Record<string, string>, threadId: string, msgId: string, emoji: string, remove: boolean): Promise<void>;
   /** Bir üyeyle birebir sohbet kimliği (yoksa oluştur) */
   openDirect?(page: Page, cookies: Record<string, string>, participant: Participant): Promise<string>;
   /** Platformda okundu işaretle; lastIncomingId depodaki son gelen mesajın kimliği */
@@ -454,11 +460,17 @@ export class BrowserConnector extends BaseConnector {
     return next;
   }
 
-  async sendText(remoteChatId: string, text: string): Promise<{ remoteId: string }> {
+  async sendText(remoteChatId: string, text: string, opts?: SendOptions): Promise<{ remoteId: string }> {
     if (!this.pageless && !(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
-    const id = (await this.serial(async () => this.run((p, c) => this.strategy.send(p, c, remoteChatId, text)))) ?? `local-${Date.now()}`;
-    this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent' });
+    const id = (await this.serial(async () => this.run((p, c) => this.strategy.send(p, c, remoteChatId, text, opts)))) ?? `local-${Date.now()}`;
+    this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent', threadId: opts?.threadId });
     return { remoteId: id };
+  }
+
+  async react(remoteChatId: string, remoteMsgId: string, emoji: string, remove: boolean): Promise<void> {
+    if (!this.strategy.react) throw new Error('Bu platformda tepki desteklenmiyor');
+    if (!this.pageless && !(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
+    await this.serial(async () => this.run((p, c) => this.strategy.react!(p, c, remoteChatId, remoteMsgId, emoji, remove)));
   }
 
   async sendMedia(remoteChatId: string, file: { path: string; name: string; mime: string; size: number }, caption?: string): Promise<{ remoteId: string }> {
@@ -677,6 +689,9 @@ export class BrowserConnector extends BaseConnector {
         status: m.status ?? (m.fromMe ? 'sent' : 'delivered'),
         senderAvatarUrl: m.senderAvatarUrl,
         attachments: m.attachments?.length ? m.attachments.map((a) => ({ ...a, url: this.proxied(a.url), link: isMediaFile(a.link) ? this.proxied(a.link) : a.link })) : undefined,
+        reactions: m.reactions,
+        threadId: m.threadId,
+        replyCount: m.replyCount,
       },
       { live, bump: false },
     );

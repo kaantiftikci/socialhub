@@ -43,7 +43,15 @@ export interface Chat {
   participants?: Participant[];
   /** Platforma özel yapılandırılmış veri (örn. Shopier sipariş detayı) */
   meta?: Record<string, unknown>;
+  /** Yerel düzenleme bayrakları (yalnızca Mivelo'da; platforma yansımaz) */
+  pinned?: boolean;
+  archived?: boolean;
+  muted?: boolean;
+  hidden?: boolean;
 }
+
+/** Yerel sohbet bayrakları (sabitle/arşivle/sessize al/gizle) */
+export type ChatFlags = Pick<Chat, 'pinned' | 'archived' | 'muted' | 'hidden'>;
 
 export interface Participant {
   id: string;
@@ -68,6 +76,19 @@ export interface Message {
   attachments?: Attachment[];
   /** Gönderenin profil fotoğrafı (grup sohbetleri için) */
   senderAvatarUrl?: string;
+  /** Mesaja verilen emoji tepkileri */
+  reactions?: Reaction[];
+  /** Slack iş parçacığı yanıtı: üst mesajın remoteId'si */
+  threadId?: string;
+  /** Slack: bu mesajın iş parçacığındaki yanıt sayısı */
+  replyCount?: number;
+}
+
+export interface Reaction {
+  emoji: string;
+  senderId: string;
+  senderName: string;
+  fromMe: boolean;
 }
 
 export interface Attachment {

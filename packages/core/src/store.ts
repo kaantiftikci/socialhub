@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3-multiple-ciphers';
 import fs from 'node:fs';
 import { DB_PATH } from './config.js';
-import type { Account, Chat, Message, Platform } from './model.js';
+import type { Account, Chat, ChatFlags, Message, Platform, Reaction } from './model.js';
 
 /**
  * Yerel SQLite deposu. Şema küçük tutuldu; FTS5 ile tam metin arama var.
@@ -108,12 +108,16 @@ export class Store {
     // hafif göç: sonradan eklenen sütunlar
     const cols = new Set((this.db.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>).map((c) => c.name));
     if (!cols.has('sender_avatar')) this.db.exec('ALTER TABLE messages ADD COLUMN sender_avatar TEXT');
+    if (!cols.has('reactions')) this.db.exec('ALTER TABLE messages ADD COLUMN reactions TEXT');
+    if (!cols.has('thread_id')) this.db.exec('ALTER TABLE messages ADD COLUMN thread_id TEXT');
+    if (!cols.has('reply_count')) this.db.exec('ALTER TABLE messages ADD COLUMN reply_count INTEGER');
     const ccols = new Set((this.db.prepare('PRAGMA table_info(chats)').all() as Array<{ name: string }>).map((c) => c.name));
     if (!ccols.has('handle')) this.db.exec('ALTER TABLE chats ADD COLUMN handle TEXT');
     if (!ccols.has('link')) this.db.exec('ALTER TABLE chats ADD COLUMN link TEXT');
     if (!ccols.has('participants')) this.db.exec('ALTER TABLE chats ADD COLUMN participants TEXT');
     if (!ccols.has('meta')) this.db.exec('ALTER TABLE chats ADD COLUMN meta TEXT');
     if (!ccols.has('last_from_me')) this.db.exec('ALTER TABLE chats ADD COLUMN last_from_me INTEGER NOT NULL DEFAULT 0');
+    if (!ccols.has('flags')) this.db.exec('ALTER TABLE chats ADD COLUMN flags TEXT'); // {pinned,archived,muted,hidden}
     // gönderen bazlı güncellemeler (ad/fotoğraf/lid→numara) tam tablo taraması yapmasın
     this.db.exec('CREATE INDEX IF NOT EXISTS messages_sender ON messages(sender_id)');
     this.db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
@@ -319,16 +323,27 @@ export class Store {
     const existed = this.hasMessage(m.id);
     this.db
       .prepare(
-        `INSERT INTO messages (id, chat_id, remote_id, sender_id, sender_name, from_me, text, ts, status, attachments, sender_avatar)
-         VALUES (@id, @chatId, @remoteId, @senderId, @senderName, @fromMe, @text, @ts, @status, @attachments, @senderAvatar)
+        `INSERT INTO messages (id, chat_id, remote_id, sender_id, sender_name, from_me, text, ts, status, attachments, sender_avatar, reactions, thread_id, reply_count)
+         VALUES (@id, @chatId, @remoteId, @senderId, @senderName, @fromMe, @text, @ts, @status, @attachments, @senderAvatar, @reactions, @threadId, @replyCount)
          ON CONFLICT(id) DO UPDATE SET
            status = excluded.status,
            text = CASE WHEN excluded.text <> '' THEN excluded.text WHEN excluded.attachments IS NOT NULL THEN '' ELSE messages.text END,
            attachments = COALESCE(excluded.attachments, messages.attachments),
            sender_avatar = COALESCE(excluded.sender_avatar, messages.sender_avatar),
-           sender_name = CASE WHEN excluded.sender_name <> '' THEN excluded.sender_name ELSE messages.sender_name END`,
+           sender_name = CASE WHEN excluded.sender_name <> '' THEN excluded.sender_name ELSE messages.sender_name END,
+           reactions = COALESCE(excluded.reactions, messages.reactions),
+           thread_id = COALESCE(excluded.thread_id, messages.thread_id),
+           reply_count = COALESCE(excluded.reply_count, messages.reply_count)`,
       )
-      .run({ ...m, fromMe: m.fromMe ? 1 : 0, attachments: m.attachments ? JSON.stringify(m.attachments) : null, senderAvatar: m.senderAvatarUrl ?? null });
+      .run({
+        ...m,
+        fromMe: m.fromMe ? 1 : 0,
+        attachments: m.attachments ? JSON.stringify(m.attachments) : null,
+        senderAvatar: m.senderAvatarUrl ?? null,
+        reactions: m.reactions ? JSON.stringify(m.reactions) : null,
+        threadId: m.threadId ?? null,
+        replyCount: m.replyCount ?? null,
+      });
     const inserted = !existed;
     const chat = this.getChat(m.chatId);
     if (chat) {
@@ -352,6 +367,35 @@ export class Store {
   getMessage(id: string): Message | undefined {
     const r = this.db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
     return r ? rowToMessage(r) : undefined;
+  }
+
+  /** Tepki ekle/kaldır: aynı gönderenin önceki tepkisi değiştirilir (platformlar kişi başına tek tepki tutar) */
+  setReaction(id: string, r: Reaction, remove = false): Message | undefined {
+    const m = this.getMessage(id);
+    if (!m) return undefined;
+    const rest = (m.reactions ?? []).filter((x) => x.senderId !== r.senderId);
+    const next = remove ? rest : [...rest, r];
+    this.db.prepare('UPDATE messages SET reactions = ? WHERE id = ?').run(next.length ? JSON.stringify(next) : null, id);
+    return { ...m, reactions: next.length ? next : undefined };
+  }
+
+  /** Tepki listesini bütünüyle değiştir (Telegram güncellemeleri tam listeyi verir) */
+  setReactions(id: string, list: Reaction[] | undefined): Message | undefined {
+    const m = this.getMessage(id);
+    if (!m) return undefined;
+    this.db.prepare('UPDATE messages SET reactions = ? WHERE id = ?').run(list?.length ? JSON.stringify(list) : null, id);
+    return { ...m, reactions: list?.length ? list : undefined };
+  }
+
+  /** Yerel bayraklar (sabitle/arşivle/sessize al/gizle); verilmeyen alanlar korunur */
+  setFlags(id: string, flags: ChatFlags): Chat | undefined {
+    const c = this.getChat(id);
+    if (!c) return undefined;
+    const next: ChatFlags = { pinned: c.pinned, archived: c.archived, muted: c.muted, hidden: c.hidden };
+    for (const k of ['pinned', 'archived', 'muted', 'hidden'] as const) if (typeof flags[k] === 'boolean') next[k] = flags[k] || undefined;
+    const clean = Object.fromEntries(Object.entries(next).filter(([, v]) => v));
+    this.db.prepare('UPDATE chats SET flags = ? WHERE id = ?').run(Object.keys(clean).length ? JSON.stringify(clean) : null, id);
+    return this.getChat(id);
   }
 
   /** Yalnızca teslim/okundu durumunu güncelle (metin, zaman ve sohbet özetine dokunmadan). */
@@ -461,6 +505,7 @@ function rowToChat(r: unknown): Chat {
     link: (x.link as string | null) ?? undefined,
     participants: x.participants ? safeJson<Chat['participants']>(x.participants as string, undefined) : undefined,
     meta: x.meta ? safeJson<Chat['meta']>(x.meta as string, undefined) : undefined,
+    ...(x.flags ? safeJson<ChatFlags>(x.flags as string, {}) : {}),
   };
 }
 
@@ -478,6 +523,9 @@ function rowToMessage(r: unknown): Message {
     status: x.status as Message['status'],
     attachments: x.attachments ? safeJson(x.attachments as string, undefined) : undefined,
     senderAvatarUrl: x.sender_avatar ? String(x.sender_avatar) : undefined,
+    reactions: x.reactions ? safeJson<Reaction[] | undefined>(x.reactions as string, undefined) : undefined,
+    threadId: x.thread_id ? String(x.thread_id) : undefined,
+    replyCount: x.reply_count != null ? Number(x.reply_count) : undefined,
   };
 }
 

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { EmojiPicker } from './emoji';
 import { api } from './api';
-import { API_BASE, mediaUrl } from './desktop';
-import { DEFAULT_TAGS, PLATFORMS, TAG_COLORS, type Attachment, type Chat, type DraftResult, type Message } from './types';
-import { useClosing, Avatar, Chip, Icon, Resizer, Tag, fmtDay, fmtStamp, fmtTime } from './ui';
+import { API_BASE, mediaUrl, openExternal } from './desktop';
+import { DEFAULT_TAGS, PLATFORMS, QUICK_REACTIONS, REACT_PLATFORMS, TAG_COLORS, openInAppLink, type Attachment, type Chat, type ChatFlags, type DraftResult, type LinkPreview, type Message, type Reaction } from './types';
+import { useClosing, Avatar, Chip, Icon, Resizer, Tag, ago, fmtDay, fmtStamp, fmtTime } from './ui';
 
 type Tone = 'default' | 'short' | 'formal' | 'en';
 
@@ -104,6 +105,7 @@ export function Conversation({
   typing,
   snoozedUntil,
   onUnsnooze,
+  onFlags,
 }: {
   chat: Chat;
   messages: Message[];
@@ -125,6 +127,8 @@ export function Conversation({
   onBack?: () => void;
   /** Karşı taraf yazıyor: null hayır, '' evet, 'Ad' grupta kim */
   typing?: string | null;
+  /** Yerel bayraklar: sabitle/arşivle/sessize al/gizle */
+  onFlags?: (f: ChatFlags) => void;
 }) {
   const [search, setSearch] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -144,6 +148,43 @@ export function Conversation({
   useEffect(() => setLightbox(null), [chat.id]);
   const endRef = useRef<HTMLDivElement>(null);
   const msgsRef = useRef<HTMLDivElement>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  /** Slack iş parçacığı odağı: üst mesajın remoteId'si (yalnız o mesaj + yanıtları listelenir, gönderim thread'e gider) */
+  const [threadFocus, setThreadFocus] = useState<string | null>(null);
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  /** Bir mesaj için tam emoji seçici (hızlı çubuktaki "+") */
+  const [reactPick, setReactPick] = useState<{ id: string; top: number; left: number } | null>(null);
+  useEffect(() => (setThreadFocus(null), setEmojiOpen(false), setReactPick(null)), [chat.id]);
+  const canReact = REACT_PLATFORMS.has(chat.platform);
+  const byRemote = useMemo(() => new Map(messages.map((m) => [m.remoteId, m])), [messages]);
+  /** Slack: yanıtı olan üst mesajlar (sağ panel listesi), son yanıta göre */
+  const threads = useMemo(() => {
+    if (chat.platform !== 'slack') return [] as Array<{ parent: Message; replies: Message[] }>;
+    const out = new Map<string, Message[]>();
+    for (const m of messages) if (m.threadId) out.set(m.threadId, [...(out.get(m.threadId) ?? []), m]);
+    const list: Array<{ parent: Message; replies: Message[] }> = [];
+    for (const m of messages) if (m.replyCount || out.has(m.remoteId)) list.push({ parent: m, replies: out.get(m.remoteId) ?? [] });
+    return list.sort((a, b) => (b.replies.at(-1)?.ts ?? b.parent.ts) - (a.replies.at(-1)?.ts ?? a.parent.ts));
+  }, [messages, chat.platform]);
+  async function react(m: Message, emoji: string) {
+    setReactPick(null);
+    try {
+      await api.react(chat.id, m.id, emoji);
+    } catch (e) {
+      notify((e as Error).message, true);
+    }
+  }
+  const insertEmoji = (e: string) => {
+    const ta = taRef.current;
+    const start = ta?.selectionStart ?? text.length;
+    const end = ta?.selectionEnd ?? text.length;
+    setText(text.slice(0, start) + e + text.slice(end));
+    requestAnimationFrame(() => {
+      if (!ta) return;
+      ta.focus();
+      ta.selectionStart = ta.selectionEnd = start + e.length;
+    });
+  };
   const firstIdRef = useRef<string | undefined>(undefined);
   const lastIdRef = useRef<string | undefined>(undefined);
   const chatRef = useRef<string | undefined>(undefined);
@@ -365,9 +406,10 @@ export function Conversation({
 
   const shown = useMemo(() => {
     const q = (search ?? '').trim().toLocaleLowerCase('tr-TR');
-    if (!q) return messages;
-    return messages.filter((m) => m.text.toLocaleLowerCase('tr-TR').includes(q) || m.senderName.toLocaleLowerCase('tr-TR').includes(q) || m.attachments?.some((a) => a.name?.toLocaleLowerCase('tr-TR').includes(q)));
-  }, [messages, search]);
+    const base = threadFocus ? messages.filter((m) => m.remoteId === threadFocus || m.threadId === threadFocus) : messages;
+    if (!q) return base;
+    return base.filter((m) => m.text.toLocaleLowerCase('tr-TR').includes(q) || m.senderName.toLocaleLowerCase('tr-TR').includes(q) || m.attachments?.some((a) => a.name?.toLocaleLowerCase('tr-TR').includes(q)));
+  }, [messages, search, threadFocus]);
   const groups = useMemo(() => groupMessages(shown), [shown]);
   const lastIncoming = [...messages].reverse().find((m) => !m.fromMe);
   const needsReply = !!lastIncoming && messages[messages.length - 1]?.id === lastIncoming.id;
@@ -407,7 +449,7 @@ export function Conversation({
     if (!body || sending) return;
     setSending(true);
     try {
-      await api.send(chat.id, body);
+      await api.send(chat.id, body, threadFocus ?? undefined);
       setText('');
       setDraft(null);
     } catch (e) {
@@ -543,6 +585,17 @@ export function Conversation({
               })}
             </div>
           )}
+          {threadFocus && (
+            <div className="tbanner" role="status">
+              <Icon name="thread" size={14} />
+              <span>
+                <b>İş parçacığı</b> · {shown.filter((m) => m.threadId === threadFocus).length} yanıt — yazdıkların bu iş parçacığına gider
+              </span>
+              <button className="btn xs b b2" onClick={() => setThreadFocus(null)}>
+                Tümüne dön
+              </button>
+            </div>
+          )}
           {!search && hasOlder && onLoadOlder && (
             <div style={{ display: 'flex', justifyContent: 'center', margin: '4px 0 6px' }}>
               <button className="btn xs b b2" disabled={olderBusy} onClick={() => void onLoadOlder()} aria-busy={olderBusy}>
@@ -572,19 +625,90 @@ export function Conversation({
               <div key={g.key} className={`grp ${g.fromMe ? 'me' : ''}`}>
                 {!g.fromMe && <Avatar name={g.senderName} size={28} url={g.items.find((m) => m.senderAvatarUrl)?.senderAvatarUrl ?? (chat.kind === 'direct' ? chat.avatarUrl : undefined)} />}
                 <div className="col">
-                  {!g.fromMe && chat.kind !== 'direct' && <span className="sender">{g.senderName}</span>}
-                  {g.items.map((m, i) => (
-                    <div key={m.id} className={`bub ${g.items.length === 1 ? 'first last' : i === 0 ? 'first' : i === g.items.length - 1 ? 'last' : 'mid'} ${/^(👍|❤️|😂|🔥|👏|😮) .+ (bir mesajı beğendi|mesajına tepki verdi)$/.test(m.text) ? 'react' : ''}`}>
-                      {m.attachments?.map((a, j) => (
-                        <AttachmentView key={j} a={a} onOpen={setLightbox} />
-                      ))}
-                      {m.text && (m.attachments?.length ? <span className="bub-text">{m.text}</span> : m.text)}
-                    </div>
-                  ))}
-                  <span className="meta">
-                    {fmtStamp(g.items[g.items.length - 1].ts)}
-                    {g.fromMe && statusLabel(g.items[g.items.length - 1].status)}
-                  </span>
+                  {!g.fromMe && chat.kind !== 'direct' && (
+                    <span className="sender" style={{ color: senderColor(g.items[0].senderId || g.senderName) }}>
+                      {g.senderName}
+                    </span>
+                  )}
+                  {g.items.map((m, i) => {
+                    const isReact = /^(👍|❤️|😂|🔥|👏|😮) .+ (bir mesajı beğendi|mesajına tepki verdi)$/.test(m.text);
+                    const parent = m.threadId ? byRemote.get(m.threadId) : undefined;
+                    const url = !isReact && !m.attachments?.length ? firstUrl(m.text) : undefined;
+                    return (
+                      <div key={m.id} className={`bwrap ${g.fromMe ? 'me' : ''}`}>
+                        {m.threadId && !threadFocus && (
+                          <button type="button" className="tq b" onClick={() => setThreadFocus(m.threadId!)} title="İş parçacığını aç">
+                            <Icon name="reply" size={12} sw={2} />
+                            <span className="tq-h">Bir iş parçacığına yanıt</span>
+                            <span className="tq-t">{parent?.text || 'İş parçacığı'}</span>
+                          </button>
+                        )}
+                        <div className={`bub ${g.items.length === 1 ? 'first last' : i === 0 ? 'first' : i === g.items.length - 1 ? 'last' : 'mid'} ${isReact ? 'react' : ''}`}>
+                          {m.attachments?.map((a, j) => (
+                            <AttachmentView key={j} a={a} onOpen={setLightbox} />
+                          ))}
+                          {m.text && (m.attachments?.length ? <span className="bub-text">{linkify(m.text)}</span> : linkify(m.text))}
+                          {!isReact && (
+                            <time className="bt" dateTime={new Date(m.ts).toISOString()} title={fmtStamp(m.ts)}>
+                              {fmtTime(m.ts)}
+                              {g.fromMe && i === g.items.length - 1 && statusIcon(m.status)}
+                            </time>
+                          )}
+                        </div>
+                        {url && <LinkCard url={url} />}
+                        {m.reactions?.length ? <ReactionChips list={m.reactions} onToggle={canReact ? (e) => react(m, e) : undefined} /> : null}
+                        {!!m.replyCount && !threadFocus && (
+                          <button type="button" className="treplies b" onClick={() => setThreadFocus(m.remoteId)}>
+                            <span className="tav">
+                              {[...new Map((byRemote.size ? messages.filter((x) => x.threadId === m.remoteId) : []).map((x) => [x.senderId, x])).values()].slice(0, 3).map((x) => (
+                                <Avatar key={x.senderId} name={x.senderName} size={18} url={x.senderAvatarUrl} />
+                              ))}
+                            </span>
+                            {m.replyCount} yanıt
+                            {(() => {
+                              const last = messages.filter((x) => x.threadId === m.remoteId).at(-1);
+                              return last ? <span className="tago"> · {ago(last.ts)}</span> : null;
+                            })()}
+                          </button>
+                        )}
+                        {!isReact && (canReact || chat.platform === 'slack') && (
+                          <span className="rbar" role="toolbar" aria-label="Hızlı işlemler">
+                            {canReact &&
+                              QUICK_REACTIONS.map((e) => (
+                                <button key={e} type="button" className={m.reactions?.some((r) => r.fromMe && r.emoji === e) ? 'on' : ''} onClick={() => react(m, e)} title={`${e} tepkisi`}>
+                                  {e}
+                                </button>
+                              ))}
+                            {canReact && (
+                              <button
+                                type="button"
+                                className="more"
+                                title="Başka emoji"
+                                aria-label="Başka emoji"
+                                onClick={(ev) => {
+                                  const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+                                  setReactPick(reactPick?.id === m.id ? null : { id: m.id, top: r.bottom + 6, left: Math.max(8, Math.min(window.innerWidth - 300, r.left - 120)) });
+                                }}
+                              >
+                                <Icon name="smile" size={14} />
+                              </button>
+                            )}
+                            {chat.platform === 'slack' && !m.threadId && (
+                              <button type="button" className="more" title="İş parçacığında yanıtla" aria-label="İş parçacığında yanıtla" onClick={() => setThreadFocus(m.remoteId)}>
+                                <Icon name="thread" size={14} />
+                              </button>
+                            )}
+                          </span>
+                        )}
+                        {reactPick?.id === m.id && (
+                          <div className="react-pick" style={{ top: reactPick.top, left: reactPick.left }}>
+                            <EmojiPicker compact onPick={(e) => react(m, e)} onClose={() => setReactPick(null)} />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {g.fromMe && g.items[g.items.length - 1].status === 'failed' && <span className="meta" style={{ color: '#a32d2d' }}>Gönderilemedi</span>}
                 </div>
               </div>
             ),
@@ -703,9 +827,10 @@ export function Conversation({
           )}
           {draft && !text.trim() && <div className="ghost-draft">{draft.draft}</div>}
           <textarea
+            ref={taRef}
             rows={2}
             value={text}
-            placeholder={pending ? 'Açıklama ekle (isteğe bağlı) ve Gönder' : draft ? 'Taslağı kabul etmek için Tab, düzenlemek için yazmaya başla' : chat.platform === 'shopier' ? 'Siparişe yerel not ekle (Shopier alıcıya mesaj ucu sunmuyor)…' : isMail ? 'Yanıtını yaz… (Enter gönderir, Shift+Enter yeni satır)' : `${chat.name.length > 40 ? chat.name.slice(0, 38) + '…' : chat.name} için mesaj yaz…`}
+            placeholder={threadFocus ? 'İş parçacığına yanıt yaz…' : pending ? 'Açıklama ekle (isteğe bağlı) ve Gönder' : draft ? 'Taslağı kabul etmek için Tab, düzenlemek için yazmaya başla' : chat.platform === 'shopier' ? 'Siparişe yerel not ekle (Shopier alıcıya mesaj ucu sunmuyor)…' : isMail ? 'Yanıtını yaz… (Enter gönderir, Shift+Enter yeni satır)' : `${chat.name.length > 40 ? chat.name.slice(0, 38) + '…' : chat.name} için mesaj yaz…`}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKey}
             style={draft && !text.trim() ? { minHeight: 28, paddingTop: 0 } : undefined}
@@ -726,6 +851,12 @@ export function Conversation({
               <Icon name="link" size={16} />
               <input type="file" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.txt" style={{ display: 'none' }} disabled={!!uploading} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) pickFile(f); }} />
             </label>
+            <span className="emoji-anchor">
+              <button className={`btn ghost sm icon b ${emojiOpen ? 'soft' : ''}`} onClick={() => setEmojiOpen((v) => !v)} aria-label="Emoji ekle" title="Emoji" aria-expanded={emojiOpen}>
+                <Icon name="smile" size={16} />
+              </button>
+              {emojiOpen && <EmojiPicker onPick={insertEmoji} onClose={() => setEmojiOpen(false)} />}
+            </span>
             {rec ? (
               <span className="rec-bar" role="status" aria-live="polite">
                 <span className="rec-dot" />
@@ -809,6 +940,62 @@ export function Conversation({
             <Icon name="bell" size={16} /> Hatırlat
           </button>
         </div>
+
+        {onFlags && (
+          <div className="ctx-sec">
+            <span className="label">Eylemler</span>
+            <div className="acts">
+              {(() => {
+                const o = openInAppLink(chat);
+                return o ? (
+                  <button type="button" className="act b" onClick={() => void openExternal(o.href)}>
+                    <Chip platform={chat.platform} size={16} />
+                    <span>{o.label}</span>
+                    <Icon name="external" size={12} />
+                  </button>
+                ) : null;
+              })()}
+              <button type="button" className={`act b ${chat.pinned ? 'on' : ''}`} onClick={() => onFlags({ pinned: !chat.pinned })}>
+                <Icon name="pin" size={15} /> <span>{chat.pinned ? 'Sabitlemeyi kaldır' : 'Üstte sabitle'}</span>
+              </button>
+              <button type="button" className={`act b ${chat.muted ? 'on' : ''}`} onClick={() => onFlags({ muted: !chat.muted })}>
+                <Icon name="mute" size={15} /> <span>{chat.muted ? 'Sesi aç' : 'Sessize al'}</span>
+              </button>
+              <button type="button" className={`act b ${chat.archived ? 'on' : ''}`} onClick={() => onFlags({ archived: !chat.archived })}>
+                <Icon name={chat.archived ? 'unarchive' : 'archive'} size={15} /> <span>{chat.archived ? 'Arşivden çıkar' : 'Arşivle'}</span>
+              </button>
+              <button type="button" className={`act b ${chat.hidden ? 'on' : ''}`} onClick={() => onFlags({ hidden: !chat.hidden })}>
+                <Icon name="eyeoff" size={15} /> <span>{chat.hidden ? 'Gizlemeyi kaldır' : 'Gizle'}</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {threads.length > 0 && (
+          <div className="ctx-sec">
+            <span className="label">İş parçacıkları · {threads.length}</span>
+            <div className="tlist">
+              {threads.slice(0, 6).map(({ parent, replies }) => {
+                const last = replies.at(-1);
+                const fresh = !!last && !last.fromMe && Date.now() - last.ts < 24 * 3600_000;
+                return (
+                  <button key={parent.id} type="button" className={`titem b ${threadFocus === parent.remoteId ? 'on' : ''}`} onClick={() => setThreadFocus(parent.remoteId)}>
+                    <span className={`tdot ${fresh ? 'on' : ''}`} />
+                    <span className="tbody">
+                      <span className="tt">{parent.text || '[ek]'}</span>
+                      {last && (
+                        <span className="tl">
+                          <b>{last.fromMe ? 'Sen' : last.senderName.split(' ')[0]}:</b> {last.text || '[ek]'}
+                        </span>
+                      )}
+                      <span className="tn">{parent.replyCount ?? replies.length} yanıt{last ? ` · ${ago(last.ts)}` : ''}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {(noteOpen || chatNote) && (
           <div className="card ctx-note">
@@ -1279,6 +1466,99 @@ function groupMessages(msgs: Message[]): Group[] {
     }
   }
   return out;
+}
+
+const SENDER_COLORS = ['#6c47ff', '#0b6b45', '#b45309', '#a3195b', '#0a66c2', '#b42318', '#0e7490', '#6d28d9', '#047857', '#c2410c'];
+/** Grup sohbetinde her gönderene sabit bir renk (kimlikten türetilir; oturumlar arasında aynı kalır) */
+export function senderColor(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return SENDER_COLORS[h % SENDER_COLORS.length];
+}
+
+const URL_RE = /https?:\/\/[^\s<>"')\]]+/gi;
+function firstUrl(text: string): string | undefined {
+  const m = text.match(URL_RE);
+  return m?.[0].replace(/[.,;:!?]+$/, '');
+}
+/** Metindeki http(s) adreslerini tıklanabilir yap */
+function linkify(text: string): React.ReactNode {
+  if (!/https?:\/\//i.test(text)) return text;
+  const out: React.ReactNode[] = [];
+  let last = 0;
+  for (const m of text.matchAll(URL_RE)) {
+    const raw = m[0];
+    const trail = raw.match(/[.,;:!?]+$/)?.[0] ?? '';
+    const href = raw.slice(0, raw.length - trail.length);
+    if (m.index! > last) out.push(text.slice(last, m.index));
+    out.push(
+      <a key={m.index} href={href} target="_blank" rel="noreferrer" className="msg-link" onClick={(e) => (e.preventDefault(), void openExternal(href))}>
+        {href}
+      </a>,
+    );
+    if (trail) out.push(trail);
+    last = m.index! + raw.length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
+function statusIcon(s: Message['status']) {
+  if (s === 'read') return <Icon name="checks" size={13} sw={2.2} />;
+  if (s === 'delivered' || s === 'sent') return <Icon name="check" size={12} sw={2.2} />;
+  if (s === 'pending') return <span className="spin" style={{ width: 9, height: 9, borderWidth: 1.5 }} />;
+  return null;
+}
+
+/** Tepki çipleri: emoji başına sayı; benimki vurgulu; başlıkta kimler */
+function ReactionChips({ list, onToggle }: { list: Reaction[]; onToggle?: (emoji: string) => void }) {
+  const groups = new Map<string, { n: number; mine: boolean; names: string[] }>();
+  for (const r of list) {
+    const g = groups.get(r.emoji) ?? { n: 0, mine: false, names: [] };
+    g.n++;
+    if (r.fromMe) g.mine = true;
+    if (r.senderName) g.names.push(r.fromMe ? 'Sen' : r.senderName);
+    groups.set(r.emoji, g);
+  }
+  return (
+    <span className="rchips">
+      {[...groups].map(([e, g]) => (
+        <button key={e} type="button" className={`rchip b ${g.mine ? 'mine' : ''}`} title={g.names.join(', ')} onClick={onToggle ? () => onToggle(e) : undefined} disabled={!onToggle}>
+          <span className="e">{e}</span>
+          {g.n > 1 || g.names.length === 0 ? <span className="n">{g.n}</span> : <span className="n">{g.names[0]?.split(' ')[0]}</span>}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+const previewCache = new Map<string, Promise<LinkPreview>>();
+/** Bağlantı kartı (Open Graph): site · başlık · açıklama · görsel; önizleme yoksa hiç görünmez */
+function LinkCard({ url }: { url: string }) {
+  const [p, setP] = useState<LinkPreview | null>(null);
+  useEffect(() => {
+    let alive = true;
+    let req = previewCache.get(url);
+    if (!req) {
+      req = api.preview(url).catch(() => ({ url, none: true }) as LinkPreview);
+      previewCache.set(url, req);
+    }
+    void req.then((v) => alive && setP(v));
+    return () => {
+      alive = false;
+    };
+  }, [url]);
+  if (!p || p.none || !p.title) return null;
+  return (
+    <a className="linkcard b" href={p.url} target="_blank" rel="noreferrer" onClick={(e) => (e.preventDefault(), void openExternal(p.url))} title={p.url}>
+      {p.image && <img src={p.image} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(e) => (e.currentTarget.style.display = 'none')} />}
+      <span className="lc-body">
+        <span className="lc-site">{p.site}</span>
+        <span className="lc-title">{p.title}</span>
+        {p.description && <span className="lc-desc">{p.description}</span>}
+      </span>
+    </a>
+  );
 }
 
 function statusLabel(s: Message['status']) {

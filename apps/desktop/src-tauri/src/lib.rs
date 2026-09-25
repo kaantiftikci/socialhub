@@ -135,6 +135,16 @@ fn log(app: &AppHandle, text: &str) {
     let _ = app.emit("desktop-log", text);
 }
 
+/// Dış bağlantı / uygulama şeması (whatsapp://, slack://, imessage://, https://): sistemin varsayılan uygulamasıyla aç
+#[tauri::command]
+fn open_external(app: AppHandle, url: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    if !(url.starts_with("https://") || url.starts_with("http://") || url.starts_with("mailto:") || url.starts_with("tel:") || url.starts_with("whatsapp://") || url.starts_with("slack://") || url.starts_with("imessage://") || url.starts_with("tg://")) {
+        return Err("izin verilmeyen adres".into());
+    }
+    app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
+}
+
 /// Arayüz için: çekirdek/başlatma günlüğünün son satırları
 #[tauri::command]
 fn core_info() -> String {
@@ -218,7 +228,7 @@ pub fn run() {
                 .build(),
         )
         .manage(CoreProcess(Mutex::new(None)))
-        .invoke_handler(tauri::generate_handler![set_badge, focus_window, core_url, core_info, core_token])
+        .invoke_handler(tauri::generate_handler![set_badge, focus_window, core_url, core_info, core_token, open_external])
         .setup(|app| {
             let handle = app.handle().clone();
 

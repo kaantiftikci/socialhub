@@ -367,33 +367,33 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
       ],
     },
   ],
-  shopier: [
+  n11: [
     {
-      remoteId: 'elif', name: 'Elif Kaya · sipariş 4821', kind: 'direct', tags: ['müşteri'], unread: 2, handle: 'Elif Kaya', avatar: 'elif.jpg',
+      remoteId: 'soru-beden', name: 'Müşteri sorusu · keten gömlek', kind: 'direct', tags: ['müşteri'], unread: 2, handle: 'Elif K.', avatar: 'elif.jpg',
       lines: [
-        [false, 'Merhaba, 4821 numaralı siparişimde beden yanlış seçmiş olabilirim. M ile S arasındaki fark ne?'],
-        [true, 'Merhaba Elif. Gömlekte M, göğüste 4 cm daha bol. Boyunuz 165 civarıysa S rahat olur.'],
-        [false, '165, 58 kilo. S’e çevirebilir misiniz, kargo çıkmadan?'],
-        [true, 'Çevirdim, henüz paketlenmemişti. Beden tablosunu da bırakıyorum.'],
+        [false, 'Merhaba, bu gömlekte M ile S arasındaki fark ne? 165 boy, 58 kiloyum.'],
+        [true, 'Merhaba Elif. Gömlekte M, göğüste 4 cm daha bol. 165 boy için S rahat olur.'],
         [true, 'Beden tablosu.', [pdf('beden-tablosu.pdf', 110_200)]],
-        [false, 'Teşekkürler. Fatura bireysel kalsın, kargo yarın mı çıkar?'],
-        [true, 'Yarın öğleden önce Yurtiçi’ne verilir. Çıkınca kodu buraya yazacağım.'],
-        [false, 'Adreste kapıcıya bırakılmasın, not düşer misiniz?'],
-        [true, 'Düştüm. Başka sorunuz olursa bu siparişten yazmanız yeterli.'],
+        [false, 'Teşekkürler. Sipariş verirsem kargo ne zaman çıkar?'],
+        [true, 'Saat 14:00’a kadar verilen siparişler aynı gün Yurtiçi’ne teslim edilir.'],
+        [false, 'Adreste kapıcıya bırakılmasın diye not düşebilir miyim?'],
+        [true, 'Sipariş notuna yazmanız yeterli, etikete geçiriyoruz.'],
+        [false, 'Harika, S alıyorum. Fatura bireysel kesilsin.'],
+        [true, 'Tamamdır, sipariş gelince bu soru üzerinden de yazabilirsiniz.'],
       ],
     },
     {
-      remoteId: 'kerem', name: 'Kerem Aydın · iade', kind: 'direct', tags: ['müşteri'], unread: 1, handle: 'Kerem Aydın', avatar: 'kerem.jpg',
+      remoteId: 'soru-iade', name: 'Sipariş 2207-4481 · iade', kind: 'direct', tags: ['müşteri'], unread: 1, handle: 'Kerem A.', avatar: 'kerem.jpg',
       lines: [
         [false, 'Kupa çatlamış geldi, fotoğrafını çektim. İade etmek istiyorum.'],
         [false, 'Fotoğraf.', [pic('hasarli-kupa.jpg', 'kupa.jpg')]],
         [false, 'Bir de kısa video çektim.', [vid('kupa.mp4', 'paket.mp4', 'kupa.jpg', 574_823)]],
         [true, 'Üzüldüm, değişim ya da iade yapabiliriz. Hangisini istersiniz?'],
         [false, 'İade olsun. Ücret karta geri döner mi?'],
-        [true, 'Evet, ürün bize ulaşınca 3 iş günü. Form ektedir, kargo ücretsiz.'],
+        [true, 'Evet, ürün bize ulaşınca 3 iş günü içinde n11 üzerinden karta iade edilir. Kargo ücretsiz.'],
         [true, 'İade formu.', [pdf('iade-formu.pdf', 52_600)]],
         [false, 'Formu doldurdum. Kodu nereye yazacağım?'],
-        [true, 'Shopier iade kodunu paketin üstüne yazmanız yeterli. Takip numarasını da buraya bırakın.'],
+        [true, 'n11 iade kodunu paketin üstüne yazmanız yeterli. Takip numarasını da buraya bırakın.'],
         [false, 'Yarın veririm, numarayı akşam atarım.'],
       ],
     },
@@ -938,8 +938,8 @@ const SAMPLE_SUMMARY: Partial<Record<Platform, Record<string, string[]>>> = {
   gmail: {
     fatura: ['Eylül faturası 1.250 TL; ek depolama 12–18 Eylül.', 'Döküm uyuyor, ödeme cuma.', 'Dekont bu yazışmaya eklenecek.'],
   },
-  shopier: {
-    elif: ['4821 siparişte beden M’den S’e çevrildi, henüz paketlenmemişti.', 'Fatura bireysel kalacak, kargo yarın öğleden önce.', 'Kapıcıya bırakılmaması notu düşüldü.'],
+  n11: {
+    'soru-beden': ['Keten gömlek için 165 cm / 58 kg müşteriye S önerildi.', '14:00’a kadar siparişler aynı gün Yurtiçi ile çıkıyor.', 'Kapıcıya bırakılmaması notu sipariş notuna yazılacak.'],
   },
   trendyol: {
     'soru-kalip': ['Keten elbise kalıbı regular; 170 cm / 62 kg için 38 önerildi.', 'Keten kırışır, nemli ütüyle düzelir.', 'Müşteri siparişi bu akşam geçecek.'],
@@ -967,9 +967,9 @@ const SAMPLE_NOTE: Partial<Record<Platform, Record<string, string>>> = {
   gmail: {
     fatura: 'Ödeme cuma. Dekont gelince bu kaydı kapat.',
   },
-  shopier: {
-    elif: 'Beden S’e çevrildi. Fatura bireysel. Yarın Yurtiçi, kapıcıya yok.',
-    kerem: 'Kupa çatlak geldi. İade seçti; karta 3 iş günü, kargo ücretsiz.',
+  n11: {
+    'soru-beden': 'S bedeni alacak. Fatura bireysel. Kapıcıya bırakılmayacak.',
+    'soru-iade': 'Kupa çatlak geldi. İade seçti; karta 3 iş günü, kargo ücretsiz.',
   },
   trendyol: {
     'soru-kargo': '1042931 bugün 16:00’ya kadar Trendyol Express ile çıkacak. Adres Ankara, Çankaya.',
@@ -1001,7 +1001,7 @@ const BADGE: Partial<Record<Platform, number>> = {
   yahoo: 0,
   icloud: 11,
   imap: 16,
-  shopier: 5,
+  n11: 5,
   trendyol: 29,
   hepsiburada: 2,
   etsy: 14,

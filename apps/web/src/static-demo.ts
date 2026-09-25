@@ -1,4 +1,4 @@
-import type { Account, Attachment, Chat, CoreEvent, DraftResult, Message, Platform } from './types';
+import type { Account, Attachment, Chat, ChatFlags, CoreEvent, DraftResult, LinkPreview, Message, Platform } from './types';
 import { PLATFORMS } from './types';
 import { authSaveAccounts } from './auth-api';
 import { DEMO_APPS, SCRIPTS } from './demo-scripts';
@@ -277,7 +277,7 @@ export const staticApi = {
       .filter((m) => m.chatId === chatId && (before == null || m.ts < before))
       .sort((a, b) => a.ts - b.ts)
       .slice(-limit),
-  send: async (chatId: string, text: string) => {
+  send: async (chatId: string, text: string, _threadId?: string) => {
     const chat = chatOf(chatId);
     const ts = Date.now();
     const remoteId = `demo-${ts}`;
@@ -308,6 +308,35 @@ export const staticApi = {
     const next = { ...chat, unread: 0 };
     chats = chats.map((c) => (c.id === chatId ? next : c));
     emit({ type: 'chat.upsert', chat: next });
+  },
+  react: async (chatId: string, messageId: string, emoji: string): Promise<Message> => {
+    const m = messages.find((x) => x.id === messageId && x.chatId === chatId);
+    if (!m) throw new Error('Mesaj yok');
+    const mine = m.reactions?.find((r) => r.fromMe);
+    const rest = (m.reactions ?? []).filter((r) => !r.fromMe);
+    m.reactions = mine?.emoji === emoji ? (rest.length ? rest : undefined) : [...rest, { emoji, senderId: 'me', senderName: 'Ben', fromMe: true }];
+    const chat = chatOf(chatId);
+    emit({ type: 'message.upsert', message: { ...m }, chat });
+    return { ...m };
+  },
+  setFlags: async (chatId: string, flags: ChatFlags): Promise<Chat> => {
+    const cur = chatOf(chatId);
+    const next: Chat = { ...cur };
+    for (const k of ['pinned', 'archived', 'muted', 'hidden'] as const) if (typeof flags[k] === 'boolean') next[k] = flags[k] || undefined;
+    chats = chats.map((c) => (c.id === chatId ? next : c));
+    emit({ type: 'chat.upsert', chat: next });
+    return next;
+  },
+  preview: async (url: string): Promise<LinkPreview> => {
+    // Demo: çekirdek yok; bilinen örnek adresler için sabit kart, diğerleri kartsız
+    try {
+      const host = new URL(url).hostname.replace(/^www\./, '');
+      if (host === 'partners.beehiiv.com') return { url, site: 'beehiiv', title: 'Mivelo × beehiiv · lansman ortak tanıtımı', description: 'Lansman haftasında beehiiv yazar bültenine yerleşim.' };
+      if (host === 'mivelo.kaantiftikci.com') return { url, site: 'Mivelo', title: 'Mivelo — tüm mesajların tek gelen kutusunda', description: 'WhatsApp, Telegram, Slack, Instagram, e-posta ve pazaryerleri tek yerde.' };
+    } catch {
+      /* geçersiz */
+    }
+    return { url, none: true };
   },
   setTags: async (chatId: string, tags: string[]) => {
     const next = { ...chatOf(chatId), tags };

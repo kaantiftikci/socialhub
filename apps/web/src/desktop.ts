@@ -249,3 +249,17 @@ export function playPing(id?: string, force = false): void {
     /* ses yok */
   }
 }
+
+/** Dış bağlantıyı sistemde aç (Tauri: uygulama şemaları dahil; web: yeni sekme) */
+export async function openExternal(url: string): Promise<void> {
+  if (isTauri) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('open_external', { url });
+      return;
+    } catch {
+      /* eski paket: aşağıya düş */
+    }
+  }
+  window.open(url, '_blank', 'noopener');
+}
