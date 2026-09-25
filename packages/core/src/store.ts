@@ -1,4 +1,5 @@
-import Database from 'better-sqlite3';
+import Database from 'better-sqlite3-multiple-ciphers';
+import fs from 'node:fs';
 import { DB_PATH } from './config.js';
 import type { Account, Chat, Message, Platform } from './model.js';
 
@@ -9,13 +10,43 @@ import type { Account, Chat, Message, Platform } from './model.js';
 export class Store {
   private db: Database.Database;
 
-  constructor(path = DB_PATH) {
+  constructor(path = DB_PATH, key?: string) {
+    if (key) Store.migratePlain(path, key);
     this.db = new Database(path);
+    if (key) {
+      // SQLCipher uyumlu şifreleme; anahtar ham hex (tırnak/kaçış sorunu yok)
+      this.db.pragma("cipher = 'sqlcipher'");
+      this.db.pragma(`key = "x'${key}'"`);
+    }
     this.db.pragma('journal_mode = WAL');
     // WAL + NORMAL: her yazımda fsync beklenmez (geçmiş eşitlemesinde on binlerce satır); çökme güvenliği korunur
     this.db.pragma('synchronous = NORMAL');
     this.db.pragma('foreign_keys = ON');
     this.migrate();
+  }
+
+  /** Diskteki veritabanı düz (şifresiz) SQLite ise yerinde şifrele (SQLite3MultipleCiphers: PRAGMA rekey). */
+  private static migratePlain(file: string, key: string): void {
+    if (!fs.existsSync(file)) return;
+    const head = Buffer.alloc(16);
+    try {
+      const fd = fs.openSync(file, 'r');
+      fs.readSync(fd, head, 0, 16, 0);
+      fs.closeSync(fd);
+    } catch {
+      return;
+    }
+    if (head.toString('utf8', 0, 15) !== 'SQLite format 3') return; // zaten şifreli (ya da boş)
+    const db = new Database(file);
+    try {
+      // rekey WAL ile çalışmaz: önce geri al, sonra şifrele; journal_mode WAL'a constructor'da döner
+      db.pragma('journal_mode = DELETE');
+      db.pragma("cipher = 'sqlcipher'");
+      db.pragma(`rekey = "x'${key}'"`);
+    } finally {
+      db.close();
+    }
+    fs.chmodSync(file, 0o600);
   }
 
   /** Toplu yazımları tek işlemde çalıştır (geçmiş paketleri, ad yenileme) — çok daha hızlı. */

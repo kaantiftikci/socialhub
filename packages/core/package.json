@@ -16,6 +16,7 @@
     "@slack/web-api": "^7.9.1",
     "@whiskeysockets/baileys": "^7.0.0-rc14",
     "better-sqlite3": "^11.10.0",
+    "better-sqlite3-multiple-ciphers": "^13.0.3",
     "big-integer": "^1.6.52",
     "imapflow": "^2.0.6",
     "mailparser": "^3.9.28",

@@ -117,6 +117,19 @@ export function createServer(store: Store, registry: Registry, port: number): ht
       throw new HttpError(400, 'Geçersiz kimlik');
     }
   };
+  let lanServer: http.Server | undefined;
+  const openLan = () => {
+    if (lanServer) return;
+    lanServer = http.createServer(onRequest);
+    attachUpgrade(lanServer);
+    lanServer.keepAliveTimeout = 120_000;
+    lanServer.on('error', (e) => bus.log('warn', `LAN dinleyicisi: ${(e as Error).message}`));
+    lanServer.listen(port, '0.0.0.0');
+  };
+  const closeLan = () => {
+    lanServer?.close();
+    lanServer = undefined;
+  };
   const lanInfo = async () => {
     const urls = lanAddresses().map((ip) => `http://${ip}:${port}/#token=${token}`);
     return { enabled: lanEnabled, urls, qr: urls[0] ? await QRCode.toDataURL(urls[0], { margin: 1, width: 220 }) : undefined };
@@ -271,6 +284,8 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     localOnly(r);
     lanEnabled = !!(body as { enabled?: boolean }).enabled;
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify({ ...readSettings(), lan: lanEnabled }), { mode: 0o600 });
+    if (lanEnabled) openLan();
+    else closeLan();
     bus.log('info', lanEnabled ? `Telefondan erişim açıldı: ${lanAddresses().map((ip) => `http://${ip}:${port}`).join(', ')}` : 'Telefondan erişim kapatıldı');
     return lanInfo();
   });
@@ -284,7 +299,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   // derlenmiş arayüz: geliştirmede apps/web/dist, paketli uygulamada Resources/core/web (bundle-core.mjs kopyalar)
   const distDir = [path.resolve(here, '../web'), path.resolve(here, '../../web'), path.resolve(here, '../../../apps/web/dist'), path.resolve(here, '../../apps/web/dist')].find((d) => fs.existsSync(path.join(d, 'index.html')));
 
-  const server = http.createServer(async (req, res) => {
+  const onRequest = async (req: http.IncomingMessage, res: http.ServerResponse) => {
     const origin = req.headers.origin;
     // Yerel arayüzler: Vite (localhost:5173), Tauri (tauri://localhost / http://tauri.localhost) ve WKWebView'ın
     // özel şema sayfaları için gönderdiği "null" kaynağı (yalnızca belirteçle). Sunucu yalnızca 127.0.0.1'e bağlıdır.
@@ -371,14 +386,27 @@ export function createServer(store: Store, registry: Registry, port: number): ht
       // iç hata ayrıntısı (yığın/yol) istemciye gitmesin
       res.end(JSON.stringify({ error: status === 500 ? 'Sunucu hatası (ayrıntı Günlük\'te)' : (e as Error).message }));
     }
-  });
+  };
+  const server = http.createServer(onRequest);
 
   // WebKit (Tauri) bağlantıyı yeniden kullanırken sunucu keep-alive'ı erken kapatırsa "Load failed" oluşur
   server.keepAliveTimeout = 120_000;
   server.headersTimeout = 125_000;
 
   // ---------- websocket ----------
-  const wss = new WebSocketServer({ server, path: '/ws', verifyClient: (info: { req: http.IncomingMessage }) => authorized(info.req) });
+  // WS: tek WebSocketServer, hem yerel hem (açıksa) LAN dinleyicisinin upgrade'lerini alır
+  const wss = new WebSocketServer({ noServer: true });
+  const attachUpgrade = (srv: http.Server) =>
+    srv.on('upgrade', (req, socket, head) => {
+      const p = new URL(req.url ?? '/', 'http://x').pathname;
+      if (p !== '/ws' || !authorized(req)) {
+        socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+      wss.handleUpgrade(req, socket, head, (client) => wss.emit('connection', client, req));
+    });
+  attachUpgrade(server);
   wss.on('connection', (client) => {
     // Yeni bağlanan arayüze bekleyen QR'ları hemen gönder
     for (const [accountId, qrDataUrl] of pendingQr) client.send(JSON.stringify({ type: 'account.qr', accountId, qrDataUrl }));
@@ -416,8 +444,10 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     clearInterval(pingTimer);
   });
 
-  // 0.0.0.0: telefondan erişim için; uzak istemciler yalnızca LAN modu + belirteçle geçer (authorized)
-  server.listen(port, '0.0.0.0', () => bus.log('info', `Yerel API hazır: http://127.0.0.1:${port}  (ws: /ws)${lanEnabled ? ' · telefondan: ' + lanAddresses().map((ip) => `http://${ip}:${port}`).join(', ') : ''}`));
+  // Yerel dinleyici yalnız 127.0.0.1; LAN modu açıkken ayrı bir dinleyici 0.0.0.0'da (kapatınca port ağdan kaybolur)
+  server.listen(port, '127.0.0.1', () => bus.log('info', `Yerel API hazır: http://127.0.0.1:${port}  (ws: /ws)${lanEnabled ? ' · telefondan: ' + lanAddresses().map((ip) => `http://${ip}:${port}`).join(', ') : ''}`));
+  if (lanEnabled) openLan();
+  server.on('close', () => closeLan());
   return server;
 }
 

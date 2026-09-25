@@ -732,7 +732,7 @@ export default function App() {
           <NavItem icon="inbox" label="Gelen kutusu" count={totals.unread} active={view === 'inbox' && filter === 'all' && !platformFilter && !tagFilter} onClick={() => goInbox('all')} />
           <NavItem icon="sparkle" label="Odak" badge="AI" count={totals.waiting} active={view === 'focus'} onClick={() => setView('focus')} />
           <NavItem icon="bell" label="Ertelenenler" count={snoozedChats.length} active={view === 'snoozed'} onClick={() => setView('snoozed')} />
-          <NavItem icon="archive" label="Okunmamış" count={0} active={view === 'inbox' && filter === 'unread' && !platformFilter && !tagFilter} onClick={() => goInbox('unread')} />
+          <NavItem icon="archive" label="Okunmamış" count={totals.unread} active={view === 'inbox' && filter === 'unread' && !platformFilter && !tagFilter} onClick={() => goInbox('unread')} />
         </div>
         <div className="side-scroll">
           {(chatAccounts.length > 0 || accounts.length === 0) && (

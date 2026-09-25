@@ -5,6 +5,7 @@ import { bus } from './bus.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DEMO_MODE, PORT, ensureDirs, DATA_DIR } from './config.js';
+import { getDbKey } from './dbkey.js';
 
 // libsignal (WhatsApp şifre kütüphanesi) çözülemeyen eski/yinelenen paketleri doğrudan console.error ile basar;
 // zararsızdır (WhatsApp Web de aynı paketleri sessizce atar). Terminali kirletmesin.
@@ -69,7 +70,7 @@ async function main(): Promise<void> {
   process.umask(0o077);
   ensureDirs();
   pruneMediaCache();
-  const store = new Store();
+  const store = new Store(undefined, getDbKey()); // diskte şifreli (SQLCipher); anahtar Anahtar Zinciri'nde
   const registry = new Registry(store);
   bus.log('info', `Veri dizini: ${DATA_DIR}${DEMO_MODE ? '  (DEMO MODU)' : ''}`);
 
