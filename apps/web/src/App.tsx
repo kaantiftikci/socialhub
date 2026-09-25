@@ -923,7 +923,20 @@ export default function App() {
                 )}
               </div>
 
-              {view === 'inbox' && !platformFilter && !tagFilter && !query && pinnedChats.length > 0 && (
+              {composeOpen && (
+                <ComposePane
+                  accounts={accounts.filter((a) => a.status === 'connected' && canCompose(a.platform))}
+                  preferred={platformFilter}
+                  chats={allChats}
+                  onClose={() => setComposeOpen(false)}
+                  onOpen={(id) => {
+                    setComposeOpen(false);
+                    openChat(id);
+                  }}
+                  notify={notify}
+                />
+              )}
+              {!composeOpen && view === 'inbox' && !platformFilter && !tagFilter && !query && pinnedChats.length > 0 && (
                 <div className="quick" aria-label="Sabitlenenler">
                   {pinnedChats.slice(0, 8).map((c, i, arr) => (
                     <button key={c.id} className={`qc b ${c.id === selected ? 'on' : ''}`} onClick={() => setSelected(c.id)} title={c.lastPreview}>
@@ -938,7 +951,7 @@ export default function App() {
                 </div>
               )}
               {/* anahtar: uygulama/sekme/etiket değişince liste yeniden kurulur ve satırlar kademeli belirir */}
-              <div className="rows" key={`${view}|${platformFilter ?? ''}|${filter}|${tagFilter ?? ''}`} onScroll={onRowsScroll}>
+              <div className="rows" key={`${view}|${platformFilter ?? ''}|${filter}|${tagFilter ?? ''}`} onScroll={onRowsScroll} style={composeOpen ? { display: 'none' } : undefined}>
                 {FLAG_VIEWS.some((f) => f.view === view) ? (
                   (() => {
                     const f = FLAG_VIEWS.find((x) => x.view === view)!;
@@ -1005,19 +1018,7 @@ export default function App() {
             </section>
             <Resizer pane="list" />
 
-            {composeOpen ? (
-              <ComposePane
-                accounts={accounts.filter((a) => a.status === 'connected' && canCompose(a.platform))}
-                preferred={platformFilter}
-                chats={allChats}
-                onClose={() => setComposeOpen(false)}
-                onOpen={(id) => {
-                  setComposeOpen(false);
-                  openChat(id);
-                }}
-                notify={notify}
-              />
-            ) : current ? (
+            {current ? (
               <Conversation
                 key={current.id}
                 chat={current}
@@ -1327,31 +1328,22 @@ function ComposePane({ accounts, preferred, chats, onClose, onOpen, notify }: { 
       : 'Bu uygulamada yeni sohbet başlatılamıyor.'
     : 'E-posta adresi yazarsan e-posta, +90 numara yazarsan WhatsApp, @kullanıcı yazarsan Telegram sohbeti açılır.';
   return (
-    <section className="compose-pane" aria-label={title}>
-      <header className="conv-head">
-        <div className="conv-id">
-          <div className="conv-id-top">
-            <h2>{title}</h2>
-          </div>
-          <span className="sub">
-            {account ? (
-              <>
-                <Chip platform={account.platform} size={16} />
-                <span className="meta">
-                  {PLATFORMS[account.platform].name}
-                  {account.label && account.label !== PLATFORMS[account.platform].name ? ` · ${account.label}` : ''}
-                </span>
-              </>
-            ) : (
-              <span className="meta">Hesap yazdığın tanıtıcıya göre seçilir</span>
-            )}
+    <section className="compose-box" aria-label={title}>
+      <div className="cb-head">
+        <span className="cb-title">{title}</span>
+        {account ? (
+          <span className="cb-acc">
+            <Chip platform={account.platform} size={14} />
+            {PLATFORMS[account.platform].name}
+            {account.label && account.label !== PLATFORMS[account.platform].name ? ` · ${account.label}` : ''}
           </span>
-        </div>
-        <span style={{ flexGrow: 1 }} />
-        <button className="btn icon b b2" onClick={onClose} aria-label="Kapat" title="Kapat">
-          <Icon name="x" size={15} sw={2} />
+        ) : (
+          <span className="cb-acc">tanıtıcıya göre seçilir</span>
+        )}
+        <button className="btn ghost xs icon b" onClick={onClose} aria-label="Kapat" title="Kapat">
+          <Icon name="x" size={13} sw={2} />
         </button>
-      </header>
+      </div>
       <div className="body">
         {isMail ? (
           <div className="mailform">
