@@ -415,7 +415,9 @@ export function Conversation({
 
   const shown = useMemo(() => {
     const q = (search ?? '').trim().toLocaleLowerCase('tr-TR');
-    const base = threadFocus ? messages.filter((m) => m.remoteId === threadFocus || m.threadId === threadFocus) : messages;
+    // "X bir mesajı beğendi" türü olay metinleri sohbette satır olarak gösterilmez (liste önizlemesinde kalır; tepkiler çip olarak görünür)
+    const visible = messages.filter((m) => !REACT_TEXT.test(m.text));
+    const base = threadFocus ? visible.filter((m) => m.remoteId === threadFocus || m.threadId === threadFocus) : visible;
     if (!q) return base;
     return base.filter((m) => m.text.toLocaleLowerCase('tr-TR').includes(q) || m.senderName.toLocaleLowerCase('tr-TR').includes(q) || m.attachments?.some((a) => a.name?.toLocaleLowerCase('tr-TR').includes(q)));
   }, [messages, search, threadFocus]);
@@ -1461,6 +1463,9 @@ function groupMessages(msgs: Message[]): Group[] {
   }
   return out;
 }
+
+/** Platformların metin olarak verdiği tepki/beğeni olayları */
+const REACT_TEXT = /^(👍|❤️|❤|😂|🔥|👏|😮|🎉|🙏) .+ (bir mesajı beğendi|mesajına tepki verdi)$/;
 
 const SENDER_COLORS = ['#6c47ff', '#0b6b45', '#b45309', '#a3195b', '#0a66c2', '#b42318', '#0e7490', '#6d28d9', '#047857', '#c2410c'];
 /** Grup sohbetinde her gönderene sabit bir renk (kimlikten türetilir; oturumlar arasında aynı kalır) */

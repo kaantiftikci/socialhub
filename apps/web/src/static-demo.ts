@@ -79,8 +79,11 @@ function seed(): void {
       // uygun platformlarda her ikinci sohbette son olay bir beğeni: "Ayşe bir mesajı beğendi"
       if (REACT_PLATFORMS.has(acc.platform) && k % 2 === 0) {
         const who = s.kind === 'direct' ? s.name.split(' ')[0] : ([...members][0] ?? s.name);
-        const text = `${REACT_EMOJI[k % REACT_EMOJI.length]} ${who} bir mesajı beğendi`;
-        messages.push({ id: `${id}#react`, chatId: id, remoteId: 'react', senderId: s.kind === 'direct' ? s.remoteId : slug(who), senderName: who, fromMe: false, text, ts: lastAt + 90_000, status: 'delivered' });
+        const emoji = REACT_EMOJI[k % REACT_EMOJI.length];
+        const text = `${emoji} ${who} bir mesajı beğendi`;
+        // sohbette ayrı bir satır değil: benim son mesajıma (yoksa son mesaja) gerçek tepki; liste önizlemesi olay metnini gösterir
+        const mine = [...messages].reverse().find((m) => m.chatId === id && m.fromMe) ?? [...messages].reverse().find((m) => m.chatId === id);
+        if (mine) mine.reactions = [...(mine.reactions ?? []), { emoji, senderId: s.kind === 'direct' ? s.remoteId : slug(who), senderName: who, fromMe: false }];
         last = [false, text];
         lastText = text;
       }
