@@ -1509,15 +1509,21 @@ function statusIcon(s: Message['status']) {
   return null;
 }
 
+/** Metin sunumlu semboller (❤ ♥ ☺ …) renkli emoji olarak çizilsin: varyasyon seçicisi (U+FE0F) eklenir */
+export function colorEmoji(e: string): string {
+  return e.replace(/([\u2764\u2765\u2763\u2665\u2660\u2663\u2666\u263A\u2639\u261D\u270C\u270B\u270D\u2620\u2714\u2716\u2611\u2600\u2601\u26A0\u2B50\u2705])(?!\uFE0F)/g, '$1\uFE0F');
+}
+
 /** Tepki çipleri: emoji başına sayı; benimki vurgulu; başlıkta kimler */
 function ReactionChips({ list, onToggle }: { list: Reaction[]; onToggle?: (emoji: string) => void }) {
   const groups = new Map<string, { n: number; mine: boolean; names: string[] }>();
   for (const r of list) {
-    const g = groups.get(r.emoji) ?? { n: 0, mine: false, names: [] };
+    const key = colorEmoji(r.emoji);
+    const g = groups.get(key) ?? { n: 0, mine: false, names: [] };
     g.n++;
     if (r.fromMe) g.mine = true;
     if (r.senderName) g.names.push(r.fromMe ? 'Sen' : r.senderName);
-    groups.set(r.emoji, g);
+    groups.set(key, g);
   }
   return (
     <span className="rchips">
