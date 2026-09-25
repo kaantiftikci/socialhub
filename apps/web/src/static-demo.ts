@@ -154,19 +154,73 @@ export function clearDemoAccounts(): void {
   messages = [];
 }
 
-// Canlı beğeni akışı: 70 sn'de bir uygun bir sohbete "X bir mesajı beğendi" düşer (önizleme ve bildirim canlı kalsın)
-let reactTick = 0;
+// Canlı mesaj akışı: 70 sn'de bir uygun bir sohbete gerçekçi bir gelen mesaj düşer (önizleme ve bildirim canlı kalsın).
+// Beğeni/tepki bildirimi ÜRETİLMEZ: bildirimler hep aynı "X bir mesajı beğendi" olmasın diye metinler sohbetin etiketine göre seçilir.
+const LIVE_LINES: Record<string, string[]> = {
+  müşteri: [
+    'Merhaba, siparişim ne zaman kargoya verilir?',
+    'Bu ürünün mavi rengi var mı?',
+    'Kargo takip numarasını paylaşabilir misiniz?',
+    'İade süreci nasıl işliyor acaba?',
+    'Fatura adresini değiştirmek istiyorum, mümkün mü?',
+    'Ürün elime ulaştı, teşekkürler! Bir bedeni büyüğü de var mı?',
+  ],
+  ekip: [
+    'Toplantıyı 15:00\'e alabilir miyiz?',
+    'Raporun son halini yükledim, bakabilir misin?',
+    'Müşteri demosu için sunum hazır mı?',
+    'Bugün öğleden sonra ofiste misin?',
+    'Yeni sürüm test ortamına çıktı, göz atar mısın?',
+    'Sprint planlamasını yarına aldım, uygun mu?',
+  ],
+  fırsat: [
+    'Teklifinizi inceledik, detayları konuşabilir miyiz?',
+    'İş birliği için uygun bir gün var mı?',
+    'Fiyat listesini paylaşabilir misiniz?',
+    'Önümüzdeki hafta bir görüşme ayarlayalım mı?',
+  ],
+  kişisel: [
+    'Akşam yemeğe geliyor musun?',
+    'Fotoğrafları gördün mü? 😄',
+    'Hafta sonu plan var mı?',
+    'Aradım ulaşamadım, müsait olunca yaz',
+  ],
+  genel: [
+    'Selam, müsait misin?',
+    'Dünkü konuyla ilgili bir sorum olacak',
+    'Gönderdiğin dosyayı aldım, sağ ol',
+    'Bunu bir de sen kontrol eder misin?',
+    'Haberleri gördün mü? 🙂',
+  ],
+};
+let liveTick = 0;
 if (STATIC_DEMO) {
   setInterval(() => {
-    const pool = chats.filter((c) => REACT_PLATFORMS.has(c.platform));
+    const pool = chats.filter((c) => REACT_PLATFORMS.has(c.platform) && c.kind !== 'channel');
     if (!pool.length) return;
-    const chat = pool[reactTick++ % pool.length];
-    const who = chat.kind === 'direct' ? chat.name.split(' ')[0] : (messages.find((m) => m.chatId === chat.id && !m.fromMe)?.senderName ?? chat.name);
+    liveTick++;
+    const chat = pool[(liveTick * 7) % pool.length];
+    const tag = chat.tags.find((t) => LIVE_LINES[t]) ?? 'genel';
+    const lines = LIVE_LINES[tag];
+    const text = lines[(liveTick * 3) % lines.length];
+    const src = chat.kind === 'direct' ? undefined : messages.find((m) => m.chatId === chat.id && !m.fromMe && !isReactionText(m.text));
+    const who = chat.kind === 'direct' ? chat.name : (src?.senderName ?? chat.name);
     const ts = Date.now();
-    const text = `${REACT_EMOJI[reactTick % REACT_EMOJI.length]} ${who} bir mesajı beğendi`;
-    const message: Message = { id: `${chat.id}#react-${ts}`, chatId: chat.id, remoteId: `react-${ts}`, senderId: chat.remoteId, senderName: who, fromMe: false, text, ts, status: 'delivered' };
+    const message: Message = {
+      id: `${chat.id}#live-${ts}`,
+      chatId: chat.id,
+      remoteId: `live-${ts}`,
+      senderId: chat.kind === 'direct' ? chat.remoteId : (src?.senderId ?? chat.remoteId),
+      senderName: who,
+      senderAvatarUrl: chat.kind === 'direct' ? chat.avatarUrl : src?.senderAvatarUrl,
+      fromMe: false,
+      text,
+      ts,
+      status: 'delivered',
+    };
     messages.push(message);
-    const next = { ...touch(chat, text, false, ts), unread: chat.unread + 1 };
+    const preview = chat.kind === 'direct' ? text : `${who.split(' ')[0]}: ${text}`;
+    const next = { ...touch(chat, preview, false, ts), unread: chat.unread + 1 };
     chats = chats.map((c) => (c.id === chat.id ? next : c));
     emit({ type: 'chat.upsert', chat: next });
     emit({ type: 'message.upsert', message, chat: next, live: true });
