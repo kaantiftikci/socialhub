@@ -197,6 +197,14 @@ export class WhatsAppConnector extends BaseConnector {
         bus.log('info', 'WhatsApp bağlandı; telefon geçmişi gönderiyor (ilk seferde 10-60 sn sürebilir)');
         // Telefon bildirimleri: bağlı cihaz "aktif" görünürse WhatsApp telefona bildirim göndermez. Bağlantıda ve her 4 dk'da
         // bir açıkça çevrimdışı (unavailable) bildir; yoklamayı kesen bir durumda telefonun sessiz kalmasını önler.
+        // Baileys, creds.me.name yoksa presence isteğini sessizce ATLIYOR ("no name present"): cihaz hiç "çevrimdışı"
+        // diyemediği için WhatsApp onu "Aktif" gösteriyor ve telefon bildirimlerini bastırıyordu. Adı yoksa ver ve kaydet.
+        const creds = sock.authState.creds;
+        if (creds.me && !creds.me.name) {
+          creds.me.name = sock.user?.name || 'Mivelo';
+          sock.ev.emit('creds.update', creds);
+          bus.log('info', `WhatsApp: cihaz adı yoktu, "${creds.me.name}" olarak ayarlandı (presence gönderilebilsin)`);
+        }
         const offline = () => sock.sendPresenceUpdate('unavailable').catch(() => undefined);
         void offline();
         if (this.presenceTimer) clearInterval(this.presenceTimer);
