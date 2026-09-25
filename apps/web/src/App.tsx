@@ -867,7 +867,7 @@ export default function App() {
                     {view === 'inbox' && scoped.unread > 0 && <span className="pill">{fmtCount(scoped.unread)} yeni</span>}
                   </div>
                   <span style={{ flexGrow: 1 }} />
-                  {view === 'inbox' && accounts.some((a) => a.status === 'connected' && canCompose(a.platform)) && (
+                  {view === 'inbox' && accounts.some((a) => a.status === 'connected' && canCompose(a.platform) && (!platformFilter || a.platform === platformFilter)) && (
                     <button className={`btn icon b b2 ${composeOpen ? 'soft' : ''}`} aria-label={PLATFORMS[platformFilter ?? 'demo']?.category === 'mail' ? 'Yeni e-posta' : 'Yeni sohbet'} title={platformFilter && PLATFORMS[platformFilter].category === 'mail' ? 'Yeni e-posta yaz' : 'Yeni sohbet başlat'} onClick={() => setComposeOpen((v) => !v)}>
                       <Icon name="pen" size={15} sw={2} />
                     </button>
