@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@fortawesome/free-brands-svg-icons": "^7.3.1",
+    "@sentry/react": "^10.75.3",
     "@tauri-apps/api": "^2.11.0",
     "@tauri-apps/plugin-notification": "^2.4.0",
     "react": "^19.1.0",

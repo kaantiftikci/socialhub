@@ -4,6 +4,9 @@ import App from './App';
 import { DemoGate } from './Auth';
 import { STATIC_DEMO } from './profile';
 import './styles.css';
+import { initSentry } from './sentry';
+
+void initSentry(); // yalnız demo derlemesinde ve DSN varsa etkin
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
