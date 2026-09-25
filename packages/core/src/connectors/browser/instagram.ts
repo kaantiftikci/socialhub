@@ -153,7 +153,9 @@ function itemContent(it: J): { text: string; attachments: Attachment[] } {
     const kind = video || forceVideo ? 'video' : 'image';
     const count = Array.isArray(m.carousel_media) && m.carousel_media.length > 1 ? ` (${m.carousel_media.length})` : '';
     att.push({ kind, name: [label + count, user].filter(Boolean).join(' · '), url: mediaImage(m), link: video ?? page, page, mime: video ? 'video/mp4' : undefined });
-    return cap ? `${user ? user + ': ' : ''}${cap}` : '';
+    // Gönderinin açıklaması mesaj metni değildir (Instagram'da da yalnız kart görünür); kartta etiket + kullanıcı yeter
+    void cap;
+    return '';
   };
   // Yeni "xma" biçimi (2024+): önizleme + hedef bağlantı hazır gelir
   const xmaRaw = it.xma_media_share ?? it.xma_reel_share ?? it.xma_story_share ?? it.xma_reel_mention ?? it.xma_link ?? it.xma_profile ?? it.generic_xma ?? it.xma_clip ?? it.xma;

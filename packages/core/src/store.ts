@@ -121,6 +121,30 @@ export class Store {
     // gönderen bazlı güncellemeler (ad/fotoğraf/lid→numara) tam tablo taraması yapmasın
     this.db.exec('CREATE INDEX IF NOT EXISTS messages_sender ON messages(sender_id)');
     this.db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    // Onarım: Instagram Reels/gönderi paylaşımlarında gönderi açıklaması mesaj metni olarak yazılmıştı ("@kullanıcı: açıklama");
+    // metin boşaltılır, etkilenen sohbetlerin önizlemesi son mesajdan yeniden türetilir
+    if (!this.flag('fix_ig_caption_v1')) {
+      const rows = this.db
+        .prepare("SELECT id, chat_id FROM messages WHERE chat_id LIKE 'instagram:%' AND text LIKE '@%: %' AND attachments IS NOT NULL AND (attachments LIKE '%\"name\":\"Reels%' OR attachments LIKE '%\"name\":\"Gönderi%' OR attachments LIKE '%\"name\":\"Video%')")
+        .all() as Array<{ id: string; chat_id: string }>;
+      const touched = new Set<string>();
+      this.db.transaction(() => {
+        for (const r of rows) {
+          this.db.prepare("UPDATE messages SET text = '' WHERE id = ?").run(r.id);
+          touched.add(r.chat_id);
+        }
+        for (const cid of touched) {
+          const chat = this.getChat(cid);
+          const last = this.db.prepare('SELECT * FROM messages WHERE chat_id = ? ORDER BY ts DESC LIMIT 1').get(cid);
+          if (!chat || !last) continue;
+          const m = rowToMessage(last);
+          const body = m.text || (m.attachments?.length ? `[${m.attachments[0].name ?? m.attachments[0].kind}]` : '');
+          const preview = chat.kind !== 'direct' && body ? `${m.fromMe ? 'Sen' : (m.senderName || '').split(/\s+/)[0] || '?'}: ${body}` : body;
+          this.db.prepare('UPDATE chats SET last_preview = ? WHERE id = ?').run(preview, cid);
+        }
+      })();
+      this.setFlag('fix_ig_caption_v1');
+    }
     // Tek seferlik onarım: Messenger mesajları ilk sürümde eşitleme saatiyle yazılmıştı (kimlik aynı kaldığı için üstüne
     // yazılmıyor); sil → yoklama gerçek zamanlarıyla yeniden getirir
     if (!this.flag('fix_messenger_ts_v1')) {
