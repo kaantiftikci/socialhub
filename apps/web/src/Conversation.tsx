@@ -159,6 +159,13 @@ export function Conversation({
   useEffect(() => (setThreadFocus(null), setEmojiOpen(false), setReactPick(null), setBarFor(null)), [chat.id]);
   const canReact = REACT_PLATFORMS.has(chat.platform);
   const byRemote = useMemo(() => new Map(messages.map((m) => [m.remoteId, m])), [messages]);
+  /** Gönderen → profil fotoğrafı: bazı mesajlarda fotoğraf yoksa aynı kişinin başka mesajından ya da üye listesinden */
+  const avatarOf = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of chat.participants ?? []) if (p.avatarUrl) m.set(p.id, p.avatarUrl);
+    for (const x of messages) if (x.senderAvatarUrl && !m.has(x.senderId)) m.set(x.senderId, x.senderAvatarUrl);
+    return m;
+  }, [messages, chat.participants]);
   /** Slack: yanıtı olan üst mesajlar (sağ panel listesi), son yanıta göre */
   const threads = useMemo(() => {
     if (chat.platform !== 'slack') return [] as Array<{ parent: Message; replies: Message[] }>;
@@ -600,7 +607,7 @@ export function Conversation({
               </div>
             ) : (
               <div key={g.key} className={`grp ${g.fromMe ? 'me' : ''}`}>
-                {!g.fromMe && <Avatar name={g.senderName} size={28} url={g.items.find((m) => m.senderAvatarUrl)?.senderAvatarUrl ?? (chat.kind === 'direct' ? chat.avatarUrl : undefined)} />}
+                {!g.fromMe && <Avatar name={g.senderName} size={28} url={g.items.find((m) => m.senderAvatarUrl)?.senderAvatarUrl ?? avatarOf.get(g.items[0].senderId) ?? (chat.kind === 'direct' ? chat.avatarUrl : undefined)} />}
                 <div className="col">
                   {!g.fromMe && chat.kind !== 'direct' && (
                     <span className="sender" style={{ color: senderColor(g.items[0].senderId || g.senderName) }}>
@@ -624,13 +631,27 @@ export function Conversation({
                           {m.attachments?.map((a, j) => (
                             <AttachmentView key={j} a={a} onOpen={setLightbox} />
                           ))}
-                          {m.text && (m.attachments?.length ? <span className="bub-text">{linkify(m.text)}</span> : linkify(m.text))}
-                          {!isReact && (
-                            <time className="bt" dateTime={new Date(m.ts).toISOString()} title={fmtStamp(m.ts)}>
-                              {fmtTime(m.ts)}
-                              {g.fromMe && i === g.items.length - 1 && statusIcon(m.status)}
-                            </time>
-                          )}
+                          {(() => {
+                            const timeEl = !isReact ? (
+                              <time className="bt" dateTime={new Date(m.ts).toISOString()} title={fmtStamp(m.ts)}>
+                                {fmtTime(m.ts)}
+                                {g.fromMe && i === g.items.length - 1 && statusIcon(m.status)}
+                              </time>
+                            ) : null;
+                            if (m.text && m.attachments?.length)
+                              return (
+                                <span className="bub-text">
+                                  {linkify(m.text)}
+                                  {timeEl}
+                                </span>
+                              );
+                            return (
+                              <>
+                                {m.text ? linkify(m.text) : null}
+                                {timeEl}
+                              </>
+                            );
+                          })()}
                         </div>
                         {url && <LinkCard url={url} />}
                         {m.reactions?.length ? <ReactionChips list={m.reactions} onToggle={canReact ? (e) => react(m, e) : undefined} /> : null}
@@ -894,7 +915,7 @@ export function Conversation({
       <aside className={`ctx ${detailsP.closing ? 'closing' : ''}`} aria-label="Kişi ayrıntıları">
         <div className="ctx-bar">
           {onToggleDetails && (
-            <button className="btn ghost xs icon b" onClick={onToggleDetails} title="Ayrıntı panelini gizle" aria-label="Paneli kapat">
+            <button className="btn icon b b2" onClick={onToggleDetails} title="Ayrıntı panelini gizle" aria-label="Paneli kapat">
               <Icon name="panel" size={15} />
             </button>
           )}
@@ -1498,7 +1519,7 @@ function ReactionChips({ list, onToggle }: { list: Reaction[]; onToggle?: (emoji
       {[...groups].map(([e, g]) => (
         <button key={e} type="button" className={`rchip b ${g.mine ? 'mine' : ''}`} title={g.names.join(', ')} onClick={onToggle ? () => onToggle(e) : undefined} disabled={!onToggle}>
           <span className="e">{e}</span>
-          {g.n > 1 || g.names.length === 0 ? <span className="n">{g.n}</span> : <span className="n">{g.names[0]?.split(' ')[0]}</span>}
+          {g.n > 1 ? <span className="n">{g.n}</span> : g.mine || g.names.length === 0 ? null : <span className="n">{g.names[0]?.split(' ')[0]}</span>}
         </button>
       ))}
     </span>

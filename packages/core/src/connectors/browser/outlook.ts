@@ -372,7 +372,24 @@ export const outlook: Strategy = {
     if (await scrollList(page, 'top')) await page.waitForTimeout(1200);
     const raw = await readListRows(page);
     for (const r of raw) listed.add(r.id);
-    return raw.map(rawToThread);
+    const out: Thread[] = raw.map((r) => ({ ...rawToThread(r), meta: { folder: 'inbox' } }));
+    // Gönderilenler ve Gereksiz klasörleri: her 8. yoklamada okunur, sonra gelen kutusuna dönülür
+    if (folderTick++ % 8 === 0) {
+      for (const [path, folder] of [['sentitems', 'sent'], ['junkemail', 'junk']] as const) {
+        try {
+          await page.goto(BASE + path, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+          const ok = await page.waitForSelector(LIST, { state: 'attached', timeout: 10_000 }).then(() => true).catch(() => false);
+          if (ok) {
+            await page.waitForTimeout(800);
+            for (const r of await readListRows(page)) out.push({ ...rawToThread(r), unread: 0, meta: { folder } });
+          }
+        } catch {
+          /* klasör okunamadı */
+        }
+      }
+      await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+    }
+    return out;
   },
 
   /**
@@ -535,6 +552,7 @@ export const FILE_INPUT = 'input[type="file"][data-testid="local-computer-filein
 
 /** threads()/moreThreads ile depoya yazılmış satır kimlikleri (moreThreads yalnızca yenilerini döndürür) */
 const listed = new Set<string>();
+let folderTick = 0;
 /** liste satırından okunan zaman (ileti zamanı okunamazsa yedek) */
 const threadTs = new Map<string, number>();
 

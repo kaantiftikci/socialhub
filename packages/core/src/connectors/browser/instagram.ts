@@ -1,7 +1,7 @@
 import type { Page } from 'playwright';
 import { apiOf, needsPage, type Msg, type Strategy, type Thread } from './bridge.js';
 import { pickFileInput } from './outlook.js';
-import type { Attachment } from '../../model.js';
+import type { Attachment, Reaction } from '../../model.js';
 import { bus } from '../../bus.js';
 
 /** Instagram: web istemcisinin kullandığı /api/v1/direct_v2 uçları, sayfa bağlamında (çerezlerle). */
@@ -31,6 +31,7 @@ async function ig(page: Page, cookies: Record<string, string>, path: string, for
     try {
       return JSON.parse(text) as J;
     } catch {
+      if (/<html/i.test(text)) throw new Error('Instagram oturumu düşmüş — kanala sağ tık → Yeniden bağlan');
       throw new Error(`Instagram beklenmeyen yanıt ${path}: ${text.slice(0, 80)}`);
     }
   }
@@ -297,6 +298,38 @@ export function _resetInboxCursors(): void {
   inboxCursors.length = 0;
 }
 
+/** Öğedeki beğeni/emoji tepkileri (reactions.likes / reactions.emojis) → Reaction[] */
+function igReactions(it: J): Reaction[] | undefined {
+  const r: J | undefined = it.reactions;
+  if (!r) return undefined;
+  const out: Reaction[] = [];
+  for (const l of (r.likes ?? []) as J[]) {
+    const uid = String(l.sender_id ?? '');
+    if (!uid) continue;
+    out.push({ emoji: '❤️', senderId: uid, senderName: uid === viewerId ? 'Ben' : (userNames.get(uid) ?? 'Instagram kullanıcısı'), fromMe: uid === viewerId });
+  }
+  for (const e of (r.emojis ?? []) as J[]) {
+    const uid = String(e.sender_id ?? '');
+    if (!uid || !e.emoji) continue;
+    out.push({ emoji: String(e.emoji), senderId: uid, senderName: uid === viewerId ? 'Ben' : (userNames.get(uid) ?? 'Instagram kullanıcısı'), fromMe: uid === viewerId });
+  }
+  return out.length ? out : undefined;
+}
+/** Öğeye karşı taraftan gelen en yeni tepki (µs zaman damgası ile) — önizleme "X bir mesajı beğendi" için */
+function latestOtherReaction(it: J): { uid: string; ts: number; emoji: string } | undefined {
+  const r: J | undefined = it?.reactions;
+  if (!r) return undefined;
+  let best: { uid: string; ts: number; emoji: string } | undefined;
+  const all: J[] = [...((r.likes ?? []) as J[]).map((x) => ({ ...x, emoji: '❤️' }) as J), ...((r.emojis ?? []) as J[])];
+  for (const l of all) {
+    const uid = String(l.sender_id ?? '');
+    const ts = Number(l.timestamp ?? 0);
+    if (!uid || uid === viewerId || !ts) continue;
+    if (!best || ts > best.ts) best = { uid, ts, emoji: String(l.emoji ?? '❤️') };
+  }
+  return best;
+}
+
 /** inbox yanıtı → sohbet listesi */
 function inboxThreads(data: J): Thread[] {
   if (data.viewer?.pk) viewerId = String(data.viewer.pk);
@@ -328,7 +361,12 @@ function inboxThreads(data: J): Thread[] {
       name: t.thread_title || (t.users ?? []).map((u: J) => u.full_name || u.username).join(', ') || 'Sohbet',
       kind: t.is_group ? 'group' : 'direct',
       lastTs: tsMs(t.last_activity_at ?? last?.timestamp),
-      preview: last ? itemText(last) || (isLogItem(last) ? String(last.action_log?.description ?? '') : '') : '',
+      // karşı taraf benim mesajımı beğendiyse: mesaj metni değil "X bir mesajı beğendi" (mesaj benden gelmiş gibi görünmesin)
+      preview: (() => {
+        const rx = last ? latestOtherReaction(last) : undefined;
+        if (last && rx && rx.ts > Number(last.timestamp ?? 0)) return `${rx.emoji} ${(userNames.get(rx.uid) ?? 'Biri').split(' ')[0]} bir mesajı beğendi`;
+        return last ? itemText(last) || (isLogItem(last) ? String(last.action_log?.description ?? '') : '') : '';
+      })(),
       unread,
       // grup: özel grup fotoğrafı varsa o, yoksa ilk üyenin fotoğrafı
       avatarUrl: t.is_group ? (t.thread_image?.url ?? t.thread_image_url ?? t.users?.[0]?.profile_pic_url) : t.users?.[0]?.profile_pic_url,
@@ -466,6 +504,7 @@ export const instagram: Strategy = {
         fromMe: uid === viewerId || it.is_sent_by_viewer === true,
         senderId: uid,
         senderName: userNames.get(uid) ?? 'Instagram kullanıcısı',
+        reactions: igReactions(it),
       };
     });
   },

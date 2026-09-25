@@ -31,10 +31,13 @@ export default function App() {
   const [listSearch, setListSearch] = useState(false);
   /** iMessage klasörü: Mesajlar uygulamasındaki Bilinmeyen / İstenmeyen / SMS filtresi / Son silinenler */
   const [imFolder, setImFolder] = useState<'unknown' | 'junk' | 'sms' | 'deleted' | null>(null);
+  /** E-posta hesaplarında Gönderilenler / Gereksiz sekmesi */
+  const [mailFolder, setMailFolder] = useState<'sent' | 'junk' | null>(null);
   /** Telegram: üstteki "Arşiv" sekmesi (chat.meta.archived) */
   const [tgArchive, setTgArchive] = useState(false);
   /** Platform seçimi değişince platforma özel sekmeler (iMessage klasörü, Telegram arşivi) sıfırlanır */
   const selectPlatform = useCallback((p: Platform | null) => {
+    setMailFolder(null);
     setPlatformFilter(p);
     setImFolder(null);
     setTgArchive(false);
@@ -393,7 +396,7 @@ export default function App() {
    * Gelen kutusu, sayaçlar ve odak için sohbetler: arşivlenmiş (Telegram) ve klasörlenmiş (iMessage bilinmeyen/istenmeyen/SMS)
    * sohbetler dışarıda kalır; onlar yalnızca kendi sekmelerinde görünür.
    */
-  const inboxChats = useMemo(() => activeChats.filter((c) => !c.meta?.archived && !c.archived && !c.muted && !c.hidden && !(c.platform === 'imessage' && c.meta?.folder === 'junk')), [activeChats]);
+  const inboxChats = useMemo(() => activeChats.filter((c) => !c.meta?.archived && !c.archived && !c.muted && !c.hidden && !(c.platform === 'imessage' && c.meta?.folder === 'junk') && !(PLATFORMS[c.platform].category === 'mail' && (c.meta?.folder === 'junk' || c.meta?.folder === 'sent'))), [activeChats]);
   /** Arşiv / Sessiz / Gizli görünümleri (yerel bayraklar) */
   const flagged = useMemo(() => {
     const by = (k: 'archived' | 'muted' | 'hidden') => allChats.filter((c) => c[k]).sort((a, b) => b.lastMessageAt - a.lastMessageAt);
@@ -413,9 +416,9 @@ export default function App() {
     },
     [notify],
   );
-  /** Yeni sohbet / yeni e-posta: hangi hesapta (hesap seçimi yok; düğme yalnızca destekleyen hesabın satırında/listesinde) */
-  const [newChatFor, setNewChatFor] = useState<string | null>(null);
-  const newChatP = useClosing(newChatFor);
+  /** Yeni sohbet / yeni e-posta bölmesi: açıkken sağ bölmede (popup değil); platform, o anki uygulama filtresinden ya da yazılan tanıtıcıdan */
+  const [composeOpen, setComposeOpen] = useState(false);
+  useEffect(() => setComposeOpen(false), [selected]);
   const archivedCount = useMemo(() => activeChats.filter((c) => c.platform === platformFilter && !!c.meta?.archived).length, [activeChats, platformFilter]);
   const waitingChats = useMemo(() => inboxChats.filter(isWaiting).sort((a, b) => b.lastMessageAt - a.lastMessageAt), [inboxChats]);
   const [storyPlatform, setStoryPlatform] = useState<Platform | null>(null);
@@ -425,7 +428,8 @@ export default function App() {
   const chatList = useMemo(() => {
     // Telegram "Arşiv" sekmesi yalnızca arşivlenmişleri, iMessage klasör sekmeleri o klasörü; diğer her görünüm gelen kutusunu listeler
     const imActive = platformFilter === 'imessage' ? imFolder : null;
-    let list = platformFilter === 'telegram' && tgArchive ? activeChats.filter((c) => c.platform === 'telegram' && !!c.meta?.archived) : imActive ? activeChats : [...inboxChats];
+    const mailActive = platformFilter && PLATFORMS[platformFilter].category === 'mail' ? mailFolder : null;
+    let list = platformFilter === 'telegram' && tgArchive ? activeChats.filter((c) => c.platform === 'telegram' && !!c.meta?.archived) : imActive ? activeChats : mailActive ? activeChats.filter((c) => c.platform === platformFilter && (mailActive === 'junk' ? c.meta?.folder === 'junk' : c.meta?.folder === 'sent' || (c.meta?.folder !== 'junk' && !!c.lastFromMe))) : [...inboxChats];
     if (platformFilter) list = list.filter((c) => c.platform === platformFilter);
     // iMessage klasörleri: filtrelenmiş sohbetler (bilinmeyen/istenmeyen/SMS) gelen kutusunda görünmez; klasör seçilince yalnızca o klasör
     list = list.filter((c) => {
@@ -448,10 +452,10 @@ export default function App() {
     }
     list.sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || (smartSort ? score(b) - score(a) : 0) || b.lastMessageAt - a.lastMessageAt);
     return list;
-  }, [activeChats, inboxChats, filter, platformFilter, tagFilter, query, smartSort, imFolder, tgArchive]);
+  }, [activeChats, inboxChats, filter, platformFilter, tagFilter, query, smartSort, imFolder, tgArchive, mailFolder]);
 
   /** Boş liste metni: hangi sekme/filtre boşsa ona göre anlamlı bir açıklama */
-  const emptyText = imFolder || tgArchive ? 'Bu klasörde sohbet yok.' : query.trim() ? 'Aramayla eşleşen sohbet yok.' : filter === 'unread' && platformFilter !== 'imessage' ? 'Okunmamış sohbet yok.' : tagFilter ? 'Bu etikette sohbet yok.' : platformFilter ? 'Bu kanalda henüz sohbet yok.' : 'Bu filtreye uyan sohbet yok.';
+  const emptyText = imFolder || tgArchive || mailFolder ? 'Bu klasörde sohbet yok.' : query.trim() ? 'Aramayla eşleşen sohbet yok.' : filter === 'unread' && platformFilter !== 'imessage' ? 'Okunmamış sohbet yok.' : tagFilter ? 'Bu etikette sohbet yok.' : platformFilter ? 'Bu kanalda henüz sohbet yok.' : 'Bu filtreye uyan sohbet yok.';
 
   const totals = useMemo(() => {
     let unread = 0;
@@ -684,19 +688,6 @@ export default function App() {
             {PLATFORMS[a.platform].name}
             {handleOf(a) && <span className="handle"> ({handleOf(a)})</span>}
           </span>
-          {a.status === 'connected' && canCompose(a.platform) && (
-            <span
-              role="button"
-              tabIndex={0}
-              className="newbtn"
-              title={PLATFORMS[a.platform].category === 'mail' ? 'Yeni e-posta yaz' : 'Yeni sohbet başlat'}
-              aria-label={PLATFORMS[a.platform].category === 'mail' ? 'Yeni e-posta' : 'Yeni sohbet'}
-              onClick={(e) => (e.stopPropagation(), setNewChatFor(a.id))}
-              onKeyDown={(e) => e.key === 'Enter' && (e.stopPropagation(), setNewChatFor(a.id))}
-            >
-              <Icon name="pen" size={13} sw={2} />
-            </span>
-          )}
           <span className="count">{fmtCount(perPlatform.get(a.platform) ?? 0)}</span>
           <span className={`dot ${a.status}`} style={{ marginLeft: 8 }} />
           {sync[a.id] && <SyncBar compact progress={/%\d+/.test(a.detail ?? '') ? Number((a.detail ?? '').match(/%(\d+)/)?.[1] ?? 0) : sync[a.id].progress} since={sync[a.id].since} />}
@@ -876,14 +867,11 @@ export default function App() {
                     {view === 'inbox' && scoped.unread > 0 && <span className="pill">{fmtCount(scoped.unread)} yeni</span>}
                   </div>
                   <span style={{ flexGrow: 1 }} />
-                  {(() => {
-                    const acc = view === 'inbox' && platformFilter ? accounts.find((a) => a.platform === platformFilter && a.status === 'connected' && canCompose(a.platform)) : undefined;
-                    return acc ? (
-                      <button className="btn icon b b2" aria-label={PLATFORMS[acc.platform].category === 'mail' ? 'Yeni e-posta' : 'Yeni sohbet'} title={PLATFORMS[acc.platform].category === 'mail' ? 'Yeni e-posta yaz' : 'Yeni sohbet başlat'} onClick={() => setNewChatFor(acc.id)}>
-                        <Icon name="pen" size={15} sw={2} />
-                      </button>
-                    ) : null;
-                  })()}
+                  {view === 'inbox' && accounts.some((a) => a.status === 'connected' && canCompose(a.platform)) && (
+                    <button className={`btn icon b b2 ${composeOpen ? 'soft' : ''}`} aria-label={PLATFORMS[platformFilter ?? 'demo']?.category === 'mail' ? 'Yeni e-posta' : 'Yeni sohbet'} title={platformFilter && PLATFORMS[platformFilter].category === 'mail' ? 'Yeni e-posta yaz' : 'Yeni sohbet başlat'} onClick={() => setComposeOpen((v) => !v)}>
+                      <Icon name="pen" size={15} sw={2} />
+                    </button>
+                  )}
                   <button className={`btn icon b b2 ${listSearch || query ? 'soft' : ''}`} aria-label="Sohbetlerde ara" title="Sohbetlerde ara" onClick={() => (setListSearch(!listSearch), listSearch && setQuery(''))}>
                     <Icon name="search" size={15} sw={2} />
                   </button>
@@ -914,11 +902,17 @@ export default function App() {
                   <div className="tabs" role="tablist" aria-label={platformFilter === 'imessage' ? 'Mesajlar klasörleri' : 'Filtreler'}>
                     {/* iMessage: Okunmamış yerine Mesajlar uygulamasındaki klasörler */}
                     {(platformFilter === 'imessage' ? (['all'] as Filter[]) : (['all', 'unread'] as Filter[])).map((f) => (
-                      <button key={f} role="tab" aria-selected={filter === f && !imFolder} className={filter === f && !imFolder ? 'active' : ''} onClick={() => (setFilter(f), setImFolder(null))}>
+                      <button key={f} role="tab" aria-selected={filter === f && !imFolder && !mailFolder} className={filter === f && !imFolder && !mailFolder ? 'active' : ''} onClick={() => (setFilter(f), setImFolder(null), setMailFolder(null))}>
                         {f === 'all' ? (platformFilter === 'imessage' ? 'Mesajlar' : 'Tümü') : 'Okunmamış '}
                         {f === 'unread' && scoped.unread > 0 && <span className="c">{fmtCount(scoped.unread)}</span>}
                       </button>
                     ))}
+                    {platformFilter && PLATFORMS[platformFilter].category === 'mail' &&
+                      ([['sent', 'Gönderilenler'], ['junk', 'Gereksiz']] as Array<['sent' | 'junk', string]>).map(([fo, label]) => (
+                        <button key={fo} role="tab" aria-selected={mailFolder === fo} className={mailFolder === fo ? 'active' : ''} onClick={() => (setMailFolder(fo), setFilter('all'))}>
+                          {label}
+                        </button>
+                      ))}
                     {platformFilter === 'imessage' &&
                       ([['unknown', 'Bilinmeyen', 'Bilinmeyen gönderenler'], ['junk', 'İstenmeyen', 'İstenmeyen'], ['deleted', 'Silinenler', 'Son silinenler']] as Array<[typeof imFolder, string, string]>).map(([fo, label, title]) => (
                         <button key={String(fo)} role="tab" title={title} aria-selected={imFolder === fo} className={imFolder === fo ? 'active' : ''} onClick={() => (setImFolder(fo), setFilter('all'))}>
@@ -931,9 +925,9 @@ export default function App() {
 
               {view === 'inbox' && !platformFilter && !tagFilter && !query && pinnedChats.length > 0 && (
                 <div className="quick" aria-label="Sabitlenenler">
-                  {pinnedChats.slice(0, 8).map((c) => (
+                  {pinnedChats.slice(0, 8).map((c, i, arr) => (
                     <button key={c.id} className={`qc b ${c.id === selected ? 'on' : ''}`} onClick={() => setSelected(c.id)} title={c.lastPreview}>
-                      {c.unread > 0 && <span className="qc-bub">{c.lastPreview.replace(/^Sen: /, '')}</span>}
+                      {c.unread > 0 && arr.findIndex((x) => x.unread > 0) === i && <span className="qc-bub">{c.lastPreview.replace(/^Sen: /, '')}</span>}
                       <span className="avwrap">
                         <Avatar name={c.name} size={46} url={c.avatarUrl} />
                         <Chip platform={c.platform} size={17} ring="#f7f6fa" />
@@ -974,7 +968,7 @@ export default function App() {
                         <span className="label">{day}</span>
                       </div>
                       {items.map((c) => (
-                        <ChatRow key={c.id} chat={c} selected={c.id === selected} onClick={() => setSelected(c.id)} onPin={() => setFlags(c.id, { pinned: !c.pinned })} typing={typing[c.id] ? typing[c.id].name ?? '' : null} />
+                        <ChatRow key={c.id} chat={c} selected={c.id === selected} onClick={() => setSelected(c.id)} typing={typing[c.id] ? typing[c.id].name ?? '' : null} />
                       ))}
                     </div>
                   ))
@@ -1011,7 +1005,19 @@ export default function App() {
             </section>
             <Resizer pane="list" />
 
-            {current ? (
+            {composeOpen ? (
+              <ComposePane
+                accounts={accounts.filter((a) => a.status === 'connected' && canCompose(a.platform))}
+                preferred={platformFilter}
+                chats={allChats}
+                onClose={() => setComposeOpen(false)}
+                onOpen={(id) => {
+                  setComposeOpen(false);
+                  openChat(id);
+                }}
+                notify={notify}
+              />
+            ) : current ? (
               <Conversation
                 key={current.id}
                 chat={current}
@@ -1218,19 +1224,6 @@ export default function App() {
           </div>
         ) : null;
       })()}
-      {newChatP.value && accounts.find((a) => a.id === newChatP.value) && (
-        <NewChatModal
-          closing={newChatP.closing}
-          account={accounts.find((a) => a.id === newChatP.value)!}
-          chats={allChats}
-          onClose={() => setNewChatFor(null)}
-          onOpen={(id) => {
-            setNewChatFor(null);
-            openChat(id);
-          }}
-          notify={notify}
-        />
-      )}
       {inToasts.length > 0 && (
         <div className="msgtoasts" aria-live="polite">
           {inToasts.map((t) => (
@@ -1279,22 +1272,35 @@ function canCompose(p: Platform): boolean {
   return NEW_CHAT_PLATFORMS.has(p) || PLATFORMS[p].category === 'mail';
 }
 
-/** Yeni sohbet (numara/@kullanıcı) ya da yeni e-posta (Kime/Konu/Metin): hesap düğmeye basılan satırdan gelir, seçim yok */
-function NewChatModal({ closing, account, chats, onClose, onOpen, notify }: { closing: boolean; account: Account; chats: Chat[]; onClose: () => void; onOpen: (chatId: string) => void; notify: (t: string, err?: boolean) => void }) {
-  const isMail = PLATFORMS[account.platform].category === 'mail';
+/**
+ * Yeni sohbet / yeni e-posta bölmesi (sağ bölmede). Hesap seçilmez: uygulama filtresi açıksa o hesap; değilse yazılan
+ * tanıtıcıdan çıkarılır (e-posta adresi → ilk e-posta hesabı, +numara → WhatsApp (yoksa Telegram), @kullanıcı → Telegram).
+ */
+function ComposePane({ accounts, preferred, chats, onClose, onOpen, notify }: { accounts: Account[]; preferred: Platform | null; chats: Chat[]; onClose: () => void; onOpen: (chatId: string) => void; notify: (t: string, err?: boolean) => void }) {
   const [q, setQ] = useState('');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
-  const s = q.trim().toLocaleLowerCase('tr-TR');
-  const matches = s && !isMail ? chats.filter((c) => c.accountId === account.id && (c.name.toLocaleLowerCase('tr-TR').includes(s) || (c.handle ?? '').toLocaleLowerCase('tr-TR').includes(s))).slice(0, 6) : [];
   const ident = q.trim();
   const isPhone = /^\+?\d[\d\s-]{6,}$/.test(ident);
-  const isUser = /^@?[a-z0-9_.]{3,}$/i.test(ident) && !isPhone;
   const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ident);
-  const canStart = isMail ? isEmail && body.trim().length > 0 : account.platform === 'whatsapp' ? isPhone : account.platform === 'telegram' ? isPhone || isUser : ident.length > 1;
+  const isUser = /^@[a-z0-9_.]{3,}$/i.test(ident);
+  const byPlatform = (p: Platform) => accounts.find((a) => a.platform === p);
+  const account: Account | undefined = preferred
+    ? byPlatform(preferred)
+    : isEmail
+      ? accounts.find((a) => PLATFORMS[a.platform].category === 'mail')
+      : isPhone
+        ? byPlatform('whatsapp') ?? byPlatform('telegram') ?? byPlatform('demo')
+        : isUser
+          ? byPlatform('telegram') ?? byPlatform('demo')
+          : undefined;
+  const isMail = !!account && PLATFORMS[account.platform].category === 'mail';
+  const s = ident.toLocaleLowerCase('tr-TR');
+  const matches = s && !isMail ? chats.filter((c) => (!preferred || c.platform === preferred) && (c.name.toLocaleLowerCase('tr-TR').includes(s) || (c.handle ?? '').toLocaleLowerCase('tr-TR').includes(s))).slice(0, 6) : [];
+  const canStart = !!account && (isMail ? isEmail && body.trim().length > 0 : account.platform === 'whatsapp' ? isPhone : account.platform === 'telegram' ? isPhone || isUser : ident.length > 1);
   async function start() {
-    if (!canStart || busy) return;
+    if (!account || !canStart || busy) return;
     setBusy(true);
     try {
       if (isMail) {
@@ -1312,19 +1318,41 @@ function NewChatModal({ closing, account, chats, onClose, onOpen, notify }: { cl
       setBusy(false);
     }
   }
-  const name = PLATFORMS[account.platform].name;
+  const title = isMail ? 'Yeni e-posta' : 'Yeni sohbet';
+  const hint = preferred
+    ? account
+      ? isMail
+        ? '⌘Enter ile gönder. Gönderilen e-posta bu hesapta yeni bir dizi olarak açılır.'
+        : `Sohbet ${PLATFORMS[account.platform].name}’da açılır, ilk mesajı sen yazarsın.${account.platform === 'telegram' ? ' Rehberinde olmayan numaralar bulunamayabilir.' : ''}`
+      : 'Bu uygulamada yeni sohbet başlatılamıyor.'
+    : 'E-posta adresi yazarsan e-posta, +90 numara yazarsan WhatsApp, @kullanıcı yazarsan Telegram sohbeti açılır.';
   return (
-    <div className={`overlay ${closing ? 'closing' : ''}`} onClick={onClose}>
-      <div className="modal newchat" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={isMail ? 'Yeni e-posta' : 'Yeni sohbet'}>
-        <div className="mh">
-          <h2>{isMail ? 'Yeni e-posta' : 'Yeni sohbet'}</h2>
-          <span className="from">
-            <Chip platform={account.platform} size={16} /> {name} · {account.label}
+    <section className="compose-pane" aria-label={title}>
+      <header className="conv-head">
+        <div className="conv-id">
+          <div className="conv-id-top">
+            <h2>{title}</h2>
+          </div>
+          <span className="sub">
+            {account ? (
+              <>
+                <Chip platform={account.platform} size={16} />
+                <span className="meta">
+                  {PLATFORMS[account.platform].name}
+                  {account.label && account.label !== PLATFORMS[account.platform].name ? ` · ${account.label}` : ''}
+                </span>
+              </>
+            ) : (
+              <span className="meta">Hesap yazdığın tanıtıcıya göre seçilir</span>
+            )}
           </span>
-          <button className="btn ghost xs icon b" onClick={onClose} aria-label="Kapat">
-            <Icon name="x" size={14} sw={2} />
-          </button>
         </div>
+        <span style={{ flexGrow: 1 }} />
+        <button className="btn icon b b2" onClick={onClose} aria-label="Kapat" title="Kapat">
+          <Icon name="x" size={15} sw={2} />
+        </button>
+      </header>
+      <div className="body">
         {isMail ? (
           <div className="mailform">
             <label>
@@ -1343,7 +1371,7 @@ function NewChatModal({ closing, account, chats, onClose, onOpen, notify }: { cl
               <Icon name="search" size={15} />
               <input
                 autoFocus
-                placeholder={account.platform === 'whatsapp' ? 'Ad ya da +90 numara' : 'Ad, +90 numara ya da @kullanıcı'}
+                placeholder={preferred === 'whatsapp' ? 'Ad ya da +90 numara' : preferred === 'telegram' ? 'Ad, +90 numara ya da @kullanıcı' : 'Ad, e-posta, +90 numara ya da @kullanıcı'}
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 onKeyDown={(e) => {
@@ -1373,11 +1401,11 @@ function NewChatModal({ closing, account, chats, onClose, onOpen, notify }: { cl
         )}
         <button className="btn primary b nc-start" disabled={!canStart || busy} onClick={() => void start()}>
           {busy ? <span className="spin" /> : <Icon name={isMail ? 'send' : 'pen'} size={14} sw={2} />}
-          {isMail ? (canStart ? `Gönder (${ident})` : isEmail ? 'Metni yaz' : 'Alıcı adresini yaz') : canStart ? `${ident} ile sohbet başlat` : account.platform === 'whatsapp' ? '+90… numara yaz' : 'Numara ya da @kullanıcı adı yaz'}
+          {isMail ? (canStart ? `Gönder (${ident})` : isEmail ? 'Metni yaz' : 'Alıcı adresini yaz') : canStart && account ? `${PLATFORMS[account.platform].name}’da ${ident} ile sohbet başlat` : preferred === 'whatsapp' ? '+90… numara yaz' : 'Ad, numara, @kullanıcı ya da e-posta yaz'}
         </button>
-        <span className="nc-hint">{isMail ? '⌘Enter ile gönder. Gönderilen e-posta bu hesapta yeni bir dizi olarak açılır.' : `Sohbet ${name}’da açılır, ilk mesajı sen yazarsın.${account.platform === 'telegram' ? ' Rehberinde olmayan numaralar bulunamayabilir.' : ''}`}</span>
+        <span className="nc-hint">{hint}</span>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -1467,14 +1495,12 @@ function ChatRow({
   selected,
   onClick,
   typing,
-  onPin,
 }: {
   chat: Chat;
   selected: boolean;
   onClick: () => void;
   /** yazıyor: null = hayır, "" = evet, "Ad" = grupta kim */
   typing?: string | null;
-  onPin?: () => void;
 }) {
   const waiting = chat.platform !== 'imessage' && isWaiting(chat); // Mesajlar'da "bekleyen" kavramı yok
   const isMail = PLATFORMS[chat.platform].category === 'mail';
@@ -1508,13 +1534,6 @@ function ChatRow({
           )}
           {chat.unread > 0 && <span className="badge" aria-label={`${chat.unread} okunmamış`}>{fmtBadge(chat)}</span>}
         </span>
-      </span>
-      <span className="qa" onClick={(e) => e.stopPropagation()}>
-        {onPin && (
-          <button title={chat.pinned ? 'Sabitlemeyi kaldır' : 'Üstte sabitle'} onClick={onPin}>
-            <Icon name="pin" size={13} sw={2} />
-          </button>
-        )}
       </span>
     </div>
   );

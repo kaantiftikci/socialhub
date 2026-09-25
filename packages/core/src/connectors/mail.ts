@@ -275,7 +275,7 @@ export class MailConnector extends BaseConnector {
   }
 
   /** Verilen UID'leri indirip sohbet/mesaj olarak yaz; (işlenen e-posta, yeni açılan sohbet) sayısını döner */
-  private async fetchUids(client: ImapFlow, uids: number[], live: boolean): Promise<{ mails: number; chats: number }> {
+  private async fetchUids(client: ImapFlow, uids: number[], live: boolean, folder?: MailFolder): Promise<{ mails: number; chats: number }> {
     let mails = 0;
     let chats = 0;
     if (!uids.length) return { mails, chats };
@@ -283,11 +283,12 @@ export class MailConnector extends BaseConnector {
       try {
         if (!msg.source) continue;
         const parsed: ParsedMail = await simpleParser(msg.source);
-        if (this.ingest(parsed, msg.uid, msg.flags?.has('\\Seen') ?? false, (msg as { threadId?: string }).threadId, live)) chats++;
+        if (this.ingest(parsed, msg.uid, msg.flags?.has('\\Seen') ?? false, (msg as { threadId?: string }).threadId, live, folder ?? 'inbox')) chats++;
         mails++;
       } catch (e) {
         bus.log('warn', `${this.account.platform} e-posta okunamadı (uid ${msg.uid}): ${(e as Error).message}`);
       }
+      if (folder && folder !== 'inbox') continue; // başka kutunun UID'leri gelen kutusu imlecini oynatmasın
       if (msg.uid > this.lastUid) this.lastUid = msg.uid;
       if (!this.oldestUid || msg.uid < this.oldestUid) this.oldestUid = msg.uid;
     }
@@ -310,6 +311,8 @@ export class MailConnector extends BaseConnector {
         if (mails) bus.log('info', `${this.account.platform}: ${mails} e-posta alındı`);
         this.saveState();
       });
+      // Gönderilenler / Gereksiz: her 8. yoklamada (ilk dahil) özel kullanım bayraklı kutulardan son 40 e-posta
+      if (this.folderTick++ % 8 === 0) await this.pollFolders().catch((e) => bus.log('warn', `${this.account.platform} klasörler: ${(e as Error).message}`));
     } catch (e) {
       bus.log('warn', `${this.account.platform} IMAP: ${(e as Error).message}`);
       if (first) throw e;
@@ -358,8 +361,38 @@ export class MailConnector extends BaseConnector {
     }
   }
 
+  private folderTick = 0;
+  /** \\Sent ve \\Junk kutuları (imapflow specialUse); yoksa adla (Sent, Gönderilmiş, Junk, Spam) */
+  private async pollFolders(): Promise<void> {
+    if (this.stopping) return;
+    const client = new ImapFlow({ host: this.cfg.host!, port: this.cfg.port!, secure: this.cfg.secure ?? true, auth: this.auth(), logger: false });
+    try {
+      if (this.cfg.accessToken) await this.ensureOAuth();
+      await client.connect();
+      const boxes = await client.list();
+      const pick = (use: string, re: RegExp) => boxes.find((b) => (b as { specialUse?: string }).specialUse === use) ?? boxes.find((b) => re.test(b.path));
+      const targets: Array<[MailFolder, string | undefined]> = [
+        ['sent', pick('\\Sent', /^(\[Gmail\]\/)?(Sent( Items| Mail)?|Gönderilmiş(ler| Öğeler)?|Gönderilenler)$/i)?.path],
+        ['junk', pick('\\Junk', /^(\[Gmail\]\/)?(Junk( E-?mail)?|Spam|Gereksiz|İstenmeyen)$/i)?.path],
+      ];
+      for (const [folder, path] of targets) {
+        if (!path) continue;
+        const lock = await client.getMailboxLock(path);
+        try {
+          const uids = ((await client.search({ since: new Date(Date.now() - 30 * 86_400_000) }, { uid: true })) || []).slice(-40);
+          await this.fetchUids(client, uids, false, folder);
+        } finally {
+          lock.release();
+        }
+      }
+    } finally {
+      await client.logout().catch(() => undefined);
+      client.close();
+    }
+  }
+
   /** E-postayı sohbet (thread) + mesaj olarak yaz; sohbet bu e-postayla ilk kez açıldıysa true */
-  private ingest(m: ParsedMail, uid: number, seen: boolean, gmThread: string | undefined, live: boolean): boolean {
+  private ingest(m: ParsedMail, uid: number, seen: boolean, gmThread: string | undefined, live: boolean, folder: MailFolder = 'inbox'): boolean {
     const from = addrs(m.from)[0] ?? { address: '', name: '' };
     const me = this.cfg.user.toLowerCase();
     const fromMe = from.address === me;
@@ -387,6 +420,8 @@ export class MailConnector extends BaseConnector {
       handle: counterpart?.address,
       // mevcut katılımcıları ezme: sahte References ile diziye düşen bir ileti alıcı listesini değiştiremesin
       participants: [...new Map([...(existing?.participants ?? []), ...uniq.values()].map((p) => [p.id, p])).values()],
+      // gelen kutusunda görülen dizi Gönderilenler/Gereksiz'de de çıksa gelen kutusunda kalır
+      meta: existing?.meta?.folder === 'inbox' && folder !== 'inbox' ? existing.meta : { ...existing?.meta, folder },
     });
     const text = (m.text ?? htmlToText(m.html || '')).replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim();
     const attachments: Attachment[] = [];
@@ -509,6 +544,8 @@ export class MailConnector extends BaseConnector {
     return { remoteId: id };
   }
 }
+
+export type MailFolder = 'inbox' | 'sent' | 'junk';
 
 /** Daha eski sayfa: UID listesinin (artan) sonundan `size` adet — silinmiş UID boşlukları sayfayı küçültmesin */
 export function olderPage(uids: number[], size: number): number[] {

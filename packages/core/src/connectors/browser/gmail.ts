@@ -255,6 +255,7 @@ function readInboxRows(page: Page): Promise<GmailRawRow[]> {
 }
 
 /** Ham satır → sohbet (gönderen ben isem "Ben") */
+let folderTick = 0;
 export function gmailRowToThread(r: GmailRawRow, me: string): Thread {
   const others = r.email && r.email !== me ? { name: r.name || r.email, email: r.email } : { name: r.name || 'Ben', email: r.email };
   return {
@@ -330,7 +331,27 @@ export const gmail: Strategy = {
       return [];
     }
     if (!meEmail) await this.me(page, {});
-    return (await readInboxRows(page)).map((r) => gmailRowToThread(r, meEmail));
+    const out = (await readInboxRows(page)).map((r) => ({ ...gmailRowToThread(r, meEmail), meta: { folder: 'inbox' } }));
+    // Gönderilenler ve Spam: her 8. yoklamada (ilk yoklama dahil) #sent / #spam listeleri de okunur, sonra gelen kutusuna dönülür
+    if (folderTick++ % 8 === 0) {
+      for (const [hash, folder] of [['#sent', 'sent'], ['#spam', 'junk']] as const) {
+        try {
+          await page.evaluate((h) => {
+            location.hash = h;
+          }, hash);
+          await page.waitForTimeout(1200);
+          const ok = await page.waitForSelector('tr.zA', { state: 'visible', timeout: 8000 }).then(() => true).catch(() => false);
+          if (ok) for (const r of await readInboxRows(page)) out.push({ ...gmailRowToThread(r, meEmail), unread: 0, meta: { folder } });
+        } catch {
+          /* klasör okunamadı; gelen kutusu etkilenmez */
+        }
+      }
+      await page.evaluate(() => {
+        location.hash = '#inbox';
+      }).catch(() => undefined);
+      await page.waitForTimeout(800);
+    }
+    return out;
   },
 
   /**

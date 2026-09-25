@@ -246,7 +246,13 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     if (!text) throw new HttpError(400, 'Boş mesaj');
     const c = registry.get(chat.accountId);
     if (!c) throw new HttpError(409, 'Hesap bağlı değil');
-    return c.sendText(chat.remoteId, text, b.threadId ? { threadId: String(b.threadId).slice(0, 64) } : undefined);
+    try {
+      return await c.sendText(chat.remoteId, text, b.threadId ? { threadId: String(b.threadId).slice(0, 64) } : undefined);
+    } catch (e) {
+      // gönderim hatası kullanıcıya anlamlı dönsün (oturum düşmüş, alıcı yok…); ayrıntı yine günlükte
+      bus.log('warn', `${chat.platform} gönderilemedi: ${(e as Error).message.split('\n')[0].slice(0, 300)}`);
+      throw new HttpError(502, `Gönderilemedi: ${(e as Error).message.split('\n')[0].slice(0, 160)}`);
+    }
   });
   // Yeni e-posta (e-posta hesapları): Kime / Konu / Metin → dizi sohbeti
   route('POST', '/api/accounts/:id/compose', async (_r, _s, p, body) => {

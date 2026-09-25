@@ -35,6 +35,8 @@ export interface Thread {
   readByOthersUpTo?: number;
   /** Aynı sohbetin eski kimlikleri (ör. X'te eski DM grubu "<id>" → XChat "g<id>"): depoda varsa bu sohbete birleştirilir */
   aliases?: string[];
+  /** Platforma özel veri; e-postada folder: 'inbox' | 'sent' | 'junk' */
+  meta?: Record<string, unknown>;
 }
 
 export interface Msg {
@@ -495,6 +497,14 @@ export class BrowserConnector extends BaseConnector {
     return this.store.getChat(chat.id) ?? chat;
   }
 
+  /** Klasör bilgisi: gelen kutusunda görülen bir dizi, Gönderilenler/Gereksiz listesinde de çıksa gelen kutusundan düşmez */
+  private folderMeta(remoteId: string, meta?: Record<string, unknown>): Record<string, unknown> | undefined {
+    if (!meta) return undefined;
+    const ex = this.store.getChat(chatId(this.account.id, remoteId))?.meta;
+    if (ex?.folder === 'inbox' && meta.folder !== 'inbox') return ex;
+    return { ...ex, ...meta };
+  }
+
   private morePage = 0;
   async loadMoreChats(): Promise<number> {
     if (!this.strategy.moreThreads) throw new Error('Bu platformda daha eski sohbet listesi desteklenmiyor');
@@ -504,7 +514,7 @@ export class BrowserConnector extends BaseConnector {
     let added = 0;
     for (const t of threads) {
       if (!this.store.getChat(chatId(this.account.id, t.id))) added++;
-      this.upsertChat({ remoteId: t.id, name: t.name, kind: t.kind, unread: t.unread, lastMessageAt: t.lastTs || undefined, lastPreview: t.preview || undefined, avatarUrl: t.avatarUrl, handle: t.handle, link: t.link, participants: t.participants });
+      this.upsertChat({ remoteId: t.id, name: t.name, kind: t.kind, unread: t.unread, lastMessageAt: t.lastTs || undefined, lastPreview: t.preview || undefined, avatarUrl: t.avatarUrl, handle: t.handle, link: t.link, participants: t.participants, meta: this.folderMeta(t.id, t.meta) });
     }
     if (threads.length) this.morePage = idx;
     return added;
@@ -635,7 +645,7 @@ export class BrowserConnector extends BaseConnector {
         // ilk yoklamada (açılış) platformun okunmamış/önizleme değeri yetkili; sonra yalnızca yeni etkinlikte
         const fresh = first || !ex || t.lastTs > ex.lastMessageAt || !ex.lastPreview;
         // okunmamış her zaman platformun değeri: telefonda okunan sohbet burada da okundu olur (Mivelo'da okunan platforma markRead ile gider)
-        this.upsertChat({ remoteId: t.id, name: t.name, kind: t.kind, unread: t.unread, lastMessageAt: t.lastTs || undefined, lastPreview: fresh ? t.preview || undefined : undefined, avatarUrl: t.avatarUrl, handle: t.handle, link: t.link, participants: t.participants });
+        this.upsertChat({ remoteId: t.id, name: t.name, kind: t.kind, unread: t.unread, lastMessageAt: t.lastTs || undefined, lastPreview: fresh ? t.preview || undefined : undefined, avatarUrl: t.avatarUrl, handle: t.handle, link: t.link, participants: t.participants, meta: this.folderMeta(t.id, t.meta) });
         if (t.readByOthersUpTo) this.outgoingRead(t.id, t.readByOthersUpTo);
         // eski kimlikli kopya (hedef sohbet yukarıda yazıldı)
         for (const a of t.aliases ?? []) {
