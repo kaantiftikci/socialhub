@@ -655,20 +655,16 @@ export class BrowserConnector extends BaseConnector {
         // lastTs=0 (DOM okuyan Messenger): çekirdek yeniden başladıysa platformun okunmamış durumu depoya aktarılsın
         // ilk yoklamada (açılış) platformun okunmamış/önizleme değeri yetkili; sonra yalnızca yeni etkinlikte
         const fresh = first || !ex || t.lastTs > ex.lastMessageAt || !ex.lastPreview;
-        // okunmamış platformun değeri (telefonda okunan burada da okunur); Mivelo'da yeni okunmuş ve o zamandan beri yeni mesaj
-        // gelmemiş sohbette platform hâlâ 'okunmamış' diyorsa 30 dk boyunca 0 tutulur ve işaretleme en çok 2 kez yinelenir
-        let unread = t.unread;
+        // okunmamış platformun değeri (telefonda okunan burada da okunur); Mivelo'da okunan sohbeti depo kalıcı olarak korur
+        // (chats.read_upto: yeni mesaj gelmedikçe platform geri açamaz). Platform hâlâ 'okunmamış' diyorsa işaretleme 2 kez yinelenir.
+        const unread = t.unread;
         const lr = this.localRead.get(t.id);
         if (lr) {
-          if (t.lastTs > lr.lastTs + 1000) this.localRead.delete(t.id);
-          else if (t.unread === 0) this.localRead.delete(t.id);
-          else if (Date.now() - lr.at < 30 * 60_000) {
-            unread = 0;
-            if (lr.retries < 2) {
-              lr.retries++;
-              retryRead.push(t.id);
-            }
-          } else this.localRead.delete(t.id);
+          if (t.lastTs > lr.lastTs + 1000 || t.unread === 0) this.localRead.delete(t.id);
+          else if (lr.retries < 2) {
+            lr.retries++;
+            retryRead.push(t.id);
+          }
         }
         this.upsertChat({ remoteId: t.id, name: t.name, kind: t.kind, unread, lastMessageAt: t.lastTs || undefined, lastPreview: fresh ? t.preview || undefined : undefined, avatarUrl: t.avatarUrl, handle: t.handle, link: t.link, participants: t.participants, meta: this.folderMeta(t.id, t.meta) });
         if (t.readByOthersUpTo) this.outgoingRead(t.id, t.readByOthersUpTo);

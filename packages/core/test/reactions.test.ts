@@ -80,3 +80,26 @@ test('link-preview parsePreview: og etiketleri, göreli görsel, varlık çözü
   assert.equal(q.site, 'x.example.com');
   assert.equal(parsePreview('https://e.com', '<html><body>hi</body></html>'), null);
 });
+
+test('okundu kalıcı: markRead sonrası platform yoklaması (upsertChat unread>0, aynı son mesaj) sohbeti geri açamaz; yeni mesaj açar', () => {
+  const store = new Store(path.join(tmp, 'r2.db'));
+  store.upsertAccount({ id: 'demo:2', platform: 'demo', label: 'd', status: 'connected', createdAt: 1 });
+  const base = { id: 'demo:2/c', accountId: 'demo:2', platform: 'demo' as const, remoteId: 'c', name: 'C', kind: 'direct' as const, lastPreview: 'x', tags: [] as string[] };
+  store.upsertChat({ ...base, unread: 3, lastMessageAt: 5000 });
+  store.markRead('demo:2/c');
+  assert.equal(store.getChat('demo:2/c')?.unread, 0);
+  // platform eski değeriyle geri yazıyor (aynı son mesaj zamanı)
+  store.upsertChat({ ...base, unread: 3, lastMessageAt: 5000 });
+  assert.equal(store.getChat('demo:2/c')?.unread, 0, 'aynı son mesajla okunmamış geri gelmez');
+  // eski mesaj (okuma noktasından önce) canlı gelse de sayaç artmaz
+  store.upsertMessage({ id: 'demo:2/c#old', chatId: 'demo:2/c', remoteId: 'old', senderId: 'u', senderName: 'U', fromMe: false, text: 'eski', ts: 4000, status: 'delivered' }, { bumpUnread: true });
+  assert.equal(store.getChat('demo:2/c')?.unread, 0);
+  // yeni mesaj sayacı açar; platform da yeni zamanla okunmamış diyebilir
+  store.upsertMessage({ id: 'demo:2/c#new', chatId: 'demo:2/c', remoteId: 'new', senderId: 'u', senderName: 'U', fromMe: false, text: 'yeni', ts: 9000, status: 'delivered' }, { bumpUnread: true });
+  assert.equal(store.getChat('demo:2/c')?.unread, 1);
+  store.upsertChat({ ...base, unread: 2, lastMessageAt: 9000 });
+  assert.equal(store.getChat('demo:2/c')?.unread, 2);
+  store.markRead('demo:2/c');
+  assert.equal(store.getChat('demo:2/c')?.readUpto, 9000);
+  store.close();
+});

@@ -118,6 +118,8 @@ export class Store {
     if (!ccols.has('meta')) this.db.exec('ALTER TABLE chats ADD COLUMN meta TEXT');
     if (!ccols.has('last_from_me')) this.db.exec('ALTER TABLE chats ADD COLUMN last_from_me INTEGER NOT NULL DEFAULT 0');
     if (!ccols.has('flags')) this.db.exec('ALTER TABLE chats ADD COLUMN flags TEXT'); // {pinned,archived,muted,hidden}
+    // Mivelo'da okunan nokta (ms): bu zamana kadar olan mesajlar kalıcı olarak okundu; platform yoklaması geri açamaz
+    if (!ccols.has('read_upto')) this.db.exec('ALTER TABLE chats ADD COLUMN read_upto INTEGER NOT NULL DEFAULT 0');
     // gönderen bazlı güncellemeler (ad/fotoğraf/lid→numara) tam tablo taraması yapmasın
     this.db.exec('CREATE INDEX IF NOT EXISTS messages_sender ON messages(sender_id)');
     this.db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
@@ -250,7 +252,7 @@ export class Store {
          ON CONFLICT(id) DO UPDATE SET
            name = CASE WHEN excluded.name <> '' THEN excluded.name ELSE chats.name END,
            kind = excluded.kind,
-           unread = excluded.unread,
+           unread = CASE WHEN MAX(chats.last_message_at, excluded.last_message_at) <= chats.read_upto THEN 0 ELSE excluded.unread END,
            last_message_at = MAX(chats.last_message_at, excluded.last_message_at),
            last_preview = CASE WHEN excluded.last_message_at >= chats.last_message_at THEN excluded.last_preview ELSE chats.last_preview END,
            avatar_url = COALESCE(excluded.avatar_url, chats.avatar_url),
@@ -333,8 +335,9 @@ export class Store {
     return this.db.prepare('SELECT * FROM chats WHERE account_id = ? ORDER BY last_message_at DESC').all(accountId).map(rowToChat);
   }
 
+  /** Sohbet Mivelo'da okundu: sayaç 0 ve okuma noktası = son mesaj zamanı (kalıcı; yeni mesaj gelene dek platform geri açamaz) */
   markRead(id: string): void {
-    this.db.prepare('UPDATE chats SET unread = 0 WHERE id = ?').run(id);
+    this.db.prepare('UPDATE chats SET unread = 0, read_upto = MAX(read_upto, last_message_at) WHERE id = ?').run(id);
   }
 
   setTags(id: string, tags: string[]): void {
@@ -380,7 +383,7 @@ export class Store {
         .run(
           Math.max(chat.lastMessageAt, m.ts),
           isNewer ? preview : chat.lastPreview,
-          opts.bumpUnread && inserted && !m.fromMe ? chat.unread + 1 : chat.unread,
+          opts.bumpUnread && inserted && !m.fromMe && m.ts > (chat.readUpto ?? 0) ? chat.unread + 1 : chat.unread,
           isNewer ? (m.fromMe ? 1 : 0) : (chat.lastFromMe ? 1 : 0),
           m.chatId,
         );
@@ -523,6 +526,7 @@ function rowToChat(r: unknown): Chat {
     lastMessageAt: Number(x.last_message_at),
     lastPreview: String(x.last_preview),
     lastFromMe: Number(x.last_from_me ?? 0) === 1,
+    readUpto: Number(x.read_upto ?? 0) || undefined,
     avatarUrl: (x.avatar_url as string | null) ?? undefined,
     tags: safeJson<string[]>(x.tags as string, []),
     handle: (x.handle as string | null) ?? undefined,

@@ -33,6 +33,8 @@ export interface Chat {
   lastPreview: string;
   /** Son mesaj benden mi (Odak → "Senin beklediklerin") */
   lastFromMe?: boolean;
+  /** Mivelo'da okunan nokta (ms): bu zamana kadar olan mesajlar kalıcı olarak okundu */
+  readUpto?: number;
   avatarUrl?: string;
   tags: string[];
   /** Platforma özel tanıtıcı: +numara, @kullanıcı, profil adı */
