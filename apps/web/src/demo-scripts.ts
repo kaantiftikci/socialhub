@@ -1,3 +1,4 @@
+import { demoAsset } from './demo-asset';
 import type { Attachment, Chat, Platform } from './types';
 import { PLATFORMS } from './types';
 
@@ -18,10 +19,10 @@ export interface Script {
   lines: Line[];
 }
 
-const pdf = (name: string, size = 128_440): Attachment => ({ kind: 'file', name, mime: 'application/pdf', size, link: '/demo/files/ornek.pdf' });
-const csv = (name: string, size = 18_420): Attachment => ({ kind: 'file', name, mime: 'text/csv', size, link: '/demo/files/siparisler.csv' });
-const pic = (name: string, file = 'urun.jpg', size = 140_000): Attachment => ({ kind: 'image', name, mime: 'image/jpeg', size, url: `/demo/files/${file}` });
-const vid = (name: string, file: string, poster: string, size: number): Attachment => ({ kind: 'video', name, mime: 'video/mp4', size, link: `/demo/files/${file}`, url: `/demo/files/${poster}` });
+const pdf = (name: string, size = 128_440): Attachment => ({ kind: 'file', name, mime: 'application/pdf', size, link: demoAsset('files/ornek.pdf') });
+const csv = (name: string, size = 18_420): Attachment => ({ kind: 'file', name, mime: 'text/csv', size, link: demoAsset('files/siparisler.csv') });
+const pic = (name: string, file = 'urun.jpg', size = 140_000): Attachment => ({ kind: 'image', name, mime: 'image/jpeg', size, url: demoAsset(`files/${file}`) });
+const vid = (name: string, file: string, poster: string, size: number): Attachment => ({ kind: 'video', name, mime: 'video/mp4', size, link: demoAsset(`files/${file}`), url: demoAsset(`files/${poster}`) });
 
 /** Bağlı her uygulamanın örnek sohbetleri. Alışveriş kanalları müşteri sorusu olarak yazılır. */
 export const SCRIPTS: Partial<Record<Platform, Script[]>> = {

@@ -1,6 +1,8 @@
 import type { Account, Attachment, Chat, ChatFlags, CoreEvent, DraftResult, LinkPreview, Message, Platform } from './types';
 import { PLATFORMS } from './types';
 import { authSaveAccounts } from './auth-api';
+import { demoAsset } from './demo-asset';
+import { DEMO_OFFLINE } from './profile';
 import { DEMO_APPS, SCRIPTS } from './demo-scripts';
 import { STATIC_DEMO } from './profile';
 
@@ -37,7 +39,7 @@ const slug = (name: string) =>
     .replace(/ç/g, 'c')
     .replace(/ğ/g, 'g')
     .replace(/[^a-z0-9]/g, '');
-const memberAvatar = (name: string): string | undefined => (AVATAR_FILES.has(slug(name)) ? `/demo/avatars/${slug(name)}.jpg` : undefined);
+const memberAvatar = (name: string): string | undefined => (AVATAR_FILES.has(slug(name)) ? demoAsset(`avatars/${slug(name)}.jpg`) : undefined);
 /** Beğeni/tepki olayı olan platformlar (e-posta ve alışveriş kanallarında yok) */
 const REACT_PLATFORMS = new Set<Platform>(['whatsapp', 'instagram', 'messenger', 'imessage', 'telegram', 'slack']);
 const REACT_EMOJI = ['👍', '❤️', '😂', '🔥', '👏'];
@@ -66,7 +68,7 @@ function seed(): void {
           remoteId: `m-${j}`,
           senderId: fromMe ? 'me' : s.kind === 'direct' ? s.remoteId : slug(who) || s.remoteId,
           senderName: who,
-          senderAvatarUrl: fromMe ? undefined : s.kind === 'direct' ? `/demo/avatars/${s.avatar}` : memberAvatar(who),
+          senderAvatarUrl: fromMe ? undefined : s.kind === 'direct' ? demoAsset(`avatars/${s.avatar}`) : memberAvatar(who),
           fromMe,
           text: s.kind === 'direct' || fromMe ? text : text.replace(/^[^:]+:\s*/, ''),
           ts: lastAt - (s.lines.length - 1 - j) * 18 * 60_000,
@@ -100,9 +102,9 @@ function seed(): void {
         lastFromMe: last?.[0] ?? false,
         tags: s.tags,
         handle: s.handle,
-        avatarUrl: `/demo/avatars/${s.avatar}`,
+        avatarUrl: demoAsset(`avatars/${s.avatar}`),
         meta: s.summary?.length || s.note ? { ...(s.summary?.length ? { summary: s.summary } : {}), ...(s.note ? { note: s.note } : {}) } : undefined,
-        participants: s.handle && PLATFORMS[acc.platform].category === 'mail' ? [{ id: s.handle, name: s.handle.split('@')[0] ?? s.handle, handle: s.handle, avatarUrl: `/demo/avatars/${s.avatar}` }] : undefined,
+        participants: s.handle && PLATFORMS[acc.platform].category === 'mail' ? [{ id: s.handle, name: s.handle.split('@')[0] ?? s.handle, handle: s.handle, avatarUrl: demoAsset(`avatars/${s.avatar}`) }] : undefined,
       });
     });
   }
@@ -128,6 +130,7 @@ function publicAccount(a: Account): Record<string, unknown> {
 }
 
 async function saveAccounts(): Promise<void> {
+  if (DEMO_OFFLINE) return; // tek dosyalık demo: sunucu yok, hesaplar bellekte
   await authSaveAccounts(accounts.map(publicAccount));
 }
 

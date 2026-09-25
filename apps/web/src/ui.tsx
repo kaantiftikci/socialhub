@@ -1,4 +1,5 @@
 import { mediaUrl } from './desktop';
+import { publicAsset } from './demo-asset';
 import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import type { ReactNode } from 'react';
 import { PLATFORMS, TAG_COLORS, type Platform } from './types';
@@ -140,7 +141,7 @@ export function Chip({ platform, size = 18, ring }: { platform: Platform; size?:
   if (shopIcon && !shopFailed) {
     return (
       <span className="plat" title={p.name} style={{ ...base, background: 'transparent' }}>
-        <img src={shopIcon.src} alt="" width={s} height={s} draggable={false} style={{ width: s, height: s, objectFit: shopIcon.fit, display: 'block' }} onError={() => setShopFailed(true)} />
+        <img src={publicAsset(shopIcon.src.replace(/^\//, ''))} alt="" width={s} height={s} draggable={false} style={{ width: s, height: s, objectFit: shopIcon.fit, display: 'block' }} onError={() => setShopFailed(true)} />
       </span>
     );
   }
