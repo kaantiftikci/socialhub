@@ -94,7 +94,6 @@ export function Conversation({
   ai,
   notify,
   onTags,
-  onSnooze,
   showDetails = true,
   onToggleDetails,
   onOpenChat,
@@ -103,8 +102,6 @@ export function Conversation({
   olderBusy = false,
   onBack,
   typing,
-  snoozedUntil,
-  onUnsnooze,
   onFlags,
 }: {
   chat: Chat;
@@ -112,10 +109,6 @@ export function Conversation({
   ai: boolean;
   notify: (t: string, err?: boolean) => void;
   onTags: (tags: string[]) => void;
-  onSnooze: () => void;
-  /** Ertelenmişse ne zamana kadar; geri alma */
-  snoozedUntil?: number;
-  onUnsnooze?: () => void;
   showDetails?: boolean;
   onToggleDetails?: () => void;
   onOpenChat?: (c: Chat) => void;
@@ -142,7 +135,6 @@ export function Conversation({
   const [tone, setTone] = useState<Tone>('default');
   const [tagInput, setTagInput] = useState('');
   const [addingTag, setAddingTag] = useState(false);
-  const [remind, setRemind] = useState(true);
   const [lightbox, setLightbox] = useState<Attachment | null>(null);
   const lightboxP = useClosing(lightbox);
   useEffect(() => setLightbox(null), [chat.id]);
@@ -154,7 +146,17 @@ export function Conversation({
   const [emojiOpen, setEmojiOpen] = useState(false);
   /** Bir mesaj için tam emoji seçici (hızlı çubuktaki "+") */
   const [reactPick, setReactPick] = useState<{ id: string; top: number; left: number } | null>(null);
-  useEffect(() => (setThreadFocus(null), setEmojiOpen(false), setReactPick(null)), [chat.id]);
+  /** Hızlı tepki çubuğu açık olan mesaj (üstüne gelince yalnız 😊 düğmesi görünür; tıklayınca çubuk açılır) */
+  const [barFor, setBarFor] = useState<string | null>(null);
+  useEffect(() => {
+    if (!barFor) return;
+    const close = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest('.rbar, .rtrig, .react-pick')) setBarFor(null);
+    };
+    window.addEventListener('mousedown', close);
+    return () => window.removeEventListener('mousedown', close);
+  }, [barFor]);
+  useEffect(() => (setThreadFocus(null), setEmojiOpen(false), setReactPick(null), setBarFor(null)), [chat.id]);
   const canReact = REACT_PLATFORMS.has(chat.platform);
   const byRemote = useMemo(() => new Map(messages.map((m) => [m.remoteId, m])), [messages]);
   /** Slack: yanıtı olan üst mesajlar (sağ panel listesi), son yanıta göre */
@@ -507,32 +509,7 @@ export function Conversation({
           <button className={`btn icon b b2 ${search !== null ? 'on' : ''}`} onClick={() => setSearch(search === null ? '' : null)} title="Sohbette ara" aria-label="Ara">
             <Icon name="search" size={15} />
           </button>
-          {snoozedUntil && onUnsnooze ? (
-            <button className="btn b b2 on" onClick={onUnsnooze} title={`${fmtStamp(snoozedUntil)} tarihine ertelendi — geri al`}>
-              <Icon name="bell" size={15} /> <span className="lbl">Ertelendi · geri al</span>
-            </button>
-          ) : (
-            <button className="btn b b2" onClick={onSnooze} title="Yarına ertele">
-              <Icon name="clock" size={15} /> <span className="lbl">Ertele</span> <span className="kbd lbl">H</span>
-            </button>
-          )}
-          {onToggleDetails && !showDetails && (
-            <button className="btn icon b b2 ctx-toggle" onClick={onToggleDetails} title="Ayrıntı panelini göster" aria-label="Ayrıntı paneli">
-              <Icon name="panel" size={15} />
-            </button>
-          )}
         </header>
-        {snoozedUntil && onUnsnooze && (
-          <div className="snooze-banner" role="status">
-            <Icon name="bell" size={14} sw={2} />
-            <span>
-              Bu sohbet <b>{fmtStamp(snoozedUntil)}</b> tarihine ertelendi; o zamana kadar gelen kutusunda görünmez.
-            </span>
-            <button className="btn xs b b2" onClick={onUnsnooze}>
-              Ertelemeyi kaldır
-            </button>
-          </div>
-        )}
         {search !== null && (
           <div className="chat-search">
             <Icon name="search" size={14} />
@@ -672,10 +649,15 @@ export function Conversation({
                           </button>
                         )}
                         {!isReact && (canReact || chat.platform === 'slack') && (
+                          <button type="button" className={`rtrig ${barFor === m.id ? 'on' : ''}`} aria-label="Tepki ver" title="Tepki ver" onClick={() => (setBarFor(barFor === m.id ? null : m.id), setReactPick(null))}>
+                            <Icon name="smile" size={15} />
+                          </button>
+                        )}
+                        {!isReact && barFor === m.id && (canReact || chat.platform === 'slack') && (
                           <span className="rbar" role="toolbar" aria-label="Hızlı işlemler">
                             {canReact &&
                               QUICK_REACTIONS.map((e) => (
-                                <button key={e} type="button" className={m.reactions?.some((r) => r.fromMe && r.emoji === e) ? 'on' : ''} onClick={() => react(m, e)} title={`${e} tepkisi`}>
+                                <button key={e} type="button" className={m.reactions?.some((r) => r.fromMe && r.emoji === e) ? 'on' : ''} onClick={() => (react(m, e), setBarFor(null))} title={`${e} tepkisi`}>
                                   {e}
                                 </button>
                               ))}
@@ -694,7 +676,7 @@ export function Conversation({
                               </button>
                             )}
                             {chat.platform === 'slack' && !m.threadId && (
-                              <button type="button" className="more" title="İş parçacığında yanıtla" aria-label="İş parçacığında yanıtla" onClick={() => setThreadFocus(m.remoteId)}>
+                              <button type="button" className="more" title="İş parçacığında yanıtla" aria-label="İş parçacığında yanıtla" onClick={() => (setThreadFocus(m.remoteId), setBarFor(null))}>
                                 <Icon name="thread" size={14} />
                               </button>
                             )}
@@ -932,12 +914,9 @@ export function Conversation({
         </div>
         {chat.platform === 'shopier' && chat.meta?.order ? <OrderPanel chat={chat} notify={notify} /> : null}
 
-        <div className="qacts">
+        <div className="qacts one">
           <button className={`b b2 ${noteOpen || chatNote ? 'go' : ''}`} onClick={() => (setNoteDraft(chatNote), setNoteOpen((v) => !v))}>
             <Icon name="pen" size={16} /> {chatNote ? 'Notu düzenle' : 'Not ekle'}
-          </button>
-          <button className="b b2" onClick={onSnooze}>
-            <Icon name="bell" size={16} /> Hatırlat
           </button>
         </div>
 
@@ -1105,13 +1084,7 @@ export function Conversation({
           </div>
         </div>
 
-        <div className="ctx-remind">
-          <Icon name="bell" size={16} color="#6b6878" />
-          <span>2 gün yanıt yoksa hatırlat</span>
-          <button type="button" role="switch" aria-checked={remind} aria-label="Takip hatırlatıcısı" className={`sw ${remind ? 'on' : ''}`} onClick={() => setRemind(!remind)}>
-            <span />
-          </button>
-        </div>
+
 
         {chat.kind === 'group' && (chat.participants?.length ?? 0) > 0 && (
           <div className="ctx-sec">

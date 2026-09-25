@@ -4,10 +4,10 @@ import { createHash, randomBytes } from 'node:crypto';
 import { ImapFlow } from 'imapflow';
 import nodemailer, { type SendMailOptions } from 'nodemailer';
 import { simpleParser, type AddressObject, type ParsedMail } from 'mailparser';
-import { BaseConnector, type StartOptions } from './base.js';
+import { type ComposeDraft, BaseConnector, type StartOptions } from './base.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
-import type { Attachment, Participant, Platform } from '../model.js';
+import type { Attachment, Chat, Participant, Platform } from '../model.js';
 
 /**
  * E-posta: IMAP (okuma) + SMTP (gönderme). Gmail / Yahoo / iCloud / özel sunucu için
@@ -458,6 +458,20 @@ export class MailConnector extends BaseConnector {
     const id = info.messageId ?? `local-${Date.now()}`;
     this.threadOf.set(id, remoteChatId);
     return id;
+  }
+
+  /** Yeni e-posta: SMTP ile gönder, Message-ID'den yeni dizi sohbeti aç (gelen yanıtlar References ile aynı diziye düşer) */
+  async compose(d: ComposeDraft): Promise<Chat> {
+    const to = d.to.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) throw new Error('Geçerli bir e-posta adresi yaz');
+    if (this.cfg.accessToken) await this.ensureOAuth();
+    const info = await this.createTransport().sendMail({ from: this.cfg.user, to, subject: d.subject.trim(), text: d.text });
+    const id = info.messageId ?? `<local-${Date.now()}@mivelo>`;
+    const thread = `msg:${id}`;
+    this.threadOf.set(id, thread);
+    const chat = this.upsertChat({ remoteId: thread, name: d.subject.trim() || '(konu yok)', kind: 'direct', handle: to, participants: [{ id: to.toLowerCase(), name: to }] });
+    this.upsertMessage({ remoteChatId: thread, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text: d.text, ts: Date.now(), status: 'sent' });
+    return this.store.getChat(chat.id) ?? chat;
   }
 
   async sendText(remoteChatId: string, text: string): Promise<{ remoteId: string }> {

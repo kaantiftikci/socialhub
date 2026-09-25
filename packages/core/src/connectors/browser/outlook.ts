@@ -1,5 +1,5 @@
 import type { BrowserContext, Page } from 'playwright';
-import { hashId, type Msg, type Strategy, type Thread } from './bridge.js';
+import { hashId, needsPage, type Msg, type Strategy, type Thread } from './bridge.js';
 import { bus } from '../../bus.js';
 
 /**
@@ -483,6 +483,29 @@ export const outlook: Strategy = {
     await body.fill(text);
     await clickSend(page);
     return hashId(threadId + '|' + text + '|' + Date.now());
+  },
+
+  /**
+   * Yeni e-posta: "Yeni posta" düğmesi → Kime (kişi seçici metin kutusu) → Konu → gövde → Gönder. Dizi kimliği sonradan
+   * yoklamayla gelir; gönderim yerel kimlikle kaydedilir. Seçiciler tr/en; canlı denenmedi.
+   */
+  async compose(page, _cookies, d) {
+    needsPage(page);
+    if (!page.url().startsWith(BASE)) await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    const btn = page.locator('button[aria-label="Yeni posta"], button[aria-label="New mail"], button[aria-label^="Yeni ileti"], button[aria-label^="New message"], [data-testid="splitbutton-main-button"]').first();
+    await btn.click({ timeout: 10_000 });
+    const to = page.locator('div[aria-label="Kime"] [role="textbox"], div[aria-label="To"] [role="textbox"], [aria-label="Kime"][role="textbox"], [aria-label="To"][role="textbox"], div[role="textbox"][aria-label*="Kime"], div[role="textbox"][aria-label*="To"]').first();
+    await to.waitFor({ timeout: 10_000 });
+    await to.click();
+    await page.keyboard.type(d.to);
+    await page.keyboard.press('Enter');
+    const subject = page.locator('input[aria-label="Konu ekleyin"], input[aria-label="Add a subject"], input[placeholder*="Konu"], input[placeholder*="subject" i]').first();
+    await subject.fill(d.subject);
+    const body = page.locator(EDITOR).last();
+    await body.click();
+    await body.fill(d.text);
+    await clickSend(page);
+    return undefined;
   },
 
   /**

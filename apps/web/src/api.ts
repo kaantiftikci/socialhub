@@ -41,6 +41,7 @@ const liveApi = {
   chats: () => call<Chat[]>('GET', '/chats'),
   messages: (chatId: string, limit = 100, before?: number) => call<Message[]>('GET', `/chats/${enc(chatId)}/messages?limit=${limit}${before ? `&before=${before}` : ''}`),
   send: (chatId: string, text: string, threadId?: string) => call<{ remoteId: string }>('POST', `/chats/${enc(chatId)}/send`, { text, threadId }),
+  compose: (accountId: string, draft: { to: string; subject: string; text: string }) => call<Chat>('POST', `/accounts/${enc(accountId)}/compose`, draft),
   react: (chatId: string, messageId: string, emoji: string) => call<Message>('POST', `/chats/${enc(chatId)}/react`, { messageId, emoji }),
   setFlags: (chatId: string, flags: ChatFlags) => call<Chat>('POST', `/chats/${enc(chatId)}/flags`, flags),
   preview: (url: string) => call<LinkPreview>('GET', `/preview?url=${enc(url)}`),

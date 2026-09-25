@@ -14,7 +14,6 @@ export function Focus({
   ai,
   notify,
   onOpen,
-  onSnooze,
   onBack,
   onMenu,
 }: {
@@ -23,7 +22,6 @@ export function Focus({
   ai: boolean;
   notify: (t: string, err?: boolean) => void;
   onOpen: (id: string) => void;
-  onSnooze: (id: string) => void;
   onBack: () => void;
   onMenu?: () => void;
 }) {
@@ -208,9 +206,6 @@ export function Focus({
                       <Icon name="pen" size={14} /> Düzenle
                     </button>
                   )}
-                  <button className="btn b b2" onClick={() => onSnooze(c.id)}>
-                    <Icon name="clock" size={14} /> Yarına ertele <span className="kbd">H</span>
-                  </button>
                   <span style={{ flexGrow: 1 }} />
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text3)' }}>
                     <Chip platform={c.platform} size={15} /> {PLATFORMS[c.platform].name} ile yanıtlanır
@@ -276,9 +271,6 @@ export function Focus({
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 22, fontSize: 12.5, color: 'var(--text3)', marginTop: 'auto' }}>
-        <span>
-          <span className="kbd">H</span> ertele
-        </span>
         <span>
           <span className="kbd">Esc</span> gelen kutusu
         </span>

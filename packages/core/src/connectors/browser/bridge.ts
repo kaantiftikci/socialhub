@@ -3,13 +3,13 @@ import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import type { APIRequestContext, BrowserContext, Page } from 'playwright';
-import { BaseConnector, type SendOptions, type StartOptions } from '../base.js';
+import { BaseConnector, type ComposeDraft, type SendOptions, type StartOptions } from '../base.js';
 import { chatId } from '../../model.js';
 import { persistSessionCookies } from './outlook.js';
 import { bus } from '../../bus.js';
 import { sessionDir } from '../../config.js';
 import { mediaHostAllowed, MEDIA_MAX } from '../../media-hosts.js';
-import type { Account, Attachment, ChatKind, Participant, Reaction } from '../../model.js';
+import type { Account, Attachment, Chat, ChatKind, Participant, Reaction } from '../../model.js';
 import type { Store } from '../../store.js';
 
 /**
@@ -100,6 +100,8 @@ export interface Strategy {
   /** true: API tabanlı strateji, mesaj çağrıları paralel yapılabilir (DOM okuyanlar tek sayfayı paylaştığı için sıralı) */
   parallel?: boolean;
   send(page: Page, cookies: Record<string, string>, threadId: string, text: string, opts?: SendOptions): Promise<string | undefined>;
+  /** Yeni e-posta (web posta istemcisinde Oluştur → Kime/Konu/Metin → Gönder); dizi kimliği biliniyorsa döner */
+  compose?(page: Page, cookies: Record<string, string>, draft: ComposeDraft): Promise<string | undefined>;
   /** Emoji tepkisi ver/kaldır (Slack reactions.add/remove) */
   react?(page: Page, cookies: Record<string, string>, threadId: string, msgId: string, emoji: string, remove: boolean): Promise<void>;
   /** Bir üyeyle birebir sohbet kimliği (yoksa oluştur) */
@@ -480,6 +482,17 @@ export class BrowserConnector extends BaseConnector {
     const kind = file.mime.startsWith('image/') ? 'image' : file.mime.startsWith('video/') ? 'video' : file.mime.startsWith('audio/') ? 'audio' : 'file';
     this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text: caption ?? '', ts: Date.now(), status: 'sent', attachments: [{ kind, name: file.name, mime: file.mime, size: file.size }] });
     return { remoteId: id };
+  }
+
+  async compose(d: ComposeDraft): Promise<Chat> {
+    if (!this.strategy.compose) throw new Error('Bu hesapta yeni e-posta oluşturma desteklenmiyor');
+    if (!this.pageless && !(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
+    const to = d.to.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) throw new Error('Geçerli bir e-posta adresi yaz');
+    const id = (await this.serial(async () => this.run((p, c) => this.strategy.compose!(p, c, { ...d, to })))) ?? `out-${createHash('sha1').update(`${to}|${d.subject}|${Date.now()}`).digest('hex').slice(0, 16)}`;
+    const chat = this.upsertChat({ remoteId: id, name: d.subject.trim() || '(konu yok)', kind: 'direct', handle: to, participants: [{ id: to.toLowerCase(), name: to }] });
+    this.upsertMessage({ remoteChatId: id, remoteId: `local-${Date.now()}`, senderId: 'me', senderName: 'Ben', fromMe: true, text: d.text, ts: Date.now(), status: 'sent' });
+    return this.store.getChat(chat.id) ?? chat;
   }
 
   private morePage = 0;

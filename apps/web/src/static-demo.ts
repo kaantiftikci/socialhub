@@ -309,6 +309,16 @@ export const staticApi = {
     chats = chats.map((c) => (c.id === chatId ? next : c));
     emit({ type: 'chat.upsert', chat: next });
   },
+  compose: async (accountId: string, d: { to: string; subject: string; text: string }): Promise<Chat> => {
+    const acc = accounts.find((a) => a.id === accountId);
+    if (!acc) throw new Error('Hesap bulunamadı');
+    const ts = Date.now();
+    const chat: Chat = { id: `${accountId}/out-${ts}`, accountId, platform: acc.platform, remoteId: `out-${ts}`, name: d.subject || '(konu yok)', kind: 'direct', unread: 0, lastMessageAt: ts, lastPreview: d.text, lastFromMe: true, tags: [], handle: d.to, participants: [{ id: d.to, name: d.to }] };
+    chats.push(chat);
+    messages.push({ id: `${chat.id}#m`, chatId: chat.id, remoteId: 'm', senderId: 'me', senderName: 'Ben', fromMe: true, text: d.text, ts, status: 'sent' });
+    emit({ type: 'chat.upsert', chat });
+    return chat;
+  },
   react: async (chatId: string, messageId: string, emoji: string): Promise<Message> => {
     const m = messages.find((x) => x.id === messageId && x.chatId === chatId);
     if (!m) throw new Error('Mesaj yok');

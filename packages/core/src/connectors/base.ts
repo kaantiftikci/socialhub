@@ -15,6 +15,13 @@ export interface SendOptions {
   threadId?: string;
 }
 
+/** Yeni e-posta (Kime / Konu / Metin) */
+export interface ComposeDraft {
+  to: string;
+  subject: string;
+  text: string;
+}
+
 /** Gönderilecek dosya (server send-file → connector.sendMedia) */
 export interface OutFile {
   path: string;
@@ -34,6 +41,8 @@ export interface Connector {
   sendText(remoteChatId: string, text: string, opts?: SendOptions): Promise<{ remoteId: string }>;
   /** Mesaja emoji tepkisi ver/kaldır (WhatsApp, Telegram, Slack) */
   react?(remoteChatId: string, remoteMsgId: string, emoji: string, remove: boolean): Promise<void>;
+  /** Yeni e-posta gönder ve dizi sohbetini döndür (e-posta hesapları) */
+  compose?(draft: ComposeDraft): Promise<Chat>;
   /** Telegram gibi etkileşimli girişlerde (telefon, kod, 2FA) arayüzden gelen değeri iletir. */
   provideInput?(kind: 'phone' | 'code' | 'password', value: string): void;
   /** Belirli bir sohbetin geçmişini (daha eski mesajları) ister. */

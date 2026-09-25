@@ -264,7 +264,7 @@ button:focus-visible, a:focus-visible, .sw:focus-visible { outline: 2px solid va
 .datepill { align-self: center; font-size: 11.5px; font-weight: 500; color: var(--text3); padding: 4px 11px; border-radius: 999px; background: var(--bg2); margin: 8px 0; }
 .grp { display: flex; align-items: flex-end; gap: 8px; margin-top: 10px; }
 .grp.me { flex-direction: row-reverse; }
-.grp .col { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; max-width: min(520px, 78%); }
+.grp .col { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; max-width: min(520px, 72%); }
 .grp.me .col { align-items: flex-end; }
 .bub { padding: 10px 14px; background: var(--bg2); color: var(--text); border-radius: 18px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
 .grp.me .bub { background: var(--v); color: #fff; box-shadow: 0 6px 16px -10px rgba(108,71,255,.9); }
@@ -827,9 +827,14 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .bub:has(.att-card) .bub-text + .bt, .bub:has(.att-card):has(.bub-text) .bt { position: static; background: transparent; color: var(--text3); padding: 0; margin: 4px 8px 0 10px; }
 .grp.me .bub:has(.att-card):has(.bub-text) .bt { color: rgba(255,255,255,.75); }
 .msg-link { color: inherit; text-decoration: underline; text-underline-offset: 2px; word-break: break-all; }
-.rbar { position: absolute; top: -14px; right: 6px; display: inline-flex; gap: 1px; padding: 3px; border-radius: 999px; background: #fff; border: 1px solid var(--line); box-shadow: var(--shadow-3); opacity: 0; transform: translateY(4px) scale(.96); pointer-events: none; transition: opacity .12s ease, transform .12s ease; z-index: 3; }
-.bwrap.me .rbar { right: auto; left: 6px; }
-.bwrap:hover .rbar, .bwrap:focus-within .rbar { opacity: 1; transform: none; pointer-events: auto; }
+/* Üstüne gelince yalnız 😊 düğmesi (balonun yanında); tıklayınca hızlı tepki çubuğu açılır */
+.rtrig { position: absolute; top: 50%; right: -30px; transform: translateY(-50%); width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line); background: #fff; color: var(--text3); display: inline-flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity .12s ease; cursor: pointer; z-index: 2; }
+.bwrap.me .rtrig { right: auto; left: -30px; }
+.bwrap:hover .rtrig, .rtrig.on { opacity: 1; pointer-events: auto; }
+.rtrig:hover, .rtrig.on { color: var(--v-txt); border-color: #c9b9ff; background: var(--v-soft); }
+/* Çubuk balonun üstünde, tetikleyici tarafında (yana taşıp kırpılmasın) */
+.rbar { position: absolute; bottom: calc(100% + 4px); right: -30px; display: inline-flex; gap: 1px; padding: 3px; border-radius: 999px; background: #fff; border: 1px solid var(--line); box-shadow: var(--shadow-3); z-index: 4; animation: bubIn .14s ease-out both; }
+.bwrap.me .rbar { right: auto; left: -30px; }
 .rbar button { width: 26px; height: 26px; border-radius: 50%; border: 0; background: transparent; font-size: 15px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; color: var(--text2); cursor: pointer; }
 .rbar button:hover { background: var(--bg2); transform: scale(1.15); }
 .rbar button.on { background: var(--v-soft); }
@@ -899,14 +904,10 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .qc.on .avwrap { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--v); border-radius: 50%; }
 .qc .qc-nm { width: 100%; font-size: 11.5px; font-weight: 500; color: var(--text2); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .qc .qc-bub { position: absolute; top: -8px; left: 50%; transform: translateX(-50%); max-width: 120px; padding: 3px 8px; border-radius: 10px 10px 10px 3px; background: #f2652f; color: #fff; font-size: 10.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: 0 4px 10px -4px rgba(242,101,47,.6); z-index: 1; }
-/* Kenar çubuğu kısayol kartı */
-.hotkey-card { display: flex; flex-direction: column; align-items: center; gap: 6px; margin: 6px 0 8px; padding: 10px 12px; border-radius: 14px; background: var(--bg2); border: 1px solid var(--line3); }
-.hotkey-card .keys { display: inline-flex; gap: 4px; }
-.hotkey-card .keys .kbd { min-width: 24px; height: 22px; line-height: 20px; font-size: 12px; }
-.hotkey-card .txt { font-size: 11.5px; color: var(--text3); text-align: center; line-height: 1.35; }
 /* Yeni sohbet */
 .modal.newchat { width: min(440px, 92vw); display: flex; flex-direction: column; gap: 12px; }
-.newchat .mh { display: flex; align-items: center; justify-content: space-between; }
+.newchat .mh { display: flex; align-items: center; gap: 10px; }
+.newchat .mh .from { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .newchat .mh h2 { margin: 0; font-size: 18px; }
 .nc-accs { display: flex; flex-wrap: wrap; gap: 6px; }
 .nc-acc { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--line); background: #fff; font-size: 12.5px; color: var(--text); cursor: pointer; }
@@ -920,5 +921,18 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .nc-row .hd { font-size: 12px; font-weight: 400; color: var(--text3); }
 .nc-start { justify-content: center; }
 .nc-hint { font-size: 12px; color: var(--text3); line-height: 1.4; }
-.app.mobile .hotkey-card { display: none; }
 .app.mobile .list { border-radius: 0; }
+
+/* Kenar çubuğu: yeni sohbet / yeni e-posta düğmesi (üstüne gelince) */
+.chan .newbtn { margin-left: auto; width: 22px; height: 22px; border-radius: 7px; border: 0; background: transparent; color: var(--text3); display: inline-flex; align-items: center; justify-content: center; opacity: 0; cursor: pointer; flex: none; }
+.chan:hover .newbtn { opacity: 1; }
+.chan .newbtn:hover { background: var(--v-soft); color: var(--v-txt); }
+.chan:hover .count, .chan:hover .dot { display: none; }
+/* Yeni e-posta formu (posta düzeni) */
+.mailform { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); overflow: hidden; }
+.mailform label { display: flex; align-items: center; gap: 10px; padding: 0 14px; height: 40px; border-bottom: 1px solid var(--line2); font-size: 12.5px; color: var(--text3); }
+.mailform label span { width: 44px; flex: none; }
+.mailform input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font-size: 14px; color: var(--text); }
+.mailform textarea { border: 0; outline: 0; resize: vertical; min-height: 160px; padding: 12px 14px; font: inherit; font-size: 14px; line-height: 1.55; color: var(--text); background: transparent; }
+.newchat .from { font-size: 12px; color: var(--text3); display: flex; align-items: center; gap: 6px; }
+.qacts.one { grid-template-columns: 1fr; }

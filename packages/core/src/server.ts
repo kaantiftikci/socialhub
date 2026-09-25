@@ -248,6 +248,17 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     if (!c) throw new HttpError(409, 'Hesap bağlı değil');
     return c.sendText(chat.remoteId, text, b.threadId ? { threadId: String(b.threadId).slice(0, 64) } : undefined);
   });
+  // Yeni e-posta (e-posta hesapları): Kime / Konu / Metin → dizi sohbeti
+  route('POST', '/api/accounts/:id/compose', async (_r, _s, p, body) => {
+    const c = registry.get(dec(p.id));
+    if (!c) throw new HttpError(409, 'Hesap bağlı değil');
+    if (!c.compose) throw new HttpError(400, 'Bu hesapta yeni e-posta oluşturma desteklenmiyor');
+    const b = (body ?? {}) as { to?: string; subject?: string; text?: string };
+    const to = String(b.to ?? '').trim();
+    const text = String(b.text ?? '').trim();
+    if (!to || !text) throw new HttpError(400, 'Alıcı ve metin gerekli');
+    return c.compose({ to: to.slice(0, 200), subject: String(b.subject ?? '').trim().slice(0, 300), text: text.slice(0, 50_000) });
+  });
   // Emoji tepkisi: aynı emoji zaten benimse kaldırır (toggle); platforma iletilir, depo hemen güncellenir
   route('POST', '/api/chats/:id/react', async (_r, _s, p, body) => {
     const id = dec(p.id);

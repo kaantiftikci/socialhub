@@ -1,5 +1,5 @@
 import type { Page } from 'playwright';
-import { hashId, type Msg, type Strategy, type Thread } from './bridge.js';
+import { hashId, needsPage, type Msg, type Strategy, type Thread } from './bridge.js';
 import { bus } from '../../bus.js';
 import type { Attachment } from '../../model.js';
 
@@ -414,6 +414,29 @@ export const gmail: Strategy = {
     await body.fill(text);
     await clickSend(page);
     return hashId(threadId + '|' + text + '|' + Date.now());
+  },
+
+  /**
+   * Yeni e-posta: gelen kutusunda "Oluştur" (gh="cm") → Kime (textarea/peoplekit girişi) → Konu (subjectbox) → gövde → Gönder.
+   * Dizi kimliği gönderim anında bilinmez (yerel kimlik). Seçiciler tr/en; canlı denenmedi.
+   */
+  async compose(page, _cookies, d) {
+    needsPage(page);
+    if (!page.url().startsWith(BASE)) await page.goto(BASE + '#inbox', { waitUntil: 'domcontentloaded' });
+    const btn = page.locator('div[role="button"][gh="cm"], [aria-label="Oluştur"], [aria-label="Compose"]').first();
+    await btn.click({ timeout: 10_000 });
+    const to = page.locator('input[aria-label*="Alıcı"], input[aria-label*="To recipients"], textarea[name="to"], input[name="to"], input[peoplekit-id]').last();
+    await to.waitFor({ timeout: 10_000 });
+    await to.click();
+    await to.fill(d.to);
+    await page.keyboard.press('Enter');
+    const subject = page.locator('input[name="subjectbox"]').last();
+    await subject.fill(d.subject);
+    const body = page.locator('div[aria-label="Mesaj Gövdesi"], div[aria-label="Message Body"], div[role="textbox"][contenteditable="true"]').last();
+    await body.click();
+    await body.fill(d.text);
+    await clickSend(page);
+    return undefined;
   },
 
   /**
