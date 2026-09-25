@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3-multiple-ciphers';
 import fs from 'node:fs';
 import { DB_PATH } from './config.js';
-import type { Account, Chat, ChatFlags, Message, Platform, Reaction } from './model.js';
+import type { Account, Chat, ChatFlags, FollowUp, Message, Platform, Reaction } from './model.js';
 
 /**
  * Yerel SQLite deposu. Şema küçük tutuldu; FTS5 ile tam metin arama var.
@@ -119,6 +119,8 @@ export class Store {
     if (!ccols.has('last_from_me')) this.db.exec('ALTER TABLE chats ADD COLUMN last_from_me INTEGER NOT NULL DEFAULT 0');
     if (!ccols.has('flags')) this.db.exec('ALTER TABLE chats ADD COLUMN flags TEXT'); // {pinned,archived,muted,hidden}
     // Mivelo'da okunan nokta (ms): bu zamana kadar olan mesajlar kalıcı olarak okundu; platform yoklaması geri açamaz
+    // takip hatırlatıcısı {at, since, due}
+    if (!ccols.has('followup')) this.db.exec('ALTER TABLE chats ADD COLUMN followup TEXT');
     if (!ccols.has('read_upto')) this.db.exec('ALTER TABLE chats ADD COLUMN read_upto INTEGER NOT NULL DEFAULT 0');
     // gönderen bazlı güncellemeler (ad/fotoğraf/lid→numara) tam tablo taraması yapmasın
     this.db.exec('CREATE INDEX IF NOT EXISTS messages_sender ON messages(sender_id)');
@@ -425,6 +427,39 @@ export class Store {
     return this.getChat(id);
   }
 
+  /** Takip hatırlatıcısı kur (at ms) ya da kaldır (null) */
+  setFollowUp(id: string, at: number | null): Chat | undefined {
+    if (!this.getChat(id)) return undefined;
+    const v = at ? JSON.stringify({ at, since: Date.now() } satisfies FollowUp) : null;
+    this.db.prepare('UPDATE chats SET followup = ? WHERE id = ?').run(v, id);
+    return this.getChat(id);
+  }
+
+  /**
+   * Takip hatırlatıcılarını değerlendir: kurulduktan sonra karşı taraftan mesaj gelen kapanır (resolved),
+   * süresi dolup yanıt gelmeyen `due` olur (yalnızca ilk kez döner; bildirim bir kez gider).
+   */
+  checkFollowUps(now = Date.now()): { resolved: Chat[]; due: Chat[] } {
+    const rows = this.db.prepare('SELECT id, followup FROM chats WHERE followup IS NOT NULL').all() as Array<{ id: string; followup: string }>;
+    const resolved: Chat[] = [];
+    const due: Chat[] = [];
+    const incoming = this.db.prepare('SELECT 1 FROM messages WHERE chat_id = ? AND from_me = 0 AND ts > ? LIMIT 1');
+    for (const r of rows) {
+      const f = safeJson<FollowUp | null>(r.followup, null);
+      if (!f) continue;
+      if (incoming.get(r.id, f.since)) {
+        this.db.prepare('UPDATE chats SET followup = NULL WHERE id = ?').run(r.id);
+        const c = this.getChat(r.id);
+        if (c) resolved.push(c);
+      } else if (!f.due && f.at <= now) {
+        this.db.prepare('UPDATE chats SET followup = ? WHERE id = ?').run(JSON.stringify({ ...f, due: true }), r.id);
+        const c = this.getChat(r.id);
+        if (c) due.push(c);
+      }
+    }
+    return { resolved, due };
+  }
+
   /** Yalnızca teslim/okundu durumunu güncelle (metin, zaman ve sohbet özetine dokunmadan). */
   updateStatus(id: string, status: Message['status']): void {
     this.db.prepare('UPDATE messages SET status = ? WHERE id = ?').run(status, id);
@@ -456,12 +491,44 @@ export class Store {
     return rows.map(rowToMessage).reverse();
   }
 
-  /** Kullanıcının bu sohbette daha önce yazdığı mesajlar: AI taslağının "senin tarzın" örnekleri. */
-  myRecentMessages(chatId: string, limit = 8): string[] {
-    return this.db
-      .prepare('SELECT text FROM messages WHERE chat_id = ? AND from_me = 1 AND length(text) > 12 ORDER BY ts DESC LIMIT ?')
-      .all(chatId, limit)
-      .map((r) => (r as { text: string }).text);
+  /**
+   * Üslup örnekleri: karşı tarafın mesajı → benim hemen ardından yazdığım yanıt çiftleri. Önce bu sohbetten,
+   * sonra aynı platformdan, sonra tüm platformlardan (yeni sohbette de "senin tarzın" bilinsin).
+   */
+  styleSamples(chatId: string, platform: string, limit = 12): Array<{ them: string; me: string; scope: 'chat' | 'platform' | 'all' }> {
+    const since = Date.now() - 365 * 86_400_000;
+    const out: Array<{ them: string; me: string; scope: 'chat' | 'platform' | 'all' }> = [];
+    const seen = new Set<string>();
+    const add = (where: string, arg: string | null, scope: 'chat' | 'platform' | 'all', n: number) => {
+      if (out.length >= limit) return;
+      const sql = `SELECT text, prev_text FROM (
+           SELECT text, from_me, ts,
+                  LAG(text) OVER (PARTITION BY chat_id ORDER BY ts) AS prev_text,
+                  LAG(from_me) OVER (PARTITION BY chat_id ORDER BY ts) AS prev_me
+           FROM messages WHERE ${where} AND ts > ?
+         ) WHERE from_me = 1 AND prev_me = 0 AND length(text) BETWEEN 2 AND 400 AND length(prev_text) BETWEEN 1 AND 400
+         ORDER BY ts DESC LIMIT ?`;
+      const rows = (arg === null ? this.db.prepare(sql).all(since, n * 3) : this.db.prepare(sql).all(arg, since, n * 3)) as Array<{ text: string; prev_text: string }>;
+      for (const r of rows) {
+        if (out.length >= limit || seen.has(r.text)) continue;
+        seen.add(r.text);
+        out.push({ them: r.prev_text, me: r.text, scope });
+        if (out.filter((o) => o.scope === scope).length >= n) break;
+      }
+    };
+    add('chat_id = ?', chatId, 'chat', 6);
+    add("chat_id IN (SELECT id FROM chats WHERE platform = ? AND kind = 'direct')", platform, 'platform', 4);
+    add("chat_id IN (SELECT id FROM chats WHERE kind = 'direct')", null, 'all', limit);
+    return out;
+  }
+
+  /** Son yazdığım mesajlar (üslup istatistiği için; platform verilirse önce o platform) */
+  myTexts(platform?: string, limit = 400): string[] {
+    const sql = platform
+      ? "SELECT m.text FROM messages m JOIN chats c ON c.id = m.chat_id WHERE m.from_me = 1 AND c.platform = ? AND length(m.text) > 1 ORDER BY m.ts DESC LIMIT ?"
+      : 'SELECT text FROM messages WHERE from_me = 1 AND length(text) > 1 ORDER BY ts DESC LIMIT ?';
+    const rows = (platform ? this.db.prepare(sql).all(platform, limit) : this.db.prepare(sql).all(limit)) as Array<{ text: string }>;
+    return rows.map((r) => r.text);
   }
 
   search(q: string, limit = 50): Array<{ message: Message; chat: Chat }> {
@@ -534,6 +601,7 @@ function rowToChat(r: unknown): Chat {
     participants: x.participants ? safeJson<Chat['participants']>(x.participants as string, undefined) : undefined,
     meta: x.meta ? safeJson<Chat['meta']>(x.meta as string, undefined) : undefined,
     ...(x.flags ? safeJson<ChatFlags>(x.flags as string, {}) : {}),
+    followUp: x.followup ? (safeJson<FollowUp | null>(x.followup as string, null) ?? undefined) : undefined,
   };
 }
 

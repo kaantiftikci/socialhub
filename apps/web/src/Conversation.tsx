@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { EmojiPicker } from './emoji';
 import { api } from './api';
 import { API_BASE, mediaUrl, openExternal } from './desktop';
-import { DEFAULT_TAGS, PLATFORMS, QUICK_REACTIONS, REACT_PLATFORMS, TAG_COLORS, openInAppLink, type Attachment, type Chat, type ChatFlags, type DraftResult, type LinkPreview, type Message, type Reaction } from './types';
+import { DEFAULT_TAGS, PLATFORMS, QUICK_REACTIONS, REACT_PLATFORMS, TAG_COLORS, openInAppLink, type Attachment, type CalendarDraft, type Chat, type ChatFlags, type DraftResult, type LinkPreview, type Message, type Reaction } from './types';
+import { guessWhen } from './when';
 import { useClosing, Avatar, Chip, Icon, Resizer, Tag, ago, fmtDay, fmtStamp, fmtTime } from './ui';
 
 type Tone = 'default' | 'short' | 'formal' | 'en';
@@ -148,6 +149,22 @@ export function Conversation({
   const [reactPick, setReactPick] = useState<{ id: string; top: number; left: number } | null>(null);
   /** Hızlı tepki çubuğu açık olan mesaj (üstüne gelince yalnız 😊 düğmesi görünür; tıklayınca çubuk açılır) */
   const [barFor, setBarFor] = useState<string | null>(null);
+  /** Takvime ekle penceresi (ön doldurulmuş) */
+  const [calFor, setCalFor] = useState<CalendarDraft | null>(null);
+  /** Metinden takvim taslağı: tarih/saat tahmini + başlık (ilk satır, kısaltılmış) */
+  const calFromText = (text: string, notes?: string): CalendarDraft => {
+    const w = guessWhen(text);
+    const title = text.replace(/\s+/g, ' ').trim().slice(0, 80) || chat.name;
+    return { title: `${chat.name}: ${title}`, start: w.time ? `${w.date}T${w.time}` : w.date, notes };
+  };
+  async function setFollowUp(days: number | null) {
+    try {
+      await api.setFollowUp(chat.id, days === null ? null : Date.now() + days * 86_400_000);
+      notify(days === null ? 'Takip hatırlatması kaldırıldı' : `${days === 7 ? '1 hafta' : `${days} gün`} içinde yanıt gelmezse hatırlatılacak`);
+    } catch (e) {
+      notify((e as Error).message, true);
+    }
+  }
   useEffect(() => {
     if (!barFor) return;
     const close = (e: MouseEvent) => {
@@ -536,6 +553,24 @@ export function Conversation({
           </div>
         )}
 
+        {chat.followUp && (
+          <div className={`snooze-banner follow ${chat.followUp.due ? 'due' : ''}`}>
+            <Icon name="bell" size={15} />
+            <span>
+              {chat.followUp.due
+                ? `${chat.name} yanıt vermedi. Nazik bir hatırlatma gönderebilirsin.`
+                : `${fmtFollow(chat.followUp.at)} yanıt gelmezse hatırlatılacak. ${chat.name} yazınca kendiliğinden kapanır.`}
+            </span>
+            {chat.followUp.due && ai && (
+              <button type="button" className="btn xs soft b b2" onClick={() => void makeDraft()}>
+                <Icon name="sparkle" size={12} color="#6C47FF" sw={2} /> Hatırlatma yaz
+              </button>
+            )}
+            <button type="button" className="btn ghost xs b b2" onClick={() => void setFollowUp(null)}>
+              {chat.followUp.due ? 'Kapat' : 'Kaldır'}
+            </button>
+          </div>
+        )}
         <div className={`msgs ${isMail ? 'mail' : ''}`} ref={msgsRef}>
           {isMail && (
             <div className="mail-thread">
@@ -671,12 +706,12 @@ export function Conversation({
                             })()}
                           </button>
                         )}
-                        {!isReact && (canReact || chat.platform === 'slack') && (
-                          <button type="button" className={`rtrig ${barFor === m.id ? 'on' : ''}`} aria-label="Tepki ver" title="Tepki ver" onClick={() => (setBarFor(barFor === m.id ? null : m.id), setReactPick(null))}>
-                            <Icon name="smile" size={15} />
+                        {!isReact && (canReact || chat.platform === 'slack' || !!m.text) && (
+                          <button type="button" className={`rtrig ${barFor === m.id ? 'on' : ''}`} aria-label={canReact ? 'Tepki ver' : 'Hızlı işlemler'} title={canReact ? 'Tepki ver' : 'Hızlı işlemler'} onClick={() => (setBarFor(barFor === m.id ? null : m.id), setReactPick(null))}>
+                            <Icon name={canReact || chat.platform === 'slack' ? 'smile' : 'calendar'} size={15} />
                           </button>
                         )}
-                        {!isReact && barFor === m.id && (canReact || chat.platform === 'slack') && (
+                        {!isReact && barFor === m.id && (canReact || chat.platform === 'slack' || !!m.text) && (
                           <span className="rbar" role="toolbar" aria-label="Hızlı işlemler">
                             {canReact &&
                               QUICK_REACTIONS.map((e) => (
@@ -696,6 +731,11 @@ export function Conversation({
                                 }}
                               >
                                 <Icon name="smile" size={14} />
+                              </button>
+                            )}
+                            {!!m.text && (
+                              <button type="button" className="more" title="Takvime ekle" aria-label="Takvime ekle" onClick={() => (setCalFor(calFromText(m.text, `${m.fromMe ? 'Ben' : m.senderName}: ${m.text}`)), setBarFor(null))}>
+                                <Icon name="calendar" size={14} />
                               </button>
                             )}
                             {chat.platform === 'slack' && !m.threadId && (
@@ -718,6 +758,25 @@ export function Conversation({
               </div>
             ),
           )}
+          {draft && (draft.events?.length ?? 0) > 0 && (
+            <div className="actions">
+              <div className="h">
+                <span className="ico">
+                  <Icon name="calendar" size={13} color="#fff" sw={2} />
+                </span>
+                {draft.events!.length} tarihli olay
+              </div>
+              {draft.events!.map((ev, i) => (
+                <div key={i} className="it">
+                  <Icon name="calendar" size={15} color="#4A4757" />
+                  <span style={{ flexGrow: 1 }}>
+                    {ev.title} · <span style={{ color: 'var(--text3)' }}>{fmtEventWhen(ev.start)}</span>
+                  </span>
+                  <button className="btn soft xs b b2" onClick={() => setCalFor({ ...ev, title: ev.title.includes(chat.name) ? ev.title : `${chat.name}: ${ev.title}` })}>Takvime ekle</button>
+                </div>
+              ))}
+            </div>
+          )}
           {draft && draft.actions.length > 0 && (
             <div className="actions">
               <div className="h">
@@ -730,7 +789,7 @@ export function Conversation({
                 <div key={i} className="it">
                   <Icon name="calendar" size={15} color="#4A4757" />
                   <span style={{ flexGrow: 1 }}>{a}</span>
-                  <button className="btn soft xs b b2" disabled title="Yakında">Göreve ekle</button>
+                  <button className="btn soft xs b b2" onClick={() => setCalFor(calFromText(a, a))}>Takvime ekle</button>
                 </div>
               ))}
             </div>
@@ -780,7 +839,7 @@ export function Conversation({
           {ai && (
             <div className="comp-top">
               {draft ? (
-                <span className="aipill on">
+                <span className="aipill on" title={draft.style?.length ? `Tarzın: ${draft.style.join(', ')}` : undefined}>
                   <Icon name="sparkle" size={13} color="#D4FF3F" sw={2} /> Senin tarzında taslak
                 </span>
               ) : (
@@ -804,6 +863,11 @@ export function Conversation({
               <button className="btn xs icon b b2" onClick={() => makeDraft(tone)} disabled={drafting} aria-label="Yeniden yaz">
                 <Icon name="refresh" size={13} sw={2} />
               </button>
+            </div>
+          )}
+          {ai && draft && (draft.style?.length ?? 0) > 0 && (
+            <div className="style-line" title="Kendi mesajlarından yerelde çıkarıldı; taslak bu tarza göre yazılır">
+              <b>Tarzın:</b> {draft.style!.join(' · ')}
             </div>
           )}
           {pending && (
@@ -973,6 +1037,30 @@ export function Conversation({
           </div>
         )}
 
+        {PLATFORMS[chat.platform].category !== 'shop' && (
+          <div className="ctx-sec">
+            <span className="label">Takip hatırlatıcısı</span>
+            {chat.followUp ? (
+              <div className={`follow-card ${chat.followUp.due ? 'due' : ''}`}>
+                <Icon name="bell" size={15} />
+                <span>{chat.followUp.due ? 'Süre doldu, yanıt gelmedi' : `${fmtFollow(chat.followUp.at)} yanıt gelmezse hatırlatılacak`}</span>
+                <button type="button" className="btn ghost xs b b2" onClick={() => void setFollowUp(null)}>
+                  Kaldır
+                </button>
+              </div>
+            ) : (
+              <div className="follow-opts">
+                <span className="hint">Yanıt gelmezse hatırlat</span>
+                {([1, 2, 3, 7] as const).map((d) => (
+                  <button key={d} type="button" className="btn xs b b2" onClick={() => void setFollowUp(d)}>
+                    {d === 7 ? '1 hafta' : `${d} gün`}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {threads.length > 0 && (
           <div className="ctx-sec">
             <span className="label">İş parçacıkları · {threads.length}</span>
@@ -1052,7 +1140,10 @@ export function Conversation({
             <div className="todos">
               {draft.actions.map((a, i) => (
                 <label key={i} className="todo">
-                  <input type="checkbox" /> <span>{a}</span>
+                  <input type="checkbox" /> <span style={{ flexGrow: 1 }}>{a}</span>
+                  <button type="button" className="btn ghost xs icon b b2" title="Takvime ekle" aria-label="Takvime ekle" onClick={(e) => (e.preventDefault(), setCalFor(calFromText(a, a)))}>
+                    <Icon name="calendar" size={13} />
+                  </button>
                 </label>
               ))}
             </div>
@@ -1206,6 +1297,7 @@ export function Conversation({
       </aside>
       </>
       )}
+      {calFor && <CalendarModal initial={calFor} notify={notify} onClose={() => setCalFor(null)} />}
       {mediaP.value && (
         <div className={`overlay ${mediaP.closing ? 'closing' : ''}`} onClick={() => setMediaOpen(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Paylaşılanlar" style={{ gap: 14 }}>
@@ -1270,6 +1362,110 @@ const CARRIERS: Array<[string, string]> = [
 ];
 
 /** Shopier sipariş kartı: durum, ürünler, tutar, adres, kargo; kapatma/kargo formu */
+/** Takip zamanı: "yarın 14:30", "3 gün sonra (Pzt 09:00)" */
+function fmtFollow(at: number): string {
+  const d = new Date(at);
+  const days = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() - new Date().setHours(0, 0, 0, 0)) / 86_400_000);
+  const hm = d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+  if (days <= 0) return `Bugün ${hm}'e kadar`;
+  if (days === 1) return `Yarın ${hm}'e kadar`;
+  return `${d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', weekday: 'short' })} ${hm}'e kadar`;
+}
+
+/** "2026-10-02T14:30" → "2 Ekim Cum 14:30" */
+function fmtEventWhen(start: string): string {
+  const [d, t] = start.split('T');
+  const [y, m, day] = d.split('-').map(Number);
+  const s = new Date(y, m - 1, day).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', weekday: 'short' });
+  return t ? `${s} ${t}` : `${s} · tüm gün`;
+}
+
+/**
+ * Takvime ekle: çekirdek .ics üretip sistemin takvim uygulamasında açar (Mac: Takvim, Windows: Outlook/Takvim);
+ * kullanıcı orada kaydeder. Uzak oturumda/demoda dosya indirilir.
+ */
+function CalendarModal({ initial, notify, onClose }: { initial: CalendarDraft; notify: (t: string, err?: boolean) => void; onClose: () => void }) {
+  const [title, setTitle] = useState(initial.title);
+  const [date, setDate] = useState(initial.start.slice(0, 10));
+  const [time, setTime] = useState(initial.start.slice(11, 16));
+  const [duration, setDuration] = useState(initial.durationMin ?? 60);
+  const [notes, setNotes] = useState(initial.notes ?? '');
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    if (!title.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return notify('Başlık ve tarih gerekli', true);
+    setBusy(true);
+    try {
+      const r = await api.calendar({ title: title.trim(), start: time ? `${date}T${time}` : date, durationMin: duration, notes: notes.trim() || undefined });
+      if (r.opened) notify('Takvim uygulamasında açıldı; oradan kaydet');
+      else {
+        const url = URL.createObjectURL(new Blob([r.ics], { type: 'text/calendar' }));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${title.trim().replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 60) || 'etkinlik'}.ics`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        notify('Takvim dosyası indirildi; açınca takvimine eklenir');
+      }
+      onClose();
+    } catch (e) {
+      notify((e as Error).message, true);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal cal-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Takvime ekle" onKeyDown={(e) => e.key === 'Escape' && onClose()}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Icon name="calendar" size={20} color="#6C47FF" />
+          <h2 style={{ fontSize: 20 }}>Takvime ekle</h2>
+          <span style={{ flexGrow: 1 }} />
+          <button className="btn icon b b2" onClick={onClose} aria-label="Kapat">
+            <Icon name="x" size={15} sw={2} />
+          </button>
+        </div>
+        <label className="fld">
+          <span>Başlık</span>
+          <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void save()} />
+        </label>
+        <div className="fld-row">
+          <label className="fld">
+            <span>Tarih</span>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </label>
+          <label className="fld">
+            <span>Saat</span>
+            <input type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+          </label>
+          <label className="fld">
+            <span>Süre</span>
+            <select value={duration} onChange={(e) => setDuration(Number(e.target.value))} disabled={!time}>
+              {[15, 30, 45, 60, 90, 120, 180].map((m) => (
+                <option key={m} value={m}>
+                  {m < 60 ? `${m} dk` : `${m / 60} sa`}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        {!time && <span className="hint">Saat boşsa tüm gün etkinlik olarak eklenir.</span>}
+        <label className="fld">
+          <span>Not</span>
+          <textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="İsteğe bağlı" />
+        </label>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button className="btn b b2" onClick={onClose}>
+            Vazgeç
+          </button>
+          <button className="btn primary b b2" onClick={() => void save()} disabled={busy}>
+            {busy ? <span className="spin" /> : <Icon name="calendar" size={14} />} Takvime ekle
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function OrderPanel({ chat, notify }: { chat: Chat; notify: (t: string, err?: boolean) => void }) {
   const o = chat.meta!.order as OrderMeta;
   const [company, setCompany] = useState('yurtici');

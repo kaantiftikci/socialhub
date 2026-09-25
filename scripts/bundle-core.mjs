@@ -4,6 +4,12 @@
  *   apps/desktop/src-tauri/core-bundle/{dist, package.json, node_modules}
  * Tauri bu klasörü uygulama kaynaklarına (Resources/core) kopyalar; uygulama açılınca
  * `node Resources/core/dist/index.js` çalıştırılır.
+ *
+ * Çapraz platform (macOS/Windows/Linux): yalnızca Node fs kullanılır (cp/du/ditto yok). Yerel modüller
+ * (better-sqlite3, better-sqlite3-multiple-ciphers) `npm install` sırasında o makinenin OS/mimarisi için hazır ikili
+ * (prebuild) indirir, yoksa node-gyp ile derlenir — Windows paketi bu yüzden Windows'ta (CI: windows-latest) üretilmeli.
+ * KAVSAK_BUNDLE_NODE=1: bu betiği çalıştıran node ikilisi de core-bundle/bin/node[.exe] olarak eklenir; masaüstü
+ * kabuğu önce onu kullanır (kullanıcıda Node kurulu olmasa da çalışır; yerel modüllerin ABI'si aynı node'la uyumlu).
  */
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -46,5 +52,27 @@ if (depsChanged) {
 }
 // .bin altındaki sembolik bağlar paketlemede sorun çıkarabilir; çalışma zamanında gerekmez
 for (const dir of ['node_modules/.bin']) fs.rmSync(path.join(out, dir), { recursive: true, force: true });
-const size = execSync(`du -sh "${out}" | cut -f1`).toString().trim();
+
+// İsteğe bağlı gömülü node (Windows CI paketi): kabuk Resources/core/bin/node[.exe]'yi önce dener
+const nodeOut = path.join(out, 'bin', process.platform === 'win32' ? 'node.exe' : 'node');
+if (process.env.KAVSAK_BUNDLE_NODE === '1') {
+  fs.mkdirSync(path.dirname(nodeOut), { recursive: true });
+  fs.copyFileSync(process.execPath, nodeOut);
+  if (process.platform !== 'win32') fs.chmodSync(nodeOut, 0o755);
+  console.log(`[bundle-core] node ${process.version} eklendi: ${nodeOut}`);
+} else {
+  fs.rmSync(path.join(out, 'bin'), { recursive: true, force: true });
+}
+
+/** Klasör boyutu (du yerine; Windows'ta da çalışır). Sembolik bağlar izlenmez. */
+function dirSize(dir) {
+  let total = 0;
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) total += dirSize(p);
+    else if (e.isFile()) total += fs.statSync(p).size;
+  }
+  return total;
+}
+const size = `${Math.round(dirSize(out) / 1048576)} MB`;
 console.log(`[bundle-core] hazır: ${out} (${size})`);

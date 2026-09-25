@@ -1,4 +1,4 @@
-import type { Account, Attachment, Chat, ChatFlags, CoreEvent, DraftResult, LinkPreview, Message, Platform } from './types';
+import type { Account, Attachment, CalendarDraft, Chat, ChatFlags, CoreEvent, CoreOs, DraftResult, LinkPreview, Message, Platform } from './types';
 import { PLATFORMS } from './types';
 import { authSaveAccounts } from './auth-api';
 import { demoAsset } from './demo-asset';
@@ -233,8 +233,19 @@ if (STATIC_DEMO) {
   }, 70_000);
 }
 
+const DEMO_STYLE = ['kısa-orta uzunlukta yazar', '"siz" diye hitap eder (resmî)', 'ara sıra emoji kullanır (🙏 😊)', 'açılışta "Merhaba" der', 'kapanışta "Teşekkürler" der'];
+
+/** Demo: çekirdek yok; tek etkinlikli .ics tarayıcıda üretilir ve indirilir */
+function demoIcs(ev: CalendarDraft): string {
+  const [d, t] = ev.start.split('T');
+  const ymd = d.replace(/-/g, '');
+  const start = t ? `DTSTART:${ymd}T${t.replace(':', '')}00` : `DTSTART;VALUE=DATE:${ymd}`;
+  const esc = (x: string) => x.replace(/[\\;,]/g, (c) => '\\' + c).replace(/\n/g, '\\n');
+  return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Mivelo//TR', 'BEGIN:VEVENT', `UID:${Date.now()}@mivelo`, start, `SUMMARY:${esc(ev.title)}`, 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+}
+
 export const staticApi = {
-  health: async () => ({ ok: true, ai: false, stats: { unread: chats.reduce((n, c) => n + c.unread, 0), chats: chats.length } }),
+  health: async () => ({ ok: true, ai: false, stats: { unread: chats.reduce((n, c) => n + c.unread, 0), chats: chats.length }, os: undefined as CoreOs | undefined }),
   accounts: async () => accounts.map((a) => ({ ...a })),
   addAccount: async (platform: Platform, _token?: string): Promise<Account> => {
     const account: Account = {
@@ -388,7 +399,27 @@ export const staticApi = {
     draft: 'Teşekkürler, uygun bir zamanda dönüş yapacağım.',
     summary: ['Bu herkese açık demodur; taslak örnektir ve kaydedilmez.'],
     actions: [],
+    style: DEMO_STYLE,
   }),
+  setFollowUp: async (chatId: string, at: number | null): Promise<Chat> => {
+    const next: Chat = { ...chatOf(chatId), followUp: at ? { at, since: Date.now() } : undefined };
+    chats = chats.map((c) => (c.id === chatId ? next : c));
+    emit({ type: 'chat.upsert', chat: next });
+    // demo: kısa süreli hatırlatma gerçekten düşsün (çekirdekteki dakikalık denetimin karşılığı)
+    if (at && at - Date.now() < 2_000_000_000) {
+      window.setTimeout(() => {
+        const cur = chats.find((c) => c.id === chatId);
+        if (!cur?.followUp || cur.followUp.at !== at) return;
+        const due: Chat = { ...cur, followUp: { ...cur.followUp, due: true } };
+        chats = chats.map((c) => (c.id === chatId ? due : c));
+        emit({ type: 'chat.upsert', chat: due });
+        emit({ type: 'chat.followup', chat: due });
+      }, Math.max(0, at - Date.now()));
+    }
+    return next;
+  },
+  calendar: async (ev: CalendarDraft) => ({ ics: demoIcs(ev), opened: false }),
+  style: async () => ({ lines: DEMO_STYLE }),
   openChat: async (accountId: string, participant: { id: string; name: string; handle?: string; avatarUrl?: string }) => {
     const acc = accounts.find((a) => a.id === accountId);
     if (!acc) throw new Error('Hesap bulunamadı');

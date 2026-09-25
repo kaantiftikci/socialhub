@@ -5,7 +5,7 @@ import { Avatar, Chip, Icon, Logo, Resizer, SyncBar, Tag, ago, fmtTime, loadPane
 import { Conversation, startScheduledSends } from './Conversation';
 import { ConnectModal } from './Connect';
 import { Focus } from './Focus';
-import { isTauri, notify as desktopNotify, onDesktopEvent, playPing, SOUNDS, getPlatformSound, getPlatformTone, setPlatformSound, setPlatformTone, setBadge, windowFocused, coreInfo } from './desktop';
+import { MOD_KEY, isTauri, notify as desktopNotify, onDesktopEvent, playPing, SOUNDS, getPlatformSound, getPlatformTone, setPlatformSound, setPlatformTone, setBadge, windowFocused, coreInfo } from './desktop';
 import { PROFILE_NAME, STATIC_DEMO } from './profile';
 import { leaveDemoPanel } from './demo-session';
 
@@ -15,7 +15,7 @@ const FLAG_VIEWS: Array<{ view: View; flag: 'archived' | 'muted' | 'hidden'; lab
   { view: 'muted', flag: 'muted', label: 'Sessiz', icon: 'mute', empty: 'Sessize alınmış sohbet yok.' },
   { view: 'hidden', flag: 'hidden', label: 'Gizli', icon: 'eyeoff', empty: 'Gizlenmiş sohbet yok.' },
 ];
-export type Filter = 'all' | 'unread' | 'waiting';
+export type Filter = 'all' | 'unread' | 'waiting' | 'followup';
 
 
 export default function App() {
@@ -316,6 +316,17 @@ export default function App() {
         case 'messages.read':
           if (ev.chatId === selectedRef.current) setMessages((prev) => prev.map((m) => (m.fromMe && m.ts <= ev.before && m.status !== 'read' ? { ...m, status: 'read' } : m)));
           break;
+        case 'chat.followup': {
+          // takip hatırlatıcısı: süre doldu, yanıt gelmedi
+          queueChat(ev.chat);
+          const body = 'Yanıt gelmedi. Takip etmek ister misin?';
+          void windowFocused().then((focused) => {
+            if (focused) pushInToast(ev.chat, `⏰ ${body}`);
+            else desktopNotify(`Takip: ${ev.chat.name}`, body);
+            playPing(getPlatformSound(ev.chat.platform) || undefined);
+          });
+          break;
+        }
         case 'message.delete':
           if (ev.chatId === selectedRef.current) setMessages((prev) => prev.filter((m) => m.id !== ev.messageId));
           break;
@@ -451,19 +462,21 @@ export default function App() {
     });
     if (tagFilter) list = list.filter((c) => c.tags.includes(tagFilter));
     // iMessage'da Okunmamış/Bekleyen sekmeleri yok (Mesajlar uygulamasındaki klasörler var)
-    const effFilter = platformFilter === 'imessage' ? 'all' : filter;
+    const effFilter = platformFilter === 'imessage' && filter !== 'followup' ? 'all' : filter;
     if (effFilter === 'unread') list = list.filter((c) => c.unread > 0);
     if (effFilter === 'waiting') list = list.filter(isWaiting);
+    if (filter === 'followup') list = list.filter((c) => !!c.followUp).sort((a, b) => Number(!!b.followUp?.due) - Number(!!a.followUp?.due) || (a.followUp?.at ?? 0) - (b.followUp?.at ?? 0));
     if (query.trim()) {
       const q = query.toLowerCase();
       list = list.filter((c) => c.name.toLowerCase().includes(q) || c.lastPreview.toLowerCase().includes(q));
     }
-    list.sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || (smartSort ? score(b) - score(a) : 0) || b.lastMessageAt - a.lastMessageAt);
+    // Takip sekmesi kendi sırasında kalır: süresi dolanlar önce, sonra en yakın hatırlatma
+    if (filter !== 'followup') list.sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || (smartSort ? score(b) - score(a) : 0) || b.lastMessageAt - a.lastMessageAt);
     return list;
   }, [activeChats, inboxChats, filter, platformFilter, tagFilter, query, smartSort, imFolder, tgArchive, mailFolder]);
 
   /** Boş liste metni: hangi sekme/filtre boşsa ona göre anlamlı bir açıklama */
-  const emptyText = imFolder || tgArchive || mailFolder ? 'Bu klasörde sohbet yok.' : query.trim() ? 'Aramayla eşleşen sohbet yok.' : filter === 'unread' && platformFilter !== 'imessage' ? 'Okunmamış sohbet yok.' : tagFilter ? 'Bu etikette sohbet yok.' : platformFilter ? 'Bu kanalda henüz sohbet yok.' : 'Bu filtreye uyan sohbet yok.';
+  const emptyText = filter === 'followup' ? 'Takipte sohbet yok. Sohbetin sağ panelinden "Yanıt gelmezse hatırlat" ile ekle.' : imFolder || tgArchive || mailFolder ? 'Bu klasörde sohbet yok.' : query.trim() ? 'Aramayla eşleşen sohbet yok.' : filter === 'unread' && platformFilter !== 'imessage' ? 'Okunmamış sohbet yok.' : tagFilter ? 'Bu etikette sohbet yok.' : platformFilter ? 'Bu kanalda henüz sohbet yok.' : 'Bu filtreye uyan sohbet yok.';
 
   const totals = useMemo(() => {
     let unread = 0;
@@ -487,11 +500,26 @@ export default function App() {
     return m;
   }, [inboxChats]);
 
+  /** Takip hatırlatıcısı kurulu sohbetler (sekme sayacı; süresi dolanlar ayrıca) */
+  const follow = useMemo(() => {
+    let n = 0, due = 0;
+    for (const c of allChats) {
+      if (!c.followUp) continue;
+      if (platformFilter && c.platform !== platformFilter) continue;
+      n++;
+      if (c.followUp.due) due++;
+    }
+    return { n, due };
+  }, [allChats, platformFilter]);
+
   const allTags = useMemo(() => {
     const m = new Map<string, number>();
     for (const c of allChats) for (const t of c.tags) m.set(t, (m.get(t) ?? 0) + 1);
     return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
   }, [allChats]);
+
+  /** Görünümler (⌘1 Tümü, ⌘2… etiketler): kenar çubuğundaki etiket sırasıyla aynı */
+  const viewTags = useMemo(() => [...new Set([...DEFAULT_TAGS, ...allTags.map(([t]) => t)])].slice(0, 8), [allTags]);
 
   // ---- masaüstü ----
   useEffect(() => {
@@ -524,6 +552,17 @@ export default function App() {
         });
         return;
       }
+      // ⌘1 Tümü, ⌘2… etiket görünümleri (Windows'ta Ctrl); yazarken de çalışır
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && /^[1-9]$/.test(e.key)) {
+        const n = Number(e.key);
+        if (n === 1 || viewTags[n - 2]) {
+          e.preventDefault();
+          setView('inbox');
+          setFilter('all');
+          setTagFilter(n === 1 ? null : viewTags[n - 2]);
+        }
+        return;
+      }
       if (typing) return;
       if (e.key === 'Escape') {
         if (connectOpen) setConnectOpen(false);
@@ -545,7 +584,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [chatList, selected, view, connectOpen]);
+  }, [chatList, selected, view, connectOpen, viewTags]);
 
   const orderedAccounts = useMemo(() => {
     const idx = new Map(chanOrder.map((id, i) => [id, i]));
@@ -777,7 +816,7 @@ export default function App() {
             </div>
             <div className="tagrow">
               {[...new Set([...DEFAULT_TAGS, ...allTags.map(([t]) => t)])].map((t) => (
-                <button key={t} className={`tagbtn b ${tagFilter === t ? 'active' : ''}`} onClick={() => (setView('inbox'), setTagFilter(tagFilter === t ? null : t))}>
+                <button key={t} className={`tagbtn b ${tagFilter === t ? 'active' : ''}`} title={viewTags.indexOf(t) >= 0 ? `${MOD_KEY}${viewTags.indexOf(t) + 2}` : undefined} onClick={() => (setView('inbox'), setTagFilter(tagFilter === t ? null : t))}>
                   <span className="dot" style={{ background: tagDot(t) }} />
                   {t}
                   {allTags.find(([x]) => x === t)?.[1] ? <span className="c">{allTags.find(([x]) => x === t)![1]}</span> : null}
@@ -896,6 +935,19 @@ export default function App() {
                     )}
                   </label>
                 )}
+                {view === 'inbox' && !isMobile && (
+                  <div className="views" role="tablist" aria-label="Görünümler">
+                    {[null, ...viewTags.slice(0, 3)].map((t, i) => (
+                      <button key={t ?? 'all'} role="tab" aria-selected={tagFilter === t} className={`vchip b ${tagFilter === t ? 'active' : ''}`} title={`${MOD_KEY}${i + 1}`} onClick={() => (setTagFilter(t), setFilter('all'))}>
+                        {t ? t[0].toLocaleUpperCase('tr') + t.slice(1) : 'Tümü'}
+                        <kbd>
+                          {MOD_KEY}
+                          {i + 1}
+                        </kbd>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {view === 'inbox' && platformFilter === 'telegram' && (
                   <div className="tabs" role="tablist" aria-label="Telegram klasörleri">
                     <button role="tab" aria-selected={!tgArchive} className={!tgArchive ? 'active' : ''} onClick={() => setTgArchive(false)}>
@@ -915,6 +967,11 @@ export default function App() {
                         {f === 'unread' && scoped.unread > 0 && <span className="c">{fmtCount(scoped.unread)}</span>}
                       </button>
                     ))}
+                    {(follow.n > 0 || filter === 'followup') && !imFolder && !mailFolder && (
+                      <button role="tab" aria-selected={filter === 'followup'} className={`fol ${filter === 'followup' ? 'active' : ''} ${follow.due ? 'due' : ''}`} title="Yanıt gelmezse hatırlatılacak sohbetler" onClick={() => (setFilter('followup'), setImFolder(null), setMailFolder(null), setTgArchive(false))}>
+                        Takip {follow.n > 0 && <span className="c">{follow.due ? `${follow.due}/${follow.n}` : follow.n}</span>}
+                      </button>
+                    )}
                     {platformFilter && PLATFORMS[platformFilter].category === 'mail' &&
                       ([['sent', 'Gönderilenler'], ['junk', 'Gereksiz']] as Array<['sent' | 'junk', string]>).map(([fo, label]) => (
                         <button key={fo} role="tab" aria-selected={mailFolder === fo} className={mailFolder === fo ? 'active' : ''} onClick={() => (setMailFolder(fo), setFilter('all'))}>
@@ -1020,7 +1077,10 @@ export default function App() {
                   <span className="kbd">K</span> gezin
                 </span>
                 <span>
-                  <span className="kbd">⌘K</span> ara
+                  <span className="kbd">{MOD_KEY}1</span> görünüm
+                </span>
+                <span>
+                  <span className="kbd">{MOD_KEY}K</span> ara
                 </span>
               </div>
             </section>

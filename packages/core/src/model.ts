@@ -50,6 +50,17 @@ export interface Chat {
   archived?: boolean;
   muted?: boolean;
   hidden?: boolean;
+  /** Takip hatırlatıcısı: `at` zamanına kadar karşı taraftan (`since` sonrasında) yanıt gelmezse hatırlat */
+  followUp?: FollowUp;
+}
+
+export interface FollowUp {
+  /** Hatırlatma zamanı (ms) */
+  at: number;
+  /** Kurulduğu an (ms): bundan sonra gelen yanıt hatırlatmayı kendiliğinden kapatır */
+  since: number;
+  /** Süre doldu, yanıt yok: kullanıcıya gösteriliyor */
+  due?: boolean;
 }
 
 /** Yerel sohbet bayrakları (sabitle/arşivle/sessize al/gizle) */
@@ -121,6 +132,8 @@ export type CoreEvent =
   | { type: 'account.sync'; accountId: string; progress: number; label?: string }
   /** Gönderdiğim mesajlar `before` zamanına kadar karşı tarafça görüldü */
   | { type: 'messages.read'; chatId: string; before: number }
+  /** Takip hatırlatıcısının süresi doldu (yanıt gelmedi) */
+  | { type: 'chat.followup'; chat: Chat }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; text: string };
 
 export function chatId(accountId: string, remoteId: string): string {

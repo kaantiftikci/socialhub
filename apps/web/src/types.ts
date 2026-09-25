@@ -34,6 +34,8 @@ export interface Chat {
   archived?: boolean;
   muted?: boolean;
   hidden?: boolean;
+  /** Takip hatırlatıcısı: `at` zamanına kadar yanıt gelmezse hatırlat; `due` = süre doldu, yanıt yok */
+  followUp?: { at: number; since: number; due?: boolean };
 }
 
 export type ChatFlags = Pick<Chat, 'pinned' | 'archived' | 'muted' | 'hidden'>;
@@ -101,12 +103,29 @@ export type CoreEvent =
   | { type: 'chat.typing'; chatId: string; typing: boolean; name?: string }
   | { type: 'account.sync'; accountId: string; progress: number; label?: string }
   | { type: 'messages.read'; chatId: string; before: number }
+  | { type: 'chat.followup'; chat: Chat }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; text: string };
+
+/** Çekirdeğin çalıştığı işletim sistemi (Node process.platform); /api/health `os` alanı */
+export type CoreOs = 'darwin' | 'win32' | 'linux' | (string & {});
+/** Yalnız macOS'ta çalışan kanallar (Windows/Linux çekirdeğinde pasif gösterilir) */
+export const MAC_ONLY = new Set<Platform>(['imessage']);
 
 export interface DraftResult {
   draft: string;
   summary: string[];
   actions: string[];
+  /** Mesajlardan çıkan tarihli olaylar (start: "YYYY-MM-DDTHH:mm" ya da "YYYY-MM-DD") → Takvime ekle */
+  events?: CalendarDraft[];
+  /** "Tarzın": kullanıcının kendi mesajlarından çıkarılan üslup maddeleri */
+  style?: string[];
+}
+
+export interface CalendarDraft {
+  title: string;
+  start: string;
+  durationMin?: number;
+  notes?: string;
 }
 
 export const PLATFORMS: Record<Platform, { name: string; code: string; color: string; method: string; available: boolean; mode: 'native' | 'browser' | 'token' | 'mail' | 'demo'; experimental?: boolean; category?: Category }> = {
@@ -140,7 +159,7 @@ export const TAG_COLORS: Record<string, [string, string]> = {
   kişisel: ['#FFE8F1', '#A3195B'],
 };
 
-export const DEFAULT_TAGS = ['müşteri', 'fırsat', 'ekip', 'kişisel'];
+export const DEFAULT_TAGS = ['müşteri', 'ekip', 'fırsat', 'kişisel'];
 
 /** Emoji tepkisi verilebilen platformlar */
 export const REACT_PLATFORMS = new Set<Platform>(['whatsapp', 'telegram', 'slack', 'demo']);

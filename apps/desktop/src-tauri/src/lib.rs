@@ -3,10 +3,12 @@
 //! Sorumluluklar:
 //! - Node çekirdeğini (packages/core) başlatmak ve uygulama kapanırken durdurmak
 //!   (geliştirmede `npm run dev` çekirdeği zaten çalıştırır; o zaman atlanır)
-//! - Menü çubuğu simgesi (okunmamış sayısı başlıkta), göster/gizle, çıkış
+//! - Menü çubuğu / sistem tepsisi simgesi (okunmamış sayısı başlıkta; Windows'ta ipucunda), göster/gizle, çıkış
 //! - Kapat düğmesi pencereyi gizler, uygulama arka planda yaşar
-//! - Küresel kısayol ⌘⇧K: pencereyi getir/gizle
-//! - `set_badge` komutu: arayüz okunmamış sayısını bildirir (Dock rozeti + tray başlığı)
+//! - Küresel kısayol ⌘⇧K (Windows/Linux: Ctrl+Shift+K): pencereyi getir/gizle
+//! - `set_badge` komutu: arayüz okunmamış sayısını bildirir (macOS Dock rozeti + tray başlığı)
+//!
+//! Platformlar: macOS (asıl hedef) ve Windows. Mac'e özgü kodlar `#[cfg(target_os = "macos")]` ile korunur.
 
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
@@ -17,6 +19,27 @@ use tauri::{AppHandle, Emitter, Manager, RunEvent, WindowEvent};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 const CORE_PORT: &str = "7788";
+
+/// Küresel kısayolun değiştiricisi: macOS'ta ⌘, Windows/Linux'ta Ctrl (SUPER orada Windows tuşu olurdu)
+#[cfg(target_os = "macos")]
+const SHORTCUT_MOD: Modifiers = Modifiers::SUPER;
+#[cfg(not(target_os = "macos"))]
+const SHORTCUT_MOD: Modifiers = Modifiers::CONTROL;
+
+/// Node ikili dosyasının adı
+#[cfg(windows)]
+const NODE_BIN: &str = "node.exe";
+#[cfg(not(windows))]
+const NODE_BIN: &str = "node";
+
+/// Ev dizini: Unix'te HOME, Windows'ta USERPROFILE (Node'un os.homedir() ile aynı; ~/.kavsak ikisinde de aynı yer)
+fn home_dir() -> std::path::PathBuf {
+    #[cfg(windows)]
+    let home = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME"));
+    #[cfg(not(windows))]
+    let home = std::env::var("HOME");
+    std::path::PathBuf::from(home.unwrap_or_else(|_| ".".into()))
+}
 
 struct CoreProcess(Mutex<Option<Child>>);
 
@@ -30,13 +53,46 @@ fn core_is_up() -> bool {
 }
 
 /// Finder'dan açılan uygulamanın PATH'i kısıtlıdır (nvm/homebrew node görünmez); yaygın yerleri ve
-/// kullanıcının kabuğunu deneyerek node'u bul. KAVSAK_NODE ile elle verilebilir.
-fn find_node() -> String {
+/// kullanıcının kabuğunu deneyerek node'u bul. KAVSAK_NODE ile elle verilebilir; pakette gömülü node
+/// (Resources/core/bin/node[.exe], CI'da KAVSAK_BUNDLE_NODE=1 ile) varsa önce o kullanılır.
+fn find_node(bundled: Option<std::path::PathBuf>) -> String {
     if let Ok(n) = std::env::var("KAVSAK_NODE") {
         return n;
     }
-    let home = std::env::var("HOME").unwrap_or_default();
-    // Finder/Dock'tan açılınca PATH launchd'nin kısıtlı yolu: terminalden çalışan `node` görünmez. Bilinen kurulum yerleri:
+    if let Some(b) = bundled.filter(|p| p.exists()) {
+        return b.to_string_lossy().to_string();
+    }
+    for c in &node_candidates() {
+        if std::path::Path::new(c).exists() {
+            return c.clone();
+        }
+    }
+    // son çare: giriş kabuğuna sor
+    // -i: .zshrc de okunsun (PATH çoğunlukla orada); -l yalnız .zprofile okur
+    #[cfg(unix)]
+    if let Ok(out) = Command::new("/bin/zsh").args(["-ilc", "command -v node"]).output() {
+        let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !p.is_empty() {
+            return p;
+        }
+    }
+    // Windows: Gezgin'den açılan uygulama kullanıcının PATH'ini zaten alır; `where` ilk eşleşmeyi verir
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        if let Ok(out) = Command::new("where").arg("node").creation_flags(CREATE_NO_WINDOW).output() {
+            if let Some(p) = String::from_utf8_lossy(&out.stdout).lines().map(str::trim).find(|l| !l.is_empty()) {
+                return p.to_string();
+            }
+        }
+    }
+    NODE_BIN.into()
+}
+
+/// macOS/Linux: Finder/Dock'tan açılınca PATH launchd'nin kısıtlı yolu: terminalden çalışan `node` görünmez. Bilinen kurulum yerleri:
+#[cfg(not(windows))]
+fn node_candidates() -> Vec<String> {
+    let home = home_dir().to_string_lossy().to_string();
     let mut candidates: Vec<String> = vec![
         format!("{home}/.local/node/bin/node"),
         format!("{home}/.local/bin/node"),
@@ -53,20 +109,53 @@ fn find_node() -> String {
         vers.reverse();
         candidates.extend(vers);
     }
-    for c in &candidates {
-        if std::path::Path::new(c).exists() {
-            return c.clone();
-        }
+    candidates
+}
+
+/// Windows: resmi kurulum, nvm-windows, Volta, fnm, Scoop
+#[cfg(windows)]
+fn node_candidates() -> Vec<String> {
+    let env = |k: &str| std::env::var(k).unwrap_or_default();
+    let (pf, pf86, local, roaming) = (env("ProgramFiles"), env("ProgramFiles(x86)"), env("LOCALAPPDATA"), env("APPDATA"));
+    let home = home_dir().to_string_lossy().to_string();
+    let mut candidates: Vec<String> = Vec::new();
+    if !env("NVM_SYMLINK").is_empty() {
+        candidates.push(format!("{}\\node.exe", env("NVM_SYMLINK")));
     }
-    // son çare: giriş kabuğuna sor
-    // -i: .zshrc de okunsun (PATH çoğunlukla orada); -l yalnız .zprofile okur
-    if let Ok(out) = Command::new("/bin/zsh").args(["-ilc", "command -v node"]).output() {
-        let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !p.is_empty() {
-            return p;
-        }
+    candidates.extend([
+        format!("{pf}\\nodejs\\node.exe"),
+        format!("{pf86}\\nodejs\\node.exe"),
+        format!("{local}\\Programs\\nodejs\\node.exe"),
+        format!("{local}\\Volta\\bin\\node.exe"),
+        format!("{roaming}\\fnm\\aliases\\default\\node.exe"),
+        format!("{home}\\scoop\\apps\\nodejs-lts\\current\\node.exe"),
+        format!("{home}\\scoop\\apps\\nodejs\\current\\node.exe"),
+    ]);
+    // nvm-windows: en yeni sürüm (%APPDATA%\nvm\v22.x.y\node.exe)
+    let nvm_home = if env("NVM_HOME").is_empty() { format!("{roaming}\\nvm") } else { env("NVM_HOME") };
+    if let Ok(rd) = std::fs::read_dir(&nvm_home) {
+        let mut vers: Vec<String> = rd.flatten().map(|e| e.path().join("node.exe").to_string_lossy().to_string()).collect();
+        vers.sort();
+        vers.reverse();
+        candidates.extend(vers);
     }
-    "node".into()
+    candidates.into_iter().filter(|c| !c.starts_with('\\')).collect()
+}
+
+/// Windows: konsol uygulaması (node.exe, where) başlatılınca siyah pencere açılmasın
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// Çekirdeğin PATH'i: ffmpeg/pkill gibi araçlar Finder'dan açılışta da bulunsun (Windows: winget kısayolları)
+fn core_path() -> std::ffi::OsString {
+    let mut dirs: Vec<std::path::PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+    #[cfg(not(windows))]
+    dirs.extend(["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"].map(std::path::PathBuf::from));
+    #[cfg(windows)]
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        dirs.push(std::path::PathBuf::from(local).join("Microsoft").join("WinGet").join("Links"));
+    }
+    std::env::join_paths(dirs).unwrap_or_default()
 }
 
 fn spawn_core(app: &AppHandle) -> Option<Child> {
@@ -87,7 +176,8 @@ fn spawn_core(app: &AppHandle) -> Option<Child> {
         log(app, &format!("çekirdek dosyası bulunamadı (resources: {rd}); paket eksik ya da geliştirme modunda KAVSAK_CORE verilmedi"));
         return None;
     };
-    let node = find_node();
+    let bundled = entry.parent().and_then(|d| d.parent()).map(|core| core.join("bin").join(NODE_BIN));
+    let node = find_node(bundled);
     log(app, &format!("node: {node} · çekirdek: {}", entry.display()));
     let core_dir = entry.parent().and_then(|d| d.parent()).map(|p| p.to_path_buf());
     // çekirdek çıktısı ~/.kavsak/core.log'a (Finder'dan açılınca terminal yok)
@@ -99,9 +189,14 @@ fn spawn_core(app: &AppHandle) -> Option<Child> {
     let mut cmd = Command::new(&node);
     cmd.arg(&entry)
         .env("KAVSAK_PORT", CORE_PORT)
-        .env("PATH", format!("{}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin", std::env::var("PATH").unwrap_or_default()))
+        .env("PATH", core_path())
         .stdout(out)
         .stderr(err);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
     if let Some(dir) = core_dir {
         cmd.current_dir(dir);
     }
@@ -118,8 +213,7 @@ fn spawn_core(app: &AppHandle) -> Option<Child> {
 }
 
 fn kavsak_dir() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    let d = std::path::PathBuf::from(home).join(".kavsak");
+    let d = home_dir().join(".kavsak");
     let _ = std::fs::create_dir_all(&d);
     d
 }
@@ -185,8 +279,13 @@ fn show_main(app: &AppHandle) {
 #[tauri::command]
 fn set_badge(app: AppHandle, count: u32) {
     if let Some(tray) = app.tray_by_id("main") {
+        // tepsi başlığı macOS/Linux'ta görünür; Windows'ta desteklenmez, sayı ipucunda gösterilir
+        #[cfg(not(windows))]
         let _ = tray.set_title(if count > 0 { Some(count.to_string()) } else { None::<String> });
+        #[cfg(windows)]
+        let _ = tray.set_tooltip(Some(if count > 0 { format!("Mivelo · {count} okunmamış") } else { "Mivelo".to_string() }));
     }
+    // Windows görev çubuğu rozeti (overlay simgesi) şimdilik yok: sayı tepsi ipucunda
     #[cfg(target_os = "macos")]
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.set_badge_count(if count > 0 { Some(count as i64) } else { None });
@@ -199,7 +298,8 @@ fn focus_window(app: AppHandle) {
     show_main(&app);
 }
 
-/// Çekirdeğin yerel API belirteci (~/.kavsak/token); WKWebView "null" kaynaklı olduğundan her istekte gönderilir.
+/// Çekirdeğin yerel API belirteci (~/.kavsak/token); WKWebView "null" kaynaklı olduğundan her istekte gönderilir
+/// (Windows WebView2 kaynağı http://tauri.localhost: yerel sayılır, yine de gönderilir).
 #[tauri::command]
 fn core_token() -> String {
     std::fs::read_to_string(kavsak_dir().join("token")).map(|s| s.trim().to_string()).unwrap_or_default()
@@ -220,7 +320,7 @@ pub fn run() {
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
-                    let target = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyK);
+                    let target = Shortcut::new(Some(SHORTCUT_MOD | Modifiers::SHIFT), Code::KeyK);
                     if shortcut == &target && event.state() == ShortcutState::Pressed {
                         toggle_main(app);
                     }
@@ -265,10 +365,10 @@ pub fn run() {
                 }
             });
 
-            // Küresel kısayol
+            // Küresel kısayol (⌘⇧K / Ctrl+Shift+K)
             let _ = app
                 .global_shortcut()
-                .register(Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyK));
+                .register(Shortcut::new(Some(SHORTCUT_MOD | Modifiers::SHIFT), Code::KeyK));
 
             // Menü çubuğu
             let show = MenuItem::with_id(app, "show", "Mivelo’yu Göster", true, Some("CmdOrCtrl+Shift+K"))?;
@@ -276,7 +376,12 @@ pub fn run() {
             let quit = MenuItem::with_id(app, "quit", "Çıkış", true, Some("CmdOrCtrl+Q"))?;
             let menu = Menu::with_items(app, &[&show, &focus, &PredefinedMenuItem::separator(app)?, &quit])?;
 
+            // macOS: siyah şablon simge (menü çubuğu temaya göre boyar); Windows/Linux: şablon desteklenmez, siyah simge
+            // koyu görev çubuğunda kaybolur → renkli uygulama simgesi
+            #[cfg(target_os = "macos")]
             let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?;
+            #[cfg(not(target_os = "macos"))]
+            let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
             TrayIconBuilder::with_id("main")
                 .icon(tray_icon)
                 .icon_as_template(true)

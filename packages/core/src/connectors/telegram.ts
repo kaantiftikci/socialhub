@@ -12,6 +12,7 @@ import { getPeerId } from 'telegram/Utils.js';
 import { BaseConnector, type OutFile } from './base.js';
 import type { Reaction } from '../model.js';
 import { bus } from '../bus.js';
+import { FFMPEG_HINT } from '../platform.js';
 import { sessionDir, TELEGRAM_API_ID, TELEGRAM_API_HASH } from '../config.js';
 import type { Attachment, ChatKind } from '../model.js';
 
@@ -635,7 +636,7 @@ let ffmpegOk: boolean | undefined;
 async function transcodeToMp3(input: Buffer): Promise<Buffer | undefined> {
   if (ffmpegOk === undefined) {
     ffmpegOk = await execFileP('ffmpeg', ['-version']).then(() => true).catch(() => false);
-    if (!ffmpegOk) bus.log('info', 'ffmpeg yok: Telegram sesli mesajları ogg olarak sunulur (brew install ffmpeg ile mp3 dönüşümü açılır)');
+    if (!ffmpegOk) bus.log('info', `ffmpeg yok: Telegram sesli mesajları ogg olarak sunulur (${FFMPEG_HINT} ile mp3 dönüşümü açılır)`);
   }
   if (!ffmpegOk) return undefined;
   const tmp = path.join(os.tmpdir(), `kavsak-tg-${Date.now()}-${Math.random().toString(36).slice(2)}`);

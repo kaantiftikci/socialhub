@@ -4,6 +4,17 @@
  */
 export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
+/** Arayüzün çalıştığı cihaz macOS/iOS mu (kısayol ipuçları: ⌘ / Ctrl). Çekirdeğin OS'u için /api/health `os` alanına bak. */
+export const isMac: boolean = (() => {
+  if (typeof navigator === 'undefined') return false;
+  const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
+  return /mac|iphone|ipad|ipod/i.test(nav.userAgentData?.platform || nav.platform || nav.userAgent || '');
+})();
+/** Kısayol ipuçlarında değiştirici tuş: Mac'te ⌘, Windows/Linux'ta Ctrl */
+export const MOD_KEY = isMac ? '⌘' : 'Ctrl';
+// Mac dışı masaüstünde başlık çubuğu yerel (styles.css .os-other): trafik ışıkları boşluğu kalkar
+if (isTauri && !isMac && typeof document !== 'undefined') document.documentElement.classList.add('os-other');
+
 /**
  * Uzak çekirdek: statik/demo site gerçek çekirdeğe (Mac'teki core, HTTPS tünelle) bağlanabilir.
  * Kurulum adres parçasıyla: https://site/#core=https://xxx.trycloudflare.com&token=… ; kaldırmak için #core=off

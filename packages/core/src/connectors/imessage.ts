@@ -7,6 +7,7 @@ import Database from 'better-sqlite3';
 import { BaseConnector } from './base.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
+import { openExternal } from '../platform.js';
 import { chatId as chatIdOf, type Attachment } from '../model.js';
 import { normalizePhone as normalizeContactPhone } from '../contacts-mac.js';
 
@@ -142,7 +143,7 @@ export class IMessageConnector extends BaseConnector {
       }
     } catch (e) {
       // Sistem Ayarları → Gizlilik ve Güvenlik → Tam Disk Erişimi bölmesini doğrudan aç
-      execFile('open', ['x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles'], () => undefined);
+      openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles');
       bus.log('error', `iMessage: chat.db açılamadı (${(e as Error).message}); Mivelo’da görünen iMessage verisi son başarılı okumadan kalma, yeni mesajlar gelmez`);
       this.setStatus(
         'error',

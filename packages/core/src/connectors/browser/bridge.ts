@@ -1,13 +1,13 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
-import { execFile } from 'node:child_process';
 import type { APIRequestContext, BrowserContext, Page } from 'playwright';
 import { BaseConnector, type ComposeDraft, type SendOptions, type StartOptions } from '../base.js';
 import { chatId } from '../../model.js';
 import { persistSessionCookies } from './outlook.js';
 import { bus } from '../../bus.js';
 import { sessionDir } from '../../config.js';
+import { killProcessesMatching } from '../../platform.js';
 import { mediaHostAllowed, MEDIA_MAX } from '../../media-hosts.js';
 import type { Account, Attachment, Chat, ChatKind, Participant, Reaction } from '../../model.js';
 import type { Store } from '../../store.js';
@@ -351,9 +351,10 @@ export class BrowserConnector extends BaseConnector {
       // Önceki çekirdekten kalan Chromium profil kilidini tutuyorsa: o süreci kapat, kilidi sil, bir kez daha dene
       if (!retried && /ProcessSingleton|SingletonLock|profile directory is already in use/i.test(msg)) {
         bus.log('warn', `${this.account.platform}: profil kilidi bulundu (eski tarayıcı açık kalmış); temizlenip yeniden deneniyor`);
-        await new Promise<void>((r) => execFile('pkill', ['-f', `--user-data-dir=${profile}`], () => r()));
+        await killProcessesMatching(`--user-data-dir=${profile}`);
         await sleep(1500);
-        for (const f of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) fs.rmSync(path.join(profile, f), { force: true });
+        // SingletonLock/Socket/Cookie: macOS/Linux; lockfile: Windows
+        for (const f of ['SingletonLock', 'SingletonSocket', 'SingletonCookie', 'lockfile']) fs.rmSync(path.join(profile, f), { force: true });
         return this.launch(headless, true);
       }
       this.setStatus('error', `Chromium açılamadı: ${msg.split('\n')[0]}. Çözüm: npx playwright install chromium`);

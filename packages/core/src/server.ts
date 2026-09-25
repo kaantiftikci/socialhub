@@ -13,6 +13,9 @@ import type { Connector } from './connectors/base.js';
 import { resolveOAuth } from './connectors/mail.js';
 import { bus } from './bus.js';
 import { aiEnabled, draftReply } from './ai.js';
+import { analyzeStyle, describeStyle } from './style.js';
+import { buildIcs, parseStart } from './calendar.js';
+import { openExternal } from './platform.js';
 import { ALL_PLATFORMS } from './model.js';
 import { MEDIA_HOSTS, PLATFORM_MEDIA_HOSTS, MEDIA_MAX } from './media-hosts.js';
 import { fetchPreview } from './link-preview.js';
@@ -145,7 +148,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   // ---------- routes ----------
   route('GET', '/api/health', () => {
     const m = process.memoryUsage();
-    return { ok: true, ai: aiEnabled(), stats: store.stats(), pid: process.pid, uptimeSec: Math.round(process.uptime()), memoryMb: { rss: Math.round(m.rss / 1048576), heapUsed: Math.round(m.heapUsed / 1048576), heapTotal: Math.round(m.heapTotal / 1048576), external: Math.round(m.external / 1048576) } };
+    return { ok: true, ai: aiEnabled(), stats: store.stats(), os: process.platform, pid: process.pid, uptimeSec: Math.round(process.uptime()), memoryMb: { rss: Math.round(m.rss / 1048576), heapUsed: Math.round(m.heapUsed / 1048576), heapTotal: Math.round(m.heapTotal / 1048576), external: Math.round(m.external / 1048576) } };
   });
 
   route('GET', '/api/accounts', () => registry.list().map((a) => ({ ...a, qrDataUrl: pendingQr.get(a.id) })));
@@ -335,9 +338,45 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     const chat = store.getChat(id);
     if (!chat) throw new HttpError(404, 'Sohbet yok');
     const tone = (body as { tone?: 'default' | 'short' | 'formal' | 'en' }).tone;
-    const result = await draftReply({ chat, messages: store.listMessages(id, 30), mySamples: store.myRecentMessages(id), tone });
+    const style = analyzeStyle([...store.myTexts(chat.platform, 250), ...store.myTexts(undefined, 250)]);
+    const pairs = store.styleSamples(id, chat.platform, 12);
+    const result = await draftReply({ chat, messages: store.listMessages(id, 30), pairs, style, tone });
     if (!result) throw new HttpError(503, 'AI taslak kapalı: ANTHROPIC_API_KEY tanımlı değil');
     return result;
+  });
+  // "Senin tarzın": kendi mesajlarından yerelde çıkarılan üslup profili (AI anahtarı gerekmez)
+  route('GET', '/api/style', (req) => {
+    const platform = new URL(req.url ?? '/', 'http://x').searchParams.get('platform') || undefined;
+    const profile = analyzeStyle([...(platform ? store.myTexts(platform, 250) : []), ...store.myTexts(undefined, platform ? 250 : 500)]);
+    return { profile, lines: describeStyle(profile) };
+  });
+  // Takip hatırlatıcısı: { at: ms } kur, { at: null } kaldır. Karşı taraf yazınca kendiliğinden kapanır.
+  route('POST', '/api/chats/:id/followup', (_r, _s, p, body) => {
+    const id = dec(p.id);
+    const at = (body as { at?: number | null }).at;
+    if (at !== null && (typeof at !== 'number' || !Number.isFinite(at) || at < Date.now() - 60_000 || at > Date.now() + 366 * 86_400_000)) throw new HttpError(400, 'Geçersiz hatırlatma zamanı');
+    const chat = store.setFollowUp(id, at);
+    if (!chat) throw new HttpError(404, 'Sohbet yok');
+    bus.emit({ type: 'chat.upsert', chat });
+    return chat;
+  });
+  // Takvime ekle: .ics üretir; bu bilgisayardan istenmişse takvim uygulamasında açar, uzaktaysa dosyayı döndürür (tarayıcı indirir)
+  route('POST', '/api/calendar', (req, _s, _p, body) => {
+    const b = (body ?? {}) as { title?: string; start?: string; durationMin?: number; notes?: string; location?: string };
+    if (!b.title?.trim() || !b.start || !parseStart(b.start)) throw new HttpError(400, 'Başlık ve geçerli tarih gerekli');
+    const ics = buildIcs({ title: b.title, start: b.start, durationMin: Number(b.durationMin) || undefined, notes: b.notes, location: b.location });
+    if (isRemote(req)) return { ics, opened: false };
+    const dir = path.join(DATA_DIR, 'calendar');
+    fs.mkdirSync(dir, { recursive: true });
+    // eski dosyalar birikmesin (takvim uygulaması içeri aldıktan sonra gereksiz)
+    for (const f of fs.readdirSync(dir)) {
+      const fp = path.join(dir, f);
+      if (Date.now() - fs.statSync(fp).mtimeMs > 86_400_000) fs.rmSync(fp, { force: true });
+    }
+    const file = path.join(dir, `mivelo-${Date.now()}.ics`);
+    fs.writeFileSync(file, ics, { mode: 0o600 });
+    openExternal(file);
+    return { ics, opened: true };
   });
   route('GET', '/api/logs', () => bus.recent.slice(-200));
   // Telefondan erişim (aynı Wi‑Fi): bağlantı + QR; açma/kapama
@@ -501,9 +540,25 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     }
   }, 30_000);
   pingTimer.unref();
+  // Takip hatırlatıcıları: dakikada bir; yanıt gelenler kapanır, süresi dolanlar bir kez bildirilir
+  const followTimer = setInterval(() => {
+    try {
+      const { resolved, due } = store.checkFollowUps();
+      for (const chat of resolved) bus.emit({ type: 'chat.upsert', chat });
+      for (const chat of due) {
+        bus.emit({ type: 'chat.upsert', chat });
+        bus.emit({ type: 'chat.followup', chat });
+        bus.log('info', `Takip hatırlatması: ${chat.name} yanıt vermedi`);
+      }
+    } catch (e) {
+      bus.log('warn', `Takip hatırlatıcısı: ${(e as Error).message}`);
+    }
+  }, 60_000);
+  followTimer.unref();
   server.on('close', () => {
     unsub();
     clearInterval(pingTimer);
+    clearInterval(followTimer);
   });
 
   // Yerel dinleyici yalnız 127.0.0.1; LAN modu açıkken ayrı bir dinleyici 0.0.0.0'da (kapatınca port ağdan kaybolur)

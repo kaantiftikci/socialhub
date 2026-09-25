@@ -1,4 +1,4 @@
-import type { Account, Chat, ChatFlags, CoreEvent, DraftResult, LinkPreview, Message, Platform } from './types';
+import type { Account, CalendarDraft, Chat, ChatFlags, CoreEvent, CoreOs, DraftResult, LinkPreview, Message, Platform } from './types';
 import { API_BASE, REMOTE_CORE, coreToken } from './desktop';
 import { STATIC_DEMO } from './profile';
 import { connectStaticEvents, staticApi } from './static-demo';
@@ -32,7 +32,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 const enc = encodeURIComponent;
 
 const liveApi = {
-  health: () => call<{ ok: boolean; ai: boolean; stats: { unread: number; chats: number } }>('GET', '/health'),
+  health: () => call<{ ok: boolean; ai: boolean; stats: { unread: number; chats: number }; os?: CoreOs }>('GET', '/health'),
   accounts: () => call<Account[]>('GET', '/accounts'),
   addAccount: (platform: Platform, token?: string) => call<Account>('POST', '/accounts', { platform, token }),
   removeAccount: (id: string) => call('DELETE', `/accounts/${enc(id)}`),
@@ -56,6 +56,9 @@ const liveApi = {
   lan: () => call<{ enabled: boolean; urls: string[]; qr?: string }>('GET', '/lan'),
   setLan: (enabled: boolean) => call<{ enabled: boolean; urls: string[]; qr?: string }>('POST', '/lan', { enabled }),
   logs: () => call<Array<{ ts: number; level: 'info' | 'warn' | 'error'; text: string }>>('GET', '/logs'),
+  setFollowUp: (chatId: string, at: number | null) => call<Chat>('POST', `/chats/${enc(chatId)}/followup`, { at }),
+  calendar: (ev: CalendarDraft) => call<{ ics: string; opened: boolean }>('POST', '/calendar', ev),
+  style: (platform?: string) => call<{ lines: string[] }>('GET', `/style${platform ? `?platform=${enc(platform)}` : ''}`),
   search: (q: string) => call<Array<{ message: Message; chat: Chat }>>('GET', `/search?q=${enc(q)}`),
 };
 

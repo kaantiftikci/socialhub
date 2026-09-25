@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from './api';
 import { STATIC_DEMO } from './profile';
-import { PLATFORMS, type Account, type Platform } from './types';
+import { MAC_ONLY, PLATFORMS, type Account, type CoreOs, type Platform } from './types';
 import { Chip, Icon, SyncBar } from './ui';
 
 const ORDER: Platform[] = ['whatsapp', 'telegram', 'slack', 'imessage', 'linkedin', 'x', 'instagram', 'messenger'];
@@ -58,6 +58,12 @@ export function ConnectModal({
   const [busy, setBusy] = useState(false);
 
   const activeAccount = accounts.find((a) => a.id === active);
+  /** Çekirdeğin OS'u: iMessage gibi yalnız Mac kanalları Windows/Linux çekirdeğinde pasif */
+  const [coreOs, setCoreOs] = useState<CoreOs | undefined>();
+  useEffect(() => {
+    api.health().then((h) => setCoreOs(h.os)).catch(() => undefined);
+  }, []);
+  const macOnlyOff = (p: Platform) => MAC_ONLY.has(p) && !!coreOs && coreOs !== 'darwin';
 
   async function add(platform: Platform) {
     setBusy(true);
@@ -416,7 +422,7 @@ export function ConnectModal({
                   </ol>
                 </>
               )}
-              {activeAccount.platform === 'imessage' && activeAccount.status === 'error' && (
+              {activeAccount.platform === 'imessage' && activeAccount.status === 'error' && !macOnlyOff('imessage') && (
                 <ol>
                   <li>Sistem Ayarları → Gizlilik ve Güvenlik → <b>Tam Disk Erişimi</b> bölmesi otomatik açıldı (açılmadıysa ⌘K ile arat)</li>
                   <li>Listede <b>Mivelo</b> yoksa “+” ile ekle — geliştirme modunda (<code>npm run desktop</code>) <b>Terminal</b>’i ekle; anahtarı aç</li>
@@ -487,7 +493,9 @@ export function ConnectModal({
             const acc = accounts.filter((a) => a.platform === p);
             const isConn = connected.includes(p);
             const isActive = acc.some((a) => a.id === active) || active === `${p}:new`;
-            void 0;
+            const macOnly = macOnlyOff(p);
+            // yalnız Mac kanalı: yeni bağlantı kapalı; eskiden kalan hesap varsa kaldırılabilsin
+            const available = meta.available && (!macOnly || acc.length > 0);
             return (
               <div key={p} style={{ display: 'contents' }}>
                 {p === 'whatsapp' && (
@@ -505,7 +513,7 @@ export function ConnectModal({
                     <Icon name="bag" size={16} sw={2} /> Alışveriş
                   </div>
                 )}
-              <div className={`pcard ${!meta.available ? 'soon' : ''} ${isActive ? 'active' : ''}`}>
+              <div className={`pcard ${!available ? 'soon' : ''} ${isActive ? 'active' : ''}`}>
                 <div className="top">
                   <Chip platform={p} size={44} />
                   <div style={{ minWidth: 0 }}>
@@ -513,11 +521,11 @@ export function ConnectModal({
                       {meta.name}
                       {meta.experimental && <span className="pill" style={{ background: '#FFF3D6', color: '#8A5300' }}>deneysel</span>}
                     </div>
-                    <div className="mt">{meta.method}</div>
+                    <div className="mt">{macOnly ? 'Yalnız macOS · Mesajlar uygulaması' : meta.method}</div>
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  {meta.available && (acc.length ? (
+                  {available && (acc.length ? (
                     <span className="st" style={{ color: isConn ? '#15803d' : undefined, display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flexGrow: 1 }}>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                         <span className={`dot ${acc[0].status === 'connected' ? 'on' : acc[0].status}`} />
@@ -531,7 +539,7 @@ export function ConnectModal({
                     </span>
                   ))}
                   <span style={{ flexGrow: 1 }} />
-                  {meta.available && acc.length > 0 && (
+                  {available && acc.length > 0 && (
                     <>
                       <button className="btn sm b b2" onClick={() => setActive(acc[0].id)}>
                         Ayrıntı
@@ -541,14 +549,14 @@ export function ConnectModal({
                       </button>
                     </>
                   )}
-                  {meta.available && acc.length === 0 && (
+                  {available && acc.length === 0 && (
                     <button className="btn sm primary b" onClick={() => add(p)} disabled={busy}>
                       Bağlan
                     </button>
                   )}
-                  {!meta.available && (
-                    <button className="btn sm b b2" disabled>
-                      Yakında
+                  {!available && (
+                    <button className="btn sm b b2" disabled title={macOnly ? 'iMessage yalnızca macOS’teki Mesajlar uygulamasıyla çalışır' : undefined}>
+                      {macOnly ? 'Yalnız Mac' : 'Yakında'}
                     </button>
                   )}
                 </div>

@@ -1,68 +1,120 @@
+import Anthropic from '@anthropic-ai/sdk';
 import { ANTHROPIC_API_KEY, ANTHROPIC_MODEL } from './config.js';
 import type { Chat, Message } from './model.js';
+import { describeStyle, type StyleProfile } from './style.js';
 
 /**
- * "Senin tarzında taslak": sohbetin son mesajları + kullanıcının aynı sohbette
- * daha önce yazdığı mesajlar (üslup örnekleri) modele verilir. Anahtar yoksa null döner;
- * arayüz taslak alanını gizler. İleride bu katman yerel bir modele (llama.cpp / MLX) bağlanabilir.
+ * "Senin tarzında taslak": sohbetin son mesajları + kullanıcının üslup profili (style.ts; tüm sohbetlerdeki kendi
+ * mesajlarından yerelde çıkarılır) + gerçek "gelen mesaj → benim yanıtım" örnek çiftleri modele verilir.
+ * Anahtar yoksa null döner; arayüz taslak alanını gizler. İleride bu katman yerel bir modele (llama.cpp / MLX) bağlanabilir.
  */
 export interface DraftInput {
   chat: Chat;
   messages: Message[];
-  mySamples: string[];
+  /** Karşı tarafın mesajı → benim yanıtım (önce bu sohbetten, sonra diğerlerinden) */
+  pairs: Array<{ them: string; me: string }>;
+  style: StyleProfile;
   tone?: 'default' | 'short' | 'formal' | 'en';
+}
+
+/** Mesajlardan çıkan takvim etkinliği ("Takvime ekle"); start yerel saat "YYYY-MM-DDTHH:mm" ya da tüm gün "YYYY-MM-DD" */
+export interface DraftEvent {
+  title: string;
+  start: string;
 }
 
 export interface DraftResult {
   draft: string;
   summary: string[];
   actions: string[];
+  events: DraftEvent[];
+  /** Arayüzde "Tarzın: …" satırı */
+  style: string[];
 }
 
 export const aiEnabled = (): boolean => Boolean(ANTHROPIC_API_KEY);
 
+let client: Anthropic | undefined;
+
+const SCHEMA = {
+  type: 'object',
+  properties: {
+    draft: { type: 'string' },
+    summary: { type: 'array', items: { type: 'string' } },
+    actions: { type: 'array', items: { type: 'string' } },
+    events: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { title: { type: 'string' }, start: { type: 'string' } },
+        required: ['title', 'start'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['draft', 'summary', 'actions', 'events'],
+  additionalProperties: false,
+} as const;
+
+// Sabit sistem istemi (önbelleğe uygun); sohbete özgü her şey kullanıcı mesajında
+const SYSTEM = `Sen bir mesajlaşma asistanısın. Kullanıcı adına, sohbetteki son mesaja gönderilecek bir yanıt taslağı yazıyorsun.
+Kullanıcıya "senin tarzında" taslak sunmak ana hedef: verilen üslup profilini ve gerçek yanıt örneklerini birebir taklit et —
+uzunluk, hitap (sen/siz), emoji alışkanlığı, büyük/küçük harf, noktalama, açılış ve kapanış kalıpları. Örneklerde emoji yoksa
+emoji kullanma; varsa aynı sıklıkta ve aynı emojilerle kullan. Uydurma bilgi, tarih, fiyat ya da söz ekleme; bilmediğin şeyi
+kullanıcının dolduracağı şekilde kısa bırak. Karşı tarafın sorduğu her soruya değin.
+summary: sohbetin 2-3 maddelik özeti. actions: mesajlardan çıkan somut yapılacaklar, yoksa boş liste.
+events: mesajlarda kesinleşmiş ya da önerilen buluşma/teslim/toplantı gibi tarihli olaylar; bugünün tarihine göre
+göreli ifadeleri ("yarın 14:00", "cuma") çöz ve start'ı yerel saatle "YYYY-MM-DDTHH:mm" (saat yoksa "YYYY-MM-DD") yaz; yoksa boş liste.`;
+
 export async function draftReply(input: DraftInput): Promise<DraftResult | null> {
   if (!aiEnabled()) return null;
+  client ??= new Anthropic({ apiKey: ANTHROPIC_API_KEY });
   const toneLine = {
-    default: 'Doğal, samimi ama profesyonel.',
-    short: 'Çok kısa, en fazla iki cümle.',
-    formal: 'Resmî ve ölçülü.',
-    en: 'Yanıtı İngilizce yaz.',
+    default: 'Ek ton isteği yok: tamamen kullanıcının kendi tarzı.',
+    short: 'Ek ton isteği: çok kısa, en fazla iki cümle (kullanıcının tarzını koruyarak).',
+    formal: 'Ek ton isteği: resmî ve ölçülü ("siz" hitabı).',
+    en: 'Ek ton isteği: yanıtı İngilizce yaz (kullanıcının tarzını koruyarak).',
   }[input.tone ?? 'default'];
 
+  const style = describeStyle(input.style);
   const transcript = input.messages
     .slice(-20)
     .map((m) => `${m.fromMe ? 'BEN' : m.senderName}: ${m.text}`)
     .join('\n');
-  const samples = input.mySamples.length ? `Kullanıcının bu kişiye daha önce yazdığı mesajlar (üslubu bunlardan öğren):\n${input.mySamples.map((s) => `- ${s}`).join('\n')}` : '';
+  const pairs = input.pairs.length
+    ? `Kullanıcının gerçek yanıt örnekleri (gelen → kullanıcının yanıtı):\n${input.pairs.map((p) => `- "${p.them.slice(0, 200)}" → "${p.me.slice(0, 300)}"`).join('\n')}`
+    : 'Kullanıcının yanıt örneği yok.';
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${now.toLocaleDateString('tr-TR', { weekday: 'long' })}`;
+  const user = `Platform: ${input.chat.platform}. Sohbet: "${input.chat.name}". Bugün: ${today}.
+Üslup profili: ${style.length ? style.join('; ') : 'yeterli veri yok, doğal ve kısa yaz'}.
+${pairs}
+${toneLine}
 
-  const system = `Sen bir mesajlaşma asistanısın. Kullanıcı adına, ${input.chat.platform} üzerinden "${input.chat.name}" ile yapılan sohbete cevap taslağı yazıyorsun.
-Kurallar: kullanıcının üslubunu taklit et, uydurma bilgi ekleme, karşı tarafın sorduğu her soruya değin, emoji kullanma. ${toneLine}
-Yalnızca şu JSON'u döndür: {"draft": "...", "summary": ["...", "..."], "actions": ["..."]}
-summary: sohbetin 2-3 maddelik özeti. actions: mesajlardan çıkan somut yapılacaklar (tarih/saat varsa ekle), yoksa boş liste.`;
+Sohbet:
+${transcript}
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
-      max_tokens: 600,
-      system,
-      messages: [{ role: 'user', content: `${samples}\n\nSohbet:\n${transcript}\n\nSon mesaja cevap taslağı üret.` }],
-    }),
+Son mesaja yanıt taslağı üret.`;
+
+  const res = await client.messages.create({
+    model: ANTHROPIC_MODEL,
+    max_tokens: 4000,
+    system: SYSTEM,
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: SCHEMA } },
+    messages: [{ role: 'user', content: user }],
   });
-  if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${await res.text()}`);
-  const data = (await res.json()) as { content: Array<{ type: string; text?: string }> };
-  const text = data.content.find((c) => c.type === 'text')?.text ?? '';
-  const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
+  if (res.stop_reason === 'refusal') throw new Error('AI bu sohbet için taslak üretmeyi reddetti');
+  const text = res.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('');
   try {
-    const parsed = JSON.parse(json) as Partial<DraftResult>;
-    return { draft: parsed.draft ?? '', summary: parsed.summary ?? [], actions: parsed.actions ?? [] };
+    const parsed = JSON.parse(text) as Partial<DraftResult>;
+    return {
+      draft: parsed.draft ?? '',
+      summary: parsed.summary ?? [],
+      actions: parsed.actions ?? [],
+      events: (parsed.events ?? []).filter((e) => e.title && /^\d{4}-\d{2}-\d{2}/.test(e.start)),
+      style,
+    };
   } catch {
-    return { draft: text.trim(), summary: [], actions: [] };
+    return { draft: text.trim(), summary: [], actions: [], events: [], style };
   }
 }

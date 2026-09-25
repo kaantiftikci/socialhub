@@ -29,7 +29,8 @@ export function sessionDir(accountId: string): string {
   // savunma derinliği: '..' gibi bir kimlik ~/.kavsak'ın kendisine çözülüp registry.remove ile silinebilirdi
   const name = accountId.replace(/[^a-zA-Z0-9_.:-]/g, '_');
   if (!name || name === '.' || name === '..' || !/^[a-z0-9]+:[A-Za-z0-9_.-]{1,64}$/i.test(name)) throw new Error(`Geçersiz hesap kimliği: ${accountId}`);
-  const dir = path.join(SESSIONS_DIR, name);
+  // Windows: ':' dosya/klasör adında geçersiz (NTFS alternatif veri akışı) → '_'; macOS/Linux'ta mevcut klasör adları korunur
+  const dir = path.join(SESSIONS_DIR, process.platform === 'win32' ? name.replace(/:/g, '_') : name);
   if (path.dirname(dir) !== SESSIONS_DIR) throw new Error('Geçersiz oturum dizini');
   fs.mkdirSync(dir, { recursive: true });
   return dir;

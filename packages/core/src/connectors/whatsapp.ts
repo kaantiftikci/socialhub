@@ -9,6 +9,7 @@ import * as Baileys from '@whiskeysockets/baileys';
 import type { WASocket, WAMessage, Contact, proto } from '@whiskeysockets/baileys';
 import { BaseConnector, type OutFile, type StartOptions } from './base.js';
 import { bus } from '../bus.js';
+import { FFMPEG_HINT } from '../platform.js';
 import { sessionDir } from '../config.js';
 import { chatId as chatIdOf, messageId as messageIdOf, type Attachment, type Message, type Participant } from '../model.js';
 import { macContacts } from '../contacts-mac.js';
@@ -1461,7 +1462,7 @@ let ffmpegOk: boolean | undefined;
 async function transcodeToMp3(input: Buffer): Promise<Buffer | undefined> {
   if (ffmpegOk === undefined) {
     ffmpegOk = await execFileP('ffmpeg', ['-version']).then(() => true).catch(() => false);
-    if (!ffmpegOk) bus.log('info', 'ffmpeg yok: WhatsApp sesli mesajları ogg olarak sunulur (brew install ffmpeg ile mp3 dönüşümü açılır)');
+    if (!ffmpegOk) bus.log('info', `ffmpeg yok: WhatsApp sesli mesajları ogg olarak sunulur (${FFMPEG_HINT} ile mp3 dönüşümü açılır)`);
   }
   if (!ffmpegOk) return undefined;
   const tmp = path.join(os.tmpdir(), `kavsak-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -1479,7 +1480,7 @@ async function transcodeToMp3(input: Buffer): Promise<Buffer | undefined> {
 async function transcodeToOpus(input: string): Promise<string | undefined> {
   if (ffmpegOk === undefined) ffmpegOk = await execFileP('ffmpeg', ['-version']).then(() => true).catch(() => false);
   if (!ffmpegOk) {
-    bus.log('warn', 'ffmpeg yok: sesli mesaj olduğu gibi gönderiliyor (telefonda oynatılamayabilir; brew install ffmpeg)');
+    bus.log('warn', `ffmpeg yok: sesli mesaj olduğu gibi gönderiliyor (telefonda oynatılamayabilir; ${FFMPEG_HINT})`);
     return undefined;
   }
   const out = input + '.opus.ogg';
