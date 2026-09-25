@@ -777,3 +777,21 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .row .top .name { flex-grow: 0; max-width: 100%; }
 .row .top .name + .tag.mini, .row .top .tag.mini + .tag.mini { margin-left: 4px; }
 .row .top .time { margin-left: auto; }
+
+/* ---------- mobil ---------- */
+.m-brand { display: inline-flex; align-items: center; margin-right: 2px; }
+.conv-open { cursor: pointer; }
+.app.mobile { position: fixed; inset: 0; height: 100dvh; } /* gövde kaymasın; adres çubuğuyla boy değişimi */
+.app.mobile .list-head, .app.mobile .conv-head { position: sticky; top: 0; z-index: 6; background: var(--surface); }
+.app.mobile .ctx-toggle { display: none; } /* mobilde panel avatar/isme dokununca açılır */
+/* mobilde ayrıntı paneli: sağdan kayan tam boy kart */
+.app.mobile { --w-ctx: min(100vw, 440px); }
+.app.mobile .ctx { display: flex; position: fixed; top: 0; right: 0; bottom: 0; width: min(100vw, 440px); z-index: 40; box-shadow: -18px 0 48px -20px rgba(17,16,22,.45); animation: panelIn .26s cubic-bezier(.2,.8,.2,1) both; padding-top: max(10px, env(safe-area-inset-top)); }
+.app.mobile .ctx > * { animation: none; min-width: 0; }
+.app.mobile .ctx.closing { animation: panelOut .2s ease-in both; }
+/* iOS: 16 px altındaki form alanlarına odaklanınca sayfa yakınlaşır; mobilde hepsi 16 px */
+@media (max-width: 820px) {
+  input, textarea, select, .composer textarea, .search input, .auth-card input { font-size: 16px !important; }
+}
+.app.mobile .ctx .ctx-close { padding: 0 10px; gap: 6px; }
+.app.mobile .ctx .ctx-close::after { content: 'Kapat'; font-size: 13px; font-weight: 600; }

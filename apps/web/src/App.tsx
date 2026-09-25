@@ -76,6 +76,9 @@ export default function App() {
     setPSounds((p) => ({ ...p, [platform]: id }));
     if (on) playPing(tone, true);
   };
+  /** Mobil: sağ panel tam ekran kaydırmalı kart olarak, yalnızca isteyince (avatar/isme dokununca) */
+  const [mobileDetails, setMobileDetails] = useState(false);
+  useEffect(() => setMobileDetails(false), [selected]);
   const [showDetails, setShowDetailsState] = useState<boolean>(() => {
     try {
       return localStorage.getItem('kavsak.details') !== 'off';
@@ -841,9 +844,14 @@ export default function App() {
               <div className="list-head">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   {isMobile && (
-                    <button className="btn icon b b2" aria-label="Menü" title="Menü" onClick={() => setNavOpen(true)}>
-                      <Icon name="grip" size={16} sw={2} />
-                    </button>
+                    <>
+                      <button className="btn icon b b2" aria-label="Menü" title="Menü" onClick={() => setNavOpen(true)}>
+                        <Icon name="grip" size={16} sw={2} />
+                      </button>
+                      <span className="m-brand" aria-hidden="true">
+                        <Logo size={24} />
+                      </span>
+                    </>
                   )}
                   {platformFilter && view !== 'snoozed' && <Chip platform={platformFilter} size={26} />}
                   <h1>{view === 'snoozed' ? 'Ertelenenler' : platformFilter ? PLATFORMS[platformFilter].name : tagFilter ? capitalize(tagFilter) : 'Gelen kutusu'}</h1>
@@ -978,8 +986,8 @@ export default function App() {
                 snoozedUntil={snoozes[current.id]}
                 onUnsnooze={() => unsnooze(current.id)}
                 onTags={(tags) => api.setTags(current.id, tags).then((c) => setChats((p) => new Map(p).set(c.id, c))).catch((e) => notify(e.message, true))}
-                showDetails={isMobile ? false : showDetails}
-                onToggleDetails={() => setShowDetails(!showDetails)}
+                showDetails={isMobile ? mobileDetails : showDetails}
+                onToggleDetails={() => (isMobile ? setMobileDetails((v) => !v) : setShowDetails(!showDetails))}
                 onBack={isMobile ? () => setSelected(null) : undefined}
                 typing={typing[current.id] ? typing[current.id].name ?? '' : null}
                 olderBusy={olderBusy}

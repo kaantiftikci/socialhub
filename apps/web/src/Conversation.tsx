@@ -379,10 +379,10 @@ export function Conversation({
               <Icon name="chev" size={15} sw={2} />
             </button>
           )}
-          <span className="avwrap">
+          <span className="avwrap conv-open" role="button" tabIndex={0} title="Ayrıntılar" onClick={onToggleDetails} onKeyDown={(e) => e.key === 'Enter' && onToggleDetails?.()}>
             <Avatar name={chat.name} size={40} url={chat.avatarUrl} />
           </span>
-          <div className="conv-id">
+          <div className="conv-id conv-open" role="button" tabIndex={0} title="Ayrıntılar" onClick={onToggleDetails} onKeyDown={(e) => e.key === 'Enter' && onToggleDetails?.()}>
             <div className="conv-id-top">
               <h2 title={chat.name}>{chat.name}</h2>
               {chat.tags.slice(0, 1).map((t) => (
@@ -416,7 +416,7 @@ export function Conversation({
             </button>
           )}
           {onToggleDetails && !showDetails && (
-            <button className="btn icon b b2" onClick={onToggleDetails} title="Ayrıntı panelini göster" aria-label="Ayrıntı paneli">
+            <button className="btn icon b b2 ctx-toggle" onClick={onToggleDetails} title="Ayrıntı panelini göster" aria-label="Ayrıntı paneli">
               <Icon name="panel" size={15} />
             </button>
           )}
