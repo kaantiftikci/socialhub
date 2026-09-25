@@ -935,19 +935,6 @@ export default function App() {
                     )}
                   </label>
                 )}
-                {view === 'inbox' && !isMobile && (
-                  <div className="views" role="tablist" aria-label="Görünümler">
-                    {[null, ...viewTags.slice(0, 3)].map((t, i) => (
-                      <button key={t ?? 'all'} role="tab" aria-selected={tagFilter === t} className={`vchip b ${tagFilter === t ? 'active' : ''}`} title={`${MOD_KEY}${i + 1}`} onClick={() => (setTagFilter(t), setFilter('all'))}>
-                        {t ? t[0].toLocaleUpperCase('tr') + t.slice(1) : 'Tümü'}
-                        <kbd>
-                          {MOD_KEY}
-                          {i + 1}
-                        </kbd>
-                      </button>
-                    ))}
-                  </div>
-                )}
                 {view === 'inbox' && platformFilter === 'telegram' && (
                   <div className="tabs" role="tablist" aria-label="Telegram klasörleri">
                     <button role="tab" aria-selected={!tgArchive} className={!tgArchive ? 'active' : ''} onClick={() => setTgArchive(false)}>

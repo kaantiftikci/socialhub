@@ -181,15 +181,6 @@ button:focus-visible, a:focus-visible, .sw:focus-visible { outline: 2px solid va
 .tabs .c.amber { color: var(--amber-txt); }
 .tabs button.fol { flex: 0 0 auto; padding: 0 10px; }
 .tabs button.due .c { color: var(--amber-txt); font-weight: 600; }
-/* Görünümler: ⌘1 Tümü, ⌘2… etiketler */
-.views { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
-.views::-webkit-scrollbar { display: none; }
-.vchip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; border-radius: 99px; border: 1px solid var(--line); background: var(--surface); font-size: 12px; font-weight: 500; color: var(--text2); white-space: nowrap; flex-shrink: 0; }
-.vchip kbd { display: none; font: inherit; font-size: 10.5px; color: var(--text3); background: var(--bg2); border-radius: 5px; padding: 0 4px; }
-/* kısayol ipucu yalnız seçili ve üzerine gelinen çipte (dar listede dört görünüm sığsın) */
-.vchip.active kbd, .vchip:hover kbd { display: inline; }
-.vchip.active { background: var(--ink); border-color: var(--ink); color: #fff; }
-.vchip.active kbd { background: rgba(255,255,255,.14); color: rgba(255,255,255,.75); }
 .brief { display: flex; align-items: center; gap: 11px; padding: 11px 11px 11px 12px; border-radius: 16px; background: var(--surface); border: 1px solid var(--line3); box-shadow: 0 10px 24px -14px rgba(17,16,22,.14); width: 100%; text-align: left; }
 .brief .ico { width: 34px; height: 34px; border-radius: 10px; background: var(--v); color: #fff; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .brief > span { min-width: 0; }
