@@ -828,9 +828,14 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .grp.me .bub:has(.att-card):has(.bub-text) .bt { color: rgba(255,255,255,.75); }
 .msg-link { color: inherit; text-decoration: underline; text-underline-offset: 2px; word-break: break-all; }
 /* Üstüne gelince yalnız 😊 düğmesi (balonun yanında); tıklayınca hızlı tepki çubuğu açılır */
-.rtrig { position: absolute; top: 50%; right: -30px; transform: translateY(-50%); width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line); background: #fff; color: var(--text3); display: inline-flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity .12s ease; cursor: pointer; z-index: 2; }
-.bwrap.me .rtrig { right: auto; left: -30px; }
-.bwrap:hover .rtrig, .rtrig.on { opacity: 1; pointer-events: auto; }
+.rtrig { position: absolute; top: 50%; right: -32px; transform: translateY(-50%); width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line); background: #fff; color: var(--text3); display: inline-flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity .12s ease .18s; cursor: pointer; z-index: 2; }
+.bwrap.me .rtrig { right: auto; left: -32px; }
+/* Balon ile ikon arasındaki boşluk görünmez köprüyle sarmalayıcıya dahil: imleç geçerken hover düşmez */
+.bwrap::after { content: ""; position: absolute; top: -4px; bottom: -4px; right: -40px; width: 40px; }
+.bwrap.me::after { right: auto; left: -40px; }
+/* İkonun tıklama alanı büyütülür (görünen daireden 6 px taşar) */
+.rtrig::before { content: ""; position: absolute; inset: -6px -6px -6px -10px; border-radius: 999px; }
+.bwrap:hover .rtrig, .rtrig:hover, .rtrig.on { opacity: 1; pointer-events: auto; transition-delay: 0s; }
 .rtrig:hover, .rtrig.on { color: var(--v-txt); border-color: #c9b9ff; background: var(--v-soft); }
 /* Çubuk balonun üstünde, tetikleyici tarafında (yana taşıp kırpılmasın) */
 .rbar { position: absolute; bottom: calc(100% + 4px); right: -30px; display: inline-flex; gap: 1px; padding: 3px; border-radius: 999px; background: #fff; border: 1px solid var(--line); box-shadow: var(--shadow-3); z-index: 4; animation: bubIn .14s ease-out both; }
