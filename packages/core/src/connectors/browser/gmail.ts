@@ -334,16 +334,19 @@ export const gmail: Strategy = {
     const out = (await readInboxRows(page)).map((r) => ({ ...gmailRowToThread(r, meEmail), meta: { folder: 'inbox' } }));
     // Gönderilenler ve Spam: her 8. yoklamada (ilk yoklama dahil) #sent / #spam listeleri de okunur, sonra gelen kutusuna dönülür
     if (folderTick++ % 8 === 0) {
-      for (const [hash, folder] of [['#sent', 'sent'], ['#spam', 'junk']] as const) {
+      for (const [hash, folder, titleRe] of [['#sent', 'sent', /Gönderil|Sent/i], ['#spam', 'junk', /Spam|Gereksiz|İstenmeyen/i]] as const) {
         try {
           await page.evaluate((h) => {
             location.hash = h;
           }, hash);
-          await page.waitForTimeout(1200);
-          const ok = await page.waitForSelector('tr.zA', { state: 'visible', timeout: 8000 }).then(() => true).catch(() => false);
-          if (ok) for (const r of await readInboxRows(page)) out.push({ ...gmailRowToThread(r, meEmail), unread: 0, meta: { folder } });
-        } catch {
-          /* klasör okunamadı; gelen kutusu etkilenmez */
+          // gelen kutusu satırları hâlâ DOM'dayken okumamak için sekme başlığının klasöre dönmesi beklenir
+          const ok = await page.waitForFunction((re) => new RegExp(re).test(document.title) && !!document.querySelector('tr.zA'), titleRe.source, { timeout: 10_000 }).then(() => true).catch(() => false);
+          await page.waitForTimeout(800);
+          const rows = ok ? await readInboxRows(page) : [];
+          bus.log('info', `Gmail: ${folder} klasörü → ${rows.length} satır${ok ? '' : ' (liste yüklenmedi)'}`);
+          for (const r of rows) out.push({ ...gmailRowToThread(r, meEmail), unread: 0, meta: { folder } });
+        } catch (e) {
+          bus.log('warn', `Gmail: ${folder} klasörü okunamadı: ${(e as Error).message.split('\n')[0].slice(0, 120)}`);
         }
       }
       await page.evaluate(() => {

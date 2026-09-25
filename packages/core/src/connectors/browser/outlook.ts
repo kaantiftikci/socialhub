@@ -379,12 +379,12 @@ export const outlook: Strategy = {
         try {
           await page.goto(BASE + path, { waitUntil: 'domcontentloaded', timeout: 30_000 });
           const ok = await page.waitForSelector(LIST, { state: 'attached', timeout: 10_000 }).then(() => true).catch(() => false);
-          if (ok) {
-            await page.waitForTimeout(800);
-            for (const r of await readListRows(page)) out.push({ ...rawToThread(r), unread: 0, meta: { folder } });
-          }
-        } catch {
-          /* klasör okunamadı */
+          await page.waitForTimeout(800);
+          const rows = ok ? await readListRows(page) : [];
+          bus.log('info', `Outlook: ${folder} klasörü → ${rows.length} satır${ok ? '' : ' (liste yüklenmedi)'}`);
+          for (const r of rows) out.push({ ...rawToThread(r), unread: 0, meta: { folder } });
+        } catch (e) {
+          bus.log('warn', `Outlook: ${folder} klasörü okunamadı: ${(e as Error).message.split('\n')[0].slice(0, 120)}`);
         }
       }
       await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
