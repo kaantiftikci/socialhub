@@ -152,7 +152,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     return { ok: true };
   });
   route('POST', '/api/accounts/:id/input', (_r, _s, p, body) => {
-    const c = registry.get(decodeURIComponent(p.id));
+    const c = registry.get(dec(p.id));
     const b = body as { kind: 'phone' | 'code' | 'password'; value: string };
     if (!['phone', 'code', 'password'].includes(b.kind)) throw new HttpError(400, 'Geçersiz giriş türü');
     if (!c?.provideInput) throw new HttpError(400, 'Bu hesap giriş beklemiyor');
@@ -165,10 +165,10 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     const url = new URL(req.url ?? '/', 'http://x');
     const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit')) || 100));
     const before = Number(url.searchParams.get('before'));
-    return store.listMessages(decodeURIComponent(p.id), limit, Number.isFinite(before) && before > 0 ? before : undefined);
+    return store.listMessages(dec(p.id), limit, Number.isFinite(before) && before > 0 ? before : undefined);
   });
   route('POST', '/api/chats/:id/read', (_r, _s, p) => {
-    const id = decodeURIComponent(p.id);
+    const id = dec(p.id);
     const before = store.getChat(id);
     store.markRead(id);
     // sohbet açık: yazıyor/çevrimiçi aboneliği (WhatsApp presence vb.)
@@ -182,7 +182,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     return { ok: true };
   });
   route('POST', '/api/chats/:id/tags', (_r, _s, p, body) => {
-    const id = decodeURIComponent(p.id);
+    const id = dec(p.id);
     const tags = (body as { tags?: unknown }).tags ?? [];
     if (!Array.isArray(tags)) throw new HttpError(400, 'tags bir dizi olmalı');
     store.setTags(id, tags.map((t) => String(t).trim()).filter(Boolean).slice(0, 20));
@@ -192,7 +192,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   });
   // Dosya gönderme: JSON {name, mime, data(base64), caption} → ~/.kavsak/outbox/<zaman>-<ad> → connector.sendMedia
   route('POST', '/api/chats/:id/send-file', async (_r, _s, p, body) => {
-    const id = decodeURIComponent(p.id);
+    const id = dec(p.id);
     const chat = store.getChat(id);
     if (!chat) throw new HttpError(404, 'Sohbet yok');
     const b = body as { name?: string; mime?: string; data?: string; caption?: string };
@@ -215,13 +215,13 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   });
   // Sohbet listesinin sonraki sayfası (daha eski e-postalar/sohbetler)
   route('POST', '/api/accounts/:id/more', async (_r, _s, p) => {
-    const c = registry.get(decodeURIComponent(p.id));
+    const c = registry.get(dec(p.id));
     if (!c) throw new HttpError(409, 'Hesap bağlı değil');
     if (!c.loadMoreChats) return { added: 0, supported: false };
     return { added: await c.loadMoreChats(), supported: true };
   });
   route('POST', '/api/chats/:id/send', async (_r, _s, p, body) => {
-    const id = decodeURIComponent(p.id);
+    const id = dec(p.id);
     const chat = store.getChat(id);
     if (!chat) throw new HttpError(404, 'Sohbet yok');
     const text = String((body as { text?: string }).text ?? '').trim();
@@ -238,7 +238,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     return c.openChatWith(b.participant);
   });
   route('POST', '/api/chats/:id/action', async (_r, _s, p, body) => {
-    const chat = store.getChat(decodeURIComponent(p.id));
+    const chat = store.getChat(dec(p.id));
     if (!chat) throw new HttpError(404, 'Sohbet yok');
     const c = registry.get(chat.accountId);
     if (!c?.action) throw new HttpError(400, 'Bu platformda işlem desteklenmiyor');
@@ -246,7 +246,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     return store.getChat(chat.id);
   });
   route('POST', '/api/chats/:id/history', async (_r, _s, p, body) => {
-    const id = decodeURIComponent(p.id);
+    const id = dec(p.id);
     const chat = store.getChat(id);
     if (!chat) throw new HttpError(404, 'Sohbet yok');
     const c = registry.get(chat.accountId);
@@ -256,7 +256,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     return { ok: true };
   });
   route('POST', '/api/chats/:id/draft', async (_r, _s, p, body) => {
-    const id = decodeURIComponent(p.id);
+    const id = dec(p.id);
     const chat = store.getChat(id);
     if (!chat) throw new HttpError(404, 'Sohbet yok');
     const tone = (body as { tone?: 'default' | 'short' | 'formal' | 'en' }).tone;
