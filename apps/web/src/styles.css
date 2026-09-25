@@ -795,3 +795,8 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 }
 .app.mobile .ctx .ctx-close { padding: 0 10px; gap: 6px; }
 .app.mobile .ctx .ctx-close::after { content: 'Kapat'; font-size: 13px; font-weight: 600; }
+
+/* liste başlığı: masaüstünde tek satır; mobilde 1. satır menü+logo+arama, 2. satır platform logosu + ad */
+.list-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.app.mobile .list-top { flex-wrap: wrap; row-gap: 6px; }
+.app.mobile .list-top .list-title { flex-basis: 100%; order: 10; }

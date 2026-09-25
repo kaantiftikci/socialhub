@@ -842,7 +842,7 @@ export default function App() {
                 </div>
               )}
               <div className="list-head">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div className="list-top" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   {isMobile && (
                     <>
                       <button className="btn icon b b2" aria-label="Menü" title="Menü" onClick={() => setNavOpen(true)}>
@@ -853,9 +853,11 @@ export default function App() {
                       </span>
                     </>
                   )}
-                  {platformFilter && view !== 'snoozed' && <Chip platform={platformFilter} size={26} />}
-                  <h1>{view === 'snoozed' ? 'Ertelenenler' : platformFilter ? PLATFORMS[platformFilter].name : tagFilter ? capitalize(tagFilter) : 'Gelen kutusu'}</h1>
-                  {view !== 'snoozed' && scoped.unread > 0 && <span className="pill">{fmtCount(scoped.unread)} yeni</span>}
+                  <div className="list-title">
+                    {platformFilter && view !== 'snoozed' && <Chip platform={platformFilter} size={26} />}
+                    <h1>{view === 'snoozed' ? 'Ertelenenler' : platformFilter ? PLATFORMS[platformFilter].name : tagFilter ? capitalize(tagFilter) : 'Gelen kutusu'}</h1>
+                    {view !== 'snoozed' && scoped.unread > 0 && <span className="pill">{fmtCount(scoped.unread)} yeni</span>}
+                  </div>
                   <span style={{ flexGrow: 1 }} />
                   <button className={`btn icon b b2 ${listSearch || query ? 'soft' : ''}`} aria-label="Sohbetlerde ara" title="Sohbetlerde ara" onClick={() => (setListSearch(!listSearch), listSearch && setQuery(''))}>
                     <Icon name="search" size={15} sw={2} />
