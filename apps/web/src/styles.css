@@ -499,7 +499,9 @@ a.att-card { cursor: pointer; }
 .file { cursor: pointer; }
 .file:hover { border-color: var(--v); }
 .file .ic img { width: 30px; height: 30px; object-fit: cover; border-radius: 8px; display: block; }
-.att-card, .att-card img { cursor: zoom-in; }
+/* Büyüteç yalnız büyütülebilen görsel kartlarında; video kartında normal imleç */
+button.att-card, button.att-card img { cursor: zoom-in; }
+.att-card.att-video, .att-card.att-video video { cursor: default; }
 button.att-card { padding: 0; text-align: left; font: inherit; }
 .att-blank { display: flex; align-items: center; justify-content: center; width: 100%; aspect-ratio: 16 / 10; background: #2a2833; }
 
