@@ -822,7 +822,8 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .bwrap.me { align-items: flex-end; }
 .bub .bt { float: right; margin: 6px -4px -4px 10px; font-size: 10.5px; line-height: 1; color: var(--text3); display: inline-flex; align-items: center; gap: 3px; font-variant-numeric: tabular-nums; user-select: none; }
 .grp.me .bub .bt { color: rgba(255,255,255,.75); }
-.bub:has(.att-card) .bt { position: absolute; right: 12px; bottom: 10px; margin: 0; padding: 2px 6px; border-radius: 999px; background: rgba(17,16,22,.55); color: #fff; }
+/* Yalnız ekli balon: saat rozeti kartın alt satırındaki ikonla çakışmasın, medyanın sağ altında dursun */
+.bub:has(.att-card) .bt { position: absolute; right: 14px; bottom: 44px; margin: 0; padding: 2px 6px; border-radius: 999px; background: rgba(17,16,22,.55); color: #fff; pointer-events: none; }
 .bub:has(.att-card) { position: relative; }
 .bub:has(.att-card) .bub-text .bt, .bub:has(.att) .bub-text .bt, .bub:has(.att-audio) .bub-text .bt { position: static; background: transparent; color: var(--text3); padding: 0; margin: 6px -2px -4px 10px; }
 .grp.me .bub .bub-text .bt { color: rgba(255,255,255,.75); }
