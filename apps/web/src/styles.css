@@ -796,7 +796,9 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .app.mobile .ctx .ctx-close { padding: 0 10px; gap: 6px; }
 .app.mobile .ctx .ctx-close::after { content: 'Kapat'; font-size: 13px; font-weight: 600; }
 
-/* liste başlığı: masaüstünde tek satır; mobilde 1. satır menü+logo+arama, 2. satır platform logosu + ad */
+/* liste başlığı: masaüstünde tek satır; mobilde üstte ayrı bir marka çubuğu (menü + logo + arama), altında platform + ad */
 .list-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.app.mobile .list-top { flex-wrap: wrap; row-gap: 6px; }
-.app.mobile .list-top .list-title { flex-basis: 100%; order: 10; }
+.m-topbar { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--v-soft); border-bottom: 1px solid var(--line2); position: sticky; top: 0; z-index: 7; }
+.m-topbar .m-brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: 18px; letter-spacing: -.4px; color: var(--text); }
+.app.mobile .list-top > .btn[aria-label="Sohbetlerde ara"] { display: none; } /* arama üst çubukta */
+.app.mobile .list-head { padding-top: 10px; }

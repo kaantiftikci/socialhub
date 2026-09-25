@@ -841,18 +841,23 @@ export default function App() {
                   <span className="synclbl">{booting ? 'Çekirdek başlatılıyor' : `${Object.keys(sync).length} kanal eşitleniyor`}</span>
                 </div>
               )}
+              {isMobile && (
+                <div className="m-topbar">
+                  <button className="btn icon b b2" aria-label="Menü" title="Menü" onClick={() => setNavOpen(true)}>
+                    <Icon name="grip" size={16} sw={2} />
+                  </button>
+                  <span className="m-brand" aria-hidden="true">
+                    <Logo size={32} />
+                    <span className="word">mivelo</span>
+                  </span>
+                  <span style={{ flexGrow: 1 }} />
+                  <button className={`btn icon b b2 ${listSearch || query ? 'soft' : ''}`} aria-label="Sohbetlerde ara" title="Sohbetlerde ara" onClick={() => (setListSearch(!listSearch), listSearch && setQuery(''))}>
+                    <Icon name="search" size={15} sw={2} />
+                  </button>
+                </div>
+              )}
               <div className="list-head">
                 <div className="list-top" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  {isMobile && (
-                    <>
-                      <button className="btn icon b b2" aria-label="Menü" title="Menü" onClick={() => setNavOpen(true)}>
-                        <Icon name="grip" size={16} sw={2} />
-                      </button>
-                      <span className="m-brand" aria-hidden="true">
-                        <Logo size={34} />
-                      </span>
-                    </>
-                  )}
                   <div className="list-title">
                     {platformFilter && view !== 'snoozed' && <Chip platform={platformFilter} size={26} />}
                     <h1>{view === 'snoozed' ? 'Ertelenenler' : platformFilter ? PLATFORMS[platformFilter].name : tagFilter ? capitalize(tagFilter) : 'Gelen kutusu'}</h1>
