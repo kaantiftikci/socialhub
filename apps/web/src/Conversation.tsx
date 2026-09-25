@@ -1519,7 +1519,7 @@ function ReactionChips({ list, onToggle }: { list: Reaction[]; onToggle?: (emoji
       {[...groups].map(([e, g]) => (
         <button key={e} type="button" className={`rchip b ${g.mine ? 'mine' : ''}`} title={g.names.join(', ')} onClick={onToggle ? () => onToggle(e) : undefined} disabled={!onToggle}>
           <span className="e">{e}</span>
-          {g.n > 1 ? <span className="n">{g.n}</span> : g.mine || g.names.length === 0 ? null : <span className="n">{g.names[0]?.split(' ')[0]}</span>}
+          {g.n > 1 ? <span className="n">{g.n}</span> : null}
         </button>
       ))}
     </span>
