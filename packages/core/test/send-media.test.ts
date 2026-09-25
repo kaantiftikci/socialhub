@@ -63,6 +63,18 @@ test('WhatsApp waMediaContent: MIME → Baileys içeriği (fotoğraf/video/ses/b
   assert.equal(unknown.mimetype, 'application/octet-stream');
 });
 
+test('WhatsApp waMediaContent: voice → sesli mesaj (ptt:true, ogg/opus mimetype); altyazı taşımaz', () => {
+  const v = wa.waMediaContent({ ...outboxFile('ses.ogg'), mime: 'audio/ogg; codecs=opus', voice: true }, 'not') as { audio: { url: string }; ptt: boolean; mimetype: string; caption?: string };
+  assert.ok(v.audio.url.endsWith('ses.ogg'));
+  assert.equal(v.ptt, true);
+  assert.equal(v.mimetype, 'audio/ogg; codecs=opus');
+  assert.equal('caption' in v, false);
+  // ffmpeg yoksa kayıt olduğu gibi (webm/mp4) ama yine ptt
+  const raw = wa.waMediaContent({ ...outboxFile('ses.webm'), mime: 'audio/webm;codecs=opus', voice: true }) as { ptt: boolean; mimetype: string };
+  assert.equal(raw.ptt, true);
+  assert.equal(raw.mimetype, 'audio/webm;codecs=opus');
+});
+
 test('WhatsApp sendMedia: sock.sendMessage hedefi sohbet jid; dönen WAMessage ingest ile eke dönüşür; ses altyazısı ayrı metin', async () => {
   const { store, account } = setup('whatsapp');
   const c = new wa.WhatsAppConnector(account, store);
@@ -111,6 +123,11 @@ test('WhatsApp sendMedia: sock.sendMessage hedefi sohbet jid; dönen WAMessage i
 });
 
 // ---------------- Telegram ----------------
+
+test('Telegram tgSendFileParams: voice → voiceNote (sesli mesaj balonu)', () => {
+  assert.deepEqual(tg.tgSendFileParams({ path: '/x/s.ogg', name: 's.ogg', mime: 'audio/ogg', voice: true }), { file: '/x/s.ogg', caption: undefined, forceDocument: false, voiceNote: true });
+  assert.equal('voiceNote' in tg.tgSendFileParams({ path: '/x/s.m4a', name: 's.m4a', mime: 'audio/mp4' }), false);
+});
 
 test('Telegram tgSendFileParams: görsel/video/ses doğal, diğerleri forceDocument; boş altyazı verilmez', () => {
   assert.deepEqual(tg.tgSendFileParams({ path: '/x/a.jpg', name: 'a.jpg', mime: 'image/jpeg' }, 'c'), { file: '/x/a.jpg', caption: 'c', forceDocument: false });

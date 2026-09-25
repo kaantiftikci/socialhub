@@ -183,14 +183,72 @@ export function Conversation({
   };
   const [uploading, setUploading] = useState<string | null>(null);
   /** Seçilen ek: hemen gönderilmez, kompozörde önizleme olarak bekler; Gönder ile (açıklama = yazılan metin) gider */
-  const [pending, setPending] = useState<{ file: File; url?: string } | null>(null);
+  const [pending, setPending] = useState<{ file: File; url?: string; voice?: boolean } | null>(null);
   const pickFile = (f: File) => {
     if (f.size > 50 * 1024 * 1024) return notify('Dosya 50 MB\'tan büyük', true);
     setPending((prev) => {
       if (prev?.url) URL.revokeObjectURL(prev.url);
-      return { file: f, url: f.type.startsWith('image/') || f.type.startsWith('video/') ? URL.createObjectURL(f) : undefined };
+      return { file: f, url: f.type.startsWith('image/') || f.type.startsWith('video/') || f.type.startsWith('audio/') ? URL.createObjectURL(f) : undefined };
     });
   };
+  // Sesli mesaj kaydı: mikrofon → MediaRecorder; bitince kompozörde ek olarak bekler (dinlenebilir), Gönder ile "voice" bayrağıyla gider
+  const [rec, setRec] = useState<{ r: MediaRecorder; stream: MediaStream; chunks: Blob[]; startedAt: number } | null>(null);
+  const [recSecs, setRecSecs] = useState(0);
+  const recRef = useRef<typeof rec>(null);
+  recRef.current = rec;
+  useEffect(() => {
+    if (!rec) return;
+    const t = setInterval(() => setRecSecs(Math.floor((Date.now() - rec.startedAt) / 1000)), 250);
+    return () => clearInterval(t);
+  }, [rec]);
+  const recMime = () => {
+    if (typeof MediaRecorder === 'undefined') return '';
+    for (const m of ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4', 'audio/webm']) if (MediaRecorder.isTypeSupported(m)) return m;
+    return '';
+  };
+  async function startRec() {
+    if (rec) return;
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') return notify('Bu ortamda ses kaydı desteklenmiyor', true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      const mime = recMime();
+      const r = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 48_000 } : undefined);
+      const chunks: Blob[] = [];
+      r.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+      r.start(250);
+      setRecSecs(0);
+      setRec({ r, stream, chunks, startedAt: Date.now() });
+    } catch (e) {
+      const name = (e as Error).name;
+      notify(name === 'NotAllowedError' || name === 'SecurityError' ? 'Mikrofon izni verilmedi (Sistem Ayarları → Gizlilik → Mikrofon)' : name === 'NotFoundError' ? 'Mikrofon bulunamadı' : (e as Error).message, true);
+    }
+  }
+  /** keep=false: vazgeç (kayıt atılır) */
+  function stopRec(keep: boolean) {
+    const cur = recRef.current;
+    if (!cur) return;
+    setRec(null);
+    const secs = (Date.now() - cur.startedAt) / 1000;
+    cur.r.onstop = () => {
+      cur.stream.getTracks().forEach((t) => t.stop());
+      if (!keep || secs < 0.7) {
+        if (keep) notify('Kayıt çok kısa');
+        return;
+      }
+      const type = (cur.r.mimeType || 'audio/webm').split(';')[0];
+      const ext = type.includes('ogg') ? 'ogg' : type.includes('mp4') ? 'm4a' : type.includes('mpeg') ? 'mp3' : 'webm';
+      const blob = new Blob(cur.chunks, { type: cur.r.mimeType || type });
+      if (blob.size === 0) return notify('Kayıt alınamadı: mikrofon ses vermedi', true);
+      const file = new File([blob], `Sesli mesaj ${fmtClock(secs)}.${ext}`, { type: cur.r.mimeType || type });
+      setPending((prev) => {
+        if (prev?.url) URL.revokeObjectURL(prev.url);
+        return { file, url: URL.createObjectURL(file), voice: true };
+      });
+    };
+    if (cur.r.state !== 'inactive') cur.r.stop();
+    else cur.r.onstop(new Event('stop'));
+  }
+  useEffect(() => () => stopRec(false), [chat.id]); // sohbet değişince açık kayıt atılır
   const clearPending = () => {
     setPending((prev) => {
       if (prev?.url) URL.revokeObjectURL(prev.url);
@@ -236,7 +294,7 @@ export function Conversation({
     setSchedOpen(false);
     notify(`${fmtStamp(at)} tarihinde gönderilecek`);
   }
-  async function sendFile(file: File) {
+  async function sendFile(file: File, voice = false) {
     if (file.size > 50 * 1024 * 1024) return notify('Dosya 50 MB\'tan büyük', true);
     setUploading(file.name);
     try {
@@ -246,9 +304,9 @@ export function Conversation({
         r.onerror = () => rej(new Error('Dosya okunamadı'));
         r.readAsDataURL(file);
       });
-      await api.sendFile(chat.id, { name: file.name, mime: file.type || 'application/octet-stream', data, caption: text.trim() || undefined });
+      await api.sendFile(chat.id, { name: file.name, mime: file.type || 'application/octet-stream', data, caption: text.trim() || undefined, voice: voice || undefined });
       setText('');
-      notify(`${file.name} gönderildi`);
+      notify(voice ? 'Sesli mesaj gönderildi' : `${file.name} gönderildi`);
     } catch (e) {
       notify((e as Error).message, true);
     } finally {
@@ -340,8 +398,9 @@ export function Conversation({
     if (pending) {
       if (sending || uploading) return;
       const f = pending.file;
+      const voice = !!pending.voice;
       clearPending();
-      await sendFile(f);
+      await sendFile(f, voice);
       return;
     }
     const body = (text || draft?.draft || '').trim();
@@ -516,10 +575,10 @@ export function Conversation({
                   {!g.fromMe && chat.kind !== 'direct' && <span className="sender">{g.senderName}</span>}
                   {g.items.map((m, i) => (
                     <div key={m.id} className={`bub ${g.items.length === 1 ? 'first last' : i === 0 ? 'first' : i === g.items.length - 1 ? 'last' : 'mid'} ${/^(👍|❤️|😂|🔥|👏|😮) .+ (bir mesajı beğendi|mesajına tepki verdi)$/.test(m.text) ? 'react' : ''}`}>
-                      {m.text}
                       {m.attachments?.map((a, j) => (
                         <AttachmentView key={j} a={a} onOpen={setLightbox} />
                       ))}
+                      {m.text && (m.attachments?.length ? <span className="bub-text">{m.text}</span> : m.text)}
                     </div>
                   ))}
                   <span className="meta">
@@ -622,6 +681,10 @@ export function Conversation({
             <div className="pend-att">
               {pending.url && pending.file.type.startsWith('image/') ? (
                 <img src={pending.url} alt={pending.file.name} />
+              ) : pending.url && pending.file.type.startsWith('audio/') ? (
+                <span className="pend-file voice">
+                  <Icon name="mic" size={16} />
+                </span>
               ) : pending.url ? (
                 <video src={pending.url} muted playsInline />
               ) : (
@@ -630,8 +693,8 @@ export function Conversation({
                 </span>
               )}
               <span className="pend-meta">
-                <b>{pending.file.name}</b>
-                <span>{fmtSize(pending.file.size)} · Gönder ile gider; yazdığın metin açıklama olur</span>
+                <b>{pending.voice ? 'Sesli mesaj' : pending.file.name}</b>
+                {pending.voice && pending.url ? <audio src={pending.url} controls preload="metadata" /> : <span>{fmtSize(pending.file.size)} · Gönder ile gider; yazdığın metin açıklama olur</span>}
               </span>
               <button className="btn ghost xs icon b" onClick={clearPending} aria-label="Eki kaldır" title="Eki kaldır">
                 <Icon name="x" size={13} sw={2} />
@@ -663,6 +726,25 @@ export function Conversation({
               <Icon name="link" size={16} />
               <input type="file" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.txt" style={{ display: 'none' }} disabled={!!uploading} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) pickFile(f); }} />
             </label>
+            {rec ? (
+              <span className="rec-bar" role="status" aria-live="polite">
+                <span className="rec-dot" />
+                <span className="rec-time">{fmtClock(recSecs)}</span>
+                <span className="hint">Kaydediliyor…</span>
+                <button className="btn ghost xs icon b" onClick={() => stopRec(false)} aria-label="Kaydı at" title="Kaydı at">
+                  <Icon name="trash" size={14} />
+                </button>
+                <button className="btn primary xs b" onClick={() => stopRec(true)} aria-label="Kaydı bitir" title="Kaydı bitir">
+                  <Icon name="checks" size={14} sw={2} /> Bitir
+                </button>
+              </span>
+            ) : (
+              !isMail && (
+                <button className="btn ghost sm icon b" onClick={() => void startRec()} disabled={!!uploading} aria-label="Sesli mesaj kaydet" title="Sesli mesaj kaydet">
+                  <Icon name="mic" size={16} />
+                </button>
+              )
+            )}
             {uploading && <span className="hint">{uploading} gönderiliyor…</span>}
             <div className="sched" ref={schedRef}>
               <button className={`btn ghost sm icon b ${schedOpen ? 'soft' : ''}`} aria-label="Zamanla gönder" title="Zamanla gönder" aria-expanded={schedOpen} onClick={() => setSchedOpen((v) => !v)}>
@@ -685,7 +767,7 @@ export function Conversation({
                 <span className="kbd">Tab</span> kabul et
               </span>
             )}
-            <button className="btn primary b" onClick={send} disabled={sending || !!uploading || !(pending || text.trim() || draft?.draft)}>
+            <button className="btn primary b" onClick={send} disabled={sending || !!uploading || !!rec || !(pending || text.trim() || draft?.draft)}>
               {sending || uploading ? <span className="spin" /> : <Icon name="send" size={15} sw={1.9} />} Gönder
             </button>
           </div>
@@ -1301,6 +1383,12 @@ function AttachmentView({ a, onOpen }: { a: Attachment; onOpen: (a: Attachment) 
       {link ? <Icon name="external" size={12} /> : null}
     </a>
   );
+}
+
+/** Saniye → m:ss (kayıt süresi) */
+function fmtClock(secs: number) {
+  const s = Math.max(0, Math.round(secs));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
 function attLabel(k: string) {

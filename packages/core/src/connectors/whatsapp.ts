@@ -7,7 +7,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as Baileys from '@whiskeysockets/baileys';
 import type { WASocket, WAMessage, Contact, proto } from '@whiskeysockets/baileys';
-import { BaseConnector, type StartOptions } from './base.js';
+import { BaseConnector, type OutFile, type StartOptions } from './base.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
 import { chatId as chatIdOf, type Attachment, type Message, type Participant } from '../model.js';
@@ -751,9 +751,14 @@ export class WhatsAppConnector extends BaseConnector {
    * Baileys'in döndürdüğü WAMessage (şifreli medya adresi + anahtar) ingest'ten geçirilir: rememberMedia ile saklanır,
    * böylece gönderilen fotoğraf sohbette wa:<jid>/<id> vekilinden görünür. Ses altyazı taşıyamaz; altyazı ayrı metin gider.
    */
-  async sendMedia(remoteChatId: string, file: { path: string; name: string; mime: string; size: number }, caption?: string): Promise<{ remoteId: string }> {
+  async sendMedia(remoteChatId: string, file: OutFile, caption?: string): Promise<{ remoteId: string }> {
     if (!this.sock) throw new Error('WhatsApp bağlı değil');
     if (!fs.existsSync(file.path)) throw new Error('Gönderilecek dosya bulunamadı');
+    if (file.voice) {
+      // Sesli mesaj: WhatsApp telefonlarda ancak ogg/opus'u "sesli mesaj" olarak oynatır; ffmpeg varsa dönüştür
+      const ogg = await transcodeToOpus(file.path);
+      if (ogg) file = { ...file, path: ogg, mime: 'audio/ogg; codecs=opus', size: fs.statSync(ogg).size };
+    }
     const content = waMediaContent(file, caption);
     const sent = await this.sock.sendMessage(remoteChatId, content);
     const id = sent?.key?.id ?? `local-${Date.now()}`;
@@ -1449,6 +1454,23 @@ async function transcodeToMp3(input: Buffer): Promise<Buffer | undefined> {
   }
 }
 
+/** Kaydedilmiş sesi (webm/opus, m4a/aac…) WhatsApp sesli mesaj biçimine (ogg/opus, mono 48 kHz) çevirir; ffmpeg yoksa undefined */
+async function transcodeToOpus(input: string): Promise<string | undefined> {
+  if (ffmpegOk === undefined) ffmpegOk = await execFileP('ffmpeg', ['-version']).then(() => true).catch(() => false);
+  if (!ffmpegOk) {
+    bus.log('warn', 'ffmpeg yok: sesli mesaj olduğu gibi gönderiliyor (telefonda oynatılamayabilir; brew install ffmpeg)');
+    return undefined;
+  }
+  const out = input + '.opus.ogg';
+  try {
+    await execFileP('ffmpeg', ['-y', '-loglevel', 'error', '-i', input, '-vn', '-c:a', 'libopus', '-b:a', '32k', '-ac', '1', '-ar', '48000', '-application', 'voip', out]);
+    return fs.existsSync(out) ? out : undefined;
+  } catch (e) {
+    bus.log('warn', `Sesli mesaj dönüşümü başarısız, olduğu gibi gönderiliyor: ${errorText(e)}`);
+    return undefined;
+  }
+}
+
 function isChatJid(jid: string): boolean {
   return (jid.endsWith('@s.whatsapp.net') || jid.endsWith('@g.us') || jid.endsWith('@lid')) && jid !== 'status@broadcast';
 }
@@ -1499,11 +1521,13 @@ function mediaKindOf(mime: string): Attachment['kind'] {
 
 /**
  * Gönderilecek dosya → Baileys sendMessage içeriği. image/* → fotoğraf, video/* → video, audio/* → ses (ptt:false, mp4/m4a
- * olduğu gibi gider; ogg/opus dönüşümü gerekmez), diğer her şey → belge (mimetype + dosya adı). Ses altyazı alanı taşımaz.
+ * olduğu gibi gider; ogg/opus dönüşümü gerekmez), voice → sesli mesaj (ptt:true), diğer her şey → belge (mimetype + dosya adı).
+ * Ses altyazı alanı taşımaz.
  */
-export function waMediaContent(file: { path: string; name: string; mime: string }, caption?: string): Baileys.AnyMessageContent {
-  const mime = file.mime.toLowerCase().split(';')[0].trim() || 'application/octet-stream';
+export function waMediaContent(file: { path: string; name: string; mime: string; voice?: boolean }, caption?: string): Baileys.AnyMessageContent {
   const url = { url: file.path };
+  if (file.voice) return { audio: url, mimetype: file.mime.toLowerCase().startsWith('audio/ogg') ? 'audio/ogg; codecs=opus' : file.mime, ptt: true };
+  const mime = file.mime.toLowerCase().split(';')[0].trim() || 'application/octet-stream';
   // GIF (image/gif) WhatsApp'ta fotoğraf olarak gitmez; belge olarak gönderilir ki bozulmasın
   if (mime.startsWith('image/') && mime !== 'image/gif') return { image: url, caption, mimetype: mime };
   if (mime.startsWith('video/')) return { video: url, caption, mimetype: mime };

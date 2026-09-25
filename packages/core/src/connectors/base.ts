@@ -11,6 +11,16 @@ export interface StartOptions {
   interactive?: boolean;
 }
 
+/** Gönderilecek dosya (server send-file → connector.sendMedia) */
+export interface OutFile {
+  path: string;
+  name: string;
+  mime: string;
+  size: number;
+  /** Mikrofonla kaydedilmiş sesli mesaj: platformda "voice note" olarak gönderilir */
+  voice?: boolean;
+}
+
 export interface Connector {
   readonly account: Account;
   /** interactive=false: açılışta arka planda başlat; kullanıcıdan giriş isteyen pencere/QR açma. */
@@ -28,8 +38,11 @@ export interface Connector {
   openDirect?(participant: Participant): Promise<string>;
   /** Platform tarafında da oturumu kapat (örn. WhatsApp "bağlı cihazlar"dan düş). */
   logout?(): Promise<void>;
-  /** Fotoğraf/video/dosya gönder (destekleyen platformlar). file.path çekirdeğin yazdığı geçici dosya; caption isteğe bağlı açıklama */
-  sendMedia?(remoteChatId: string, file: { path: string; name: string; mime: string; size: number }, caption?: string): Promise<{ remoteId: string }>;
+  /**
+   * Fotoğraf/video/dosya gönder (destekleyen platformlar). file.path çekirdeğin yazdığı geçici dosya; caption isteğe bağlı
+   * açıklama; file.voice = arayüzde mikrofonla kaydedilen sesli mesaj (WhatsApp ptt, Telegram voice note olarak gider)
+   */
+  sendMedia?(remoteChatId: string, file: OutFile, caption?: string): Promise<{ remoteId: string }>;
   /** Sohbet listesinin sonraki sayfasını (daha eski sohbetler/e-postalar) getir; eklenen sohbet sayısını döner, 0 = daha yok */
   loadMoreChats?(): Promise<number>;
   /** Sohbet açıkken çağrılır: yazıyor/çevrimiçi bilgisi için platforma abone ol (WhatsApp presenceSubscribe vb.) */

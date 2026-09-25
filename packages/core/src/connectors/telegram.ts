@@ -9,7 +9,7 @@ import { TelegramClient, Api } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
 import { NewMessage, Raw, type NewMessageEvent } from 'telegram/events/index.js';
 import { getPeerId } from 'telegram/Utils.js';
-import { BaseConnector } from './base.js';
+import { BaseConnector, type OutFile } from './base.js';
 import { bus } from '../bus.js';
 import { sessionDir, TELEGRAM_API_ID, TELEGRAM_API_HASH } from '../config.js';
 import type { Attachment, ChatKind } from '../model.js';
@@ -197,7 +197,7 @@ export class TelegramConnector extends BaseConnector {
    * Fotoğraf/video/ses/belge gönder. GramJS sendFile dosya türünü uzantıdan çıkarır (jpg/png → fotoğraf, mp4 → video);
    * MIME görsel/video/ses değilse forceDocument ile belge olarak gider. Dönen mesaj ingest ile yazılır: medya vekili tg:<sohbet>/<id>.
    */
-  async sendMedia(remoteChatId: string, file: { path: string; name: string; mime: string; size: number }, caption?: string): Promise<{ remoteId: string }> {
+  async sendMedia(remoteChatId: string, file: OutFile, caption?: string): Promise<{ remoteId: string }> {
     if (!this.client) throw new Error('Telegram bağlı değil');
     if (!fs.existsSync(file.path)) throw new Error('Gönderilecek dosya bulunamadı');
     const entity = await this.entityOf(remoteChatId);
@@ -531,9 +531,11 @@ export class TelegramConnector extends BaseConnector {
  * Gönderilecek dosya → GramJS sendFile parametreleri. Görsel/video/ses MIME'ları doğal medya olarak gider (GramJS türü
  * uzantıdan çıkarır; ses için DocumentAttributeAudio kendisi ekler), diğerleri forceDocument ile belge. Boş altyazı verilmez.
  */
-export function tgSendFileParams(file: { path: string; name: string; mime: string }, caption?: string): { file: string; caption?: string; forceDocument: boolean } {
+export function tgSendFileParams(file: { path: string; name: string; mime: string; voice?: boolean }, caption?: string): { file: string; caption?: string; forceDocument: boolean; voiceNote?: boolean } {
   const mime = file.mime.toLowerCase().split(';')[0].trim();
   const native = /^(image|video|audio)\//.test(mime) && mime !== 'image/gif' && !/^image\/(svg|heic|heif|tiff)/.test(mime);
+  // voice: mikrofon kaydı → Telegram "sesli mesaj" (yuvarlak dalga biçimli balon); GramJS ogg/opus bekler ama diğer biçimleri de kabul eder
+  if (file.voice) return { file: file.path, caption: caption || undefined, forceDocument: false, voiceNote: true };
   return { file: file.path, caption: caption || undefined, forceDocument: !native };
 }
 

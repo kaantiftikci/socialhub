@@ -208,7 +208,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     const id = dec(p.id);
     const chat = store.getChat(id);
     if (!chat) throw new HttpError(404, 'Sohbet yok');
-    const b = body as { name?: string; mime?: string; data?: string; caption?: string };
+    const b = body as { name?: string; mime?: string; data?: string; caption?: string; voice?: boolean };
     if (!b.name || !b.data) throw new HttpError(400, 'name ve data gerekli');
     const c = registry.get(chat.accountId);
     if (!c) throw new HttpError(409, 'Hesap bağlı değil');
@@ -220,10 +220,13 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     const buf = Buffer.from(String(b.data), 'base64');
     fs.writeFileSync(file, buf);
     try {
-      return await c.sendMedia(chat.remoteId, { path: file, name: safe, mime: String(b.mime || 'application/octet-stream'), size: buf.length }, b.caption ? String(b.caption) : undefined);
+      return await c.sendMedia(chat.remoteId, { path: file, name: safe, mime: String(b.mime || 'application/octet-stream'), size: buf.length, voice: b.voice === true }, b.caption ? String(b.caption) : undefined);
     } finally {
       // connector'lar dosyayı gönderim sırasında okur/kopyalar: hemen sil (kimlik belgesi vb. diskte kalmasın)
-      setTimeout(() => fs.rmSync(file, { force: true }), 5_000).unref();
+      setTimeout(() => {
+        fs.rmSync(file, { force: true });
+        fs.rmSync(file + '.opus.ogg', { force: true }); // sesli mesaj dönüşümü (WhatsApp)
+      }, 5_000).unref();
     }
   });
   // Sohbet listesinin sonraki sayfası (daha eski e-postalar/sohbetler)

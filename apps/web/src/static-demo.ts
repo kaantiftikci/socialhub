@@ -261,11 +261,11 @@ export const staticApi = {
     emit({ type: 'chat.upsert', chat: next });
     return next;
   },
-  sendFile: async (chatId: string, file: { name: string; mime: string; data: string; caption?: string }) => {
+  sendFile: async (chatId: string, file: { name: string; mime: string; data: string; caption?: string; voice?: boolean }) => {
     const chat = chatOf(chatId);
     const ts = Date.now();
     const remoteId = `file-${ts}`;
-    const kind: Attachment['kind'] = file.mime.startsWith('image/') ? 'image' : file.mime.startsWith('video/') ? 'video' : 'file';
+    const kind: Attachment['kind'] = file.mime.startsWith('image/') ? 'image' : file.mime.startsWith('video/') ? 'video' : file.mime.startsWith('audio/') ? 'audio' : 'file';
     const message: Message = {
       id: `${chatId}#${remoteId}`,
       chatId,
@@ -276,10 +276,10 @@ export const staticApi = {
       text: file.caption ?? '',
       ts,
       status: 'sent',
-      attachments: [{ kind, name: file.name, mime: file.mime, url: kind === 'image' ? file.data && `data:${file.mime};base64,${file.data}` : undefined }],
+      attachments: [{ kind, name: file.voice ? 'Sesli mesaj' : file.name, mime: file.mime, url: kind === 'image' ? file.data && `data:${file.mime};base64,${file.data}` : undefined, link: kind === 'audio' ? `data:${file.mime};base64,${file.data}` : undefined }],
     };
     messages.push(message);
-    const next = touch(chat, file.caption || file.name, true, ts);
+    const next = touch(chat, file.caption || (file.voice ? '🎤 Sesli mesaj' : file.name), true, ts);
     emit({ type: 'message.upsert', message, chat: next });
     return { remoteId };
   },
