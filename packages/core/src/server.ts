@@ -90,6 +90,8 @@ export function createServer(store: Store, registry: Registry, port: number): ht
       if (req.method === 'GET' && !p.startsWith('/api/') && p !== '/ws') return true;
       return givenToken(req) === token;
     }
+    // Tünel/vekil üzerinden gelen istekler (cloudflared, ngrok) loopback görünür: bunlar uzak sayılır, belirteç şart
+    if (req.headers['x-forwarded-for'] || req.headers['cf-connecting-ip'] || req.headers['x-forwarded-host']) return givenToken(req) === token;
     const origin = req.headers.origin;
     if (!origin || LOCAL_ORIGIN.test(origin)) return true;
     return givenToken(req) === token;
