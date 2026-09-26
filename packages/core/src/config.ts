@@ -10,10 +10,11 @@ export const DB_PATH = path.join(DATA_DIR, 'kavsak.db');
 export const PORT = Number(process.env.KAVSAK_PORT ?? 7788);
 
 /** Telegram için my.telegram.org'dan alınan ücretsiz kimlikler. */
-// Varsayılan: Telegram Desktop'ın açık kaynak kodunda yayımlanan herkese açık api_id/api_hash; kullanıcı isterse
-// Bağlan formundan kendi kimliğini verebilir (my.telegram.org). Böylece giriş WhatsApp gibi yalnızca QR ile olur.
-export const TELEGRAM_API_ID = Number(process.env.TELEGRAM_API_ID ?? 2040);
-export const TELEGRAM_API_HASH = process.env.TELEGRAM_API_HASH ?? 'b18441a1ff607e10a989891a5462e627';
+// Varsayılan: Mivelo'nun kendi uygulama kimliği (my.telegram.org, "Mivelo", Desktop). Başka bir istemcinin (ör. Telegram
+// Desktop 2040) kimliğini kullanmak Telegram API şartlarına aykırı ve hesap riskini artırıyordu. Masaüstü istemcilerde
+// olduğu gibi pakete gömülür; ortam değişkeni ya da Bağlan formundaki kendi kimlik alanları bunu geçersiz kılar.
+export const TELEGRAM_API_ID = Number(process.env.TELEGRAM_API_ID ?? 31111230);
+export const TELEGRAM_API_HASH = process.env.TELEGRAM_API_HASH ?? 'c0573504f4020d3af5a3bec44d33eda8';
 
 /** İsteğe bağlı: taslak üretimi için Anthropic API anahtarı. Yoksa taslak özelliği kapalı kalır. */
 export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? '';

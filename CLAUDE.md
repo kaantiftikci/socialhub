@@ -121,7 +121,8 @@ Dil: arayüz ve yorumlar Türkçe.
 - iMessage: Tam Disk Erişimi ad-hoc imzalı pakette her derlemede düşebilir (cdhash değişir); kalıcı çözüm sabit imza kimliği.
 - WhatsApp: rehberde olmayan LID kişileri ("WhatsApp kişisi") ancak canlı mesaj (sender_pn/pushName) gelince ad kazanır; eşlemeler
   `sessions/<hesap>/names.json`'da kalıcı. 45 grup adı gelmiyor (muhtemelen ayrılınan gruplar).
-- Telegram: varsayılan api_id/api_hash Telegram Desktop'ın açık kimliği (config.ts); kullanıcı isterse Bağlan formundan kendi kimliğini verir.
+- Telegram: varsayılan api_id/api_hash Mivelo'nun kendi kimliği (config.ts, api_id 31111230, my.telegram.org "Mivelo" Desktop); cihaz bilgisi
+  deviceModel "Mivelo" + gerçek OS sürümü. Ortam değişkeni ya da Bağlan formundaki kendi kimlik alanları geçersiz kılar.
 - WhatsApp sesli mesaj ffmpeg yoksa ogg (WebKit oynatmayabilir).
 - Yol haritası: Node'suz tek dosya paketleme (sidecar), ⌘K komut paleti, SQLCipher, kişi birleştirme (aynı kişi farklı
   platformlarda), Trendyol/Hepsiburada/Etsy/Shopify connector'ları, Shopier panel mesajları (DOM üzerinden).

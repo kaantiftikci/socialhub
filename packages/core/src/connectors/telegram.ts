@@ -14,6 +14,9 @@ import type { Reaction } from '../model.js';
 import { bus } from '../bus.js';
 import { FFMPEG_HINT } from '../platform.js';
 import { sessionDir, TELEGRAM_API_ID, TELEGRAM_API_HASH } from '../config.js';
+
+/** Telegram cihaz listesinde görünen sürüm (paket sürümü) */
+const MIVELO_VERSION = '0.1.0';
 import type { Attachment, ChatKind } from '../model.js';
 
 import type { Entity } from 'telegram/define.js';
@@ -59,8 +62,12 @@ export class TelegramConnector extends BaseConnector {
     const saved = fs.existsSync(this.sessionFile) ? fs.readFileSync(this.sessionFile, 'utf8').trim() : '';
     const client = new TelegramClient(new StringSession(saved), apiId, apiHash, {
       connectionRetries: 5,
+      // dürüst ve tutarlı cihaz bilgisi (Telegram'da Ayarlar → Cihazlar'da "Mivelo · macOS 15.x" gibi görünür)
       deviceModel: 'Mivelo',
-      appVersion: '0.1',
+      systemVersion: `${os.type() === 'Darwin' ? 'macOS' : os.type() === 'Windows_NT' ? 'Windows' : os.type()} ${os.release()}`,
+      appVersion: MIVELO_VERSION,
+      langCode: 'tr',
+      systemLangCode: 'tr',
     });
     this.client = client;
     this.setStatus('connecting');
