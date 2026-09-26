@@ -208,7 +208,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   .top h2{font-size:26px}
   .top{margin-bottom:16px}
   /* yüzen liquid glass sekme çubuğu: Safari'nin alttaki adres çubuğunun ÜSTÜNDE (--chrome-b, JS iOS Safari 26+ için ayarlar) */
-  .tabbar{display:flex;position:fixed;left:50%;transform:translateX(-50%);width:min(440px,calc(100% - 24px));bottom:calc(max(env(safe-area-inset-bottom),12px) + var(--chrome-b));
+  .tabbar{display:flex;position:fixed;left:50%;transform:translateX(-50%);width:min(440px,calc(100% - 24px));bottom:calc(max(env(safe-area-inset-bottom) + 10px,12px) + var(--chrome-b));
     z-index:30;padding:5px;border-radius:26px;justify-content:space-between}
   .tab{position:relative;z-index:1;flex:1;min-width:0;height:50px;border:0;border-radius:20px;background:transparent;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:10.5px;font-weight:500;color:var(--ink-3);cursor:pointer;transition:color .25s;-webkit-tap-highlight-color:transparent}
   .tab svg{width:19px;height:19px}
@@ -481,7 +481,8 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     var safari=ios&&/Safari/.test(ua)&&!/CriOS|FxiOS|EdgiOS|OPiOS/.test(ua);
     var v=+((ua.match(/Version\/(\d+)/)||[])[1]||0);
     var standalone=navigator.standalone||matchMedia('(display-mode: standalone)').matches;
-    if(safari&&v>=26&&!standalone) document.documentElement.style.setProperty('--chrome-b','58px');
+    // safe-area bu sürümde çubuğun büyük kısmını zaten kapsıyor (~62 px); açık adres çubuğunun üst kenarını aşmak için ek pay yeter
+    if(safari&&v>=26&&!standalone) document.documentElement.style.setProperty('--chrome-b','18px');
   })();
   var loaded={};
   function route(){
