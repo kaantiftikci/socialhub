@@ -277,3 +277,11 @@ test('linkedin tepki: reactWithEmoji/unreactWithEmoji {messageUrn, emoji}; react
   assert.deepEqual(r.map((x) => [x.emoji, x.fromMe]), [['👍', true], ['👍', false], ['😂', false]]);
   assert.equal(liReactions({}), undefined);
 });
+
+test('instagram: HTML yanıtında kök neden yönlendirmeden — doğrulama (checkpoint → köprü yoklamayı durdurur) / oturum kapandı', async () => {
+  const pageTo = (url: string, body = '<!DOCTYPE html><html>') =>
+    ({ request: { fetch: async () => ({ ok: () => true, status: () => 200, url: () => url, text: async () => body }) }, context: () => ({ cookies: async () => [] }) }) as unknown as Page;
+  await assert.rejects(instagram.send(pageTo('https://www.instagram.com/challenge/AbC/'), { csrftoken: 'x' }, '1', 'a'), /checkpoint/);
+  await assert.rejects(instagram.send(pageTo('https://www.instagram.com/accounts/login/?next=%2F'), { csrftoken: 'x' }, '1', 'a'), /oturumu kapattı/);
+  await assert.rejects(instagram.send(pageTo('https://www.instagram.com/direct/inbox/'), { csrftoken: 'x' }, '1', 'a'), /JSON yerine sayfa/);
+});

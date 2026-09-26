@@ -31,11 +31,17 @@ async function ig(page: Page, cookies: Record<string, string>, path: string, for
     timeout: 45_000,
   });
   const text = await r.text();
+  // Yönlendirme hedefi kök nedeni söyler: /challenge/ = güvenlik doğrulaması (köprü "checkpoint" görünce yoklamayı durdurur —
+  // ısrar etmek kısıtlamayı yasağa çevirebilir), /accounts/login/ = Instagram oturumu kapattı (çerez geçersiz)
+  const landed = (typeof r.url === 'function' ? r.url() : '') ?? '';
+  if (/\/challenge\/|\/checkpoint\/|\/accounts\/suspended/.test(landed) || /"checkpoint_required"|challenge_required/.test(text.slice(0, 2000)))
+    throw new Error(`Instagram güvenlik doğrulaması istiyor (checkpoint: ${landed.replace('https://www.instagram.com', '').slice(0, 60)}) — kanala sağ tık → Yeniden bağlan, açılan pencerede doğrula`);
   if (!r.ok()) throw new Error(`Instagram ${r.status()} ${path}: ${text.slice(0, 120)}`);
   try {
     return JSON.parse(text) as J;
   } catch {
-    if (/<html/i.test(text)) throw new Error('Instagram JSON yerine sayfa döndürdü (oturum düşmüş ya da istek reddedildi) — kanala sağ tık → Yeniden bağlan');
+    if (/\/accounts\/login/.test(landed) || /"require_login":\s*true|login_required/.test(text.slice(0, 4000))) throw new Error('Instagram oturumu kapattı (giriş sayfasına yönlendi) — kanala sağ tık → Yeniden bağlan');
+    if (/<html/i.test(text)) throw new Error(`Instagram JSON yerine sayfa döndürdü (${landed.replace('https://www.instagram.com', '').slice(0, 60)}; oturum düşmüş ya da istek reddedildi) — kanala sağ tık → Yeniden bağlan`);
     throw new Error(`Instagram beklenmeyen yanıt ${path}: ${text.slice(0, 80)}`);
   }
 }

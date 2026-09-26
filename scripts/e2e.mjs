@@ -70,7 +70,7 @@ const RULES = [
   { re: /\b429\b|rate.?limit|hız sınırı|too many/i, kind: 'hız sınırı', hint: 'Platform istek sınırı: geri çekilme devrede; turları seyrekleştir.' },
   { re: /checkpoint|challenge_required|captcha|doğrulama istedi|account\/access|authwall/i, kind: 'doğrulama', hint: 'Platform güvenlik doğrulaması istiyor: kanalda "Yeniden bağlan" → görünür pencerede çöz.' },
   { re: /pin\/recovery|PIN (gerekli|kodunu)|XChat PIN/i, kind: 'PIN', hint: 'X/Messenger şifreli sohbet PIN’i bekliyor: kanal uyarısında "PIN’i gir".' },
-  { re: /oturum düşmüş|Oturum düştü|yeniden giriş gerekli|logged ?out|401\b.*(whatsapp|wa)/i, kind: 'oturum', hint: 'Oturum düştü: kanalda "Yeniden bağlan".' },
+  { re: /oturum düşmüş|Oturum düştü|oturumu kapattı|yeniden giriş gerekli|logged ?out|401\b.*(whatsapp|wa)/i, kind: 'oturum', hint: 'Oturum düştü: kanalda "Yeniden bağlan".' },
   { re: /JSON yerine sayfa|<!DOCTYPE html>/i, kind: 'API→HTML', hint: 'Platform JSON yerine sayfa döndürdü (oturum/başlık sorunu). Günlükteki uç adını rapora ekle.' },
   { re: /Voyager \d{3}/, kind: 'LinkedIn API', hint: 'LinkedIn Voyager isteği reddedildi; durum kodu rapordaki satırda.' },
   { re: /Bad MAC|No session|decrypt|SessionError|failed to decrypt/i, kind: 'WA şifreleme', hint: 'WhatsApp Signal oturumu: tek seferlikse normal; sürüyorsa eşleşmeyi yenile.' },
@@ -191,19 +191,21 @@ async function setup() {
     ),
   );
   const pairs = [];
+  /** Sohbet seçimi: son sohbetler numaralı listelenir; numara yaz ya da kişi adıyla ara (boş = atla) */
   const pickChat = async (acc, prompt) => {
-    const mine = chats.filter((ch) => ch.accountId === acc.id);
+    const mine = chats.filter((ch) => ch.accountId === acc.id).sort((a, b) => b.lastMessageAt - a.lastMessageAt);
+    let shown = mine.filter((ch) => ch.kind === 'direct').slice(0, 9);
     for (;;) {
-      const q = (await rl.question(`  ${prompt} (${acc.label}) — sohbet adında geçen kelime: `)).trim().toLocaleLowerCase('tr-TR');
-      if (!q) return null;
+      console.log(dim(`  ${prompt} — ${acc.label}:`));
+      shown.forEach((h, i) => console.log(`   ${i + 1}) ${h.name} ${dim([h.handle, h.kind !== 'direct' ? h.kind : ''].filter(Boolean).join(' · '))}`));
+      const ans = (await rl.question(`  Numara yaz ya da kişi adıyla ara ${dim('(boş = bu platformu atla)')}: `)).trim();
+      if (!ans) return null;
+      const n = Number(ans);
+      if (Number.isInteger(n) && shown[n - 1]) return shown[n - 1];
+      const q = ans.toLocaleLowerCase('tr-TR');
       const hits = mine.filter((ch) => ch.name.toLocaleLowerCase('tr-TR').includes(q) || (ch.handle ?? '').toLocaleLowerCase('tr-TR').includes(q)).slice(0, 9);
-      if (!hits.length) {
-        console.log(yellow('   eşleşen sohbet yok, tekrar dene (boş = atla)'));
-        continue;
-      }
-      hits.forEach((h, i) => console.log(`   ${i + 1}) ${h.name} ${dim(h.kind + ' · ' + (h.handle ?? '') + ' · ' + h.id)}`));
-      const n = Number(await rl.question('   numara: '));
-      if (hits[n - 1]) return hits[n - 1];
+      if (!hits.length) console.log(yellow(`   "${ans}" adında sohbet yok — bu, sohbetteki MESAJ değil KİŞİ/SOHBET adı olmalı`));
+      else shown = hits;
     }
   };
   for (const [p, list] of byPlat) {
@@ -217,14 +219,14 @@ async function setup() {
       return ok[Number(await rl.question(`   ${label} hesap numarası: `)) - 1];
     };
     const a = await pickAcc('ANA');
-    const aChat = a && (await pickChat(a, 'ANA hesapta test kişisiyle sohbet'));
+    const aChat = a && (await pickChat(a, 'ANA hesabında, test hesabınla olan sohbeti seç'));
     if (!aChat) continue;
     const others = ok.filter((x) => x.id !== a.id);
     let b = null,
       bChat = null;
     if (others.length) {
       b = others.length === 1 ? others[0] : await pickAcc('TEST');
-      bChat = b && b.id !== a.id ? await pickChat(b, 'TEST hesapta ana hesapla sohbet') : null;
+      bChat = b && b.id !== a.id ? await pickChat(b, 'TEST hesabında, ana hesabınla olan sohbeti seç') : null;
     }
     pairs.push({ platform: p, a: { accountId: a.id, label: a.label, chatId: aChat.id, chatName: aChat.name }, b: bChat ? { accountId: b.id, label: b.label, chatId: bChat.id, chatName: bChat.name } : null, manual: !bChat });
     console.log(green(`   ✓ ${p}: ${a.label} → ${aChat.name}${bChat ? `  ⇄  ${b.label} → ${bChat.name}` : dim('  (elle cevap modu)')}`));
@@ -232,7 +234,7 @@ async function setup() {
   rl.close();
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.writeFileSync(CFG, JSON.stringify({ pairs }, null, 2), { mode: 0o600 });
-  console.log(`\n${green('Kaydedildi:')} ${CFG}  ${dim(`(${pairs.length} platform)`)}\nŞimdi: ${bold('node scripts/e2e.mjs run --ui')}`);
+  console.log(`\n${green('Kaydedildi:')} ${CFG}  ${dim(`(${pairs.length} platform)`)}\nŞimdi: ${bold('npm run e2e -- run --ui')}`);
 }
 
 /* ───────── tur ───────── */
@@ -468,7 +470,7 @@ async function preflight() {
 async function run(args) {
   const health = await preflight();
   if (!fs.existsSync(CFG)) {
-    console.log(yellow('Önce eşleştirme: node scripts/e2e.mjs setup'));
+    console.log(yellow('Önce eşleştirme: npm run e2e -- setup'));
     process.exit(1);
   }
   const { pairs } = JSON.parse(fs.readFileSync(CFG, 'utf8'));
