@@ -668,9 +668,27 @@ export class BrowserConnector extends BaseConnector {
     return next;
   }
 
+  /**
+   * Kullanıcı işlemi (gönderme/tepki): yoklama turu sürüyorsa turun BİTMESİNİ beklemez; tur bir sonraki güvenli noktada
+   * (sohbet listesinden sonra, iki mesaj isteği arasında) araya alır. Eskiden gönderim tüm turu (liste + 8 sohbetin mesajları,
+   * LinkedIn'de istekler arası 0,4–1,5 sn) bekliyordu; gelen mesajın anlık sinyali tur başlattığı için "cevap verilen ilk
+   * mesaj" birkaç saniye gecikiyordu. Tur içinde koşar → sayfa gezintisiyle çakışmaz (eşzamanlı evaluate yarıda kesilmez).
+   */
+  private inPoll = false;
+  private urgentQ: Array<() => Promise<void>> = [];
+  private urgent<T>(fn: () => Promise<T>): Promise<T> {
+    if (!this.inPoll) return this.serial(fn);
+    return new Promise<T>((resolve, reject) => {
+      this.urgentQ.push(() => fn().then(resolve, reject));
+    });
+  }
+  private async runUrgent(): Promise<void> {
+    while (this.urgentQ.length) await this.urgentQ.shift()!();
+  }
+
   async sendText(remoteChatId: string, text: string, opts?: SendOptions): Promise<{ remoteId: string }> {
     if (!this.pageless && !(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
-    const id = (await this.serial(async () => this.run((p, c) => this.strategy.send(p, c, remoteChatId, text, opts)))) ?? `local-${Date.now()}`;
+    const id = (await this.urgent(async () => this.run((p, c) => this.strategy.send(p, c, remoteChatId, text, opts)))) ?? `local-${Date.now()}`;
     this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent', threadId: opts?.threadId });
     return { remoteId: id };
   }
@@ -678,13 +696,13 @@ export class BrowserConnector extends BaseConnector {
   async react(remoteChatId: string, remoteMsgId: string, emoji: string, remove: boolean): Promise<void> {
     if (!this.strategy.react) throw new Error('Bu platformda tepki desteklenmiyor');
     if (!this.pageless && !(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
-    await this.serial(async () => this.run((p, c) => this.strategy.react!(p, c, remoteChatId, remoteMsgId, emoji, remove)));
+    await this.urgent(async () => this.run((p, c) => this.strategy.react!(p, c, remoteChatId, remoteMsgId, emoji, remove)));
   }
 
   async sendMedia(remoteChatId: string, file: { path: string; name: string; mime: string; size: number }, caption?: string): Promise<{ remoteId: string }> {
     if (!this.strategy.sendFile) throw new Error('Bu platformda dosya gönderme desteklenmiyor');
     if (!this.pageless && !(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
-    const id = (await this.serial(async () => this.run((p, c) => this.strategy.sendFile!(p, c, remoteChatId, file, caption)))) ?? `local-${Date.now()}`;
+    const id = (await this.urgent(async () => this.run((p, c) => this.strategy.sendFile!(p, c, remoteChatId, file, caption)))) ?? `local-${Date.now()}`;
     const kind = file.mime.startsWith('image/') ? 'image' : file.mime.startsWith('video/') ? 'video' : file.mime.startsWith('audio/') ? 'audio' : 'file';
     this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text: caption ?? '', ts: Date.now(), status: 'sent', attachments: [{ kind, name: file.name, mime: file.mime, size: file.size }] });
     return { remoteId: id };
@@ -861,7 +879,16 @@ export class BrowserConnector extends BaseConnector {
     this.polling = true;
     this.lastPollAt = Date.now();
     try {
-      await this.serial(() => this.pollInner(first));
+      await this.serial(async () => {
+        this.inPoll = true;
+        try {
+          await this.pollInner(first);
+        } finally {
+          // turun sonunda bekleyen kullanıcı işlemi kalmasın (boşaltma ile bayrak arasında await yok)
+          await this.runUrgent().catch(() => undefined);
+          this.inPoll = false;
+        }
+      });
       // API tabanlı kanal: ilk başarılı yoklamadan sonra tarayıcı kapanır; sayfasızda çerezler her yoklamada diske
       if (this.strategy.pageless && !this.wantPage() && this.account.status === 'connected' && !this.stopping) {
         if (this.ctx) await this.serial(() => this.goPageless()).catch((e) => bus.log('warn', `${this.account.platform}: sayfasız moda geçilemedi: ${(e as Error).message}`));
@@ -889,6 +916,7 @@ export class BrowserConnector extends BaseConnector {
       const cookies = await this.cookies();
       // Strateji çağrıları asılı kalmasın: sayfa donarsa uyarı düşsün, sonraki yoklama devam etsin
       const threads = await withTimeout(this.strategy.threads(page, cookies), 120_000, 'sohbet listesi');
+      await this.runUrgent();
       if (first) this.syncProgress(70, `${threads.length} sohbet, mesajlar alınıyor`);
       const changed: Thread[] = [];
       const retryRead: string[] = [];
@@ -937,6 +965,7 @@ export class BrowserConnector extends BaseConnector {
       // API stratejileri en çok 2'li paralel (patlamalı istek deseni hız sınırı/otomasyon algısını tetikler); DOM okuyanlar sıralı
       const width = this.strategy.parallel ? 2 : 1;
       for (let i = 0; i < batch.length; i += width) {
+        await this.runUrgent();
         await Promise.all(
           batch.slice(i, i + width).map(async (t) => {
             try {

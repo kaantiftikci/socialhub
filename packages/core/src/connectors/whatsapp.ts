@@ -1058,6 +1058,31 @@ export class WhatsAppConnector extends BaseConnector {
   async watch(remoteChatId: string): Promise<void> {
     if (!this.sock || remoteChatId.endsWith('@g.us')) return;
     await this.sock.presenceSubscribe(remoteChatId).catch(() => undefined);
+    void this.prewarm(remoteChatId);
+  }
+
+  /**
+   * Sohbet açılınca ilk gönderimin ağ işlerini önceden yap: relayMessage her gönderimde karşı tarafın + kendi cihaz
+   * listemizi (usync, önbellek 5 dk) ister ve yeni cihazlar için Signal oturumu kurar (prekey isteği). Bunlar Enter'a
+   * basınca yapılırsa "cevap verilen ilk mesaj" 1–2 sn gecikir. Baileys'in relayMessage'daki çağrılarının aynısı (önbellekli);
+   * sohbet başına 4 dk'da en çok bir kez, kullanıcı sohbeti açtığında (WhatsApp Web de sohbet açılınca cihazları eşitler).
+   */
+  private warmed = new Map<string, number>();
+  private async prewarm(jid: string): Promise<void> {
+    const sock = this.sock as (WASocket & { getUSyncDevices?: (j: string[], c: boolean, z: boolean) => Promise<{ jid: string }[]>; assertSessions?: (j: string[], f?: boolean) => Promise<boolean> }) | undefined;
+    const me = sock?.authState.creds.me;
+    if (!sock?.getUSyncDevices || !sock.assertSessions || !me?.id) return;
+    if (Date.now() - (this.warmed.get(jid) ?? 0) < 4 * 60_000) return;
+    this.warmed.set(jid, Date.now());
+    try {
+      const isLid = jid.endsWith('@lid');
+      const own = isLid && me.lid ? `${me.lid.split(':')[0].split('@')[0]}@lid` : `${me.id.split(':')[0].split('@')[0]}@s.whatsapp.net`;
+      const devices = await sock.getUSyncDevices([own, jid], true, false);
+      const targets = devices.map((d) => d.jid).filter((j) => j !== me.id && j !== me.lid);
+      if (targets.length) await sock.assertSessions(targets);
+    } catch {
+      this.warmed.delete(jid);
+    }
   }
 
   /** Son gelen mesajları telefonda da okundu işaretle (mavi tik / okunmamış rozeti düşer) */

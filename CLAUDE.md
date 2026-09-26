@@ -165,6 +165,10 @@ Dil: arayüz ve yorumlar Türkçe.
   `uidValidity` durum dosyasında; değişince imleç sıfırlanır. `classify`: authenticationFailed → dur (otomatik deneme yok), ETHROTTLE →
   throttleReset, [ALERT]/[LIMIT]/çok bağlantı → 15 dk. `missingIdleCommand: 'STATUS'`.
 - Amazon Seller Central / Etsy Mesajları / Shopify Inbox tarayıcı köprüleri varsayılan KAPALI (yapılandırmada messaging/inbox:true ile açılır).
+- Gönderim hızı: arayüz iyimser (`outbox`, Conversation.tsx) — Enter'da "Gönderiliyor" balonu hemen, gerçek kayıt gelince kopya gizlenir,
+  hata olursa metin kutuya döner; ardışık gönderimler `sendChain` ile sıralı. Köprü: send/react/sendFile `urgent()` — yoklama turu sürüyorsa
+  turu beklemez, `runUrgent()` güvenli noktada (liste sonrası, mesaj istekleri arası) araya alır (test: send-priority.test.ts).
+  WhatsApp `watch()` (sohbet açılınca) `prewarm`: getUSyncDevices + assertSessions (sohbet başına 4 dk'da bir) → ilk yanıt beklemez.
 - Mesaj üstüne gelince iki düğme (`.rtrig`, ikincisi `.second`): 😊 tepki (`REACT_PLATFORMS`: WhatsApp, Telegram, Slack, Instagram
   `broadcast/reaction`, LinkedIn `reactWithEmoji|unreactWithEmoji` {messageUrn, emoji} — mautrix-linkedin) + 📅 takvim (metinli her mesajda,
   tüm uygulamalar). LinkedIn gelen tepkiler `reactionSummaries` → `liReactions`. Messenger/X (yalnız DOM), iMessage, e-posta, pazaryeri: tepki yok.

@@ -105,7 +105,7 @@ function tomorrowAt(hour: number): number {
 
 export function Conversation({
   chat,
-  messages,
+  messages: stored,
   ai,
   notify,
   onTags,
@@ -146,6 +146,16 @@ export function Conversation({
   /** Sipariş sayfası: aynı siparişe bağlı müşteri sorusu sohbeti (varsa) */
   relatedQuestion?: Chat | null;
 }) {
+  // Anında görünen giden mesajlar: Enter'a basınca "Gönderiliyor" balonu hemen çıkar, platform onaylayınca gerçek kayıt
+  // (WS message.upsert) aynı metinle gelir ve bu kopya gizlenir. Hata olursa balon kalkar, metin kutuya geri döner.
+  const [outbox, setOutbox] = useState<Message[]>([]);
+  const messages = useMemo(() => {
+    const mine = outbox.filter((o) => o.chatId === chat.id && !stored.some((m) => m.fromMe && m.text.trim() === o.text && m.ts >= o.ts - 10_000));
+    return mine.length ? [...stored, ...mine] : stored;
+  }, [stored, outbox, chat.id]);
+  const sendChain = useRef<Promise<unknown>>(Promise.resolve());
+  const openChatRef = useRef(chat.id);
+  openChatRef.current = chat.id;
   const [search, setSearch] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -540,15 +550,23 @@ export function Conversation({
     }
     const body = (text || draftShown?.draft || '').trim();
     if (!body || sending) return;
-    setSending(true);
+    const chatId = chat.id;
+    const threadId = threadFocus ?? undefined;
+    const id = `out-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    setOutbox((x) => [...x, { id, chatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text: body, ts: Date.now(), status: 'pending', threadId }]);
+    setText('');
+    setDraft(null);
+    // art arda gönderimler sırasını korusun (her biri bir öncekini bekler; arayüz beklemez)
+    const run = sendChain.current.then(() => api.send(chatId, body, threadId));
+    sendChain.current = run.catch(() => undefined);
     try {
-      await api.send(chat.id, body, threadFocus ?? undefined);
-      setText('');
-      setDraft(null);
+      await run;
+      setOutbox((x) => x.map((o) => (o.id === id ? { ...o, status: 'sent' } : o)));
+      setTimeout(() => setOutbox((x) => x.filter((o) => o.id !== id)), 5000);
     } catch (e) {
+      setOutbox((x) => x.filter((o) => o.id !== id));
+      if (chatId === openChatRef.current) setText((t) => (t.trim() ? t : body));
       notify((e as Error).message, true);
-    } finally {
-      setSending(false);
     }
   }
 
