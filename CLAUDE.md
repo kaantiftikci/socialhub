@@ -181,6 +181,8 @@ Dil: arayüz ve yorumlar Türkçe.
   WebSocket çerçeveleri pasif dinlenir (`watchSocketFrames`; soket açılmaz/yazılmaz). Instagram `gateway.instagram.com/ws/lightspeed`,
   Messenger `gateway.facebook.com/ws/lightspeed` + `web-chat-e2ee` (boyut), olay regex'i `LIGHTSPEED_EVENT` (insertMessage/upsertMessage/
   updateThreadSnippet…); X `chat-ws.x.com` (şifreli, ≥96 bayt). Olay → `pollSoon` (≥10 sn arayla, `soonAt` bekleyen turu ertelemez).
+  Slack (tarayıcı yolu) `wss-(primary|backup).slack.com` RTM JSON (`"type":"message|*_marked|reaction_*"` olay; presence/typing/pong canlı);
+  sayfa `keepOpen:'whileActive'` (Mivelo öndeyken; Slack masaüstünde aktif sayar → telefon bildirimi o sırada durabilir), boşta sayfasız 30 sn.
   Seyrekleşme (`rtSlowdown`) ancak en az bir 'event' görüldükten sonra: Instagram ×10 (yedek 5 dk; sayfa `keepOpen:'always'`),
   LinkedIn ×5, Messenger ×5, X ×3. X tam yeniden yükleme 20–30 dk. LinkedIn `tabBadgeUpdateTopic` yalnız MESSAGING ise olay.
 - Pazaryerleri `PollTimer` + `marketDelay` (poll-timer.ts): Trendyol/Hepsiburada/Shopify odakta 30 sn / boşta 60 sn, n11 45/90, Etsy 60/90,

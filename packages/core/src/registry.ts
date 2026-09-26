@@ -130,7 +130,7 @@ export class Registry {
         const tokenFile = path.join(sessionDir(account.id), 'token');
         // belirteç dosyası: düz xoxp (eski) ya da {token, appToken} (Bağlan → Slack uygulaması; appToken varsa Socket Mode)
         const tok = fs.existsSync(tokenFile) ? parseSlackToken(fs.readFileSync(tokenFile, 'utf8')) : undefined;
-        c = tok ? new SlackConnector(account, this.store, tok.token, tok.appToken) : new BrowserConnector(account, this.store, slackStrategy, 30_000);
+        c = tok ? new SlackConnector(account, this.store, tok.token, tok.appToken) : new BrowserConnector(account, this.store, slackStrategy, 30_000, { keepOpen: 'whileActive', rtSlowdown: 3 }); // Mivelo öndeyken web istemcisi açık + kendi soketi dinlenir (anlık), boşta sayfasız 30 sn
         break;
       }
       case 'demo':

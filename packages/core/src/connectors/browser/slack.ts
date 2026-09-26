@@ -321,6 +321,13 @@ export const slackStrategy: Strategy = {
 
   pageless: true,
 
+  /**
+   * Anlık sinyal: web istemcisinin KENDİ gerçek zamanlı soketi (wss-primary/backup.slack.com, RTM JSON çerçeveleri) pasif
+   * dinlenir — soket açılmaz/yazılmaz, ek istek yok. Yeni mesaj / okundu / tepki olayı → yoklama öne çekilir; presence,
+   * yazıyor, ping çerçeveleri yalnız "canlı" sayılır. Sayfa yalnız Mivelo öndeyken açık (registry keepOpen: whileActive).
+   */
+  watchSockets: [{ url: /wss(-primary|-backup|-mobile)?\.slack\.com/, event: /"type":"(message|im_marked|channel_marked|group_marked|mpim_marked|reaction_added|reaction_removed)"/ }],
+
   async loggedIn(page, cookies, passive) {
     // "d": .slack.com oturum çerezi; yalnızca bir çalışma alanı gerçekten açıldığında yazılır.
     // Google/e-posta doğrulaması bitmiş ama çalışma alanı seçilmemişse yoktur → giriş tamamlanmamıştır.

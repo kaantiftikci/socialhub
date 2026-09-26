@@ -5,6 +5,7 @@ import { instagram, pickCursor } from '../src/connectors/browser/instagram.js';
 import { linkedin, conversationsPageUrl, liReactions } from '../src/connectors/browser/linkedin.js';
 import { messenger, SITES, siteOfUrl, threadUrl, THREAD_HREF } from '../src/connectors/browser/messenger.js';
 import { mergeLegacyGroups, applyReadMark } from '../src/connectors/browser/x.js';
+import { slackStrategy } from '../src/connectors/browser/slack.js';
 import type { Thread } from '../src/connectors/browser/bridge.js';
 
 // ───────────── Instagram ─────────────
@@ -284,4 +285,18 @@ test('instagram: HTML yanıtında kök neden yönlendirmeden — doğrulama (che
   await assert.rejects(instagram.send(pageTo('https://www.instagram.com/challenge/AbC/'), { csrftoken: 'x' }, '1', 'a'), /checkpoint/);
   await assert.rejects(instagram.send(pageTo('https://www.instagram.com/accounts/login/?next=%2F'), { csrftoken: 'x' }, '1', 'a'), /oturumu kapattı/);
   await assert.rejects(instagram.send(pageTo('https://www.instagram.com/direct/inbox/'), { csrftoken: 'x' }, '1', 'a'), /JSON yerine sayfa/);
+});
+
+test('slack anlık sinyal: web istemcisinin kendi soketi; mesaj/okundu/tepki olay, presence/yazıyor/ping yalnız canlı', () => {
+  const rule = slackStrategy.watchSockets![0];
+  assert.ok(rule.url.test('wss://wss-primary.slack.com/?token=x&sync_desync=1'));
+  assert.ok(rule.url.test('wss://wss-backup.slack.com/link/?token=x'));
+  assert.ok(!rule.url.test('wss://edgeapi.slack.com/'));
+  const ev = rule.event!;
+  assert.ok(ev.test('{"type":"message","channel":"D123","user":"U1","text":"selam","ts":"1790000000.000100"}'));
+  assert.ok(ev.test('{"type":"im_marked","channel":"D123","ts":"1790000000.000100"}'));
+  assert.ok(ev.test('{"type":"reaction_added","user":"U1","reaction":"thumbsup"}'));
+  assert.ok(!ev.test('{"type":"presence_change","presence":"active","user":"U1"}'));
+  assert.ok(!ev.test('{"type":"user_typing","channel":"D123","user":"U1"}'));
+  assert.ok(!ev.test('{"type":"pong","reply_to":3}'));
 });
