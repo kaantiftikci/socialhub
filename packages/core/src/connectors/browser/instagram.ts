@@ -500,6 +500,25 @@ export const instagram: Strategy = {
     return String(r.thread_id);
   },
 
+  /**
+   * Emoji tepkisi: metin gönderimiyle aynı "broadcast" uç ailesi (/direct_v2/threads/broadcast/reaction/; instagram-private-api
+   * ve instagrapi'nin kullandığı biçim). Instagram'da kişi başına mesaja tek tepki: yenisi eskisinin yerine geçer.
+   */
+  async react(page, cookies, threadId, msgId, emoji, remove) {
+    await ig(page, cookies, '/api/v1/direct_v2/threads/broadcast/reaction/', {
+      action: 'send_item',
+      item_type: 'reaction',
+      reaction_type: 'like',
+      reaction_status: remove ? 'deleted' : 'created',
+      node_type: 'item',
+      item_id: msgId,
+      emoji,
+      client_context: String(Date.now()) + Math.floor(Math.random() * 1e6),
+      mutation_token: String(Date.now()),
+      thread_ids: `["${threadId}"]`,
+    });
+  },
+
   async send(page, cookies, threadId, text) {
     const r = await ig(page, cookies, '/api/v1/direct_v2/threads/broadcast/text/', {
       action: 'send_item',

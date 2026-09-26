@@ -52,7 +52,7 @@ const slug = (name: string) =>
     .replace(/[^a-z0-9]/g, '');
 const memberAvatar = (name: string): string | undefined => (AVATAR_FILES.has(slug(name)) ? demoAsset(`avatars/${slug(name)}.jpg`) : undefined);
 /** Beğeni/tepki olayı olan platformlar (e-posta ve alışveriş kanallarında yok) */
-const REACT_PLATFORMS = new Set<Platform>(['whatsapp', 'instagram', 'messenger', 'imessage', 'telegram', 'slack']);
+const REACT_PLATFORMS = new Set<Platform>(['whatsapp', 'instagram', 'linkedin', 'telegram', 'slack']);
 const REACT_EMOJI = ['👍', '❤️', '😂', '🔥', '👏'];
 export const isReactionText = (t: string) => /^(👍|❤️|😂|🔥|👏|😮) .+ (bir mesajı beğendi|mesajına tepki verdi)$/.test(t);
 

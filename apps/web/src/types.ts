@@ -164,7 +164,7 @@ export const TAG_COLORS: Record<string, [string, string]> = {
 export const DEFAULT_TAGS = ['müşteri', 'ekip', 'fırsat', 'kişisel'];
 
 /** Emoji tepkisi verilebilen platformlar */
-export const REACT_PLATFORMS = new Set<Platform>(['whatsapp', 'telegram', 'slack', 'demo']);
+export const REACT_PLATFORMS = new Set<Platform>(['whatsapp', 'telegram', 'slack', 'instagram', 'linkedin', 'demo']);
 /** Hızlı tepki çubuğu */
 export const QUICK_REACTIONS = ['👍', '❤️', '😂', '🔥', '👏', '😮'];
 

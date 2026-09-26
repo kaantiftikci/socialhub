@@ -775,12 +775,17 @@ export function Conversation({
                             })()}
                           </button>
                         )}
-                        {!isReact && (canReact || chat.platform === 'slack' || !!m.text) && (
+                        {!isReact && (canReact || chat.platform === 'slack') && (
                           <button type="button" className={`rtrig ${barFor === m.id ? 'on' : ''}`} aria-label={canReact ? 'Tepki ver' : 'Hızlı işlemler'} title={canReact ? 'Tepki ver' : 'Hızlı işlemler'} onClick={() => (setBarFor(barFor === m.id ? null : m.id), setReactPick(null))}>
-                            <Icon name={canReact || chat.platform === 'slack' ? 'smile' : 'calendar'} size={15} />
+                            <Icon name={canReact ? 'smile' : 'thread'} size={15} />
                           </button>
                         )}
-                        {!isReact && barFor === m.id && (canReact || chat.platform === 'slack' || !!m.text) && (
+                        {!isReact && !!m.text && (
+                          <button type="button" className={`rtrig cal ${canReact || chat.platform === 'slack' ? 'second' : ''}`} aria-label="Takvime ekle" title="Takvime ekle" onClick={() => (setCalFor(calFromText(m.text, `${m.fromMe ? 'Ben' : m.senderName}: ${m.text}`)), setBarFor(null))}>
+                            <Icon name="calendar" size={14} />
+                          </button>
+                        )}
+                        {!isReact && barFor === m.id && (canReact || chat.platform === 'slack') && (
                           <span className="rbar" role="toolbar" aria-label="Hızlı işlemler">
                             {canReact &&
                               QUICK_REACTIONS.map((e) => (
@@ -800,11 +805,6 @@ export function Conversation({
                                 }}
                               >
                                 <Icon name="smile" size={14} />
-                              </button>
-                            )}
-                            {!!m.text && (
-                              <button type="button" className="more" title="Takvime ekle" aria-label="Takvime ekle" onClick={() => (setCalFor(calFromText(m.text, `${m.fromMe ? 'Ben' : m.senderName}: ${m.text}`)), setBarFor(null))}>
-                                <Icon name="calendar" size={14} />
                               </button>
                             )}
                             {chat.platform === 'slack' && !m.threadId && (

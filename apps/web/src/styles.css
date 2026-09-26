@@ -911,9 +911,12 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 /* Üstüne gelince yalnız 😊 düğmesi (balonun yanında); tıklayınca hızlı tepki çubuğu açılır */
 .rtrig { position: absolute; top: 50%; right: -32px; transform: translateY(-50%); width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line); background: #fff; color: var(--text3); display: inline-flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: none; cursor: pointer; z-index: 2; }
 .bwrap.me .rtrig { right: auto; left: -32px; }
+/* İkinci düğme (takvim) tepki düğmesinin yanında */
+.rtrig.second { right: -60px; }
+.bwrap.me .rtrig.second { right: auto; left: -60px; }
 /* Balon ile ikon arasındaki boşluk görünmez köprüyle sarmalayıcıya dahil: imleç geçerken hover düşmez */
-.bwrap::after { content: ""; position: absolute; top: -4px; bottom: -4px; right: -40px; width: 40px; }
-.bwrap.me::after { right: auto; left: -40px; }
+.bwrap::after { content: ""; position: absolute; top: -4px; bottom: -4px; right: -68px; width: 68px; }
+.bwrap.me::after { right: auto; left: -68px; }
 /* İkonun tıklama alanı büyütülür (görünen daireden 6 px taşar) */
 .rtrig::before { content: ""; position: absolute; inset: -6px -6px -6px -10px; border-radius: 999px; }
 .bwrap:hover .rtrig, .rtrig:hover, .rtrig.on { opacity: 1; pointer-events: auto; }

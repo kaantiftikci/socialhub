@@ -2,7 +2,7 @@ import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Page } from 'playwright';
 import { instagram, pickCursor } from '../src/connectors/browser/instagram.js';
-import { linkedin, conversationsPageUrl } from '../src/connectors/browser/linkedin.js';
+import { linkedin, conversationsPageUrl, liReactions } from '../src/connectors/browser/linkedin.js';
 import { messenger, SITES, siteOfUrl, threadUrl, THREAD_HREF } from '../src/connectors/browser/messenger.js';
 import { mergeLegacyGroups, applyReadMark } from '../src/connectors/browser/x.js';
 import type { Thread } from '../src/connectors/browser/bridge.js';
@@ -240,4 +240,40 @@ test('instagram gönderim: sayfa açıkken de doğrulanmış başlıklarla (x-as
   // HTML yanıt anlaşılır hata verir
   const htmlPage = { request: { fetch: async () => ({ ok: () => true, status: () => 200, text: async () => '<!DOCTYPE html><html lang="tr">' }) }, context: () => ({ cookies: async () => [] }) } as unknown as Page;
   await assert.rejects(instagram.send(htmlPage, { csrftoken: 'x' }, '1', 'a'), /JSON yerine sayfa/);
+});
+
+test('instagram tepki: broadcast/reaction ucu, created/deleted', async () => {
+  const seen: string[] = [];
+  const page = {
+    request: {
+      fetch: async (url: string, opts: { data?: string }) => {
+        seen.push(url + ' ' + String(opts.data));
+        return { ok: () => true, status: () => 200, text: async () => '{"status":"ok"}' };
+      },
+    },
+    context: () => ({ cookies: async () => [{ name: 'csrftoken', value: 'C' }] }),
+  } as unknown as Page;
+  await instagram.react!(page, {}, '123', 'itm9', '❤️', false);
+  await instagram.react!(page, {}, '123', 'itm9', '❤️', true);
+  assert.match(seen[0], /\/api\/v1\/direct_v2\/threads\/broadcast\/reaction\//);
+  assert.match(seen[0], /reaction_status=created/);
+  assert.match(seen[0], /item_id=itm9/);
+  assert.match(seen[0], /thread_ids=%5B%22123%22%5D/);
+  assert.match(seen[1], /reaction_status=deleted/);
+});
+
+test('linkedin tepki: reactWithEmoji/unreactWithEmoji {messageUrn, emoji}; reactionSummaries → reactions', async () => {
+  const calls: Array<{ url: string; init?: { method?: string; body?: unknown } }> = [];
+  const page = { evaluate: async (_fn: unknown, a: { url: string; init?: { method?: string; body?: unknown } }) => (calls.push(a), {}) } as unknown as Page;
+  const urn = 'urn:li:msg_message:(urn:li:fsd_profile:A,2-XYZ)';
+  await linkedin.react!(page, { JSESSIONID: '"ajax:1"' }, 't', urn, '👍', false);
+  await linkedin.react!(page, { JSESSIONID: '"ajax:1"' }, 't', urn, '👍', true);
+  assert.match(calls[0].url, /voyagerMessagingDashMessengerMessages\?action=reactWithEmoji$/);
+  assert.match(calls[1].url, /action=unreactWithEmoji$/);
+  assert.deepEqual(calls[0].init, { method: 'POST', body: { messageUrn: urn, emoji: '👍' } });
+  await assert.rejects(linkedin.react!(page, {}, 't', '1790000000000', '👍', false), /uygun değil/);
+
+  const r = liReactions({ reactionSummaries: [{ emoji: '👍', count: 2, viewerReacted: true }, { emoji: '😂', count: 1, viewerReacted: false }] })!;
+  assert.deepEqual(r.map((x) => [x.emoji, x.fromMe]), [['👍', true], ['👍', false], ['😂', false]]);
+  assert.equal(liReactions({}), undefined);
 });

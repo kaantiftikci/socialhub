@@ -550,7 +550,33 @@ async function watchRealtime(page: Page, notify: (kind: 'alive' | 'event') => vo
   }, RT_EVENT_RE.source);
 }
 
+/**
+ * Mesajın tepki özetleri (reactionSummaries: emoji, count, viewerReacted) → Reaction[]. LinkedIn tepki verenleri tek tek vermez;
+ * sayı kadar kayıt üretilir (arayüz emojiye göre sayar), kendi tepkimiz fromMe.
+ */
+export function liReactions(m: J): Msg['reactions'] {
+  const out: NonNullable<Msg['reactions']> = [];
+  for (const r of (m.reactionSummaries ?? []) as J[]) {
+    const emoji = String(r.emoji ?? '');
+    if (!emoji) continue;
+    const mine = r.viewerReacted === true;
+    if (mine) out.push({ emoji, senderId: 'me', senderName: 'Ben', fromMe: true });
+    const others = Math.max(0, Math.min(50, Number(r.count ?? 0) - (mine ? 1 : 0)));
+    for (let i = 0; i < others; i++) out.push({ emoji, senderId: `li-${emoji}-${i}`, senderName: 'LinkedIn kullanıcısı', fromMe: false });
+  }
+  return out.length ? out : undefined;
+}
+
 export const linkedin: Strategy = {
+  /** Emoji tepkisi (mautrix-linkedin reactions.go ile aynı): voyagerMessagingDashMessengerMessages?action=reactWithEmoji|unreactWithEmoji */
+  async react(page, cookies, _threadId, msgId, emoji, remove) {
+    if (!msgId.startsWith('urn:li:')) throw new Error('LinkedIn: bu mesajın kimliği tepki için uygun değil');
+    await voyager(page, cookies, `https://www.linkedin.com/voyager/api/voyagerMessagingDashMessengerMessages?action=${remove ? 'unreactWithEmoji' : 'reactWithEmoji'}`, {
+      method: 'POST',
+      body: { messageUrn: msgId, emoji },
+    });
+  },
+
   home: HOME,
   watch: watchRealtime,
   loginHint: 'Açılan pencerede LinkedIn hesabına giriş yap',
@@ -691,6 +717,7 @@ export const linkedin: Strategy = {
             senderName: from.name,
             senderAvatarUrl: from.avatar,
             attachments: attachmentsOf(m),
+            reactions: liReactions(m),
           };
         })
         .sort((a: Msg, b: Msg) => a.ts - b.ts);
