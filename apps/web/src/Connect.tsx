@@ -24,6 +24,10 @@ const SLACK_MANIFEST = {
 };
 const SLACK_APP_URL = `https://api.slack.com/apps?new_app=1&manifest_json=${encodeURIComponent(JSON.stringify(SLACK_MANIFEST))}`;
 
+/** Tarayıcı yolu olsa da önce uygulama şifresi (IMAP + anlık IDLE) formu açılan e-posta sağlayıcıları; tarayıcı girişi formda yedek */
+const MAIL_FORM_FIRST = new Set<Platform>(['gmail', 'icloud']);
+const usesMailForm = (p: Platform) => PLATFORMS[p]?.mode === 'mail' || MAIL_FORM_FIRST.has(p);
+
 const UNOFFICIAL: Partial<Record<Platform, string>> = {
   whatsapp: 'WhatsApp kişisel hesaplar için API sunmaz; Mivelo WhatsApp Web gibi "bağlı cihaz" olarak bağlanır.',
   instagram: 'Instagram kişisel hesaplar için mesaj API’si sunmaz; Mivelo kendi web oturumunla bağlanır.',
@@ -123,7 +127,7 @@ export function ConnectModal({
         setActive(`${platform}:new`);
         return;
       }
-      const isMail = PLATFORMS[platform].mode === 'mail';
+      const isMail = usesMailForm(platform) && !opts.browser;
       if (isMail && (active !== `${platform}:new` || !mail.user.trim())) {
         setActive(`${platform}:new`);
         return;
@@ -199,7 +203,7 @@ export function ConnectModal({
   // Etkin kartın hemen altında açılan panel (form / QR / durum) — kullanıcı aşağı kaydırmak zorunda kalmasın
   const panel = (
     <>
-        {active?.endsWith(':new') && PLATFORMS[active.split(':')[0] as Platform]?.mode === 'mail' && (() => {
+        {active?.endsWith(':new') && usesMailForm(active.split(':')[0] as Platform) && (() => {
           const p = active.split(':')[0] as Platform;
           const isOutlook = p === 'outlook';
           const isImap = p === 'imap';
@@ -269,6 +273,15 @@ export function ConnectModal({
                     Bağlan
                   </button>
                 </div>
+                {MAIL_FORM_FIRST.has(p) && (
+                  <p style={{ margin: '10px 0 0', fontSize: 12.5, color: 'var(--text3, var(--text2))', lineHeight: 1.5 }}>
+                    Uygulama şifresiyle yeni e-postalar anında (~2 sn) gelir ve tarayıcı açılmaz. Şifre üretmek istemiyorsan{' '}
+                    <a href="#browser" onClick={(e) => (e.preventDefault(), void add(p, { browser: true }))} style={{ color: 'var(--v-txt)', fontWeight: 600 }}>
+                      tarayıcı girişiyle bağlan
+                    </a>{' '}
+                    (Mivelo açıkken ~15 sn, arka planda ~50 sn gecikmeyle).
+                  </p>
+                )}
               </div>
             </div>
           );
@@ -392,19 +405,27 @@ export function ConnectModal({
               </p>
               <ol style={{ margin: '10px 0 0', paddingLeft: 20, fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.6 }}>
                 <li>
-                  <a href={SLACK_APP_URL} target="_blank" rel="noreferrer" style={{ color: 'var(--v-txt)' }}>
-                    <b>Slack’te Mivelo uygulamasını oluştur</b>
-                  </a>{' '}
-                  → çalışma alanını seç → <b>Next</b> → <b>Create</b> (izinler hazır gelir)
+                  <span>
+                    <a href={SLACK_APP_URL} target="_blank" rel="noreferrer" style={{ color: 'var(--v-txt)' }}>
+                      <b>Slack’te Mivelo uygulamasını oluştur</b>
+                    </a>{' '}
+                    → çalışma alanını seç → <b>Next</b> → <b>Create</b> (izinler hazır gelir)
+                  </span>
                 </li>
                 <li>
-                  Sol menüde <b>Install App → Install to Workspace</b> → İzin ver
+                  <span>
+                    Sol menüde <b>Install App → Install to Workspace</b> → İzin ver
+                  </span>
                 </li>
                 <li>
-                  Çıkan <b>User OAuth Token</b>’ı (<code>xoxp-…</code>) aşağıya yapıştır
+                  <span>
+                    Çıkan <b>User OAuth Token</b>’ı (<code>xoxp-…</code>) aşağıya yapıştır
+                  </span>
                 </li>
                 <li>
-                  İsteğe bağlı, mesajların anında gelmesi için: <b>Basic Information → App-Level Tokens → Generate</b> (kapsam: <code>connections:write</code>) → <code>xapp-…</code>
+                  <span>
+                    İsteğe bağlı, mesajların anında gelmesi için: <b>Basic Information → App-Level Tokens → Generate</b> (kapsam: <code>connections:write</code>) → <code>xapp-…</code>
+                  </span>
                 </li>
               </ol>
               <div className="field" style={{ marginTop: 12, gap: 8 }}>

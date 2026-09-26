@@ -127,11 +127,56 @@ export interface Strategy {
    * mesaj/sohbet olayı → birkaç saniye içinde yoklama.
    */
   watch?(page: Page, notify: (kind: 'alive' | 'event') => void): Promise<void>;
+  /**
+   * watch yoksa genel izleyici: sayfa (ve iframe'leri) açıkken bu seçiciye uyan ilk satırların metni 2 sn'de bir karşılaştırılır;
+   * değişince (yeni e-posta listeye düştü) 'event'. Ağ trafiği yok, yalnız sayfanın kendi DOM'u okunur (Gmail tr.zA vb.).
+   */
+  watchSelector?: string;
+}
+
+/**
+ * Genel DOM izleyicisi (Strategy.watchSelector). Zaman ifadeleri ("14:32", "5 dk") imzadan atılır: yalnız geçen süre
+ * yüzünden olay çıkmasın. Seçici görünmüyorsa (sohbet açık, başka görünüm) imza sıfırlanır; dönüşte olay sayılmaz.
+ */
+export async function watchDom(page: Page, selector: string, notify: (kind: 'alive' | 'event') => void): Promise<void> {
+  await page.exposeBinding('__miveloDom', (_src, kind: string) => notify(kind === 'event' ? 'event' : 'alive'));
+  await page.addInitScript((sel: string) => {
+    const w = window as unknown as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+    if (w.__miveloDomHooked) return;
+    w.__miveloDomHooked = true;
+    let prev: string | null = null;
+    let aliveAt = 0;
+    setInterval(() => {
+      try {
+        const rows = Array.from(document.querySelectorAll(sel)).slice(0, 6);
+        if (!rows.length) {
+          prev = null;
+          return;
+        }
+        const sig = rows
+          .map((r) => (r.textContent ?? '').replace(/\d{1,2}[:.]\d{2}|\d+\s?(sn|dk|sa|gün|sec|min|hr|h|m|s|d)\b/gi, '').replace(/\s+/g, ' ').slice(0, 160))
+          .join('|');
+        if (prev !== null && sig !== prev) w.__miveloDom?.('event');
+        prev = sig;
+        if (Date.now() - aliveAt > 30_000) {
+          aliveAt = Date.now();
+          w.__miveloDom?.('alive');
+        }
+      } catch {
+        /* sayfa değişiyor */
+      }
+    }, 2000);
+  }, selector);
 }
 
 export interface BridgeOptions {
   /** Arayüz boştayken (pencere kapalı/odaksız) yoklama aralığı; verilmezse her zaman pollMs */
   idlePollMs?: number;
+  /**
+   * unloadWhenIdle stratejilerde tarayıcıyı yoklamalar arasında açık tut: 'always' (Outlook: sayfanın canlı listesi izlenir),
+   * 'whileActive' (Gmail/iCloud tarayıcı yolu: Mivelo odaktayken açık, boşta bellek için kapanır).
+   */
+  keepOpen?: 'always' | 'whileActive';
 }
 
 export class BrowserConnector extends BaseConnector {
@@ -407,7 +452,9 @@ export class BrowserConnector extends BaseConnector {
     }
     const ctx = this.ctx;
     this.page = ctx.pages()[0] ?? (await ctx.newPage());
-    if (this.strategy.watch) await this.strategy.watch(this.page, (k) => this.onRealtime(k)).catch((e) => bus.log('warn', `${this.account.platform}: anlık akış dinlenemedi: ${(e as Error).message}`));
+    const onRt = (k: 'alive' | 'event') => this.onRealtime(k);
+    const watching = this.strategy.watch ? this.strategy.watch(this.page, onRt) : this.strategy.watchSelector ? watchDom(this.page, this.strategy.watchSelector, onRt) : undefined;
+    await watching?.catch((e) => bus.log('warn', `${this.account.platform}: anlık izleme kurulamadı: ${(e as Error).message}`));
     ctx.on('close', () => {
       if (this.ctx !== ctx) return; // biz kapattık (görünürden görünmeze geçiş)
       if (!this.stopping) this.setStatus('disconnected', 'Tarayıcı penceresi kapatıldı');
@@ -688,7 +735,8 @@ export class BrowserConnector extends BaseConnector {
    */
   private nextDelay(): number {
     const base = this.opts.idlePollMs && !isUiActive() ? this.opts.idlePollMs : this.pollMs;
-    const rt = Date.now() - this.rtAliveAt < 5 * 60_000 ? 3 : 1;
+    // tarayıcı boşta kapalıysa (unloadWhenIdle) izleyici çalışmıyor: seyrekleştirme yok
+    const rt = !this.idleClosed && Date.now() - this.rtAliveAt < 5 * 60_000 ? 3 : 1;
     return base * rt * (0.7 + Math.random() * 0.6);
   }
 
@@ -711,7 +759,8 @@ export class BrowserConnector extends BaseConnector {
       }
       // Boşta boşaltma: sekme kapatmak/about:blank render sürecini bırakmıyor (service worker, site izolasyonu); tarayıcıyı
       // tamamen kapat, sonraki yoklama/işlem yeniden açar (kalıcı profil oturumu korur; açılış ~3-5 sn)
-      if (this.strategy.unloadWhenIdle && this.ctx && this.account.status === 'connected' && !this.stopping) {
+      const keep = this.opts.keepOpen === 'always' || (this.opts.keepOpen === 'whileActive' && isUiActive());
+      if (this.strategy.unloadWhenIdle && !keep && this.ctx && this.account.status === 'connected' && !this.stopping) {
         await this.serial(() => this.closeCtx()).catch(() => undefined);
         this.idleClosed = true;
       }

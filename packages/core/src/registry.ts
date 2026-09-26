@@ -180,7 +180,7 @@ export class Registry {
         // Gmail: varsayılan tarayıcı girişi (uygulama şifresi/OAuth istemcisi gerekmez); IMAP yapılandırması (token) verildiyse eski yol
         const tokenFile = path.join(sessionDir(account.id), 'token');
         if (!fs.existsSync(tokenFile)) {
-          c = new BrowserConnector(account, this.store, gmail, 90_000); // boşta tarayıcı kapalı: her yoklama açılış+sayfa yükü, 90 sn
+          c = new BrowserConnector(account, this.store, gmail, 30_000, { idlePollMs: 90_000, keepOpen: 'whileActive' }); // Mivelo odaktayken açık sayfa + canlı liste izleme (30 sn yedek); boşta tarayıcı kapalı, 90 sn
           break;
         }
         let cfg: MailConfig = { user: '' };
@@ -197,7 +197,12 @@ export class Registry {
         // Outlook.com / iCloud Mail: varsayılan tarayıcı girişi; IMAP yapılandırması (token) verildiyse eski yol
         const tokenFile = path.join(sessionDir(account.id), 'token');
         if (!fs.existsSync(tokenFile)) {
-          c = new BrowserConnector(account, this.store, account.platform === 'outlook' ? outlook : icloud, 90_000);
+          // Outlook: IMAP yolu yok (Microsoft şifreli IMAP'i kapattı) → sayfa sürekli açık, canlı liste izlenir (~3-5 sn; ~200-300 MB).
+          // iCloud tarayıcı yolu Gmail gibi: odaktayken açık. (Uygulamaya özel şifreyle IMAP önerilen yol.)
+          c =
+            account.platform === 'outlook'
+              ? new BrowserConnector(account, this.store, outlook, 90_000, { keepOpen: 'always' })
+              : new BrowserConnector(account, this.store, icloud, 30_000, { idlePollMs: 90_000, keepOpen: 'whileActive' });
           break;
         }
         let cfg: MailConfig = { user: '' };

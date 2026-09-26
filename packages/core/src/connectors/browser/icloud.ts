@@ -58,6 +58,8 @@ async function ensureInbox(page: Page): Promise<Frame | undefined> {
 
 export const icloud: Strategy = {
   unloadWhenIdle: true,
+  // canlı liste izleme (bridge watchDom): sayfa açıkken yeni e-posta satırı düşünce birkaç sn içinde yoklama
+  watchSelector: '[role="listbox"] [role="option"], [role="list"] [role="listitem"], [role="grid"] [role="row"]',
   home: HOME,
   loginHint: 'Açılan pencerede "Giriş Yap"a bas, Apple hesabına gir (iki adımlı doğrulama dahil; "Oturumumu açık tut"u işaretle); Mail görününce pencere kendiliğinden kapanır',
 

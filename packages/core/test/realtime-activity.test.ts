@@ -48,3 +48,14 @@ test('slack manifest arayüzdeki kopyayla aynı', async () => {
   for (const s of SLACK_USER_SCOPES) assert.ok(src.includes(`'${s}'`), s);
   for (const e of SLACK_MANIFEST.settings.event_subscriptions.user_events) assert.ok(src.includes(`'${e}'`), e);
 });
+
+test('e-posta tarayıcı stratejileri canlı liste izleyicisi tanımlar', async () => {
+  const { gmail } = await import('../src/connectors/browser/gmail.js');
+  const { outlook } = await import('../src/connectors/browser/outlook.js');
+  const { icloud } = await import('../src/connectors/browser/icloud.js');
+  for (const s of [gmail, outlook, icloud]) {
+    assert.ok(s.watchSelector, s.home);
+    assert.equal(s.unloadWhenIdle, true);
+  }
+  assert.equal(gmail.watchSelector, 'tr.zA');
+});

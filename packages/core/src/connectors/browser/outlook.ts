@@ -290,6 +290,8 @@ export function outlookRow(r: OutlookRawRow, now = new Date()): { subject: strin
 
 export const outlook: Strategy = {
   unloadWhenIdle: true,
+  // canlı liste izleme (bridge watchDom): sayfa açıkken yeni e-posta satırı düşünce birkaç sn içinde yoklama
+  watchSelector: LIST,
   home: HOME,
   loginHint: 'Açılan pencerede Microsoft hesabına giriş yap ("Oturumunuz açık kalsın mı?" sorusuna Evet de); gelen kutusu görününce pencere kendiliğinden kapanır',
 

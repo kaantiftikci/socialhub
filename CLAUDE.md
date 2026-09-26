@@ -71,7 +71,8 @@ Dil: arayüz ve yorumlar Türkçe.
 - **iMessage**: `~/Library/Messages/chat.db` salt okunur + AppleScript gönderim; Tam Disk Erişimi yoksa Sistem Ayarları bölmesini açar.
 - **E-posta** (`connectors/mail.ts`): imapflow + nodemailer + mailparser; thread = sohbet. Gmail: uygulama şifresi ya da
   Google OAuth (Desktop client id+secret, `/oauth/callback`); Outlook: Azure client id + cihaz kodu (pencere otomatik açılır/kapanır).
-- **Gmail (tarayıcı)** (`connectors/browser/gmail.ts`): varsayılan yol; görünür pencerede Google girişi, sonra Gmail web DOM'u (tr.zA satırları,
+- **Gmail/iCloud Bağlan**: önce uygulama şifresi formu (IMAP + IDLE, anlık; `MAIL_FORM_FIRST` Connect.tsx), tarayıcı girişi formdaki yedek
+  bağlantı. **Gmail (tarayıcı)** (`connectors/browser/gmail.ts`): yedek yol; görünür pencerede Google girişi, sonra Gmail web DOM'u (tr.zA satırları,
   div.adn iletileri, span.aZo ekleri) okunur; yanıt Gmail düzenleyicisiyle. IMAP/uygulama şifresi yalnızca token dosyası varsa (registry).
 - **Shopier** (`connectors/shopier.ts`): resmi API `https://api.shopier.com/v1`, `Authorization: Bearer <PAT>`, 200 istek/dk.
   Sipariş = sohbet; olaylar mesaj; `action('fulfill')` → `PUT /orders/{id}`. API'de mesajlaşma ucu YOK.
@@ -102,7 +103,7 @@ Dil: arayüz ve yorumlar Türkçe.
 
 ## Ban önleme (Eylül 2026 araştırması)
 - Tarayıcı köprüsü yoklaması sabit `setInterval` DEĞİL: `bridge.schedule()` her tur ±%30 sapmalı `setTimeout`. Aralıklar (registry):
-  LinkedIn 60 sn, X 60 sn, Instagram 30 sn, Messenger 30 sn, Slack(tarayıcı) 30 sn, Gmail/Outlook/iCloud 90 sn. API paralelliği en çok 2.
+  LinkedIn 60 sn, X 60 sn, Instagram 30 sn, Messenger 30 sn, Slack(tarayıcı) 30 sn, Gmail/iCloud (tarayıcı) odakta 30 sn / boşta 90 sn, Outlook 90 sn. API paralelliği en çok 2.
 - Hata sınıfları (`pollInner` catch): checkpoint/captcha/`account/access`/authwall → yoklama durur, durum 'pairing' (otomatik deneme yok);
   429/999/rate limit → üstel bekleme 5→10→20… ≤120 dk (`rateHits`, başarılı turda sıfırlanır).
 - WhatsApp 402/403/406 → dur, oturumu SİLME (kısıtlı hesapta yeniden eşleşme yasağı kalıcılaştırabilir); kopmalarda üstel ≤5 dk + sapma.
@@ -126,6 +127,9 @@ Dil: arayüz ve yorumlar Türkçe.
   ya da JSON {token, appToken} (`parseSlackToken`). Tarayıcı girişi formdaki "yedek" bağlantısıyla.
 - E-posta (IMAP): ikinci uzun ömürlü oturum INBOX'ta IMAP IDLE (imapflow auto-IDLE, `maxIdleTime` 20 dk); 'exists' → 1 sn içinde
   yoklama. IDLE açıkken yoklama ~5 dk yedek, yoksa ~60 sn (±%30); kopmada üstel yeniden bağlanma 5 sn → ≤5 dk.
+- E-posta tarayıcı yolları canlı liste izler (`Strategy.watchSelector` → `bridge.watchDom`: ilk 6 satırın metni 2 sn'de bir, zaman
+  ifadeleri hariç; değişince yoklama). Köprü `keepOpen`: Outlook 'always' (IMAP yok; sürekli açık, ~200-300 MB, yoklama 90 sn → izleyici
+  canlıyken 270 sn), Gmail/iCloud tarayıcı 'whileActive' (odakta açık + 30 sn, boşta kapalı + 90 sn).
 - Amazon Seller Central / Etsy Mesajları / Shopify Inbox tarayıcı köprüleri varsayılan KAPALI (yapılandırmada messaging/inbox:true ile açılır).
 - Bağlan: resmi olmayan kanallarda "resmi değil" etiketi + Sosyal Medya altında açıklama (`UNOFFICIAL`, Connect.tsx).
 
