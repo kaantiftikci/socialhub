@@ -47,6 +47,7 @@ try {
   console.log('me:', await strategy.me(page, await cookies()));
   const threads = await strategy.threads(page, await cookies());
   console.log(`sohbet: ${threads.length} (${Date.now() - t0} ms)`);
+  if (mod.messengerSite) console.log('messenger adresi:', mod.messengerSite()?.key ?? 'seçilemedi', '| sayfa:', page.url());
   for (const t of threads.slice(0, 8)) console.log('  ', t.kind.padEnd(7), String(t.unread).padStart(3), t.lastTs ? new Date(t.lastTs).toISOString().slice(0, 16) : '-'.padEnd(16), t.name, '|', (t.preview ?? '').slice(0, 40));
   for (const t of threads.slice(0, 3)) {
     const t1 = Date.now();

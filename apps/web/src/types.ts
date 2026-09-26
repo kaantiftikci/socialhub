@@ -189,7 +189,7 @@ export function openInAppLink(c: Chat): { href: string; label: string } | null {
     case 'instagram':
       return { href: c.link || `https://www.instagram.com/direct/t/${id}/`, label };
     case 'messenger':
-      return { href: c.link || `https://www.messenger.com/t/${id}`, label };
+      return { href: c.link || `https://www.facebook.com/messages/t/${id}/`, label };
     case 'x':
       return { href: c.link || `https://x.com/messages/${id}`, label };
     case 'linkedin':

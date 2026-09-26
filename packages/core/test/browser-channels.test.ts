@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { Page } from 'playwright';
 import { instagram, pickCursor } from '../src/connectors/browser/instagram.js';
 import { linkedin, conversationsPageUrl } from '../src/connectors/browser/linkedin.js';
-import { messenger } from '../src/connectors/browser/messenger.js';
+import { messenger, SITES, siteOfUrl, threadUrl, THREAD_HREF } from '../src/connectors/browser/messenger.js';
 import { mergeLegacyGroups, applyReadMark } from '../src/connectors/browser/x.js';
 import type { Thread } from '../src/connectors/browser/bridge.js';
 
@@ -191,4 +191,22 @@ test('messenger: aynı mesaj ertesi gün ("Bugün" → "Dün") aynı kimliği al
   } finally {
     mock.timers.reset();
   }
+});
+
+test('messenger: iki adres — bağlantı biçimleri, adres tanıma ve sohbet adresi', () => {
+  for (const h of ['/t/123/', '/t/123', '/e2ee/t/123/', '/messages/t/123/', '/messages/e2ee/t/123']) assert.equal(h.match(THREAD_HREF)?.[1], '123', h);
+  for (const h of ['/t/abc/', '/messages/', '/marketplace/t/123/', '/messages/t/123/?focus_target=x']) assert.equal(THREAD_HREF.test(h), false, h);
+  assert.equal(siteOfUrl('https://www.facebook.com/messages/t/1/')?.key, 'facebook');
+  assert.equal(siteOfUrl('https://web.facebook.com/messages/')?.key, 'facebook');
+  assert.equal(siteOfUrl('https://www.messenger.com/t/1/')?.key, 'messenger');
+  assert.equal(siteOfUrl('https://notfacebook.com/')?.key, undefined);
+  const [fb, ms] = SITES;
+  assert.equal(threadUrl('9', fb, undefined), 'https://www.facebook.com/messages/t/9/');
+  assert.equal(threadUrl('9', ms, undefined), 'https://www.messenger.com/t/9/');
+  assert.equal(threadUrl('9', fb, '/messages/e2ee/t/9'), 'https://www.facebook.com/messages/e2ee/t/9/');
+  // başka adreste görülmüş yol kullanılmaz
+  assert.equal(threadUrl('9', fb, '/e2ee/t/9/'), 'https://www.facebook.com/messages/t/9/');
+  assert.equal(threadUrl('9', ms, '/messages/e2ee/t/9/'), 'https://www.messenger.com/t/9/');
+  assert.equal(threadUrl('9', ms, '/e2ee/t/9/'), 'https://www.messenger.com/e2ee/t/9/');
+  assert.equal(messenger.home, 'https://www.facebook.com/messages/');
 });

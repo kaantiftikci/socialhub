@@ -21,8 +21,49 @@ import type { Attachment } from '../../model.js';
  *   yutar ama DOM okunabilir. Bu yüzden tüm tıklamalar DOM üzerinden (element.click()) yapılır.
  * Deneysel: arayüz değişince seçicilerin güncellenmesi gerekir.
  */
-const BASE = 'https://www.messenger.com';
-const CHAT_LINK = 'a[href^="/t/"]';
+/**
+ * İki adres: messenger.com Nisan 2026'da kapatılıp facebook.com/messages'a yönlendirilmeye başlandı. Önce facebook.com
+ * denenir; gelen kutusu orada açılmazsa messenger.com'a düşülür. Çalışan adres hatırlanır (oturum boyunca), hangisinin
+ * seçildiği günlüğe yazılır. Sohbet bağlantıları facebook.com'da `/messages/t/<id>/` (şifreli: `/messages/e2ee/t/<id>/`),
+ * messenger.com'da `/t/<id>/` (`/e2ee/t/<id>/`); kimlik her iki adreste aynı sayısal id.
+ */
+export interface MessengerSite {
+  key: 'facebook' | 'messenger';
+  base: string;
+  /** sohbet yolunun öneki: `${base}${prefix}/t/<id>/` */
+  prefix: string;
+}
+export const SITES: MessengerSite[] = [
+  { key: 'facebook', base: 'https://www.facebook.com', prefix: '/messages' },
+  { key: 'messenger', base: 'https://www.messenger.com', prefix: '' },
+];
+let site: MessengerSite | undefined;
+/** Şu an kullanılan adres (doğrulama betiği ve günlük için) */
+export function messengerSite(): MessengerSite | undefined {
+  return site;
+}
+/** URL hangi adrese ait? (yönlendirme sonrası gerçek adresi bulmak için) */
+export function siteOfUrl(url: string): MessengerSite | undefined {
+  try {
+    const h = new URL(url).hostname;
+    if (/(^|\.)facebook\.com$/.test(h)) return SITES[0];
+    if (/(^|\.)messenger\.com$/.test(h)) return SITES[1];
+  } catch {
+    /* geçersiz URL */
+  }
+  return undefined;
+}
+/** Kenar çubuğu bağlantısından sohbet kimliği: /t/1, /e2ee/t/1, /messages/t/1, /messages/e2ee/t/1 (sondaki / isteğe bağlı) */
+export const THREAD_HREF = /^(?:\/messages)?(?:\/e2ee)?\/t\/(\d+)\/?$/;
+/** Kimlik → son görülen bağlantı yolu (şifreli sohbetler /e2ee/ yolunda açılır) */
+const hrefOf = new Map<string, string>();
+const cur = (): MessengerSite => site ?? SITES[0];
+/** Sohbet adresi: kenar çubuğunda görülen yol varsa o (aynı adresteyse), yoksa `${base}${prefix}/t/<id>/` */
+export function threadUrl(id: string, s: MessengerSite = cur(), href = hrefOf.get(id)): string {
+  if (href && (s.prefix ? href.startsWith(s.prefix + '/') : !href.startsWith('/messages/'))) return s.base + (href.endsWith('/') ? href : href + '/');
+  return `${s.base}${s.prefix}/t/${id}/`;
+}
+const CHAT_LINK = 'a[href^="/t/"], a[href^="/e2ee/t/"], a[href^="/messages/t/"], a[href^="/messages/e2ee/t/"]';
 const ROW = '[role="main"] [role="log"] [data-scope="messages_table"]';
 const CONTINUE_RE = /Olarak Devam Et|Continue as/i;
 
@@ -98,12 +139,12 @@ async function pinDialogOpen(page: Page): Promise<boolean> {
  */
 async function openThread(page: Page, id: string): Promise<void> {
   const here = new RegExp(`/t/${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/?(?:[?#]|$)`).test(page.url());
-  if (!here) await page.goto(`${BASE}/t/${id}/`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  if (!here) await page.goto(threadUrl(id), { waitUntil: 'domcontentloaded', timeout: 30_000 });
   const n = await waitForRows(page, here ? 5_000 : 15_000);
   if (n === 0 && !here) {
     // ara sayfa geç açılmış olabilir: gelen kutusunu bekle, sonra bir kez daha dene
     if (await ensureInbox(page, 10_000)) {
-      if (!new RegExp(`/t/${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/?(?:[?#]|$)`).test(page.url())) await page.goto(`${BASE}/t/${id}/`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      if (!new RegExp(`/t/${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/?(?:[?#]|$)`).test(page.url())) await page.goto(threadUrl(id), { waitUntil: 'domcontentloaded', timeout: 30_000 });
       await waitForRows(page, 10_000);
     }
   }
@@ -313,13 +354,15 @@ interface SidebarRow {
 }
 
 /** Kenar çubuğundaki sohbet satırları (`/t/<id>/` bağlantıları; sohbet penceresi içindekiler hariç) */
-function readSidebarRows(page: Page): Promise<SidebarRow[]> {
-  return page.evaluate(() => {
-    const out: Array<{ id: string; name: string; preview: string; unread: boolean; avatarUrl?: string }> = [];
+async function readSidebarRows(page: Page): Promise<SidebarRow[]> {
+  const rows = await page.evaluate(({ sel, hrefRe }) => {
+    const out: Array<{ id: string; href: string; name: string; preview: string; unread: boolean; avatarUrl?: string }> = [];
     const seen = new Set<string>();
     const mainLeft = document.querySelector('[role="main"]')?.getBoundingClientRect().left ?? window.innerWidth;
-    for (const a of Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href^="/t/"]'))) {
-      const m = a.getAttribute('href')?.match(/^\/t\/(\d+)\/?$/);
+    const re = new RegExp(hrefRe);
+    for (const a of Array.from(document.querySelectorAll<HTMLAnchorElement>(sel))) {
+      const href = a.getAttribute('href') ?? '';
+      const m = href.match(re);
       if (!m || seen.has(m[1])) continue;
       if (a.getBoundingClientRect().left >= mainLeft) continue; // sohbet penceresi içindeki bağlantılar
       seen.add(m[1]);
@@ -335,10 +378,12 @@ function readSidebarRows(page: Page): Promise<SidebarRow[]> {
       const unread = (nameSpan?.w ?? 400) >= 600 || unreadPrefix.test(preview);
       preview = preview.replace(unreadPrefix, '').replace(/\s+/g, ' ').slice(0, 200);
       const avatarUrl = Array.from(a.querySelectorAll('img')).map((i) => i.getAttribute('src') ?? '').find((s) => /^https?:\/\//.test(s) && !/emoji/.test(s));
-      out.push({ id: m[1], name, preview, unread, avatarUrl });
+      out.push({ id: m[1], href, name, preview, unread, avatarUrl });
     }
     return out;
-  });
+  }, { sel: CHAT_LINK, hrefRe: THREAD_HREF.source });
+  for (const r of rows) hrefOf.set(r.id, r.href);
+  return rows.map(({ href: _h, ...r }) => r);
 }
 
 /** Ham satır → sohbet; önizleme değiştiyse "şimdi", ilk görüşte/değişmediyse 0 (depodaki zaman kalır) */
@@ -357,9 +402,10 @@ function rowToThread(r: SidebarRow): Thread {
  */
 function scrollSidebar(page: Page): Promise<boolean> {
   return page
-    .evaluate(() => {
+    .evaluate(({ sel, hrefRe }) => {
+      const re = new RegExp(hrefRe);
       const mainLeft = document.querySelector('[role="main"]')?.getBoundingClientRect().left ?? window.innerWidth;
-      const row = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href^="/t/"]')).find((a) => /^\/t\/\d+\/?$/.test(a.getAttribute('href') ?? '') && a.getBoundingClientRect().left < mainLeft && a.closest('[role="row"], [role="grid"]'));
+      const row = Array.from(document.querySelectorAll<HTMLAnchorElement>(sel)).find((a) => re.test(a.getAttribute('href') ?? '') && a.getBoundingClientRect().left < mainLeft && a.closest('[role="row"], [role="grid"]'));
       let el: HTMLElement | null = row ?? null;
       while (el && el !== document.body) {
         const oy = getComputedStyle(el).overflowY;
@@ -371,19 +417,54 @@ function scrollSidebar(page: Page): Promise<boolean> {
         el = el.parentElement;
       }
       return false;
-    })
+    }, { sel: CHAT_LINK, hrefRe: THREAD_HREF.source })
     .catch(() => false);
 }
 
 /** Kenar çubuğundaki ilk sohbeti aç ve PIN penceresinin açılıp açılmadığını bildir (ilk sohbet yoksa false). */
 async function pinPendingOnFirstThread(page: Page): Promise<boolean> {
-  if (!(await ensureInbox(page, 20_000))) return false;
-  const href = await page.locator(CHAT_LINK).first().getAttribute('href', { timeout: 5_000 }).catch(() => null);
-  const id = href?.match(/^\/t\/(\d+)/)?.[1];
+  if (!(await goInbox(page))) return false;
+  const id = (await readSidebarRows(page).catch(() => []))[0]?.id;
   if (!id) return false;
   await openThread(page, id);
   await page.waitForTimeout(1500); // pencere satırlardan ~0,5 sn sonra çiziliyor
   return pinDialogOpen(page);
+}
+
+/**
+ * Gelen kutusuna git (gerekirse). Adres henüz seçilmediyse önce facebook.com/messages, olmazsa messenger.com denenir;
+ * yönlendirme olursa (messenger.com → facebook.com) varılan adres esas alınır. Seçilen adres sayfa bu adresteyken
+ * yeniden gezinmeye yol açmaz (her yoklamada tam sayfa yüklemesi yok).
+ */
+async function goInbox(page: Page, timeout = 20_000): Promise<boolean> {
+  const here = siteOfUrl(page.url());
+  // facebook.com'un ana akışında sohbet bağlantısı yok: yalnız /messages altındaysak yerinde bekle (boşuna 20 sn beklenmesin)
+  const onInbox = here && site && here.key === site.key && (here.prefix === '' || safeUrl(page.url()).replace(here.base, '').startsWith(here.prefix + '/'));
+  if (onInbox && (await ensureInbox(page, timeout))) return true;
+  const order = site ? [site, ...SITES.filter((x) => x.key !== site!.key)] : SITES;
+  for (const cand of order) {
+    await page.goto(`${cand.base}${cand.prefix}/`, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+    const landed = siteOfUrl(page.url()) ?? cand;
+    if (await ensureInbox(page, timeout)) {
+      if (site?.key !== landed.key) bus.log('info', `Messenger: gelen kutusu ${landed.key === 'facebook' ? 'facebook.com/messages' : 'messenger.com'} üzerinden okunuyor`);
+      site = landed;
+      return true;
+    }
+    bus.log('info', `Messenger: ${cand.base}${cand.prefix}/ gelen kutusunu açmadı (${safeUrl(page.url())}), diğer adres deneniyor`);
+    // yönlendirmeyle zaten diğer adrese varıldıysa onu ikinci kez deneme
+    if (landed.key !== cand.key) break;
+  }
+  return false;
+}
+
+/** Günlüğe sorgusuz adres */
+function safeUrl(u: string): string {
+  try {
+    const x = new URL(u);
+    return x.origin + x.pathname;
+  } catch {
+    return u;
+  }
 }
 
 /**
@@ -397,7 +478,8 @@ interface PinHooks {
 }
 
 export const messenger: Strategy & PinHooks = {
-  home: `${BASE}/`,
+  // giriş penceresi: Facebook girişi her iki adres için ortak (c_user/xs çerezleri); kapanan messenger.com'u açmıyoruz
+  home: `${SITES[0].base}${SITES[0].prefix}/`,
   loginHint: 'Açılan pencerede Facebook hesabına giriş yap; "PIN kodunu gir" çıkarsa eski mesajlar için PIN\'ini gir',
 
   async loggedIn(_page, cookies) {
@@ -428,8 +510,7 @@ export const messenger: Strategy & PinHooks = {
   },
 
   async threads(page): Promise<Thread[]> {
-    if (!page.url().startsWith(BASE)) await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-    const ready = await ensureInbox(page);
+    const ready = await goInbox(page);
     if (!ready) {
       const title = await page.title().catch(() => '?');
       bus.log('warn', `Messenger: sohbet listesi bulunamadı (sayfa: ${page.url()} · "${title}"). Görünmez modda engelleniyorsa kanala sağ tık → Yeniden bağlan ile pencereyi açıp deneyin.`);
@@ -457,8 +538,7 @@ export const messenger: Strategy & PinHooks = {
    * (Profil kopyasıyla doğrulandı: 14 → 19 → 24 sohbet.)
    */
   async moreThreads(page): Promise<Thread[]> {
-    if (!page.url().startsWith(BASE)) await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-    if (!(await ensureInbox(page))) return [];
+    if (!(await goInbox(page))) return [];
     let fresh: SidebarRow[] = [];
     // Messenger ilk kaydırmada her zaman yüklemez (gözlem: 1. tur 14→14, 2. tur 14→19): art arda iki tur boş kalınca durulur
     for (let round = 0, idle = 0; round < 6 && !fresh.length && idle < 2; round++) {
@@ -527,7 +607,7 @@ export const messenger: Strategy & PinHooks = {
   async markRead(page, _cookies, threadId) {
     // Sohbeti açmak Messenger'da okundu sayılır; istemci okundu olayını yalnız sekme görünürken gönderir → görünür aç
     // (köprünün gizli sekme taklidi #mivelo-visible ile kapatılır), sonra normal sayfaya dönülür
-    await page.goto(`${BASE}/t/${threadId}/#mivelo-visible`, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+    await page.goto(`${threadUrl(threadId)}#mivelo-visible`, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
     await waitForRows(page, 15_000);
     await page.waitForTimeout(2500);
   },
