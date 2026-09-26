@@ -500,7 +500,7 @@ export const messenger: Strategy & PinHooks = {
 
   async attention() {
     // PIN penceresi bir sohbette görüldüyse (pinDialogOpen) PIN adımı tamamlanana dek
-    return pinWarned ? 'Şifreli sohbet geçmişi için Messenger PIN\'i gerekli — girilene dek eski mesajlar yüklenmez' : undefined;
+    return pinWarned ? 'Şifreli sohbet geçmişi için PIN gerekli; girilene dek eski mesajlar yüklenmez' : undefined;
   },
   async afterLogin(page) {
     if (!(await pinPendingOnFirstThread(page).catch(() => false))) return;

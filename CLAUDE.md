@@ -121,7 +121,9 @@ Dil: arayüz ve yorumlar Türkçe.
   bildirimi çıkarıyor (canlı testte arka arkaya). Eski mesajlar yalnız kullanıcı yukarı kaydırınca (loadHistory). İçeriksiz mesaj için yeniden gönderim
   isteği mesaj başına bir kez (`resend.json`). X: `/i/chat/pin/recovery` = XChat PIN bekleniyor → uyarı, needsWindow/afterLogin ile Yeniden bağlan'da PIN.
 - Kullanıcı eylemi bekleyen durum: `Strategy.attention(page)` her yoklamadan sonra (X PIN sayfası, Messenger PIN penceresi) → `Account.attention`
-  (kalıcı değil; registry.list connector'dan ekler) → arayüzde kanal noktası turuncu + sohbet listesi üstünde "PIN'i gir" şeridi (restartAccount).
+  (kalıcı değil; registry.list connector'dan ekler). Arayüz `accountIssue(a)` (App.tsx): attention / pairing / error / disconnected → kanal
+  satırında yeşil nokta yerine yanıp sönen kırmızı uyarı işareti (`.alert-ic`); üzerine gelince/dokununca `.alert-pop` kartı (ne oldu, ne
+  yapmalı, düğme: PIN'i gir / Yeniden bağlan → restartAccount, QR'ı göster → Bağlan). 'connecting' uyarı sayılmaz.
 - (açıksa) WhatsApp geçmiş boşluğu doldurma tur başına ≤25 istek × 50 mesaj (1,5–4 sn aralık; kalanı 30–45 dk sonra). "unavailable" presence yalnız
   bağlanınca ve gönderim/okundu sonrası tek sefer (`offlineSoon`); 4 dk'lık düzenli zamanlayıcı kaldırıldı (Baileys README: bildirim
   için yalnız `markOnlineOnConnect: false` yeterli).

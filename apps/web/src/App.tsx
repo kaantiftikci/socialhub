@@ -170,6 +170,35 @@ export default function App() {
     return () => clearTimeout(t);
   }, [query]);
   const [connectOpen, setConnectOpen] = useState(false);
+  // Kanal uyarı kartı (yanıp sönen kırmızı işaretin üzerine gelince / dokununca): hangi hesap, işaretin konumu
+  const [alertPop, setAlertPop] = useState<{ id: string; x: number; y: number } | null>(null);
+  const alertTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const openAlert = (id: string, el: HTMLElement) => {
+    clearTimeout(alertTimer.current);
+    const r = el.getBoundingClientRect();
+    setAlertPop({ id, x: r.right, y: r.top + r.height / 2 });
+  };
+  const closeAlertSoon = () => {
+    clearTimeout(alertTimer.current);
+    alertTimer.current = setTimeout(() => setAlertPop(null), 250);
+  };
+  useEffect(() => {
+    if (!alertPop) return;
+    const close = (e: Event) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.('.alert-pop, .alert-ic')) return;
+      setAlertPop(null);
+    };
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setAlertPop(null);
+    document.addEventListener('pointerdown', close, true);
+    document.addEventListener('keydown', esc);
+    window.addEventListener('resize', close);
+    return () => {
+      document.removeEventListener('pointerdown', close, true);
+      document.removeEventListener('keydown', esc);
+      window.removeEventListener('resize', close);
+    };
+  }, [alertPop]);
   const [qr, setQr] = useState<Record<string, string>>({});
   /** Bağlanma/eşitleme ilerlemesi: hesap → {progress 0-100, since} (0/100 → gizli) */
   const [sync, setSync] = useState<Record<string, { progress: number; since: number; label?: string }>>({});
@@ -797,7 +826,22 @@ export default function App() {
             {handleOf(a) && <span className="handle"> ({handleOf(a)})</span>}
           </span>
           <span className="count">{fmtCount(perPlatform.get(a.platform) ?? 0)}</span>
-          <span className={`dot ${a.status}${a.attention ? ' attn' : ''}`} style={{ marginLeft: 8 }} title={a.attention} />
+          {accountIssue(a) ? (
+            <span
+              className="alert-ic"
+              role="button"
+              tabIndex={0}
+              aria-label={`${PLATFORMS[a.platform].name}: ${accountIssue(a)!.title}`}
+              onMouseEnter={(e) => openAlert(a.id, e.currentTarget)}
+              onMouseLeave={closeAlertSoon}
+              onClick={(e) => (e.stopPropagation(), openAlert(a.id, e.currentTarget))}
+              onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), e.stopPropagation(), openAlert(a.id, e.currentTarget))}
+            >
+              <Icon name="alert" size={14} sw={2.2} />
+            </span>
+          ) : (
+            <span className={`dot ${a.status}`} style={{ marginLeft: 8 }} />
+          )}
           {sync[a.id] && <SyncBar compact progress={/%\d+/.test(a.detail ?? '') ? Number((a.detail ?? '').match(/%(\d+)/)?.[1] ?? 0) : sync[a.id].progress} since={sync[a.id].since} />}
         </button>
         );
@@ -987,19 +1031,6 @@ export default function App() {
                   </button>
                 </div>
               )}
-              {accounts
-                .filter((a) => a.attention && a.status === 'connected' && (!platformFilter || a.platform === platformFilter))
-                .map((a) => (
-                  <div key={a.id} className="attn-bar" role="status">
-                    <Icon name="lock" size={14} sw={2} />
-                    <span>
-                      <b>{PLATFORMS[a.platform].name}:</b> {a.attention}
-                    </span>
-                    <button className="btn sm b" onClick={() => api.restartAccount(a.id).then(() => notify(`${PLATFORMS[a.platform].name} penceresi açılıyor — PIN'ini gir`)).catch((e) => notify(e.message, true))}>
-                      PIN'i gir
-                    </button>
-                  </div>
-                ))}
               <div className="list-head">
                 <div className="list-top" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div className="list-title">
@@ -1317,6 +1348,34 @@ export default function App() {
           </div>
         </div>
       )}
+      {alertPop &&
+        (() => {
+          const a = accounts.find((x) => x.id === alertPop.id);
+          const is = a && accountIssue(a);
+          if (!a || !is) return null;
+          const left = Math.min(alertPop.x + 12, window.innerWidth - 300);
+          const top = Math.max(12, Math.min(alertPop.y - 28, window.innerHeight - 190));
+          return (
+            <div className="alert-pop" role="dialog" aria-label={`${PLATFORMS[a.platform].name} uyarısı`} style={{ left, top }} onMouseEnter={() => clearTimeout(alertTimer.current)} onMouseLeave={closeAlertSoon}>
+              <div className="ap-head">
+                <Icon name="alert" size={14} sw={2.2} />
+                <b>{PLATFORMS[a.platform].name}</b>
+              </div>
+              <div className="ap-title">{is.title}</div>
+              <p>{is.how}</p>
+              <button
+                className="btn sm primary b"
+                onClick={() => {
+                  setAlertPop(null);
+                  if (is.action === 'connect') setConnectOpen(true);
+                  else api.restartAccount(a.id).then(() => notify(is.done)).catch((e) => notify(e.message, true));
+                }}
+              >
+                {is.label}
+              </button>
+            </div>
+          );
+        })()}
       {connectP.value && (
         <ConnectModal
           closing={connectP.closing}
@@ -1566,6 +1625,41 @@ function ComposePane({ accounts, preferred, chats, onClose, onOpen, notify }: { 
 
 function statusText(s: Account['status']): string {
   return { connected: 'Bağlı', connecting: 'Bağlanıyor…', pairing: 'Eşleşme bekleniyor', disconnected: 'Bağlı değil', error: 'Hata' }[s];
+}
+
+/**
+ * Kullanıcı eylemi gereken kanal durumu → yanıp sönen kırmızı işaret + açılır kart (başlık, ne yapmalı, düğme).
+ * Geçici 'connecting' uyarı sayılmaz. attention (bağlı ama PIN vb. bekliyor) önce gelir.
+ */
+function accountIssue(a: Account): { title: string; how: string; label: string; action: 'reconnect' | 'connect'; done: string } | null {
+  const name = PLATFORMS[a.platform].name;
+  const browser = PLATFORMS[a.platform].mode === 'browser';
+  const detail = (a.detail ?? '').replace(/\s+/g, ' ').trim();
+  if (a.attention && a.status === 'connected')
+    return {
+      title: a.attention,
+      how: `Aşağıdaki düğmeye bas; açılan ${name} penceresinde PIN kodunu gir. PIN kabul edilince pencere kendiliğinden kapanır ve bu uyarı kalkar.`,
+      label: "PIN'i gir",
+      action: 'reconnect',
+      done: `${name} penceresi açılıyor — PIN'ini gir`,
+    };
+  if (a.status === 'pairing') {
+    if (a.platform === 'whatsapp' || a.platform === 'telegram')
+      return { title: 'Telefonla eşleştirme bekleniyor', how: `"Uygulama bağla"da ${name} kanalını aç ve ekrandaki QR kodu telefonundaki ${name} ile okut.`, label: "QR'ı göster", action: 'connect', done: '' };
+    return {
+      // çekirdeğin ayrıntısı talimat içeriyorsa ("… Yeniden bağlan ile …") başlık sade: talimat açıklamada ve düğmede
+      title: detail && !/^[+@]/.test(detail) && !/yeniden bağlan/i.test(detail) ? detail : 'Oturum düşmüş, yeniden giriş gerekli',
+      how: browser ? `Aşağıdaki düğmeye bas; açılan ${name} penceresinde hesabına giriş yap (doğrulama isterse tamamla). Giriş algılanınca pencere kendiliğinden kapanır.` : `Aşağıdaki düğmeyle yeniden bağlan.`,
+      label: 'Yeniden bağlan',
+      action: 'reconnect',
+      done: `${name} giriş penceresi açılıyor`,
+    };
+  }
+  if (a.status === 'error')
+    return { title: detail || 'Bağlantı hatası', how: 'Yeniden bağlanmayı dene. Sorun sürerse kanalın ayrıntısına (Uygulama bağla) bak.', label: 'Yeniden bağlan', action: 'reconnect', done: 'Yeniden bağlanılıyor' };
+  if (a.status === 'disconnected')
+    return { title: detail || 'Bağlantı kesildi', how: `${name} şu an bağlı değil; yeni mesajlar gelmiyor.`, label: 'Yeniden bağlan', action: 'reconnect', done: 'Yeniden bağlanılıyor' };
+  return null;
 }
 
 /** Kanal satırında platform adının yanında gösterilecek hesap tanıtıcısı (@kullanıcı, +numara, ad) */

@@ -1037,7 +1037,7 @@ export const x: Strategy & { fetchMedia(page: Page, cookies: Record<string, stri
     return /\/i\/chat\/pin/.test(page.url());
   },
   async attention(page) {
-    return /\/i\/chat\/pin/.test(page.url()) ? 'Şifreli sohbetler için X PIN\'i gerekli — girilene dek yeni mesajlar geç ve eksik gelir' : undefined;
+    return /\/i\/chat\/pin/.test(page.url()) ? 'Şifreli sohbetler için PIN gerekli; girilene dek yeni mesajlar geç ve eksik gelir' : undefined;
   },
   async afterLogin(page) {
     if (!(await this.needsWindow!(page).catch(() => false))) return;
