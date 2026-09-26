@@ -1368,7 +1368,7 @@ export default function App() {
                 onClick={() => {
                   setAlertPop(null);
                   if (is.action === 'connect') setConnectOpen(true);
-                  else api.restartAccount(a.id).then(() => notify(is.done)).catch((e) => notify(e.message, true));
+                  else (notify(is.done), api.restartAccount(a.id).catch((e) => notify(e.message, true)));
                 }}
               >
                 {is.label}

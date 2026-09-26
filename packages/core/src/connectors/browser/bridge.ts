@@ -347,6 +347,17 @@ export class BrowserConnector extends BaseConnector {
     }
     this.setStatus('connecting');
 
+    // Uyarıdaki "PIN'i gir": PIN adımı bekleniyor olduğu zaten biliniyor → görünmez açılış + sayfa denetimi + kapatma
+    // turunu (10-20 sn) atla, görünür pencereyi hemen aç; oturum çerezleri varsa giriş beklemeden PIN adımına geç
+    if (interactive && opts.window && this.strategy.afterLogin) {
+      if (!(await this.launch(false))) return;
+      if (!(await this.visibleLogin(await this.isLoggedIn(true)))) return;
+      if (this.stopping) return;
+      this.syncProgress(45, 'oturum doğrulandı');
+      await this.finishStart();
+      return;
+    }
+
     // 0) API tabanlı kanal ve kayıtlı oturum durumu varsa tarayıcısız başla (bellek: Chromium hiç açılmaz)
     if (this.strategy.pageless && !interactive && fs.existsSync(this.stateFile)) {
       try {
@@ -385,23 +396,31 @@ export class BrowserConnector extends BaseConnector {
       // 2) Yok: görünür pencere aç, kullanıcı giriş yapsın; izin adımları bitince pencereyi kapat.
       await this.closeCtx();
       if (!(await this.launch(false))) return;
-      this.setStatus('pairing', this.strategy.loginHint);
-      if (!(await this.waitForLogin())) return;
-      // Platforma özgü son adım (Messenger: "PIN kodunu gir") — pencere hâlâ açıkken
-      if (this.strategy.afterLogin && this.page && !this.page.isClosed()) await this.strategy.afterLogin(this.page).catch(() => undefined);
-      // Görünür pencereden görünmeze geçişte süresiz (oturum) çerezleri silinir → Microsoft/Google/Apple oturumu düşer.
-      // Pencere kapanmadan tüm oturum çerezlerini 30 günlük çereze çevir (tüm tarayıcı kanalları)
-      if (this.ctx) {
-        const n = await persistSessionCookies(this.ctx, /./).catch(() => 0);
-        if (n) bus.log('info', `${this.account.platform}: ${n} oturum çerezi kalıcı yapıldı`);
-      }
-      bus.log('info', `${this.account.platform}: giriş yapıldı, pencere kapatılıyor`);
-      await this.closeCtx();
-      if (!(await this.launch(true))) return;
+      if (!(await this.visibleLogin(false))) return;
     }
     if (this.stopping) return;
     this.syncProgress(45, 'oturum doğrulandı');
     await this.finishStart();
+  }
+
+  /**
+   * Görünür pencere açıkken: giriş (loggedIn=false ise beklenir), platformun son adımı (PIN), oturum çerezlerini kalıcı yap,
+   * pencereyi kapatıp görünmez devam et.
+   */
+  private async visibleLogin(loggedIn: boolean): Promise<boolean> {
+    this.setStatus('pairing', loggedIn ? 'Açılan pencerede PIN kodunu gir; kabul edilince pencere kendiliğinden kapanır' : this.strategy.loginHint);
+    if (!loggedIn && !(await this.waitForLogin())) return false;
+    // Platforma özgü son adım (Messenger: "PIN kodunu gir") — pencere hâlâ açıkken
+    if (this.strategy.afterLogin && this.page && !this.page.isClosed()) await this.strategy.afterLogin(this.page).catch(() => undefined);
+    // Görünür pencereden görünmeze geçişte süresiz (oturum) çerezleri silinir → Microsoft/Google/Apple oturumu düşer.
+    // Pencere kapanmadan tüm oturum çerezlerini 30 günlük çereze çevir (tüm tarayıcı kanalları)
+    if (this.ctx) {
+      const n = await persistSessionCookies(this.ctx, /./).catch(() => 0);
+      if (n) bus.log('info', `${this.account.platform}: ${n} oturum çerezi kalıcı yapıldı`);
+    }
+    bus.log('info', `${this.account.platform}: giriş yapıldı, pencere kapatılıyor`);
+    await this.closeCtx();
+    return this.launch(true);
   }
 
   private async finishStart(): Promise<void> {

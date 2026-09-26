@@ -9,6 +9,8 @@ import { chatId, messageId, type Reaction, type Account, type AccountStatus, typ
  */
 export interface StartOptions {
   interactive?: boolean;
+  /** Kullanıcı eylemi bekleyen uyarıdan (PIN) gelindi: görünmez denetimi atla, görünür pencereyi hemen aç */
+  window?: boolean;
 }
 
 export interface SendOptions {

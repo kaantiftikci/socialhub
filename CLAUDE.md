@@ -165,6 +165,8 @@ Dil: arayüz ve yorumlar Türkçe.
   `uidValidity` durum dosyasında; değişince imleç sıfırlanır. `classify`: authenticationFailed → dur (otomatik deneme yok), ETHROTTLE →
   throttleReset, [ALERT]/[LIMIT]/çok bağlantı → 15 dk. `missingIdleCommand: 'STATUS'`.
 - Amazon Seller Central / Etsy Mesajları / Shopify Inbox tarayıcı köprüleri varsayılan KAPALI (yapılandırmada messaging/inbox:true ile açılır).
+- "PIN'i gir" hızlı yol: `registry.restart` eski connector'da `attention` varsa `start({window:true})` → köprü görünmez denetim turunu
+  (headless aç + needsWindow + kapat, 10-20 sn) atlar, görünür pencereyi hemen açar; çerezler varsa doğrudan `afterLogin` (`visibleLogin`).
 - Gönderim hızı: arayüz iyimser (`outbox`, Conversation.tsx) — Enter'da "Gönderiliyor" balonu hemen, gerçek kayıt gelince kopya gizlenir,
   hata olursa metin kutuya döner; ardışık gönderimler `sendChain` ile sıralı. Köprü: send/react/sendFile `urgent()` — yoklama turu sürüyorsa
   turu beklemez, `runUrgent()` güvenli noktada (liste sonrası, mesaj istekleri arası) araya alır (test: send-priority.test.ts).

@@ -110,11 +110,13 @@ export class Registry {
     const a = this.store.getAccount(id);
     if (!a) throw new Error('Hesap yok');
     const c = this.connectors.get(id);
+    // PIN gibi kullanıcı eylemi bekleniyorsa yeni bağlantı pencereyi doğrudan açar (görünmez denetim turu yok)
+    const window = !!(c as { attention?: string } | undefined)?.attention;
     if (c) await withTimeout(c.stop(), 15_000).catch(() => undefined);
-    await this.spawn(a);
+    await this.spawn(a, true, window);
   }
 
-  private async spawn(account: Account, interactive = true): Promise<void> {
+  private async spawn(account: Account, interactive = true, window = false): Promise<void> {
     let c: Connector;
     switch (account.platform) {
       case 'whatsapp':
@@ -235,7 +237,7 @@ export class Registry {
     }
     this.connectors.set(account.id, c);
     // start() uzun sürebilir (QR bekleme vb.); arka planda çalışsın
-    void c.start({ interactive }).catch((e) => bus.log('error', `${account.platform} hata: ${(e as Error).message}`));
+    void c.start({ interactive, window }).catch((e) => bus.log('error', `${account.platform} hata: ${(e as Error).message}`));
   }
 
   async stopAll(): Promise<void> {
