@@ -62,7 +62,7 @@ const firstName = (c: Chat) => {
 function templated(chat: Chat, last: string): Curated {
   const t = last.toLocaleLowerCase('tr');
   const casual = TEAMISH(chat);
-  const hi = casual ? '' : `Merhaba ${firstName(chat)} Hanım/Bey, `;
+  const hi = casual ? '' : `Merhaba ${firstName(chat)}, `;
   const pick = (formal: string, informal: string) => (casual ? informal : hi + formal);
   if (/kargo|ne zaman çıkar|takip/.test(t)) return { draft: pick('siparişiniz bugün kargoya veriliyor. Takip numarasını hemen buradan iletiyorum 🙏', 'bugün kargoda, takip no birazdan burada'), actions: [`${chat.name}: takip numarasını ilet`] };
   if (/fatura|dekont|ödeme/.test(t)) return { draft: pick('faturanızı bugün kesip PDF olarak buraya bırakıyorum. Teşekkürler.', 'faturayı bugün kesip atıyorum'), actions: [`${chat.name}: faturayı kes ve gönder`] };
