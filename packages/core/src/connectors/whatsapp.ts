@@ -83,6 +83,8 @@ export class WhatsAppConnector extends BaseConnector {
   private appliedSender = new Map<string, string>();
   /** loadHistory: telefondan istenen geçmiş paketi (ON_DEMAND) gelince çözülecek bekleyiciler (sohbet jid → resolve'lar) */
   private historyWaiters = new Map<string, Array<() => void>>();
+  /** Boşluk doldurmada başına ulaşılan sohbetler (telefon daha eskisini vermiyor) */
+  private gapDone = new Set<string>();
   private gapTimer?: NodeJS.Timeout;
   private presenceTimer?: NodeJS.Timeout;
   private gapBusy = false;
@@ -426,7 +428,7 @@ export class WhatsAppConnector extends BaseConnector {
         if (c.name ?? c.notify ?? c.verifiedName) named++;
         this.learnContact(c);
       }
-      if (contacts?.length) bus.log('info', `WhatsApp: ${contacts.length} kişi geldi (${named} adlı)`);
+      if (contacts?.length && !onDemand) bus.log('info', `WhatsApp: ${contacts.length} kişi geldi (${named} adlı)`); // istek üzerine pakette her seferinde 1 kişi: gürültü
       // Binlerce satır tek işlemde: her satırda ayrı commit/fsync olmasın (olay döngüsü dakikalarca kilitleniyordu)
       const t0 = Date.now();
       this.store.transaction(() => {
@@ -733,7 +735,8 @@ export class WhatsAppConnector extends BaseConnector {
       return false;
     }
     let timer: NodeJS.Timeout | undefined;
-    await Promise.race([waited, new Promise<void>((resolve) => (timer = setTimeout(resolve, 25_000)))]);
+    // telefon bazen 25 sn'den geç yanıtlıyor (canlı testte 27 sn): 45 sn beklenir
+    await Promise.race([waited, new Promise<void>((resolve) => (timer = setTimeout(resolve, 45_000)))]);
     if (timer) clearTimeout(timer);
     drop();
     return arrived;
@@ -773,6 +776,7 @@ export class WhatsAppConnector extends BaseConnector {
       let touched = 0;
       for (const chat of chats) {
         if (this.stopping) break;
+        if (this.gapDone.has(chat.id)) continue; // bu oturumda başına ulaşılmış sohbet
         for (let round = 0; round < 40; round++) {
           const msgs = this.store.listMessages(chat.id, 1500); // artan sırada, en yeni 1500
           if (!msgs.length) break;
@@ -797,7 +801,7 @@ export class WhatsAppConnector extends BaseConnector {
           const ok = await this.requestHistory(chat.remoteId, 50, anchor);
           if (!ok) {
             if (++fails >= 2) {
-              bus.log('warn', `WhatsApp: boşluk doldurma duraklatıldı (telefon yanıt vermiyor; ${total} mesaj alındı) — 30 dk sonra yeniden denenir`);
+              bus.log('warn', `WhatsApp: boşluk doldurma duraklatıldı (telefon 45 sn içinde iki kez yanıt vermedi; ${total} mesaj alındı) — 30 dk sonra yeniden denenir`);
               this.scheduleGapFill(30 * 60_000);
               return;
             }
@@ -806,7 +810,11 @@ export class WhatsAppConnector extends BaseConnector {
           fails = 0;
           const got = this.store.listMessages(chat.id, 1500).length - msgs.length;
           total += Math.max(0, got);
-          if (got <= 0) break;
+          // istenenden çok az geldiyse sohbetin başına ulaşıldı: telefon sonraki isteğe hiç yanıt vermez (bu "yanıt yok" sayılmasın)
+          if (got < 10) {
+            this.gapDone.add(chat.id);
+            break;
+          }
           await new Promise((r) => setTimeout(r, 1500 + Math.random() * 2500));
         }
       }

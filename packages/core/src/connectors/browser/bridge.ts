@@ -286,6 +286,33 @@ export class BrowserConnector extends BaseConnector {
     if (kind === 'event') this.pollSoon();
   }
 
+  /**
+   * Tanı: dinleyici tanımlı kanalda 3 dk içinde hiç anlık sinyal gelmezse bir kez günlüğe sayfanın adresi, izlenen seçiciye
+   * uyan öğe sayısı ve sayfanın açtığı soketler (yalnız host+yol) yazılır — sinyalin neden gelmediği canlı hesapta görülsün.
+   */
+  private diagnoseRealtime(page: Page): void {
+    const st = this.strategy;
+    if (!st.watch && !st.watchSelector && !st.watchSockets) return;
+    const sockets = new Set<string>();
+    page.on('websocket', (ws) => {
+      try {
+        const u = new URL(ws.url());
+        if (sockets.size < 20) sockets.add(u.host + u.pathname);
+      } catch {
+        /* geçersiz adres */
+      }
+    });
+    const t = setTimeout(async () => {
+      if (this.rtAliveAt || page.isClosed() || this.stopping) return;
+      const rows = st.watchSelector ? await page.evaluate((sel) => document.querySelectorAll(sel).length, st.watchSelector).catch(() => -1) : undefined;
+      bus.log(
+        'info',
+        `${this.account.platform}: 3 dk'dır anlık sinyal yok (tanı) — sayfa ${safeUrl(page.url())}${rows !== undefined ? `, izlenen satır ${rows}` : ''}, soketler: ${[...sockets].join(' | ') || 'yok'}`,
+      );
+    }, 180_000);
+    t.unref?.();
+  }
+
   /** Bekleyen turu öne çek. Yoklama durmuşsa (doğrulama sayfası, kapalı) canlandırmaz. */
   private pollSoon(): void {
     if (!this.timer || this.stopping || this.account.status !== 'connected' || Date.now() < this.backoffUntil) return;
@@ -528,6 +555,7 @@ export class BrowserConnector extends BaseConnector {
     const watching = this.strategy.watch ? this.strategy.watch(this.page, onRt) : this.strategy.watchSelector ? watchDom(this.page, this.strategy.watchSelector, onRt) : undefined;
     await watching?.catch((e) => bus.log('warn', `${this.account.platform}: anlık izleme kurulamadı: ${(e as Error).message}`));
     if (this.strategy.watchSockets) watchSocketFrames(this.page, this.strategy.watchSockets, onRt);
+    this.diagnoseRealtime(this.page);
     ctx.on('close', () => {
       if (this.ctx !== ctx) return; // biz kapattık (görünürden görünmeze geçiş)
       if (!this.stopping) this.setStatus('disconnected', 'Tarayıcı penceresi kapatıldı');

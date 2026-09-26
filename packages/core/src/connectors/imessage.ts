@@ -97,6 +97,7 @@ export class IMessageConnector extends BaseConnector {
   private assocCol = 'NULL';
   private retractAt = Date.now();
   private unreadAt = 0;
+  private retractedLogged = -1;
   /** message.date nanosaniye mi (macOS 10.13+; eski sürümlerde saniye) */
   private dateNs = true;
   /** Tarih sıralama/filtre sütunu: chat_message_join.message_date (indeksli); eski macOS'ta sütun yoksa m.date */
@@ -515,7 +516,9 @@ export class IMessageConnector extends BaseConnector {
         const { deleted: _d, ...meta } = chat.meta;
         this.upsertChat({ remoteId: chat.remoteId, name: chat.name, meta });
       }
-      if (rows.length) bus.log('info', `iMessage: son silinenlerde ${rows.length} mesaj`);
+      // yalnız sayı değişince yaz (dakikada bir aynı satır günlüğü dolduruyordu)
+      if (rows.length && rows.length !== this.retractedLogged) bus.log('info', `iMessage: son silinenlerde ${rows.length} mesaj`);
+      this.retractedLogged = rows.length;
     } catch {
       /* tablo yok (eski macOS) */
     }
