@@ -58,6 +58,15 @@ export function ConnectModal({
   const [busy, setBusy] = useState(false);
 
   const activeAccount = accounts.find((a) => a.id === active);
+  // Başka bir sağlayıcının formuna geçince alanlar sıfırlansın (Yahoo'ya yazılan adres/şifre "Diğer e-posta"da görünmesin)
+  // ve açılan panel görünür alana kaydırılsın
+  useEffect(() => {
+    setMail(EMPTY_MAIL);
+    setShop({});
+    setPat('');
+    if (!active) return;
+    requestAnimationFrame(() => document.querySelector('.overlay .pairbox')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
+  }, [active]);
   /** Çekirdeğin OS'u: iMessage gibi yalnız Mac kanalları Windows/Linux çekirdeğinde pasif */
   const [coreOs, setCoreOs] = useState<CoreOs | undefined>();
   useEffect(() => {
@@ -370,7 +379,8 @@ export function ConnectModal({
             )}
             <div style={{ flexGrow: 1, minWidth: 0 }}>
               <h3>
-                {PLATFORMS[activeAccount.platform].name} · {activeAccount.label}
+                {PLATFORMS[activeAccount.platform].name}
+                {activeAccount.label && activeAccount.label !== PLATFORMS[activeAccount.platform].name && ` · ${activeAccount.label}`}
               </h3>
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text2)' }}>
                 <span className={`dot ${activeAccount.status === 'connected' ? 'on' : activeAccount.status}`} />
@@ -463,7 +473,7 @@ export function ConnectModal({
                 </div>
               )}
               {activeAccount.status === 'connected' && (
-                <p style={{ margin: '10px 0 0', fontSize: 13.5, color: 'var(--text2)' }}>Bağlı. Sohbetler gelen kutusuna akıyor; tarayıcı arka planda görünmez çalışıyor.</p>
+                <p style={{ margin: '10px 0 0', fontSize: 13.5, color: 'var(--text2)' }}>Bağlı. {PLATFORMS[activeAccount.platform].category === 'shop' ? 'Siparişler ve müşteri soruları' : 'Sohbetler'} gelen kutusuna akıyor{PLATFORMS[activeAccount.platform].mode === 'browser' ? '; tarayıcı arka planda görünmez çalışıyor' : ''}.</p>
               )}
             </div>
           </div>

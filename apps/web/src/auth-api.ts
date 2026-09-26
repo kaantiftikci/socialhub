@@ -4,8 +4,17 @@ export interface SessionUser {
   username: string;
 }
 
+/** Ağ hatası tarayıcının İngilizce "Failed to fetch" iletisiyle değil, Türkçe görünsün */
+async function net(input: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch {
+    throw new Error('Sunucuya ulaşılamadı. İnternet bağlantını kontrol edip tekrar dene.');
+  }
+}
+
 async function call<T>(action: string, method: string, body?: unknown): Promise<T> {
-  const res = await fetch(`/api/index.php?action=${action}`, {
+  const res = await net(`/api/index.php?action=${action}`, {
     method,
     credentials: 'same-origin',
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
@@ -17,7 +26,7 @@ async function call<T>(action: string, method: string, body?: unknown): Promise<
 }
 
 export async function authMe(): Promise<SessionUser | null> {
-  const res = await fetch('/api/index.php?action=me', { credentials: 'same-origin' });
+  const res = await net('/api/index.php?action=me', { credentials: 'same-origin' });
   if (res.status === 401) return null;
   const data = (await res.json().catch(() => ({}))) as { user?: SessionUser; error?: string };
   if (!res.ok || !data.user) throw new Error(data.error || 'Oturum okunamadı');

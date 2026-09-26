@@ -151,6 +151,8 @@ button:focus-visible, a:focus-visible, .sw:focus-visible { outline: 2px solid va
 .me { display: flex; align-items: center; gap: 10px; padding: 0 4px; flex-shrink: 0; }
 .me .n { font-size: 13px; font-weight: 600; display: block; }
 .me .s { font-size: 11.5px; color: var(--text3); }
+/* .me (kenar çubuğu profil satırı) posta kartındaki kendi iletimize (article.mail-card.me) sızmasın */
+.mail-card.me { display: block; padding: 14px 16px; }
 
 /* ---------- avatar / tag ---------- */
 .plat { color: #fff; font-weight: 600; letter-spacing: -.2px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
@@ -174,8 +176,8 @@ button:focus-visible, a:focus-visible, .sw:focus-visible { outline: 2px solid va
 .story .plat { position: absolute; right: -2px; bottom: -2px; }
 .story .n { position: absolute; right: -4px; top: -4px; min-width: 19px; height: 19px; padding: 0 5px; border-radius: 999px; background: var(--v); color: #fff; font-size: 10.5px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 0 2px var(--bg); }
 .story .nm { width: 58px; font-size: 11.5px; font-weight: 500; color: var(--text2); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tabs { display: flex; flex-wrap: nowrap; gap: 3px; padding: 3px; background: #eceaf2; border-radius: 12px; }
-.tabs button { flex: 1 1 0; height: 30px; padding: 0 6px; min-width: 0; border: 0; background: transparent; border-radius: 9px; font-size: 12px; font-weight: 500; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tabs { display: flex; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 3px; padding: 3px; background: #eceaf2; border-radius: 12px; }
+.tabs button { flex: 1 0 auto; height: 30px; padding: 0 8px; border: 0; background: transparent; border-radius: 9px; font-size: 12px; font-weight: 500; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tabs button.active { background: var(--surface); font-weight: 600; color: var(--text); box-shadow: 0 1px 2px rgba(17,16,22,.08); }
 .tabs .c { color: var(--v); font-size: 11px; font-variant-numeric: tabular-nums; }
 .tabs .c.amber { color: var(--amber-txt); }
@@ -200,7 +202,7 @@ button:focus-visible, a:focus-visible, .sw:focus-visible { outline: 2px solid va
 .row .body { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .row .top { display: flex; align-items: center; gap: 8px; }
 .row .name { flex-grow: 1; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.row .time { font-size: 11px; color: var(--text3); font-variant-numeric: tabular-nums; }
+.row .time { white-space: nowrap; flex-shrink: 0; font-size: 11px; color: var(--text3); font-variant-numeric: tabular-nums; }
 .row.unread .time { color: var(--v); }
 .row .prev { flex-grow: 1; font-size: 13px; line-height: 1.4; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row.unread .prev { color: var(--text); font-weight: 400; }
@@ -246,7 +248,7 @@ button:focus-visible, a:focus-visible, .sw:focus-visible { outline: 2px solid va
   html, body { min-width: 0; }
   .app { min-width: 0; }
   .focus h1 { font-size: 28px; letter-spacing: -1px; }
-  .focus-hero, .focus-cols { flex-direction: column; align-items: stretch; gap: 14px; }
+  .app .focus-hero, .app .focus-cols { flex-direction: column; align-items: stretch; gap: 14px; }
   .focus-hero > div:last-child { flex-wrap: wrap; }
   .stat { width: auto; flex: 1 1 96px; height: 88px; }
 }
@@ -326,7 +328,12 @@ a.att-card { cursor: pointer; }
 .actions .it { display: flex; align-items: center; gap: 9px; padding: 7px 7px 7px 10px; background: var(--surface); border-radius: 11px; font-size: 13px; }
 .composer { margin: 6px 18px 16px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); display: flex; flex-direction: column; box-shadow: var(--shadow-3); }
 .composer.ai { border-color: #c9b9ff; }
-.comp-top { display: flex; align-items: center; gap: 6px; padding: 10px 10px 0 12px; flex-wrap: wrap; }
+.comp-top { display: flex; align-items: center; gap: 6px; padding: 10px 10px 0 12px; flex-wrap: nowrap; min-width: 0; }
+.comp-top > * { flex-shrink: 0; }
+/* dar genişlikte önce "N mesaj bağlamı" kısalır/gizlenir, ton düğmeleri tek satırda kalır */
+.comp-top .ctx-n { flex: 0 1 auto; min-width: 0; font-size: 11px; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.comp-top .aipill { white-space: nowrap; }
+@media (max-width: 520px) { .comp-top .ctx-n { display: none; } }
 .aipill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: var(--text); background: var(--bg); padding: 4px 10px 4px 7px; border-radius: 999px; border: 0; }
 .aipill.on { background: var(--ink); color: #fff; }
 .composer textarea { border: 0; outline: none; resize: none; padding: 9px 16px 4px; font-size: 14.5px; line-height: 1.55; color: var(--text); background: transparent; min-height: 52px; max-height: 180px; }
@@ -404,6 +411,11 @@ a.att-card { cursor: pointer; }
 .focus-hero { display: flex; align-items: flex-end; gap: 28px; }
 .focus-cols { display: flex; gap: 20px; align-items: flex-start; }
 .focus-hero > div:last-child { display: flex; gap: 12px; }
+@media (max-width: 1100px) {
+  .app .focus-cols { flex-direction: column; align-items: stretch; }
+  .app .focus-cols > * { width: auto; max-width: none; flex: 1 1 auto; min-width: 0; }
+  .app .focus-hero { flex-wrap: wrap; align-items: flex-start; }
+}
 .stat { width: 150px; height: 104px; padding: 14px 16px; border-radius: 20px; background: var(--surface); border: 1px solid var(--line); display: flex; flex-direction: column; justify-content: space-between; box-shadow: var(--shadow-1); }
 .stat .n { font-size: 40px; font-weight: 700; letter-spacing: -1.5px; line-height: 1; }
 .stat .t { font-size: 12.5px; color: var(--text3); }
@@ -796,7 +808,7 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
   .app-set-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 720px) {
-  .grid3 { grid-template-columns: 1fr; }
+  .grid3 { grid-template-columns: minmax(0, 1fr); }
   .overlay { padding: 12px; }
   .modal { width: min(940px, 100%); }
   .app-set-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -856,6 +868,9 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 
 /* liste başlığı: masaüstünde tek satır; mobilde üstte ayrı bir marka çubuğu (menü + logo + arama), altında platform + ad */
 .list-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* dar sütunda önce "N yeni" rozeti kısalır, başlık tam kalır */
+.list-title h1 { flex-shrink: 0; }
+.list-title .pill { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .m-topbar { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--v-soft); border-bottom: 1px solid var(--line2); position: sticky; top: 0; z-index: 7; }
 .m-topbar .m-brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: 18px; letter-spacing: -.4px; color: var(--text); }
 .app.mobile .list-top > .btn[aria-label="Sohbetlerde ara"] { display: none; } /* arama üst çubukta */
@@ -927,7 +942,7 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .emoji-cats { display: flex; gap: 2px; }
 .emoji-cats button { flex: 1; height: 28px; border-radius: 8px; border: 0; background: transparent; font-size: 15px; cursor: pointer; opacity: .55; }
 .emoji-cats button.on { background: var(--v-soft); opacity: 1; }
-.emoji-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; overflow-y: auto; min-height: 0; padding-right: 2px; }
+.emoji-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 2px; overflow-y: auto; min-height: 0; padding-right: 2px; }
 .emoji-grid button { aspect-ratio: 1; border-radius: 8px; border: 0; background: transparent; font-size: 20px; line-height: 1; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 .emoji-grid button:hover { background: var(--bg2); transform: scale(1.2); }
 .emoji-empty { grid-column: 1 / -1; padding: 16px; text-align: center; font-size: 12.5px; color: var(--text3); }
@@ -1003,3 +1018,12 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .settings .ai-key-note { font-size: 11.5px; color: var(--text3); line-height: 1.4; }
 .settings .set-hint { display: block; font-style: normal; font-size: 11.5px; color: var(--text3); }
 .settings .row-toggle:hover .set-hint { color: rgba(255,255,255,.8); }
+
+/* sohbet açıkken bildirim yazma alanının araç çubuğunu (emoji/mikrofon/zamanla) örtmesin */
+.app:has(.composer) .toast { bottom: 132px; }
+
+.ctx-tag .x { display: inline-flex; opacity: .45; margin-left: 1px; }
+.ctx-tag:hover .x { opacity: 1; }
+/* takvim penceresi dar ekranda: tarih/saat alanları tam genişlik */
+@media (max-width: 520px) { .cal-modal .fld-row > .fld { flex: 1 1 100%; } .cal-modal .fld input { width: 100%; box-sizing: border-box; } }
+@media (max-width: 520px) { .fcard .via { display: none !important; } }

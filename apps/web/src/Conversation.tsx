@@ -118,6 +118,8 @@ export function Conversation({
   onBack,
   typing,
   onFlags,
+  seed,
+  onSeedUsed,
 }: {
   chat: Chat;
   messages: Message[];
@@ -137,6 +139,9 @@ export function Conversation({
   typing?: string | null;
   /** Yerel bayraklar: sabitle/arşivle/sessize al/gizle */
   onFlags?: (f: ChatFlags) => void;
+  /** Başka ekrandan (Odak) açılırken kompozöre konacak metin ya da kendiliğinden üretilecek taslak */
+  seed?: { text?: string; autoDraft?: boolean } | null;
+  onSeedUsed?: () => void;
 }) {
   const [search, setSearch] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -237,6 +242,7 @@ export function Conversation({
   const role = profileRole(chat);
   const sampleSummary = Array.isArray(chat.meta?.summary) ? chat.meta.summary.filter((x): x is string => typeof x === 'string') : [];
   const summary = draft && draft.summary.length > 0 ? draft.summary : sampleSummary;
+  const [summaryAt, setSummaryAt] = useState(0);
   /** E-posta kanalları: balon yerine ileti kartları ve e-posta yanıt alanı */
   const isMail = platform.category === 'mail';
   // Pazaryeri yanıtları (Trendyol/HB/n11 soru-cevap, sipariş notu) yalnız metin: dosya ve ses gönderilemez
@@ -346,6 +352,19 @@ export function Conversation({
   const [schedOpen, setSchedOpen] = useState(false);
   const [schedWhen, setSchedWhen] = useState('');
   const [queued, setQueued] = useState<ScheduledSend[]>([]);
+  // Esc önce en üstteki katmanı kapatır (zamanla/emoji/tepki/bekleyen ek); yakalama evresinde çalışır ki App'in
+  // "sohbeti kapat" Esc'i ancak açık katman yoksa devreye girsin (e.defaultPrevented)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      const close = schedOpen ? () => setSchedOpen(false) : emojiOpen ? () => setEmojiOpen(false) : reactPick ? () => setReactPick(null) : barFor ? () => setBarFor(null) : pending ? clearPending : null;
+      if (!close) return;
+      e.preventDefault();
+      close();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [schedOpen, emojiOpen, reactPick, barFor, pending]);
   const schedRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const sync = () => setQueued(readScheduled().filter((s) => s.chatId === chat.id).sort((a, b) => a.at - b.at));
@@ -414,7 +433,8 @@ export function Conversation({
       stickRef.current = true;
       endRef.current?.scrollIntoView({ block: 'end' });
     } else if (prepended && el) el.scrollTop += el.scrollHeight - heightRef.current;
-    else if (el && last !== lastIdRef.current && stickRef.current) endRef.current?.scrollIntoView({ block: 'end' });
+    // alttaysan her içerik değişiminde (yeni mesaj, tepki, durum) altta kal
+    else if (el && stickRef.current) el.scrollTop = el.scrollHeight;
     firstIdRef.current = first;
     lastIdRef.current = last;
     heightRef.current = el?.scrollHeight ?? 0;
@@ -429,9 +449,14 @@ export function Conversation({
   useEffect(() => {
     const el = msgsRef.current;
     if (!el) return;
+    // Yapışma yalnızca KULLANICI yukarı kaydırınca bırakılır: sağ panel açılıp sütun daralınca metin uzar ve boşluk büyür,
+    // ama scrollTop değişmez — bunu "yukarı kaydırdı" sanıp en yeni mesajı yazma alanının altında bırakıyorduk.
+    let lastTop = el.scrollTop;
     const onScroll = () => {
       const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
-      stickRef.current = gap < 80;
+      if (gap < 80) stickRef.current = true;
+      else if (el.scrollTop < lastTop - 2) stickRef.current = false;
+      lastTop = el.scrollTop;
       setShowDown(gap > 360);
       heightRef.current = el.scrollHeight;
     };
@@ -440,10 +465,14 @@ export function Conversation({
       if (stickRef.current) el.scrollTop = el.scrollHeight;
       heightRef.current = el.scrollHeight;
     };
+    // Boyut değişimi (sağ panel, takip şeridi, pencere): alttaysan altta kal
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => onMediaLoad()) : undefined;
+    ro?.observe(el);
     el.addEventListener('scroll', onScroll, { passive: true });
     el.addEventListener('load', onMediaLoad, true);
     el.addEventListener('loadedmetadata', onMediaLoad, true);
     return () => {
+      ro?.disconnect();
       el.removeEventListener('scroll', onScroll);
       el.removeEventListener('load', onMediaLoad, true);
       el.removeEventListener('loadedmetadata', onMediaLoad, true);
@@ -472,19 +501,30 @@ export function Conversation({
   }, [messages]);
   const files = useMemo(() => allShared.slice(0, 4), [allShared]);
 
-  async function makeDraft(t: Tone = tone) {
+  /** summaryOnly: yalnız özet/aksiyon (sağ paneldeki "Özetle"); yanıtlanacak mesaj yokken kompozöre taslak düşmez */
+  async function makeDraft(t: Tone = tone, summaryOnly = false) {
     setTone(t);
     setDrafting(true);
     try {
       const r = await api.draft(chat.id, t);
-      // taslak kapalıysa metni tutma (Özetle düğmesi aynı çağrıyı özet/aksiyonlar için kullanır)
-      setDraft(aiP.drafts ? r : { ...r, draft: '' });
+      // taslak kapalıysa ya da yalnız özet istendiyse metni tutma
+      setDraft(aiP.drafts && !summaryOnly ? r : { ...r, draft: '' });
+      setSummaryAt(Date.now());
     } catch (e) {
       notify((e as Error).message, true);
     } finally {
       setDrafting(false);
     }
   }
+
+  // Odak'tan "Düzenle": taslak metni kompozöre; "Nazik hatırlatma yaz": taslağı hemen üret
+  useEffect(() => {
+    if (!seed) return;
+    if (seed.text) setText(seed.text);
+    else if (seed.autoDraft && draftOn) void makeDraft();
+    onSeedUsed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function send() {
     if (pending) {
@@ -869,7 +909,7 @@ export function Conversation({
                   {drafting ? <span className="spin" /> : <Icon name="sparkle" size={13} color="#6C47FF" sw={2} />} Taslak yaz
                 </button>
               )}
-              <span style={{ fontSize: 11, color: 'var(--text3)', whiteSpace: 'nowrap' }}>· {Math.min(messages.length, 30)} mesaj bağlamı</span>
+              <span className="ctx-n">· {Math.min(messages.length, 30)} mesaj bağlamı</span>
               <span style={{ flexGrow: 1 }} />
               {(
                 [
@@ -878,11 +918,11 @@ export function Conversation({
                   ['en', 'EN'],
                 ] as Array<[Tone, string]>
               ).map(([t, l]) => (
-                <button key={t} className={`btn xs b b2 ${tone === t && draftShown ? 'soft' : ''}`} onClick={() => makeDraft(t)} disabled={drafting}>
+                <button key={t} className={`btn xs b b2 ${tone === t && draftShown ? 'soft' : ''}`} onClick={() => makeDraft(t)} disabled={drafting || (!needsReply && !draftShown)}>
                   {l}
                 </button>
               ))}
-              <button className="btn xs icon b b2" onClick={() => makeDraft(tone)} disabled={drafting} aria-label="Yeniden yaz">
+              <button className="btn xs icon b b2" onClick={() => makeDraft(tone)} disabled={drafting || (!needsReply && !draftShown)} aria-label="Yeniden yaz">
                 <Icon name="refresh" size={13} sw={2} />
               </button>
             </div>
@@ -939,8 +979,20 @@ export function Conversation({
           )}
           <div className="comp-bottom">
             {canMedia && (
-            <label className="btn ghost sm icon b" aria-label="Fotoğraf, video veya dosya ekle" title="Fotoğraf / video / dosya gönder" style={{ cursor: uploading ? 'progress' : 'pointer' }}>
-              <Icon name="link" size={16} />
+            <label
+              className="btn ghost sm icon b"
+              role="button"
+              tabIndex={0}
+              aria-label="Fotoğraf, video veya dosya ekle"
+              title="Fotoğraf / video / dosya gönder"
+              style={{ cursor: uploading ? 'progress' : 'pointer' }}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                e.preventDefault();
+                e.currentTarget.querySelector('input')?.click();
+              }}
+            >
+              <Icon name="clip" size={16} />
               <input type="file" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.txt" style={{ display: 'none' }} disabled={!!uploading} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) pickFile(f); }} />
             </label>
             )}
@@ -1146,7 +1198,7 @@ export function Conversation({
             <span className="h">
               <span className="sum-ic"><Icon name="sparkle" size={13} color="#6C47FF" sw={2} /></span>
               Özet
-              {draft && draft.summary.length > 0 && <span className="when">{fmtTime(Date.now())}</span>}
+              {draft && draft.summary.length > 0 && summaryAt > 0 && <span className="when">{fmtTime(summaryAt)}</span>}
             </span>
             {summary.length > 0 ? (
               <ul>
@@ -1155,7 +1207,7 @@ export function Conversation({
                 ))}
               </ul>
             ) : ai ? (
-              <button type="button" className="btn xs soft b b2" style={{ alignSelf: 'flex-start' }} onClick={() => void makeDraft()} disabled={drafting}>
+              <button type="button" className="btn xs soft b b2" style={{ alignSelf: 'flex-start' }} onClick={() => void makeDraft(tone, !needsReply)} disabled={drafting}>
                 {drafting ? <span className="spin" /> : <Icon name="sparkle" size={12} color="#6C47FF" sw={2} />} Özetle
               </button>
             ) : (
@@ -1184,9 +1236,10 @@ export function Conversation({
           <span className="label">Etiketler</span>
           <div className="ctx-tags">
             {chat.tags.map((t) => (
-              <button key={t} type="button" className="ctx-tag b" title="Etiketi kaldır" onClick={() => onTags(chat.tags.filter((x) => x !== t))}>
+              <button key={t} type="button" className="ctx-tag b" title="Etiketi kaldır" aria-label={`${t} etiketini kaldır`} onClick={() => (onTags(chat.tags.filter((x) => x !== t)), notify(`“${t}” etiketi kaldırıldı`))}>
                 {t === 'fırsat' ? <Icon name="sparkle" size={11} color={TAG_COLORS[t][1]} sw={2} /> : <span className="dot" style={{ background: TAG_COLORS[t]?.[1] ?? '#8c889b' }} />}
                 {t}
+                <span className="x" aria-hidden><Icon name="x" size={10} sw={2.2} /></span>
               </button>
             ))}
             <button type="button" className={`ctx-tag add b ${addingTag ? 'on' : ''}`} aria-label="Etiket ekle" title="Etiket ekle" onClick={() => setAddingTag((v) => !v)}>
@@ -1446,7 +1499,7 @@ function CalendarModal({ initial, notify, onClose }: { initial: CalendarDraft; n
   }
   return (
     <div className="overlay" onClick={onClose}>
-      <div className="modal cal-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Takvime ekle" onKeyDown={(e) => e.key === 'Escape' && onClose()}>
+      <div className="modal cal-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Takvime ekle" onKeyDown={(e) => e.key === 'Escape' && (e.preventDefault(), onClose())}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <Icon name="calendar" size={20} color="#6C47FF" />
           <h2 style={{ fontSize: 20 }}>Takvime ekle</h2>
@@ -1616,9 +1669,13 @@ function profileRole(chat: Chat): { text: string; href?: string } | undefined {
 /** Medya penceresi: görsel/video doğrudan, Instagram/X gönderileri gömülü (embed) sayfayla, diğerleri bağlantıyla. */
 function Lightbox({ att, onClose, closing }: { att: Attachment; onClose: () => void; closing?: boolean }) {
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      e.preventDefault(); // arkadaki sohbet kapanmasın
+      onClose();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [onClose]);
   const link = att.link ? abs(att.link) : undefined;
   const page = att.page ?? (att.link && !isMediaFile(att.link) ? att.link : undefined);
@@ -1695,7 +1752,7 @@ function groupMessages(msgs: Message[]): Group[] {
 }
 
 /** Platformların metin olarak verdiği tepki/beğeni olayları */
-const REACT_TEXT = /^(👍|❤️|❤|😂|🔥|👏|😮|🎉|🙏) .+ (bir mesajı beğendi|mesajına tepki verdi)$/;
+export const REACT_TEXT = /^(👍|❤️|❤|😂|🔥|👏|😮|🎉|🙏) .+ (bir mesajı beğendi|mesajına tepki verdi)$/;
 
 const SENDER_COLORS = ['#6c47ff', '#0b6b45', '#b45309', '#a3195b', '#0a66c2', '#b42318', '#0e7490', '#6d28d9', '#047857', '#c2410c'];
 /** Grup sohbetinde her gönderene sabit bir renk (kimlikten türetilir; oturumlar arasında aynı kalır) */

@@ -6,7 +6,7 @@ import { PROFILE_NAME } from './profile';
 import { useAiPrefs } from './ai-prefs';
 
 /**
- * Odak modu: yanıt bekleyenler (en eskiden yeniye), her biri için AI taslağı ve tek tıkla gönderme.
+ * Odak modu: yanıt bekleyenler (en yeniden eskiye), her biri için AI taslağı ve tek tıkla gönderme.
  * Sağda: verdiğin sözler (AI aksiyonlarından), senin beklediklerin (son mesaj senin, 2+ gün cevap yok), sessize alınanlar.
  */
 export function Focus({
@@ -22,7 +22,7 @@ export function Focus({
   chats: Chat[];
   ai: boolean;
   notify: (t: string, err?: boolean) => void;
-  onOpen: (id: string) => void;
+  onOpen: (id: string, seed?: { text?: string; autoDraft?: boolean }) => void;
   onBack: () => void;
   onMenu?: () => void;
 }) {
@@ -135,7 +135,7 @@ export function Focus({
             <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, letterSpacing: -0.3 }}>Yanıt bekleyenler</h2>
             {visible.length > 0 && <span className="pill lime">{visible.length}</span>}
             <span style={{ flexGrow: 1 }} />
-            <span style={{ fontSize: 12.5, color: 'var(--text3)' }}>En eskiden yeniye</span>
+            <span style={{ fontSize: 12.5, color: 'var(--text3)' }}>En yeniden eskiye</span>
           </div>
           {visible.length === 0 && <div className="empty card">Şu an yanıt bekleyen kimse yok. Yeni mesaj gelince burada görünür.</div>}
           {visible.map((c, i) => {
@@ -205,12 +205,12 @@ export function Focus({
                     </button>
                   )}
                   {draftOn && draft?.draft && (
-                    <button className="btn b b2" onClick={() => onOpen(c.id)}>
+                    <button className="btn b b2" onClick={() => onOpen(c.id, { text: draft.draft })}>
                       <Icon name="pen" size={14} /> Düzenle
                     </button>
                   )}
                   <span style={{ flexGrow: 1 }} />
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text3)' }}>
+                  <span className="via" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text3)' }}>
                     <Chip platform={c.platform} size={15} /> {PLATFORMS[c.platform].name} ile yanıtlanır
                   </span>
                 </div>
@@ -250,7 +250,7 @@ export function Focus({
               </button>
             ))}
             {awaiting.length > 0 && (
-              <button className="btn b b2" style={{ alignSelf: 'flex-start' }} onClick={() => onOpen(awaiting[0].id)}>
+              <button className="btn b b2" style={{ alignSelf: 'flex-start' }} onClick={() => onOpen(awaiting[0].id, { autoDraft: true })} title={`${awaiting[0].name} için hatırlatma taslağı`}>
                 <Icon name="sparkle" size={14} color="#6C47FF" sw={2} /> Nazik hatırlatma yaz
               </button>
             )}

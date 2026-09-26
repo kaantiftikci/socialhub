@@ -18,7 +18,8 @@ export function DemoGate() {
         if (cancelled) return;
         if (u) {
           setProfileName(u.name);
-          loadDemoAccounts(await authLoadAccounts());
+          // kayıtlı kanallar okunamazsa oturum geçerli kalır (giriş ekranına atılmaz), demo varsayılan kanallarla açılır
+          loadDemoAccounts(await authLoadAccounts().catch(() => []));
         }
         setUser(u);
       })
@@ -37,6 +38,7 @@ export function DemoGate() {
     setLeaveDemoPanel(() => {
       void authLogout().catch(() => undefined);
       clearDemoAccounts();
+      setProfileName('');
       setUser(null);
     });
     return () => setLeaveDemoPanel(null);
@@ -44,7 +46,7 @@ export function DemoGate() {
 
   async function enter(u: SessionUser) {
     setProfileName(u.name);
-    loadDemoAccounts(await authLoadAccounts());
+    loadDemoAccounts(await authLoadAccounts().catch(() => []));
     setUser(u);
   }
 
@@ -100,7 +102,7 @@ function AuthScreen({
         <h1>Giriş yap</h1>
         <label>
           Kullanıcı adı
-          <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoCapitalize="none" required minLength={2} maxLength={40} />
+          <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoCapitalize="none" required minLength={2} maxLength={40} pattern=".*\S.*\S.*" title="En az 2 karakter" />
         </label>
         <label>
           Şifre

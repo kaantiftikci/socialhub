@@ -2,11 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, connectEvents } from './api';
 import { PLATFORMS, type Account, type Chat, type ChatFlags, type CoreEvent, type Message, type Platform, DEFAULT_TAGS } from './types';
 import { Avatar, Chip, Icon, Logo, Resizer, SyncBar, Tag, ago, fmtTime, loadPaneSizes, useClosing } from './ui';
-import { Conversation, startScheduledSends } from './Conversation';
+import { Conversation, REACT_TEXT, startScheduledSends } from './Conversation';
 import { ConnectModal } from './Connect';
 import { Focus } from './Focus';
 import { MOD_KEY, isTauri, notify as desktopNotify, onDesktopEvent, playPing, SOUNDS, getPlatformSound, getPlatformTone, setPlatformSound, setPlatformTone, setBadge, windowFocused, coreInfo } from './desktop';
-import { PROFILE_NAME, STATIC_DEMO } from './profile';
+import { DEMO_OFFLINE, PROFILE_NAME, STATIC_DEMO } from './profile';
 import { leaveDemoPanel } from './demo-session';
 import { setAiPrefs, useAiPrefs } from './ai-prefs';
 
@@ -569,13 +569,18 @@ export default function App() {
         }
         return;
       }
-      if (typing) return;
       if (e.key === 'Escape') {
-        if (connectOpen) setConnectOpen(false);
+        if (e.defaultPrevented) return; // bir katman (medya penceresi, açılır menü) Esc'i zaten kullandı
+        // önce en üstteki pencere/menü kapanır; sohbet ancak hiçbiri açık değilse
+        if (appSettingsOpen) setAppSettingsOpen(false);
+        else if (settingsOpen) setSettingsOpen(false);
+        else if (typing) return;
+        else if (connectOpen) setConnectOpen(false);
         else if (view !== 'inbox') setView('inbox');
         else setSelected(null);
         return;
       }
+      if (typing) return;
       if (view !== 'inbox' || e.metaKey || e.ctrlKey || e.altKey) return;
       const idx = chatList.findIndex((c) => c.id === selected);
       if (e.key === 'j' || e.key === 'ArrowDown') {
@@ -590,7 +595,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [chatList, selected, view, connectOpen, viewTags]);
+  }, [chatList, selected, view, connectOpen, viewTags, settingsOpen, appSettingsOpen]);
 
   const orderedAccounts = useMemo(() => {
     const idx = new Map(chanOrder.map((id, i) => [id, i]));
@@ -756,7 +761,10 @@ export default function App() {
     selectPlatform(null);
     setTagFilter(null);
   };
-  const openChat = (id: string) => {
+  /** Odak'tan açılışta kompozöre taşınacak taslak/niyet (Düzenle, Nazik hatırlatma yaz) */
+  const [seed, setSeed] = useState<{ id: string; text?: string; autoDraft?: boolean } | null>(null);
+  const openChat = (id: string, s?: { text?: string; autoDraft?: boolean }) => {
+    setSeed(s ? { id, ...s } : null);
     setView('inbox');
     setSelected(id);
   };
@@ -822,7 +830,7 @@ export default function App() {
             </div>
             <div className="tagrow">
               {[...new Set([...DEFAULT_TAGS, ...allTags.map(([t]) => t)])].map((t) => (
-                <button key={t} className={`tagbtn b ${tagFilter === t ? 'active' : ''}`} title={viewTags.indexOf(t) >= 0 ? `${MOD_KEY}${viewTags.indexOf(t) + 2}` : undefined} onClick={() => (setView('inbox'), setTagFilter(tagFilter === t ? null : t))}>
+                <button key={t} className={`tagbtn b ${tagFilter === t ? 'active' : ''}`} title={viewTags.indexOf(t) >= 0 ? `${MOD}${viewTags.indexOf(t) + 2}` : undefined} onClick={() => (setView('inbox'), setTagFilter(tagFilter === t ? null : t))}>
                   <span className="dot" style={{ background: tagDot(t) }} />
                   {t}
                   {allTags.find(([x]) => x === t)?.[1] ? <span className="c">{allTags.find(([x]) => x === t)![1]}</span> : null}
@@ -875,7 +883,8 @@ export default function App() {
               <span>Aynı Wi‑Fi'daki telefondan aç{STATIC_DEMO && <em className="set-hint">Masaüstü uygulamasında</em>}</span>
               <input type="checkbox" disabled={STATIC_DEMO} checked={!!lan?.enabled} onChange={(e) => api.setLan(e.target.checked).then(setLanState).catch((err) => notify(err.message, true))} />
             </label>
-            {STATIC_DEMO && (
+            {/* tek dosya (çevrimdışı) demoda giriş ekranı yok → çıkış da yok */}
+            {STATIC_DEMO && !DEMO_OFFLINE && (
               <button className="row-toggle b psounds-head" onClick={() => leaveDemoPanel()}>
                 <span>Çıkış yap</span>
               </button>
@@ -1086,10 +1095,10 @@ export default function App() {
                   <span className="kbd">K</span> gezin
                 </span>
                 <span>
-                  <span className="kbd">{MOD_KEY}1</span> görünüm
+                  <span className="kbd">{MOD}1</span> görünüm
                 </span>
                 <span>
-                  <span className="kbd">{MOD_KEY}K</span> ara
+                  <span className="kbd">{MOD}K</span> ara
                 </span>
               </div>
             </section>
@@ -1104,6 +1113,8 @@ export default function App() {
                 notify={notify}
                 onTags={(tags) => api.setTags(current.id, tags).then((c) => setChats((p) => new Map(p).set(c.id, c))).catch((e) => notify(e.message, true))}
                 onFlags={(f) => setFlags(current.id, f)}
+                seed={seed?.id === current.id ? seed : null}
+                onSeedUsed={() => setSeed(null)}
                 showDetails={isMobile ? mobileDetails : showDetails}
                 onToggleDetails={() => (isMobile ? setMobileDetails((v) => !v) : setShowDetails(!showDetails))}
                 onBack={isMobile ? () => setSelected(null) : undefined}
@@ -1510,8 +1521,12 @@ function fmtBadge(c: Chat): string {
 }
 
 /** Son mesaj karşı taraftan geldiyse ve 20 dakikadır cevaplanmadıysa "yanıt bekliyor". */
+/** Kısayol öneki: Mac'te "⌘1", diğerlerinde "Ctrl+1" */
+const MOD = MOD_KEY === '⌘' ? '⌘' : `${MOD_KEY}+`;
+
 export function isWaiting(c: Chat): boolean {
-  return c.unread > 0 && Date.now() - c.lastMessageAt > 20 * 60_000;
+  // son olay yalnızca bir tepkiyse ("😂 Mert bir mesajı beğendi") yanıt beklemiyor
+  return c.unread > 0 && Date.now() - c.lastMessageAt > 20 * 60_000 && !REACT_TEXT.test(c.lastPreview ?? '');
 }
 
 /** Akıllı sıralama: yanıt bekleyenler ve etiketli müşteriler önce. */
