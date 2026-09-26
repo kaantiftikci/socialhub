@@ -30,6 +30,10 @@ Dil: arayüz ve yorumlar Türkçe.
   izler; paketli sürümde `scripts/bundle-core.mjs` çekirdeği kendi `node_modules`'üyle `core-bundle/`e koyar
   (Resources/core). Günlükler: `~/.kavsak/desktop.log`, `~/.kavsak/core.log`. Release'te devtools açık.
 - Komutlar: `npm run dev` (çekirdek+Vite), `npm run demo`, `npm run desktop` (Tauri dev), `npm run app` (paketle + aç; `scripts/open-app.mjs`).
+- **Herkese açık demo** (`VITE_STATIC_DEMO=1`, `static-demo.ts`): main'e push → `.github/workflows/deploy-demo.yml` FTP ile hem
+  `mivelo.kaantiftikci.com/` hem `mivelo.app/` klasörüne (aynı cPanel hesabı; demo hesapları `~/mivelo-data`, `public/api/index.php`).
+  Demoda örnek AI açık (`demo-ai.ts`: sohbete özel taslak/özet/aksiyon/olay, model çağrısı yok); pazaryeri sipariş kartı `Script.order`.
+  Tek dosya demo (`npm run demo:html`) profil adı "Mivelo".
 - **Windows**: `tauri.windows.conf.json` (NSIS, currentUser, yerel başlık çubuğu) Tauri'nin platform yapılandırma birleştirmesiyle
   uygulanır; paket yalnız CI'da üretilir (`.github/workflows/build-windows.yml`: workflow_dispatch + `v*` etiketi, windows-latest,
   `KAVSAK_BUNDLE_NODE=1` ile node.exe `core-bundle/bin/`e gömülür, kabuk önce onu dener). `lib.rs`: kısayol Ctrl+Shift+K,

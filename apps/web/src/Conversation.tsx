@@ -999,7 +999,7 @@ export function Conversation({
             {chat.kind === 'group' ? 'grup' : chat.kind === 'channel' ? 'kanal' : 'sohbet'}
           </span>
         </div>
-        {chat.platform === 'shopier' && chat.meta?.order ? <OrderPanel chat={chat} notify={notify} /> : null}
+        {PLATFORMS[chat.platform].category === 'shop' && (chat.meta?.order as OrderMeta | undefined)?.items ? <OrderPanel chat={chat} notify={notify} /> : null}
 
         <div className="qacts one">
           <button className={`b b2 ${noteOpen || chatNote ? 'go' : ''}`} onClick={() => (setNoteDraft(chatNote), setNoteOpen((v) => !v))}>
@@ -1347,21 +1347,22 @@ export function Conversation({
 interface OrderMeta {
   id: string;
   status: string;
+  /** Pazaryeri bağlayıcılarının Türkçe durum etiketi (Trendyol/Hepsiburada/Amazon) */
+  statusLabel?: string;
   paymentStatus?: string;
   dateCreated?: string;
   currency: string;
   totals?: { subtotal?: string; shipping?: string; discount?: string; total?: string };
   note?: string;
   items: Array<{ title: string; quantity: number; total: string; type?: string; selection?: string[] }>;
-  shipping: { name: string; phone?: string; email?: string; address?: string };
-  fulfillments: Array<{ status: string; company?: string; trackingNumber?: string; trackingUrl?: string; date?: string }>;
-  refunds: Array<{ type: string; status: string; total: string; date?: string }>;
+  shipping?: { name: string; phone?: string; email?: string; address?: string };
+  fulfillments?: Array<{ status: string; company?: string; trackingNumber?: string; trackingUrl?: string; date?: string }>;
+  refunds?: Array<{ type: string; status: string; total: string; date?: string }>;
 }
 const CARRIERS: Array<[string, string]> = [
   ['yurtici', 'Yurtiçi'], ['aras', 'Aras'], ['mng', 'MNG'], ['ptt', 'PTT'], ['surat', 'Sürat'], ['hepsijet', 'HepsiJET'], ['ups', 'UPS'], ['dhl', 'DHL'], ['fedex', 'FedEx'], ['tnt', 'TNT'], ['pts', 'PTS'], ['aramex', 'Aramex'], ['interGlobal', 'InterGlobal'], ['other', 'Diğer'],
 ];
 
-/** Shopier sipariş kartı: durum, ürünler, tutar, adres, kargo; kapatma/kargo formu */
 /** Takip zamanı: "yarın 14:30", "3 gün sonra (Pzt 09:00)" */
 function fmtFollow(at: number): string {
   const d = new Date(at);
@@ -1472,7 +1473,10 @@ function OrderPanel({ chat, notify }: { chat: Chat; notify: (t: string, err?: bo
   const [tracking, setTracking] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
-  const open = o.status !== 'fulfilled';
+  // Kargoya verip kapatma yalnız Shopier'de (resmi API); pazaryerlerinde kart salt okunur
+  const canFulfill = chat.platform === 'shopier';
+  const CLOSED = /^(fulfilled|delivered|shipped|cancelled|canceled|returned)$/i;
+  const open = !CLOSED.test(o.status);
   const digital = o.items.every((i) => i.type === 'digital');
   const cur = o.currency === 'TRY' ? '₺' : o.currency;
   const fmt = (v?: string) => (v ? `${String(v).replace('.', ',')} ${cur}` : '—');
@@ -1487,7 +1491,7 @@ function OrderPanel({ chat, notify }: { chat: Chat; notify: (t: string, err?: bo
   return (
     <div className="order">
       <div className="order-head">
-        <span className={`order-status ${open ? 'open' : 'done'}`}>{open ? 'Açık sipariş' : 'Kapatıldı'}</span>
+        <span className={`order-status ${open ? 'open' : 'done'}`}>{o.statusLabel ?? (open ? 'Açık sipariş' : 'Kapatıldı')}</span>
         <span className="order-total">{fmt(o.totals?.total)}</span>
       </div>
       <div className="order-items">
@@ -1506,19 +1510,19 @@ function OrderPanel({ chat, notify }: { chat: Chat; notify: (t: string, err?: bo
         {o.totals?.shipping && o.totals.shipping !== '0' && o.totals.shipping !== '0.00' ? <Row k="Kargo" v={fmt(o.totals.shipping)} /> : null}
         {o.totals?.discount && o.totals.discount !== '0' && o.totals.discount !== '0.00' ? <Row k="İndirim" v={'−' + fmt(o.totals.discount)} /> : null}
         <Row k="Tarih" v={o.dateCreated ? new Date(o.dateCreated).toLocaleString('tr-TR', { dateStyle: 'medium', timeStyle: 'short' }) : '—'} />
-        <Row k="Alıcı" v={o.shipping.name} />
-        {o.shipping.phone ? <Row k="Telefon" v={o.shipping.phone} href={`tel:${o.shipping.phone}`} /> : null}
-        {o.shipping.email ? <Row k="E-posta" v={o.shipping.email} href={`mailto:${o.shipping.email}`} /> : null}
-        {o.shipping.address ? <Row k="Adres" v={o.shipping.address} /> : null}
+        {o.shipping?.name ? <Row k="Alıcı" v={o.shipping.name} /> : null}
+        {o.shipping?.phone ? <Row k="Telefon" v={o.shipping.phone} href={`tel:${o.shipping.phone}`} /> : null}
+        {o.shipping?.email ? <Row k="E-posta" v={o.shipping.email} href={`mailto:${o.shipping.email}`} /> : null}
+        {o.shipping?.address ? <Row k="Adres" v={o.shipping.address} /> : null}
         {o.note ? <Row k="Not" v={o.note} /> : null}
-        {o.fulfillments.map((f, i) => (
+        {(o.fulfillments ?? []).map((f, i) => (
           <Row key={i} k={f.status === 'shipped' ? 'Kargo' : 'Gönderi'} v={`${f.company ?? ''}${f.trackingNumber ? ' · ' + f.trackingNumber : ''}`.trim() || (f.status === 'shipped' ? 'gönderildi' : 'hazırlanıyor')} href={f.trackingUrl} />
         ))}
-        {o.refunds.map((r, i) => (
+        {(o.refunds ?? []).map((r, i) => (
           <Row key={'r' + i} k="İade" v={`${r.type === 'full' ? 'tam' : 'kısmi'} ${fmt(r.total)} · ${r.status === 'succeeded' ? 'tamamlandı' : r.status === 'failed' ? 'başarısız' : 'bekliyor'}`} />
         ))}
       </div>
-      {open && (
+      {open && canFulfill && (
         <div className="order-form">
           <span className="label">{digital ? 'Teslim edildi olarak kapat' : 'Kargoya ver ve kapat'}</span>
           {!digital && (

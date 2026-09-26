@@ -10,7 +10,7 @@ import { initSentry } from './sentry';
 void initSentry(); // yalnız demo derlemesinde ve DSN varsa etkin
 
 if (DEMO_OFFLINE) {
-  setProfileName('Demo');
+  setProfileName('Mivelo');
   loadDemoAccounts([]); // tüm demo uygulamaları bağlı
 }
 

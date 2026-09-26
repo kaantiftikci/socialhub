@@ -4,6 +4,7 @@ import { authSaveAccounts } from './auth-api';
 import { demoAsset } from './demo-asset';
 import { DEMO_OFFLINE } from './profile';
 import { DEMO_APPS, SCRIPTS } from './demo-scripts';
+import { DEMO_STYLE, demoDraft } from './demo-ai';
 import { STATIC_DEMO } from './profile';
 
 /**
@@ -103,7 +104,7 @@ function seed(): void {
         tags: s.tags,
         handle: s.handle,
         avatarUrl: demoAsset(`avatars/${s.avatar}`),
-        meta: s.summary?.length || s.note ? { ...(s.summary?.length ? { summary: s.summary } : {}), ...(s.note ? { note: s.note } : {}) } : undefined,
+        meta: s.summary?.length || s.note || s.order ? { ...(s.summary?.length ? { summary: s.summary } : {}), ...(s.note ? { note: s.note } : {}), ...(s.order ? { order: s.order } : {}) } : undefined,
         participants: s.handle && PLATFORMS[acc.platform].category === 'mail' ? [{ id: s.handle, name: s.handle.split('@')[0] ?? s.handle, handle: s.handle, avatarUrl: demoAsset(`avatars/${s.avatar}`) }] : undefined,
       });
     });
@@ -233,7 +234,6 @@ if (STATIC_DEMO) {
   }, 70_000);
 }
 
-const DEMO_STYLE = ['kısa-orta uzunlukta yazar', '"siz" diye hitap eder (resmî)', 'ara sıra emoji kullanır (🙏 😊)', 'açılışta "Merhaba" der', 'kapanışta "Teşekkürler" der'];
 
 /** Demo: çekirdek yok; tek etkinlikli .ics tarayıcıda üretilir ve indirilir */
 function demoIcs(ev: CalendarDraft): string {
@@ -245,7 +245,7 @@ function demoIcs(ev: CalendarDraft): string {
 }
 
 export const staticApi = {
-  health: async () => ({ ok: true, ai: false, stats: { unread: chats.reduce((n, c) => n + c.unread, 0), chats: chats.length }, os: undefined as CoreOs | undefined }),
+  health: async () => ({ ok: true, ai: true, stats: { unread: chats.reduce((n, c) => n + c.unread, 0), chats: chats.length }, os: undefined as CoreOs | undefined }),
   accounts: async () => accounts.map((a) => ({ ...a })),
   addAccount: async (platform: Platform, _token?: string): Promise<Account> => {
     const account: Account = {
@@ -395,12 +395,11 @@ export const staticApi = {
   },
   moreChats: async () => ({ added: 0, supported: false }),
   loadHistory: async () => undefined,
-  draft: async (_chatId: string): Promise<DraftResult> => ({
-    draft: 'Teşekkürler, uygun bir zamanda dönüş yapacağım.',
-    summary: ['Bu herkese açık demodur; taslak örnektir ve kaydedilmez.'],
-    actions: [],
-    style: DEMO_STYLE,
-  }),
+  // Örnek AI: gerçek model yok; sohbete özel taslak/özet/aksiyon (demo-ai.ts). "Düşünme" süresi gerçekçi olsun
+  draft: async (chatId: string, tone?: string): Promise<DraftResult> => {
+    await new Promise((r) => setTimeout(r, 650 + Math.random() * 450));
+    return demoDraft(chatOf(chatId), messages.filter((m) => m.chatId === chatId), (tone as 'default') ?? 'default');
+  },
   setFollowUp: async (chatId: string, at: number | null): Promise<Chat> => {
     const next: Chat = { ...chatOf(chatId), followUp: at ? { at, since: Date.now() } : undefined };
     chats = chats.map((c) => (c.id === chatId ? next : c));

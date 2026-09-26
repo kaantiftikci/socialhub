@@ -1,4 +1,4 @@
-# Herkese açık demoyu (apps/web, VITE_STATIC_DEMO=1) cPanel FTP'sine yükler.
+# Herkese açık demoyu (apps/web, VITE_STATIC_DEMO=1) cPanel FTP'sine yükler: mivelo.kaantiftikci.com ve mivelo.app.
 # Gizli: FTP_PASSWORD (GitHub → Settings → Secrets and variables → Actions). Sunucuda SSH/SFTP kapalı, FTP+TLS açık.
 name: deploy-demo
 on:
@@ -22,7 +22,7 @@ jobs:
           # Sentry yalnızca demoda (secret yoksa SDK hiç başlamaz); release = commit
           VITE_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           VITE_COMMIT: ${{ github.sha }}
-      - name: FTP (TLS) ile yükle
+      - name: FTP (TLS) ile yükle — mivelo.kaantiftikci.com
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: kaantiftikci.com
@@ -31,5 +31,16 @@ jobs:
           protocol: ftps
           local-dir: apps/web/dist/
           server-dir: mivelo.kaantiftikci.com/
+          exclude: '**/.git*'
+      # Aynı cPanel hesabı, alan adı klasörü ~/mivelo.app (demo hesapları ortak: ~/mivelo-data)
+      - name: FTP (TLS) ile yükle — mivelo.app
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: kaantiftikci.com
+          username: kaa300ftikcicom
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftps
+          local-dir: apps/web/dist/
+          server-dir: mivelo.app/
           exclude: '**/.git*'
 # tetik: 2026-09-24T17:42:30Z

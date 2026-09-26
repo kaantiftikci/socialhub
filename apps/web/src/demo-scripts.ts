@@ -16,6 +16,8 @@ export interface Script {
   summary?: string[];
   /** Sağ paneldeki Not kartı */
   note?: string;
+  /** Pazaryeri sipariş kartı (bağlayıcıların meta.order biçimi) */
+  order?: Record<string, unknown>;
   lines: Line[];
 }
 
@@ -985,6 +987,35 @@ const SAMPLE_NOTE: Partial<Record<Platform, Record<string, string>>> = {
 for (const platform of Object.keys(SAMPLE_NOTE) as Platform[]) {
   const map = SAMPLE_NOTE[platform] ?? {};
   for (const s of SCRIPTS[platform] ?? []) if (map[s.remoteId]) s.note = map[s.remoteId];
+}
+
+/** Pazaryeri siparişleri: sağ panelde sipariş durumu kartı (gerçek Trendyol/Hepsiburada bağlayıcılarıyla aynı biçim) */
+const day = (d: number, h = 10) => new Date(Date.now() - d * 86_400_000).toISOString().slice(0, 11) + `${String(h).padStart(2, '0')}:00:00.000Z`;
+const SAMPLE_ORDER: Partial<Record<Platform, Record<string, Record<string, unknown>>>> = {
+  trendyol: {
+    'soru-kargo': {
+      id: '1042931', status: 'Shipped', statusLabel: 'Kargoya verildi', dateCreated: day(3), currency: 'TRY',
+      totals: { total: '1249.90' }, items: [{ title: 'Keten gömlek · ekru', quantity: 1, total: '1249.90', selection: ['Ekru', 'M'] }],
+      shipping: { name: 'Nisa A.', address: 'Çankaya, Ankara' },
+      fulfillments: [{ status: 'shipped', company: 'Trendyol Express', trackingNumber: '7340 1182 0931' }],
+    },
+    'soru-kalip': {
+      id: '1042977', status: 'Created', statusLabel: 'Hazırlanıyor', dateCreated: day(0, 9), currency: 'TRY',
+      totals: { total: '1890.00' }, items: [{ title: 'Keten elbise · kırmızı', quantity: 1, total: '1890.00', selection: ['Kırmızı', '38'] }],
+      shipping: { name: 'Deniz K.', address: 'Karşıyaka, İzmir' }, fulfillments: [],
+    },
+  },
+  n11: {
+    'soru-iade': {
+      id: '2207-4481', status: 'Returned', statusLabel: 'İade talebi', dateCreated: day(6), currency: 'TRY',
+      totals: { total: '349.00' }, items: [{ title: 'Seramik kupa · 2’li', quantity: 1, total: '349.00' }],
+      shipping: { name: 'Kerem A.', address: 'Nilüfer, Bursa' }, fulfillments: [{ status: 'delivered', company: 'Yurtiçi' }],
+    },
+  },
+};
+for (const platform of Object.keys(SAMPLE_ORDER) as Platform[]) {
+  const map = SAMPLE_ORDER[platform] ?? {};
+  for (const s of SCRIPTS[platform] ?? []) if (map[s.remoteId]) s.order = map[s.remoteId];
 }
 
 /** Kanal satırındaki bildirim: her uygulamada başka bir toplam. Kanallar sayıma girmez. */
