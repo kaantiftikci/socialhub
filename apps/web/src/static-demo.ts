@@ -359,7 +359,7 @@ export const staticApi = {
     try {
       const host = new URL(url).hostname.replace(/^www\./, '');
       if (host === 'partners.beehiiv.com') return { url, site: 'beehiiv', title: 'Mivelo × beehiiv · lansman ortak tanıtımı', description: 'Lansman haftasında beehiiv yazar bültenine yerleşim.' };
-      if (host === 'mivelo.kaantiftikci.com') return { url, site: 'Mivelo', title: 'Mivelo — tüm mesajların tek gelen kutusunda', description: 'WhatsApp, Telegram, Slack, Instagram, e-posta ve pazaryerleri tek yerde.' };
+      if (host === 'mivelo.app') return { url, site: 'Mivelo', title: 'Mivelo — tüm mesajların tek gelen kutusunda', description: 'WhatsApp, Telegram, Slack, Instagram, e-posta ve pazaryerleri tek yerde.' };
     } catch {
       /* geçersiz */
     }

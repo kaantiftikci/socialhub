@@ -5,7 +5,7 @@ import ftplib, getpass, os, ssl, sys
 
 HOST = os.environ.get("MIVELO_FTP_HOST", "kaantiftikci.com")
 USER = os.environ.get("MIVELO_FTP_USER", "kaa300ftikcicom")
-REMOTE = os.environ.get("MIVELO_FTP_DIR", "mivelo.kaantiftikci.com")  # cPanel belge kökü (ana dizine göre)
+REMOTE = os.environ.get("MIVELO_FTP_DIR", "mivelo.app")  # cPanel belge kökü (ana dizine göre)
 LOCAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "apps", "web", "dist")
 
 if not os.path.isfile(os.path.join(LOCAL, "index.html")):
@@ -47,4 +47,4 @@ for root, dirs, files in os.walk(LOCAL):
         count += 1
         print(f"  ↑ {remote_dir}/{name}")
 ftp.quit()
-print(f"✓ {count} dosya yüklendi → https://mivelo.kaantiftikci.com")
+print(f"✓ {count} dosya yüklendi → https://mivelo.app")
