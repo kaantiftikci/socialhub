@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, connectEvents } from './api';
-import { PLATFORMS, shopKind, shopPending, type Account, type Chat, type ChatFlags, type CoreEvent, type Message, type Platform, type ShopKind, DEFAULT_TAGS } from './types';
+import { PLATFORMS, isOrderPage, shopKind, shopPending, type Account, type Chat, type ChatFlags, type CoreEvent, type Message, type Platform, type ShopKind, DEFAULT_TAGS } from './types';
 import { Avatar, Chip, Icon, Logo, Resizer, SyncBar, Tag, ago, fmtTime, loadPaneSizes, useClosing } from './ui';
 import { Conversation, REACT_TEXT, startScheduledSends } from './Conversation';
 import { ConnectModal } from './Connect';
@@ -456,6 +456,15 @@ export default function App() {
   const storyPlatforms = useMemo(() => [...new Set(waitingChats.map((c) => c.platform))], [waitingChats]);
 
   const isShop = !!platformFilter && PLATFORMS[platformFilter].category === 'shop';
+  /** Sipariş sayfası: aynı hesapta bu siparişe bağlı müşteri sorusu (meta.question.orderNumber) */
+  const relatedQuestion = useMemo(() => {
+    const cur = selected ? chats.get(selected) : undefined;
+    if (!cur || !isOrderPage(cur)) return null;
+    const no = String((cur.meta?.order as { id?: string } | undefined)?.id ?? '');
+    if (!no) return null;
+    for (const c of chats.values()) if (c.accountId === cur.accountId && String((c.meta?.question as { orderNumber?: string } | undefined)?.orderNumber ?? '') === no) return c;
+    return null;
+  }, [chats, selected]);
   /** Pazaryeri sekmelerindeki sayılar: açık sipariş ve yanıt bekleyen soru */
   const shopCounts = useMemo(() => {
     const n: Record<ShopKind, number> = { order: 0, question: 0 };
@@ -1139,6 +1148,7 @@ export default function App() {
                 onTags={(tags) => api.setTags(current.id, tags).then((c) => setChats((p) => new Map(p).set(c.id, c))).catch((e) => notify(e.message, true))}
                 onFlags={(f) => setFlags(current.id, f)}
                 seed={seed?.id === current.id ? seed : null}
+                relatedQuestion={relatedQuestion}
                 onSeedUsed={() => setSeed(null)}
                 showDetails={isMobile ? mobileDetails : showDetails}
                 onToggleDetails={() => (isMobile ? setMobileDetails((v) => !v) : setShowDetails(!showDetails))}
@@ -1551,7 +1561,8 @@ const MOD = MOD_KEY === '⌘' ? '⌘' : `${MOD_KEY}+`;
 
 export function isWaiting(c: Chat): boolean {
   // son olay yalnızca bir tepkiyse ("😂 Mert bir mesajı beğendi") yanıt beklemiyor
-  return c.unread > 0 && Date.now() - c.lastMessageAt > 20 * 60_000 && !REACT_TEXT.test(c.lastPreview ?? '');
+  // sipariş sayfaları (Trendyol/HB/n11/Shopier) yanıtlanamaz: yanıt bekleyen sayılmaz
+  return c.unread > 0 && Date.now() - c.lastMessageAt > 20 * 60_000 && !REACT_TEXT.test(c.lastPreview ?? '') && !isOrderPage(c);
 }
 
 /** Akıllı sıralama: yanıt bekleyenler ve etiketli müşteriler önce. */

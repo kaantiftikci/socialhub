@@ -78,6 +78,8 @@ Dil: arayüz ve yorumlar Türkçe.
   yalnız metin (arayüz dosya/ses düğmesini gizler). Shopier `available:false` ("Yakında").
   Pazaryeri kanal listesi sekmeleri **Tümü · Siparişler · Sorular** (`types.ts` `shopKind`: meta.order → sipariş, diğerleri soru; sayılar
   `shopPending`: açık sipariş / cevap bekleyen soru). Satırda 📦/❓ işareti (`.skind`); sağ panelde `OrderPanel` ya da `QuestionPanel` (meta.question).
+  Trendyol/Hepsiburada/n11/Shopier'de (`ORDER_ONLY_PLATFORMS`, `isOrderPage`) sipariş sohbet DEĞİL: orta alanda `OrderPage` (özet + durum
+  geçmişi, yazma alanı yok; API'de sipariş üzerinden alıcıya mesaj ucu yok). Bağlı soru varsa (question.orderNumber) "Soruyu aç". Odak'ta sayılmaz.
 
 ## Üretkenlik özellikleri
 - **Takip hatırlatıcısı**: `chats.followup` {at, since, due}; `POST /api/chats/:id/followup {at|null}`. Sunucu dakikada bir

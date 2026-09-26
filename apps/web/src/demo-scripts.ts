@@ -18,6 +18,8 @@ export interface Script {
   note?: string;
   /** Pazaryeri sipariş kartı (bağlayıcıların meta.order biçimi) */
   order?: Record<string, unknown>;
+  /** Pazaryeri sorusu: bağlı olduğu sipariş numarası (meta.question.orderNumber) */
+  questionOrderNo?: string;
   lines: Line[];
 }
 
@@ -1032,6 +1034,43 @@ const SAMPLE_ORDER: Partial<Record<Platform, Record<string, Record<string, unkno
 for (const platform of Object.keys(SAMPLE_ORDER) as Platform[]) {
   const map = SAMPLE_ORDER[platform] ?? {};
   for (const s of SCRIPTS[platform] ?? []) if (map[s.remoteId]) s.order = map[s.remoteId];
+}
+
+/**
+ * Trendyol/Hepsiburada/n11'de (gerçek bağlayıcılardaki gibi) sipariş ayrı bir kayıttır ve içinde yazışma olmaz, yalnız durum
+ * olayları olur; müşteriyle yazışma o siparişe bağlı bir sorudur. Siparişli örnekler ikiye ayrılır: soru (yazışma) + sipariş (olaylar).
+ */
+const ORDER_EVENTS: Record<string, string[]> = {
+  Picking: ['✔️ Sipariş doğrulandı', '📦 Gönderi hazırlanıyor'],
+  Created: ['✔️ Sipariş doğrulandı', '📦 Gönderi hazırlanıyor'],
+  Shipped: ['✔️ Sipariş doğrulandı', '📦 Gönderi hazırlanıyor', '🧾 Faturalandı', '📦 Kargoya verildi'],
+  Delivered: ['✔️ Sipariş doğrulandı', '🧾 Faturalandı', '📦 Kargoya verildi', '✅ Teslim edildi'],
+  Returned: ['✔️ Sipariş doğrulandı', '📦 Kargoya verildi', '✅ Teslim edildi', '↩️ İade talebi açıldı'],
+};
+for (const platform of ['trendyol', 'hepsiburada', 'n11'] as Platform[]) {
+  const list = SCRIPTS[platform];
+  if (!list) continue;
+  const out: Script[] = [];
+  for (const s of list) {
+    out.push(s);
+    const o = s.order as { id: string; status: string; items: Array<{ title: string }>; totals?: { total?: string }; shipping?: { name?: string } } | undefined;
+    if (!o) continue;
+    s.order = undefined;
+    s.questionOrderNo = o.id;
+    const buyer = o.shipping?.name ?? s.handle ?? 'Müşteri';
+    out.push({
+      remoteId: `siparis-${o.id}`,
+      name: `#${o.id} · ${buyer}`,
+      kind: 'direct',
+      tags: s.tags,
+      unread: 0,
+      handle: buyer,
+      avatar: s.avatar,
+      order: o,
+      lines: [[false, `🛒 Yeni sipariş: ${o.items.map((i) => i.title).join(', ')}${o.totals?.total ? ` · ${o.totals.total.replace('.', ',')} ₺` : ''}`], ...(ORDER_EVENTS[o.status] ?? []).map((t): Line => [true, t])],
+    });
+  }
+  SCRIPTS[platform] = out;
 }
 
 /** Kanal satırındaki bildirim: her uygulamada başka bir toplam. Kanallar sayıma girmez. */

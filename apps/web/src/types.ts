@@ -225,3 +225,10 @@ export function shopPending(c: Pick<Chat, 'platform' | 'meta' | 'unread'>): bool
   }
   return false;
 }
+
+/** Sipariş üzerinden alıcıya mesaj ucu OLMAYAN pazaryerleri: sipariş sohbet değil, sipariş sayfası olarak gösterilir.
+ *  (Amazon/Etsy/Shopify'da alıcı mesajlaşması var; orada sohbet kalır.) */
+export const ORDER_ONLY_PLATFORMS = new Set<Platform>(['trendyol', 'hepsiburada', 'n11', 'shopier']);
+export function isOrderPage(c: Pick<Chat, 'platform' | 'meta'>): boolean {
+  return shopKind(c) === 'order' && ORDER_ONLY_PLATFORMS.has(c.platform);
+}

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { EmojiPicker } from './emoji';
 import { api } from './api';
 import { API_BASE, mediaUrl, openExternal } from './desktop';
-import { DEFAULT_TAGS, PLATFORMS, QUICK_REACTIONS, REACT_PLATFORMS, TAG_COLORS, openInAppLink, type Attachment, type CalendarDraft, type Chat, type ChatFlags, type DraftResult, type LinkPreview, type Message, type Reaction } from './types';
+import { DEFAULT_TAGS, PLATFORMS, isOrderPage, shopKind, QUICK_REACTIONS, REACT_PLATFORMS, TAG_COLORS, openInAppLink, type Attachment, type CalendarDraft, type Chat, type ChatFlags, type DraftResult, type LinkPreview, type Message, type Reaction } from './types';
 import { guessWhen } from './when';
 import { useAiPrefs } from './ai-prefs';
 import { useClosing, Avatar, Chip, Icon, Resizer, Tag, ago, fmtDay, fmtStamp, fmtTime } from './ui';
@@ -120,6 +120,7 @@ export function Conversation({
   onFlags,
   seed,
   onSeedUsed,
+  relatedQuestion,
 }: {
   chat: Chat;
   messages: Message[];
@@ -142,6 +143,8 @@ export function Conversation({
   /** Başka ekrandan (Odak) açılırken kompozöre konacak metin ya da kendiliğinden üretilecek taslak */
   seed?: { text?: string; autoDraft?: boolean } | null;
   onSeedUsed?: () => void;
+  /** Sipariş sayfası: aynı siparişe bağlı müşteri sorusu sohbeti (varsa) */
+  relatedQuestion?: Chat | null;
 }) {
   const [search, setSearch] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -590,7 +593,7 @@ export function Conversation({
                   <span className="tdots"><i /><i /><i /></span>
                 </span>
               ) : (
-                <span className="meta">{chat.kind === 'group' ? 'Grup' : chat.kind === 'channel' ? 'Kanal' : 'Sohbet'}</span>
+                <span className="meta">{isOrderPage(chat) ? 'Sipariş' : shopKind(chat) === 'question' ? 'Müşteri sorusu' : chat.kind === 'group' ? 'Grup' : chat.kind === 'channel' ? 'Kanal' : 'Sohbet'}</span>
               )}
             </span>
           </div>
@@ -633,6 +636,10 @@ export function Conversation({
             </button>
           </div>
         )}
+        {isOrderPage(chat) ? (
+          <OrderPage chat={chat} messages={messages} relatedQuestion={relatedQuestion} onOpenChat={onOpenChat} />
+        ) : (
+        <>
         <div className={`msgs ${isMail ? 'mail' : ''}`} ref={msgsRef}>
           {isMail && (
             <div className="mail-thread">
@@ -1048,6 +1055,8 @@ export function Conversation({
             </button>
           </div>
         </div>
+        </>
+        )}
       </section>
 
 
@@ -1072,7 +1081,7 @@ export function Conversation({
           <span className="sub">
             {platform.name}
             {' · '}
-            {chat.kind === 'group' ? 'grup' : chat.kind === 'channel' ? 'kanal' : 'sohbet'}
+            {isOrderPage(chat) ? 'sipariş' : shopKind(chat) === 'question' ? 'müşteri sorusu' : chat.kind === 'group' ? 'grup' : chat.kind === 'channel' ? 'kanal' : 'sohbet'}
           </span>
         </div>
         {PLATFORMS[chat.platform].category === 'shop' && (chat.meta?.order as OrderMeta | undefined)?.items ? <OrderPanel chat={chat} notify={notify} /> : null}
@@ -1630,6 +1639,83 @@ function OrderPanel({ chat, notify }: { chat: Chat; notify: (t: string, err?: bo
     </div>
   );
 }
+/**
+ * Sipariş sayfası (Trendyol/Hepsiburada/n11/Shopier): bu pazaryerlerinin API'sinde sipariş üzerinden alıcıya mesaj ucu yok,
+ * bu yüzden sohbet ve yazma alanı yerine sipariş özeti + durum zaman çizelgesi. Müşteri yazışması "Sorular"da.
+ */
+function OrderPage({ chat, messages, relatedQuestion, onOpenChat }: { chat: Chat; messages: Message[]; relatedQuestion?: Chat | null; onOpenChat?: (c: Chat) => void }) {
+  const o = chat.meta!.order as OrderMeta;
+  const cur = o.currency === 'TRY' ? '₺' : o.currency;
+  const fmt = (v?: string) => (v ? `${String(v).replace('.', ',')} ${cur}` : '—');
+  const when = (t: number) => new Date(t).toLocaleString('tr-TR', { dateStyle: 'medium', timeStyle: 'short' });
+  const open = !/^(fulfilled|delivered|shipped|cancelled|canceled|returned|completed|closed)$/i.test(o.status);
+  // zaman çizelgesi: bağlayıcının yazdığı olay satırları (yeni sipariş, durum değişiklikleri, yerel notlar), eskiden yeniye
+  const events = [...messages].sort((a, b) => a.ts - b.ts);
+  return (
+    <div className="msgs order-page">
+      <div className="op-card">
+        <div className="op-head">
+          <div>
+            <span className="op-no">📦 Sipariş #{o.id}</span>
+            <span className="op-date">{o.dateCreated ? when(Date.parse(o.dateCreated)) : ''}</span>
+          </div>
+          <span className={`order-status ${open ? 'open' : 'done'}`}>{o.statusLabel ?? o.status}</span>
+        </div>
+        <div className="op-items">
+          {o.items.map((it, i) => (
+            <div key={i} className="op-item">
+              <span className="q">{it.quantity}×</span>
+              <span className="t">
+                {it.title}
+                {it.selection?.length ? <span className="sel"> · {it.selection.join(' / ')}</span> : null}
+              </span>
+              <span className="p">{fmt(it.total)}</span>
+            </div>
+          ))}
+          <div className="op-item total">
+            <span className="t">Toplam</span>
+            <span className="p">{fmt(o.totals?.total)}</span>
+          </div>
+        </div>
+        {(o.shipping?.name || o.shipping?.address) && (
+          <div className="op-ship">
+            <Icon name="send" size={13} sw={2} /> {[o.shipping?.name, o.shipping?.address].filter(Boolean).join(' · ')}
+          </div>
+        )}
+      </div>
+
+      <div className="op-card">
+        <span className="op-h">Durum geçmişi</span>
+        <ol className="op-tl">
+          {events.map((m) => (
+            <li key={m.id} className={m.text.startsWith('📝') ? 'note' : ''}>
+              <span className="dot" />
+              <span className="tx">{m.text}</span>
+              <span className="tm">{when(m.ts)}</span>
+            </li>
+          ))}
+          {events.length === 0 && <li className="empty-tl">Henüz durum değişikliği yok.</li>}
+        </ol>
+      </div>
+
+      <div className="op-card op-msg">
+        {relatedQuestion ? (
+          <>
+            <span>❓ Bu siparişle ilgili bir müşteri sorusu var.</span>
+            <button className="btn primary sm b b2" onClick={() => onOpenChat?.(relatedQuestion)}>
+              Soruyu aç
+            </button>
+          </>
+        ) : (
+          <span>
+            {PLATFORMS[chat.platform].name}, sipariş üzerinden müşteriye mesaj göndermeye izin vermiyor. Müşteri bir soru sorarsa <b>Sorular</b> sekmesinde görünür ve oradan yanıtlarsın.
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** Pazaryeri müşteri sorusu kartı: ürün, durum, konu, bağlı sipariş. Alan adları pazaryerine göre değişir (Trendyol/Hepsiburada/n11). */
 function QuestionPanel({ chat }: { chat: Chat }) {
   const q = chat.meta!.question as {
