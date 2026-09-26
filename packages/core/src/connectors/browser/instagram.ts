@@ -9,57 +9,35 @@ type J = Record<string, any>; // eslint-disable-line @typescript-eslint/no-expli
 const APP_ID = '936619743392459';
 
 async function ig(page: Page, cookies: Record<string, string>, path: string, form?: Record<string, string>): Promise<J> {
-  // Sayfasız mod: aynı istek Node'dan (Playwright request bağlamı; çerezler + gerçek Chrome kimliği). Profil kopyasıyla doğrulandı (200).
+  // Tek yol: sayfasız modda kayıtlı çerezli istek bağlamı, sayfa açıkken tarayıcı bağlamının kendi istek bağlamı (page.request —
+  // aynı çerez deposu, aynı gerçek Chrome kimliği). Eskiden sayfa açıkken istek sayfanın içinden fetch ile gidiyordu ve x-asbd-id /
+  // referer / origin eksikti: Instagram gönderimi (/direct_v2/threads/broadcast/text/) JSON yerine HTML sayfası döndürüyordu
+  // (canlı testte "Gönderilemedi: beklenmeyen yanıt"). Profil kopyasıyla doğrulanan sayfasız istekle birebir aynı başlıklar.
   const h = apiOf(page);
-  if (h) {
-    const r = await h.api.fetch('https://www.instagram.com' + path, {
-      method: form ? 'POST' : 'GET',
-      headers: {
-        'x-ig-app-id': APP_ID,
-        'x-requested-with': 'XMLHttpRequest',
-        'x-csrftoken': cookies.csrftoken ?? '',
-        'x-asbd-id': '129477',
-        referer: 'https://www.instagram.com/direct/inbox/',
-        origin: 'https://www.instagram.com',
-        ...(form ? { 'content-type': 'application/x-www-form-urlencoded' } : {}),
-      },
-      data: form ? new URLSearchParams(form).toString() : undefined,
-      timeout: 45_000,
-    });
-    const text = await r.text();
-    if (!r.ok()) throw new Error(`Instagram ${r.status()} ${path}: ${text.slice(0, 120)}`);
-    try {
-      return JSON.parse(text) as J;
-    } catch {
-      if (/<html/i.test(text)) throw new Error('Instagram oturumu düşmüş — kanala sağ tık → Yeniden bağlan');
-      throw new Error(`Instagram beklenmeyen yanıt ${path}: ${text.slice(0, 80)}`);
-    }
-  }
-  return page.evaluate(
-    async ({ path, form, csrf, appId }) => {
-      const r = await fetch('https://www.instagram.com' + path, {
-        method: form ? 'POST' : 'GET',
-        headers: {
-          'x-ig-app-id': appId,
-          'x-requested-with': 'XMLHttpRequest',
-          'x-csrftoken': csrf,
-          ...(form ? { 'content-type': 'application/x-www-form-urlencoded' } : {}),
-        },
-        body: form ? new URLSearchParams(form).toString() : undefined,
-        credentials: 'include',
-        // asılı kalan istek page.evaluate'i (ve köprü kuyruğunu) sonsuza dek bekletmesin
-        signal: AbortSignal.timeout(45_000),
-      });
-      const text = await r.text();
-      if (!r.ok) throw new Error(`Instagram ${r.status} ${path}: ${text.slice(0, 120)}`);
-      try {
-        return JSON.parse(text);
-      } catch {
-        throw new Error(`Instagram beklenmeyen yanıt ${path}: ${text.slice(0, 80)}`);
-      }
+  const req = h ? h.api : page.request;
+  const csrf = cookies.csrftoken || (h ? '' : ((await page.context().cookies('https://www.instagram.com')).find((c) => c.name === 'csrftoken')?.value ?? ''));
+  const r = await req.fetch('https://www.instagram.com' + path, {
+    method: form ? 'POST' : 'GET',
+    headers: {
+      'x-ig-app-id': APP_ID,
+      'x-requested-with': 'XMLHttpRequest',
+      'x-csrftoken': csrf,
+      'x-asbd-id': '129477',
+      referer: 'https://www.instagram.com/direct/inbox/',
+      origin: 'https://www.instagram.com',
+      ...(form ? { 'content-type': 'application/x-www-form-urlencoded' } : {}),
     },
-    { path, form, csrf: cookies.csrftoken ?? '', appId: APP_ID },
-  );
+    data: form ? new URLSearchParams(form).toString() : undefined,
+    timeout: 45_000,
+  });
+  const text = await r.text();
+  if (!r.ok()) throw new Error(`Instagram ${r.status()} ${path}: ${text.slice(0, 120)}`);
+  try {
+    return JSON.parse(text) as J;
+  } catch {
+    if (/<html/i.test(text)) throw new Error('Instagram JSON yerine sayfa döndürdü (oturum düşmüş ya da istek reddedildi) — kanala sağ tık → Yeniden bağlan');
+    throw new Error(`Instagram beklenmeyen yanıt ${path}: ${text.slice(0, 80)}`);
+  }
 }
 
 let viewerId = '';

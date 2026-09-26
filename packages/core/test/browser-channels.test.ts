@@ -11,11 +11,17 @@ import type { Thread } from '../src/connectors/browser/bridge.js';
 
 /** Instagram sahte sayfası: ig() çağrılarını (args.path) yanıtlar, istenen yolları kaydeder */
 function igPage(handler: (path: string) => unknown, paths: string[] = []): Page {
+  // ig() sayfa açıkken page.request.fetch ile ister (tarayıcı bağlamının çerezleri); yanıt JSON metni
   return {
-    evaluate: async (_fn: unknown, args: { path: string }) => {
-      paths.push(args.path);
-      return handler(args.path);
+    request: {
+      fetch: async (url: string) => {
+        const path = url.replace('https://www.instagram.com', '');
+        paths.push(path);
+        const body = JSON.stringify(await handler(path));
+        return { ok: () => true, status: () => 200, text: async () => body };
+      },
     },
+    context: () => ({ cookies: async () => [] }),
   } as unknown as Page;
 }
 
@@ -209,4 +215,29 @@ test('messenger: iki adres — bağlantı biçimleri, adres tanıma ve sohbet ad
   assert.equal(threadUrl('9', ms, '/messages/e2ee/t/9/'), 'https://www.messenger.com/t/9/');
   assert.equal(threadUrl('9', ms, '/e2ee/t/9/'), 'https://www.messenger.com/e2ee/t/9/');
   assert.equal(messenger.home, 'https://www.facebook.com/messages/');
+});
+
+test('instagram gönderim: sayfa açıkken de doğrulanmış başlıklarla (x-asbd-id, referer, origin, csrf) istek bağlamından', async () => {
+  let seen: { url: string; opts: { method?: string; headers?: Record<string, string>; data?: string } } | undefined;
+  const page = {
+    request: {
+      fetch: async (url: string, opts: { method?: string; headers?: Record<string, string>; data?: string }) => {
+        seen = { url, opts };
+        return { ok: () => true, status: () => 200, text: async () => JSON.stringify({ payload: { item_id: '777' } }) };
+      },
+    },
+    context: () => ({ cookies: async () => [{ name: 'csrftoken', value: 'CSRF1' }] }),
+  } as unknown as Page;
+  const id = await instagram.send(page, {}, '340282366841710300949128', 'selam');
+  assert.equal(id, '777');
+  assert.equal(seen?.url, 'https://www.instagram.com/api/v1/direct_v2/threads/broadcast/text/');
+  assert.equal(seen?.opts.method, 'POST');
+  const h = seen!.opts.headers!;
+  assert.equal(h['x-csrftoken'], 'CSRF1', 'çerez sözlüğünde yoksa tarayıcı bağlamından');
+  assert.equal(h['x-asbd-id'], '129477');
+  assert.equal(h.origin, 'https://www.instagram.com');
+  assert.match(String(seen?.opts.data), /text=selam/);
+  // HTML yanıt anlaşılır hata verir
+  const htmlPage = { request: { fetch: async () => ({ ok: () => true, status: () => 200, text: async () => '<!DOCTYPE html><html lang="tr">' }) }, context: () => ({ cookies: async () => [] }) } as unknown as Page;
+  await assert.rejects(instagram.send(htmlPage, { csrftoken: 'x' }, '1', 'a'), /JSON yerine sayfa/);
 });

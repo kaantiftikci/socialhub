@@ -45,11 +45,17 @@ test('gmail gmailRowToThread: gönderen ben isem "Ben", karşı taraf katılımc
 // ───────────── Instagram: gelen kutusu imleç zinciri ─────────────
 
 function igPage(handler: (path: string) => unknown, paths: string[] = []): Page {
+  // ig() sayfa açıkken page.request.fetch ile ister (tarayıcı bağlamının çerezleri); yanıt JSON metni
   return {
-    evaluate: async (_fn: unknown, args: { path: string }) => {
-      paths.push(args.path);
-      return handler(args.path);
+    request: {
+      fetch: async (url: string) => {
+        const path = url.replace('https://www.instagram.com', '');
+        paths.push(path);
+        const body = JSON.stringify(await handler(path));
+        return { ok: () => true, status: () => 200, text: async () => body };
+      },
     },
+    context: () => ({ cookies: async () => [] }),
   } as unknown as Page;
 }
 const igThread = (id: string, name: string) => ({ thread_id: id, thread_title: name, users: [{ pk: 1, username: 'u' + id }], items: [], last_activity_at: '1790000000000000' });
