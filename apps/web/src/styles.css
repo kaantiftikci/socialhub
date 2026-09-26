@@ -530,6 +530,8 @@ button.att-card { padding: 0; text-align: left; font: inherit; }
 .settings { position: absolute; left: 12px; bottom: 74px; width: 260px; max-height: calc(100vh - 110px); overflow-y: auto; overscroll-behavior: contain; background: var(--surface); border: 1px solid var(--line); border-radius: 22px 22px 22px 22px; padding: 12px; box-shadow: 0 1px 2px rgba(17,16,22,.06), 0 18px 40px -16px rgba(17,16,22,.35); z-index: 30; }
 .row-toggle { display: flex; align-items: center; justify-content: space-between; font-size: 13px; padding: 6px 2px; }
 .row-toggle input { accent-color: var(--v); width: 16px; height: 16px; }
+.settings .set-sub { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text3); padding: 8px 10px 2px; }
+.settings .set-sub em { font-style: normal; font-weight: 500; text-transform: none; letter-spacing: 0; }
 .settings .row-toggle, .settings .psounds-head { border-radius: 10px; padding: 8px 10px; transition: background .12s ease, color .12s ease; }
 .settings .row-toggle:hover, .settings .psounds-head:hover { background: var(--v); color: #fff; }
 .settings .row-toggle:hover input { accent-color: #fff; }

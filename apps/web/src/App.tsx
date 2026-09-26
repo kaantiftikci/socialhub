@@ -8,6 +8,7 @@ import { Focus } from './Focus';
 import { MOD_KEY, isTauri, notify as desktopNotify, onDesktopEvent, playPing, SOUNDS, getPlatformSound, getPlatformTone, setPlatformSound, setPlatformTone, setBadge, windowFocused, coreInfo } from './desktop';
 import { PROFILE_NAME, STATIC_DEMO } from './profile';
 import { leaveDemoPanel } from './demo-session';
+import { setAiPrefs, useAiPrefs } from './ai-prefs';
 
 export type View = 'inbox' | 'focus' | 'archived' | 'muted' | 'hidden';
 const FLAG_VIEWS: Array<{ view: View; flag: 'archived' | 'muted' | 'hidden'; label: string; icon: string; empty: string }> = [
@@ -159,6 +160,7 @@ export default function App() {
   }, []);
   const [prompts, setPrompts] = useState<Record<string, { prompt: 'phone' | 'code' | 'password'; message: string }>>({});
   const [ai, setAi] = useState(false);
+  const aiPrefs = useAiPrefs();
   const [online, setOnline] = useState(false);
   const [toast, setToast] = useState<{ text: string; err?: boolean } | null>(null);
   /** Pencere öndeyken başka sohbete gelen mesaj: sağ üstte platform rozetli küçük kart (sistem bildirimi kapalı olabilir) */
@@ -849,6 +851,21 @@ export default function App() {
                 <Icon name="chev" size={14} sw={2} />
               </span>
             </button>
+            {/* AI senin kontrolünde: her özellik ayrı açılıp kapanır (cihaza özel) */}
+            <span className="set-sub">AI özellikleri{!ai && <em> · anahtar yok</em>}</span>
+            {(
+              [
+                ['summary', 'Özetler'],
+                ['drafts', 'Taslaklar'],
+                ['actions', 'Aksiyon çıkarma'],
+              ] as const
+            ).map(([k, l]) => (
+              <label key={k} className="row-toggle">
+                <span>{l}</span>
+                <input type="checkbox" checked={aiPrefs[k]} onChange={(e) => setAiPrefs({ [k]: e.target.checked })} />
+              </label>
+            ))}
+            <span className="set-sub">Genel</span>
             <label className="row-toggle">
               <span>Aynı Wi‑Fi'daki telefondan aç</span>
               <input type="checkbox" checked={!!lan?.enabled} onChange={(e) => api.setLan(e.target.checked).then(setLanState).catch((err) => notify(err.message, true))} />

@@ -4,6 +4,7 @@ import { api } from './api';
 import { API_BASE, mediaUrl, openExternal } from './desktop';
 import { DEFAULT_TAGS, PLATFORMS, QUICK_REACTIONS, REACT_PLATFORMS, TAG_COLORS, openInAppLink, type Attachment, type CalendarDraft, type Chat, type ChatFlags, type DraftResult, type LinkPreview, type Message, type Reaction } from './types';
 import { guessWhen } from './when';
+import { useAiPrefs } from './ai-prefs';
 import { useClosing, Avatar, Chip, Icon, Resizer, Tag, ago, fmtDay, fmtStamp, fmtTime } from './ui';
 
 type Tone = 'default' | 'short' | 'formal' | 'en';
@@ -132,6 +133,10 @@ export function Conversation({
   const [text, setText] = useState('');
   const [draft, setDraft] = useState<DraftResult | null>(null);
   const [drafting, setDrafting] = useState(false);
+  // Ayarlar → AI: kapalı özellikler gizlenir; taslak kapalıyken üretilen sonuçtan yalnızca özet/aksiyonlar kullanılır
+  const aiP = useAiPrefs();
+  const draftOn = ai && aiP.drafts;
+  const draftShown = draftOn && draft?.draft ? draft : null;
   const [sending, setSending] = useState(false);
   const [tone, setTone] = useState<Tone>('default');
   const [tagInput, setTagInput] = useState('');
@@ -346,7 +351,7 @@ export function Conversation({
     return () => window.removeEventListener('mousedown', close);
   }, [schedOpen]);
   function queueAt(at: number) {
-    const body = (text || draft?.draft || '').trim();
+    const body = (text || draftShown?.draft || '').trim();
     if (!body) {
       notify('Zamanlamak için bir mesaj yaz');
       return;
@@ -456,7 +461,9 @@ export function Conversation({
     setTone(t);
     setDrafting(true);
     try {
-      setDraft(await api.draft(chat.id, t));
+      const r = await api.draft(chat.id, t);
+      // taslak kapalıysa metni tutma (Özetle düğmesi aynı çağrıyı özet/aksiyonlar için kullanır)
+      setDraft(aiP.drafts ? r : { ...r, draft: '' });
     } catch (e) {
       notify((e as Error).message, true);
     } finally {
@@ -473,7 +480,7 @@ export function Conversation({
       await sendFile(f, voice);
       return;
     }
-    const body = (text || draft?.draft || '').trim();
+    const body = (text || draftShown?.draft || '').trim();
     if (!body || sending) return;
     setSending(true);
     try {
@@ -488,9 +495,9 @@ export function Conversation({
   }
 
   function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === 'Tab' && draft && !text.trim()) {
+    if (e.key === 'Tab' && draftShown && !text.trim()) {
       e.preventDefault();
-      setText(draft.draft);
+      setText(draftShown.draft);
       return;
     }
     if (e.key === 'Enter' && !e.shiftKey && !e.altKey && !e.nativeEvent.isComposing) {
@@ -561,7 +568,7 @@ export function Conversation({
                 ? `${chat.name} yanıt vermedi. Nazik bir hatırlatma gönderebilirsin.`
                 : `${fmtFollow(chat.followUp.at)} yanıt gelmezse hatırlatılacak. ${chat.name} yazınca kendiliğinden kapanır.`}
             </span>
-            {chat.followUp.due && ai && (
+            {chat.followUp.due && draftOn && (
               <button type="button" className="btn xs soft b b2" onClick={() => void makeDraft()}>
                 <Icon name="sparkle" size={12} color="#6C47FF" sw={2} /> Hatırlatma yaz
               </button>
@@ -758,7 +765,7 @@ export function Conversation({
               </div>
             ),
           )}
-          {draft && (draft.events?.length ?? 0) > 0 && (
+          {aiP.actions && draft && (draft.events?.length ?? 0) > 0 && (
             <div className="actions">
               <div className="h">
                 <span className="ico">
@@ -777,7 +784,7 @@ export function Conversation({
               ))}
             </div>
           )}
-          {draft && draft.actions.length > 0 && (
+          {aiP.actions && draft && draft.actions.length > 0 && (
             <div className="actions">
               <div className="h">
                 <span className="ico">
@@ -825,7 +832,7 @@ export function Conversation({
           )}
         </div>
 
-        <div className={`composer ${draft ? 'ai' : ''} ${isMail ? 'mail' : ''}`}>
+        <div className={`composer ${draftShown ? 'ai' : ''} ${isMail ? 'mail' : ''}`}>
           {isMail && (
             <div className="mail-reply-head">
               <span>
@@ -836,10 +843,10 @@ export function Conversation({
               </span>
             </div>
           )}
-          {ai && (
+          {draftOn && (
             <div className="comp-top">
-              {draft ? (
-                <span className="aipill on" title={draft.style?.length ? `Tarzın: ${draft.style.join(', ')}` : undefined}>
+              {draftShown ? (
+                <span className="aipill on" title={draftShown.style?.length ? `Tarzın: ${draftShown.style.join(', ')}` : undefined}>
                   <Icon name="sparkle" size={13} color="#D4FF3F" sw={2} /> Senin tarzında taslak
                 </span>
               ) : (
@@ -856,7 +863,7 @@ export function Conversation({
                   ['en', 'EN'],
                 ] as Array<[Tone, string]>
               ).map(([t, l]) => (
-                <button key={t} className={`btn xs b b2 ${tone === t && draft ? 'soft' : ''}`} onClick={() => makeDraft(t)} disabled={drafting}>
+                <button key={t} className={`btn xs b b2 ${tone === t && draftShown ? 'soft' : ''}`} onClick={() => makeDraft(t)} disabled={drafting}>
                   {l}
                 </button>
               ))}
@@ -865,9 +872,9 @@ export function Conversation({
               </button>
             </div>
           )}
-          {ai && draft && (draft.style?.length ?? 0) > 0 && (
+          {draftShown && (draftShown.style?.length ?? 0) > 0 && (
             <div className="style-line" title="Kendi mesajlarından yerelde çıkarıldı; taslak bu tarza göre yazılır">
-              <b>Tarzın:</b> {draft.style!.join(' · ')}
+              <b>Tarzın:</b> {draftShown.style!.join(' · ')}
             </div>
           )}
           {pending && (
@@ -894,15 +901,15 @@ export function Conversation({
               </button>
             </div>
           )}
-          {draft && !text.trim() && <div className="ghost-draft">{draft.draft}</div>}
+          {draftShown && !text.trim() && <div className="ghost-draft">{draftShown.draft}</div>}
           <textarea
             ref={taRef}
             rows={2}
             value={text}
-            placeholder={threadFocus ? 'İş parçacığına yanıt yaz…' : pending ? 'Açıklama ekle (isteğe bağlı) ve Gönder' : draft ? 'Taslağı kabul etmek için Tab, düzenlemek için yazmaya başla' : chat.platform === 'shopier' ? 'Siparişe yerel not ekle (Shopier alıcıya mesaj ucu sunmuyor)…' : isMail ? 'Yanıtını yaz… (Enter gönderir, Shift+Enter yeni satır)' : `${chat.name.length > 40 ? chat.name.slice(0, 38) + '…' : chat.name} için mesaj yaz…`}
+            placeholder={threadFocus ? 'İş parçacığına yanıt yaz…' : pending ? 'Açıklama ekle (isteğe bağlı) ve Gönder' : draftShown ? 'Taslağı kabul etmek için Tab, düzenlemek için yazmaya başla' : chat.platform === 'shopier' ? 'Siparişe yerel not ekle (Shopier alıcıya mesaj ucu sunmuyor)…' : isMail ? 'Yanıtını yaz… (Enter gönderir, Shift+Enter yeni satır)' : `${chat.name.length > 40 ? chat.name.slice(0, 38) + '…' : chat.name} için mesaj yaz…`}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKey}
-            style={draft && !text.trim() ? { minHeight: 28, paddingTop: 0 } : undefined}
+            style={draftShown && !text.trim() ? { minHeight: 28, paddingTop: 0 } : undefined}
           />
           {queued.length > 0 && (
             <div className="sched-list">
@@ -962,12 +969,12 @@ export function Conversation({
               )}
             </div>
             <span style={{ flexGrow: 1 }} />
-            {draft && !text.trim() && (
+            {draftShown && !text.trim() && (
               <span className="hint">
                 <span className="kbd">Tab</span> kabul et
               </span>
             )}
-            <button className="btn primary b" onClick={send} disabled={sending || !!uploading || !!rec || !(pending || text.trim() || draft?.draft)}>
+            <button className="btn primary b" onClick={send} disabled={sending || !!uploading || !!rec || !(pending || text.trim() || draftShown?.draft)}>
               {sending || uploading ? <span className="spin" /> : <Icon name="send" size={15} sw={1.9} />} Gönder
             </button>
           </div>
@@ -1117,24 +1124,30 @@ export function Conversation({
           </div>
         )}
 
-        <div className="card sum">
-          <span className="h">
-            <span className="sum-ic"><Icon name="sparkle" size={13} color="#6C47FF" sw={2} /></span>
-            Özet
-            {draft && draft.summary.length > 0 && <span className="when">{fmtTime(Date.now())}</span>}
-          </span>
-          {summary.length > 0 ? (
-            <ul>
-              {summary.map((s, i) => (
-                <li key={i}>{s}</li>
-              ))}
-            </ul>
-          ) : (
-            <span className="empty-sum">{ai ? 'Taslak yaz deyince sohbetin özeti burada görünür.' : 'Özet için AI anahtarı gerekir.'}</span>
-          )}
-        </div>
+        {aiP.summary && (
+          <div className="card sum">
+            <span className="h">
+              <span className="sum-ic"><Icon name="sparkle" size={13} color="#6C47FF" sw={2} /></span>
+              Özet
+              {draft && draft.summary.length > 0 && <span className="when">{fmtTime(Date.now())}</span>}
+            </span>
+            {summary.length > 0 ? (
+              <ul>
+                {summary.map((s, i) => (
+                  <li key={i}>{s}</li>
+                ))}
+              </ul>
+            ) : ai ? (
+              <button type="button" className="btn xs soft b b2" style={{ alignSelf: 'flex-start' }} onClick={() => void makeDraft()} disabled={drafting}>
+                {drafting ? <span className="spin" /> : <Icon name="sparkle" size={12} color="#6C47FF" sw={2} />} Özetle
+              </button>
+            ) : (
+              <span className="empty-sum">Özet için AI anahtarı gerekir.</span>
+            )}
+          </div>
+        )}
 
-        {draft && draft.actions.length > 0 && (
+        {aiP.actions && draft && draft.actions.length > 0 && (
           <div className="ctx-sec">
             <span className="label">Aksiyonlar</span>
             <div className="todos">

@@ -34,6 +34,8 @@ Dil: arayüz ve yorumlar Türkçe.
   `demo.mivelo.app/` klasörüne (cPanel hesabı kaantiftikci.com; demo hesapları `~/mivelo-data`, `public/api/index.php`). Aynı iş akışı
   `apps/landing/` (bekleme listesi sayfası, tek dosya `index.html`; iletişim hello@mivelo.app) → `mivelo.app/`; kayıtlar
   `api/waitlist.php` → `~/mivelo-data/waitlist.json` (e-posta tekil, davet kodu `?ref=`, `refs` sayacı).
+  Landing hero'su: sahne sonunda yüzen cam görünüm çubuğu (`#dockSeg`, alttaki `#seg` ile eşzamanlı); her sekme imleçle ufak bir görev
+  oynatır (`TASKS` dizisi, kaplamalar 1440×900 kare koordinatlarında). Telefon/tablette de masaüstü penceresi gösterilir.
   Demoda örnek AI açık (`demo-ai.ts`: sohbete özel taslak/özet/aksiyon/olay, model çağrısı yok); pazaryeri sipariş kartı `Script.order`.
   Tek dosya demo (`npm run demo:html`) profil adı "Mivelo".
 - **Windows**: `tauri.windows.conf.json` (NSIS, currentUser, yerel başlık çubuğu) Tauri'nin platform yapılandırma birleştirmesiyle
@@ -76,6 +78,9 @@ Dil: arayüz ve yorumlar Türkçe.
   düğme ipucunda kısayol yazar); sıra `DEFAULT_TAGS` + kullanılanlar.
 - **Takvime ekle**: `POST /api/calendar` → `calendar.ts` .ics (kayan yerel saat); yerelde `openExternal` ile takvim uygulamasında
   açılır, uzakta/demoda indirilir. Ön doldurma `apps/web/src/when.ts` (Türkçe tarih/saat tahmini); AI taslağı `events` da döndürür.
+- **AI özellikleri anahtarları** (Ayarlar → AI özellikleri; `apps/web/src/ai-prefs.ts`, localStorage `mivelo.aiPrefs`): Özetler / Taslaklar /
+  Aksiyon çıkarma ayrı ayrı. Taslak kapalıyken `api.draft` yalnızca özet/aksiyon için çağrılır (sağ paneldeki "Özetle"), metin tutulmaz.
+  Waitlist'teki "AI senin kontrolünde" kartı bunu anlatır.
 - **Senin tarzında taslak**: `style.ts` kullanıcının kendi mesajlarından yerel üslup profili (uzunluk, sen/siz, emoji, açılış/kapanış);
   `store.styleSamples` gelen→yanıt çiftleri (önce aynı sohbet, sonra platform, sonra hepsi). `ai.ts` @anthropic-ai/sdk ile
   yapılandırılmış çıktı (json_schema). `GET /api/style` profil satırları.

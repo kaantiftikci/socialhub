@@ -3,6 +3,7 @@ import { api } from './api';
 import { PLATFORMS, type Chat, type DraftResult } from './types';
 import { Avatar, Chip, Icon, ago, agoLong } from './ui';
 import { PROFILE_NAME } from './profile';
+import { useAiPrefs } from './ai-prefs';
 
 /**
  * Odak modu: yanıt bekleyenler (en eskiden yeniye), her biri için AI taslağı ve tek tıkla gönderme.
@@ -28,6 +29,8 @@ export function Focus({
   const [drafts, setDrafts] = useState<Record<string, DraftResult | 'loading' | 'error'>>({});
   const [sending, setSending] = useState<string | null>(null);
   const [done, setDone] = useState<Record<string, boolean>>({});
+  const aiP = useAiPrefs();
+  const draftOn = ai && aiP.drafts;
 
   const hour = new Date().getHours();
   const greet = hour < 6 ? 'İyi geceler' : hour < 12 ? 'Günaydın' : hour < 18 ? 'İyi günler' : 'İyi akşamlar';
@@ -40,9 +43,9 @@ export function Focus({
   const mutedGroups = muted.filter((c) => c.kind === 'group').length;
   const mutedChannels = muted.filter((c) => c.kind === 'channel').length;
 
-  // AI açıksa ilk 3 bekleyen için taslak üret
+  // AI açıksa ilk 3 bekleyen için taslak üret (taslak ve aksiyon çıkarma ikisi de kapalıysa hiç çağırma)
   useEffect(() => {
-    if (!ai) return;
+    if (!ai || (!aiP.drafts && !aiP.actions)) return;
     for (const c of waiting.slice(0, 3)) {
       if (drafts[c.id]) continue;
       setDrafts((d) => ({ ...d, [c.id]: 'loading' }));
@@ -52,16 +55,16 @@ export function Focus({
         .catch(() => setDrafts((d) => ({ ...d, [c.id]: 'error' })));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ai, waiting.map((c) => c.id).join(',')]);
+  }, [ai, aiP.drafts, aiP.actions, waiting.map((c) => c.id).join(',')]);
 
   const actions = useMemo(() => {
     const out: Array<{ chat: Chat; text: string }> = [];
     for (const c of waiting) {
       const d = drafts[c.id];
-      if (d && typeof d === 'object') for (const a of d.actions) out.push({ chat: c, text: a });
+      if (aiP.actions && d && typeof d === 'object') for (const a of d.actions) out.push({ chat: c, text: a });
     }
     return out.slice(0, 5);
-  }, [drafts, waiting]);
+  }, [drafts, waiting, aiP.actions]);
 
   async function sendDraft(c: Chat) {
     const d = drafts[c.id];
@@ -164,7 +167,7 @@ export function Focus({
                   </button>
                 </div>
 
-                {ai && (
+                {draftOn && (
                   <div className="fdraft">
                     <span className="h">
                       <Icon name="sparkle" size={13} color="#6C47FF" sw={2} /> Taslak · senin tarzında
@@ -192,7 +195,7 @@ export function Focus({
                 )}
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  {ai && draft?.draft ? (
+                  {draftOn && draft?.draft ? (
                     <button className="btn lime b" onClick={() => sendDraft(c)} disabled={sending === c.id}>
                       {sending === c.id ? <span className="spin" /> : <Icon name="send" size={15} sw={1.9} />} Taslağı gönder
                     </button>
@@ -201,7 +204,7 @@ export function Focus({
                       <Icon name="pen" size={14} sw={2} /> Yanıtla
                     </button>
                   )}
-                  {ai && draft?.draft && (
+                  {draftOn && draft?.draft && (
                     <button className="btn b b2" onClick={() => onOpen(c.id)}>
                       <Icon name="pen" size={14} /> Düzenle
                     </button>
@@ -220,9 +223,9 @@ export function Focus({
           <div className="card">
             <div style={{ display: 'flex', alignItems: 'center' }}>
               <h2 style={{ flexGrow: 1 }}>Verdiğin sözler</h2>
-              <span style={{ fontSize: 12, color: 'var(--text3)' }}>{ai ? 'mesajlardan çıkarıldı' : 'AI kapalı'}</span>
+              <span style={{ fontSize: 12, color: 'var(--text3)' }}>{!ai ? 'AI kapalı' : aiP.actions ? 'mesajlardan çıkarıldı' : 'aksiyon çıkarma kapalı'}</span>
             </div>
-            {actions.length === 0 && <span style={{ fontSize: 13, color: 'var(--text3)' }}>{ai ? 'Henüz çıkarılan bir söz yok.' : 'ANTHROPIC_API_KEY ile sözlerin mesajlardan otomatik çıkarılır.'}</span>}
+            {actions.length === 0 && <span style={{ fontSize: 13, color: 'var(--text3)' }}>{ai && !aiP.actions ? 'Ayarlar → AI özelliklerinden “Aksiyon çıkarma”yı açınca sözlerin burada listelenir.' : ai ? 'Henüz çıkarılan bir söz yok.' : 'ANTHROPIC_API_KEY ile sözlerin mesajlardan otomatik çıkarılır.'}</span>}
             {actions.map((a, i) => (
               <label key={i} className="todo" style={{ background: 'var(--bg2)', border: 0 }}>
                 <input type="checkbox" />
