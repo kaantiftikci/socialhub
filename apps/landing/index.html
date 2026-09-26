@@ -392,6 +392,10 @@ footer .legal{margin-top:18px;font-size:12px;line-height:1.5;color:var(--ink-4);
 .phone-sec{display:none !important}
 @media (max-width:900px), (max-aspect-ratio:1/1){
   .device{position:relative;left:auto;top:auto;transform:none !important;width:calc(100% - 48px) !important;max-width:1100px;margin:44px auto 0 !important}
+  /* telefon/tablet: pencere sayfa açılınca hazır durmasın; hero yazısının ardından yukarı süzülerek belirsin.
+     transform burada !important ile kapalı → ayrı translate/scale özellikleri kullanılır */
+  .device{opacity:0;translate:0 56px;scale:.94;filter:blur(6px);transition:opacity 1s var(--ease),translate 1.2s cubic-bezier(.2,.9,.25,1),scale 1.2s cubic-bezier(.2,.9,.25,1),filter .9s var(--ease)}
+  .device.dv-in{opacity:1;translate:0 0;scale:1;filter:none}
   .stage{padding-bottom:0}
   .ctrl{padding-top:44px}
 }
@@ -1065,6 +1069,14 @@ var AV = {"kerem": "data:image/webp;base64,UklGRsIHAABXRUJQVlA4ILYHAAAQHgCdASpgA
   }
   /* sahne sona gelince tüm görünümleri sırayla gez */
   function playDesktop(){ resetHero(); showFrame(null); setTab(0,true); return runTasks([0,2,3,1]); }
+  // telefon/tablet giriş animasyonu: görünür alana girince (açılışta hero yazısından ~0,5 sn sonra) pencere belirir
+  (function(){
+    if(desktop() || matchMedia('(prefers-reduced-motion: reduce)').matches){ device.classList.add('dv-in'); return; }
+    var t0=performance.now();
+    var dio=new IntersectionObserver(function(es){ if(!es[0].isIntersecting) return; dio.disconnect();
+      setTimeout(function(){ device.classList.add('dv-in'); },Math.max(0,550-(performance.now()-t0))); },{threshold:.05});
+    dio.observe(device);
+  })();
   var dio2=new IntersectionObserver(function(es){ if(es[0].isIntersecting && !desktop() && !heroStarted){ heroStarted=true; playDesktop(); } },{threshold:.45}); dio2.observe(device);
   /* ---------- başlıklar kelime kelime ---------- */
   (function(){
