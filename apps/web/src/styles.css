@@ -1093,7 +1093,9 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 @media (max-width: 520px) { .fcard .via { display: none !important; } }
 
 /* pazaryeri: satırda sipariş/soru işareti, sağ panelde soru kartı */
-.row .skind { flex-shrink: 0; font-size: 12px; line-height: 1; }
+.row .skind { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 6px; line-height: 1; }
+.row .skind.k-order { background: var(--v-soft); color: var(--v-txt); }
+.row .skind.k-question { background: var(--warn-bg); color: var(--warn-head); }
 .order.question .q-kind { font-size: 11.5px; color: var(--text3); font-weight: 500; }
 .q-product { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; }
 .q-product img { width: 36px; height: 36px; border-radius: 8px; object-fit: cover; flex-shrink: 0; border: 1px solid var(--line2); }
@@ -1368,3 +1370,11 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 /* metin içindeki küçük ikon (mesaj üstündeki takvim düğmesinin aynısı) */
 .cv-inline-ic { display: inline-block; line-height: 0; color: var(--text2); vertical-align: -1.5px; }
 .cv-inline-ic svg { display: inline-block; }
+/* metin başındaki sistem emojisinin ikon karşılığı (IconText) */
+.lead-ic { display: inline-block; line-height: 0; vertical-align: -2px; margin-right: 5px; color: inherit; opacity: .85; }
+.lead-ic svg { display: inline-block; }
+.op-no { display: inline-flex; align-items: center; gap: 8px; }
+.order.question .q-kind { display: inline-flex; align-items: center; gap: 4px; }
+.op-q { display: inline-flex; align-items: flex-start; gap: 7px; }
+.op-q svg { flex: none; margin-top: 2px; }
+.op-tl .tx .lead-ic { color: var(--v-txt); opacity: 1; }

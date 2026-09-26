@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
 import { PLATFORMS, type Chat, type DraftResult } from './types';
-import { Avatar, Chip, Icon, ago, agoLong } from './ui';
+import { Avatar, Chip, Icon, IconText, ago, agoLong, stripLeadIcon } from './ui';
 import { PROFILE_NAME } from './profile';
 import { useAiPrefs } from './ai-prefs';
 
@@ -208,7 +208,9 @@ export function Focus({
                         {c.tags[0] ? ` · ${c.tags[0]}` : ''}
                       </span>
                     </div>
-                    <span className="q">“{c.lastPreview}”</span>
+                    <span className="q">
+                      “<IconText text={c.lastPreview} size={12} />”
+                    </span>
                   </div>
                   <span className="wait">
                     <Icon name="clock" size={12} sw={2} />
@@ -325,7 +327,7 @@ export function Focus({
             {awaiting.map((c) => (
               <button key={c.id} className="wrow" style={{ background: 'transparent', border: 0, padding: 0, textAlign: 'left' }} onClick={() => onOpen(c.id)}>
                 <Avatar name={c.name} size={30} url={c.avatarUrl} />
-                <span style={{ flexGrow: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name} · “{c.lastPreview.slice(0, 40)}”</span>
+                <span style={{ flexGrow: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name} · “{stripLeadIcon(c.lastPreview).slice(0, 40)}”</span>
                 <span className="d">{ago(c.lastMessageAt)}</span>
               </button>
             ))}

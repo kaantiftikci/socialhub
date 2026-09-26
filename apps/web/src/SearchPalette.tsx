@@ -205,7 +205,10 @@ export function SearchPalette({ chats, onClose, onOpenChat, onOpenMessage }: { c
                         {h.message.fromMe ? 'Sen: ' : h.chat.kind !== 'direct' && h.message.senderName ? `${h.message.senderName}: ` : ''}
                         {att && !norm(h.message.text).includes(norm(term.split(/\s+/)[0] ?? '')) ? (
                           <>
-                            📎 <Marked text={att.name ?? ''} q={term} />
+                            <span className="lead-ic" aria-hidden="true">
+                              <Icon name="clip" size={12} />
+                            </span>
+                            <Marked text={att.name ?? ''} q={term} />
                           </>
                         ) : (
                           <Marked text={snippet(h.message.text, term)} q={term} />

@@ -6,7 +6,7 @@ import { API_BASE, mediaUrl, openExternal } from './desktop';
 import { DEFAULT_TAGS, PLATFORMS, isOrderPage, shopKind, QUICK_REACTIONS, REACT_PLATFORMS, TAG_COLORS, openInAppLink, type Attachment, type CalendarDraft, type Chat, type ChatFlags, type DraftResult, type LinkPreview, type Message, type Reaction } from './types';
 import { guessWhen } from './when';
 import { useAiPrefs } from './ai-prefs';
-import { useClosing, Avatar, Chip, Icon, Resizer, Tag, ago, fmtDay, fmtStamp, fmtTime } from './ui';
+import { useClosing, Avatar, Chip, Icon, IconText, Resizer, Tag, ago, fmtDay, fmtStamp, fmtTime } from './ui';
 
 type Tone = 'default' | 'short' | 'formal' | 'en';
 
@@ -1680,7 +1680,7 @@ function OrderPage({ chat, messages, relatedQuestion, onOpenChat }: { chat: Chat
       <div className="op-card">
         <div className="op-head">
           <div>
-            <span className="op-no">📦 Sipariş #{o.id}</span>
+            <span className="op-no"><Icon name="box" size={20} color="var(--v)" /> Sipariş #{o.id}</span>
             <span className="op-date">{o.dateCreated ? when(Date.parse(o.dateCreated)) : ''}</span>
           </div>
           <span className={`order-status ${open ? 'open' : 'done'}`}>{o.statusLabel ?? o.status}</span>
@@ -1714,7 +1714,9 @@ function OrderPage({ chat, messages, relatedQuestion, onOpenChat }: { chat: Chat
           {events.map((m) => (
             <li key={m.id} className={m.text.startsWith('📝') ? 'note' : ''}>
               <span className="dot" />
-              <span className="tx">{m.text}</span>
+              <span className="tx">
+                <IconText text={m.text} size={15} />
+              </span>
               <span className="tm">{when(m.ts)}</span>
             </li>
           ))}
@@ -1725,7 +1727,9 @@ function OrderPage({ chat, messages, relatedQuestion, onOpenChat }: { chat: Chat
       <div className="op-card op-msg">
         {relatedQuestion ? (
           <>
-            <span>❓ Bu siparişle ilgili bir müşteri sorusu var.</span>
+            <span className="op-q">
+              <Icon name="help" size={16} color="var(--warn-head)" /> Bu siparişle ilgili bir müşteri sorusu var.
+            </span>
             <button className="btn primary sm b b2" onClick={() => onOpenChat?.(relatedQuestion)}>
               Soruyu aç
             </button>
@@ -1754,7 +1758,9 @@ function QuestionPanel({ chat }: { chat: Chat }) {
     <div className="order question">
       <div className="order-head">
         <span className={`order-status ${waiting ? 'open' : 'done'}`}>{q.statusLabel ?? (waiting ? 'Cevap bekliyor' : 'Cevaplandı')}</span>
-        <span className="q-kind">❓ Müşteri sorusu</span>
+        <span className="q-kind">
+          <Icon name="help" size={13} /> Müşteri sorusu
+        </span>
       </div>
       {product && (
         <div className="q-product">

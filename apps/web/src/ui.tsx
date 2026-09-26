@@ -10,6 +10,20 @@ const PATHS: Record<string, ReactNode> = {
   search: (<><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></>),
   inbox: (<><path d="M3 13h4.5l1.5 2.5h6l1.5-2.5H21" /><path d="M5.5 5h13L21 13v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-5z" /></>),
   sparkle: (<><path d="M12 3.5l1.8 4.9 4.9 1.8-4.9 1.8L12 16.9l-1.8-4.9-4.9-1.8 4.9-1.8z" /><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z" /></>),
+  box: (<><path d="M21 8 12 3 3 8v8l9 5 9-5z" /><path d="M3 8l9 5 9-5M12 13v8" /></>),
+  cart: (<><path d="M3 4h2l2.4 11h10.2L20 7H6.3" /><circle cx="9.5" cy="19" r="1.4" /><circle cx="17" cy="19" r="1.4" /></>),
+  receipt: (<><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M9 8h6M9 12h6M9 16h3" /></>),
+  truck: (<><path d="M3 6h11v10H3zM14 10h4l3 3v3h-7" /><circle cx="7" cy="17.5" r="1.6" /><circle cx="17" cy="17.5" r="1.6" /></>),
+  undo: (<><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /></>),
+  ban: (<><circle cx="12" cy="12" r="8.5" /><path d="m6 6 12 12" /></>),
+  help: (<><circle cx="12" cy="12" r="8.5" /><path d="M9.6 9.5a2.5 2.5 0 1 1 3.6 2.2c-.8.4-1.2 1-1.2 1.8v.5" /><path d="M12 17h.01" /></>),
+  user: (<><circle cx="12" cy="8" r="3.6" /><path d="M5 20a7 7 0 0 1 14 0" /></>),
+  mappin: (<><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z" /><circle cx="12" cy="10" r="2.3" /></>),
+  camera: (<><path d="M4 8h3l1.6-2.2h6.8L17 8h3v11H4z" /><circle cx="12" cy="13.2" r="3.4" /></>),
+  music: (<><path d="M9 18V6l10-2v12" /><circle cx="6.5" cy="18" r="2.5" /><circle cx="16.5" cy="16" r="2.5" /></>),
+  chart: (<><path d="M4 20h16" /><path d="M7 16v-5M12 16V7M17 16v-8" /></>),
+  gift: (<><path d="M4 10h16v10H4zM3 7h18v3H3zM12 7v13" /><path d="M12 7C10 3 7 4.5 8.5 7M12 7c2-4 5-2.5 3.5 0" /></>),
+  card: (<><rect x="3" y="6" width="18" height="12" rx="2" /><path d="M3 10h18M7 15h3" /></>),
   sun: (<><circle cx="12" cy="12" r="4" /><path d="M12 2.5v2M12 19.5v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2.5 12h2M19.5 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4" /></>),
   moon: (<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" />),
   monitor: (<><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></>),
@@ -80,6 +94,43 @@ export function useClosing<T>(value: T | null | undefined | false, ms = 160): { 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
   return { value: value || cached, closing: !value && closing };
+}
+
+/**
+ * Bağlayıcıların yazdığı durum/önizleme metinleri baştaki bir emojiyle başlar ("📦 Kargoya verildi", "📷 Fotoğraf"): arayüzde emoji
+ * yerine ikon çizilir. Yalnız bu tanıdık sistem emojileri; kullanıcı içeriği / tepkiler ("😂 … beğendi") olduğu gibi kalır.
+ */
+const LEAD_ICONS: Record<string, string> = {
+  '📦': 'box', '🛍': 'bag', '🛒': 'cart', '✅': 'check', '✔': 'check', '☑': 'check', '📝': 'pen', '❌': 'x', '🚫': 'ban', '⚠': 'alert',
+  '↩': 'undo', '↪': 'arrow', '🔁': 'refresh', '📍': 'mappin', '👤': 'user', '🧾': 'receipt', '📊': 'chart', '🔒': 'lock', '📷': 'camera',
+  '🖼': 'image', '🎤': 'mic', '🎙': 'mic', '🎵': 'music', '🎬': 'play', '📹': 'play', '📎': 'clip', '🗑': 'trash', '💬': 'thread', '🎁': 'gift',
+  '💳': 'card', '✉': 'mail', '📧': 'mail', '📅': 'calendar', '📆': 'calendar', '🔗': 'link', '❓': 'help', '🚚': 'truck', '⏰': 'clock', '🔔': 'bell',
+};
+// isteğe bağlı "Sen: " / "Mert: " öneki + baştaki emoji (+ varyasyon seçicisi) + boşluk
+const LEAD_RE = /^((?:[^:\n]{1,40}: )?)([\u2190-\u21FF\u2600-\u27BF\u2B00-\u2BFF]|[\u{1F000}-\u{1FAFF}])\uFE0F?\s+/u;
+export function leadIcon(text: string): { prefix: string; icon?: string; rest: string } {
+  const m = LEAD_RE.exec(text ?? '');
+  const icon = m ? LEAD_ICONS[m[2]] : undefined;
+  return icon ? { prefix: m![1], icon, rest: text.slice(m![0].length) } : { prefix: '', rest: text };
+}
+/** Düz metin (sistem bildirimi vb.): tanıdık baş emojiyi at */
+export const stripLeadIcon = (text: string) => {
+  const r = leadIcon(text);
+  return r.prefix + r.rest;
+};
+/** Metin + baştaki sistem emojisinin ikon karşılığı (satır içi, metinle hizalı) */
+export function IconText({ text, size = 13 }: { text: string; size?: number }) {
+  const { prefix, icon, rest } = leadIcon(text);
+  if (!icon) return <>{text}</>;
+  return (
+    <>
+      {prefix}
+      <span className="lead-ic" aria-hidden="true">
+        <Icon name={icon} size={size} />
+      </span>
+      {rest}
+    </>
+  );
 }
 
 export function Icon({ name, size = 16, color = 'currentColor', sw = 1.8 }: { name: string; size?: number; color?: string; sw?: number }) {

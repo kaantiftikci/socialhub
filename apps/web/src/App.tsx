@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, connectEvents } from './api';
 import { PLATFORMS, isOrderPage, shopKind, shopPending, type Account, type Chat, type ChatFlags, type CoreEvent, type Message, type Platform, type ShopKind, DEFAULT_TAGS } from './types';
-import { Avatar, Chip, Icon, Logo, Resizer, SyncBar, Tag, ago, fmtTime, loadPaneSizes, useClosing } from './ui';
+import { Avatar, Chip, Icon, IconText, stripLeadIcon, Logo, Resizer, SyncBar, Tag, ago, fmtTime, loadPaneSizes, useClosing } from './ui';
 import { Conversation, REACT_TEXT, refreshScheduled, startScheduledSends } from './Conversation';
 import { ConnectModal } from './Connect';
 import { Focus } from './Focus';
@@ -405,8 +405,8 @@ export default function App() {
           const chatName = e.chatId ? chatsRef.current.get(e.chatId)?.name : undefined;
           const body = `${when}${e.location ? ' · ' + e.location : ''}${chatName ? ' · ' + chatName : ''}`;
           void windowFocused().then((focused) => {
-            if (focused) notify(`📅 ${e.title} — ${body}`);
-            else if (bannersEnabled()) desktopNotify(`📅 ${e.title}`, body);
+            if (focused) notify(`Takvim: ${e.title} — ${body}`);
+            else if (bannersEnabled()) desktopNotify(`Takvim: ${e.title}`, body);
             if (soundsEnabled()) playPing(undefined, true);
           });
           break;
@@ -442,7 +442,7 @@ export default function App() {
                 const body = (ev.message.text || ev.message.attachments?.[0]?.name || 'Yeni mesaj').slice(0, 140);
                 // pencere öndeyse sistem bildirimi yerine uygulama içi kart (hangi platformdan geldiği belli olsun)
                 if (focused) pushInToast(ev.chat, body);
-                else if (bannersEnabled()) desktopNotify(ev.chat.name, body);
+                else if (bannersEnabled()) desktopNotify(ev.chat.name, stripLeadIcon(body));
                 // genel anahtar + uygulama zil sesi + ses düzeyleri
                 playNotifySound(ev.chat.platform);
               }
@@ -1250,8 +1250,8 @@ export default function App() {
               {!composeOpen && view === 'inbox' && !platformFilter && !tagFilter && !query && pinnedChats.length > 0 && (
                 <div className="quick" aria-label="Sabitlenenler">
                   {pinnedChats.slice(0, 8).map((c, i, arr) => (
-                    <button key={c.id} className={`qc b ${c.id === selected ? 'on' : ''}`} onClick={() => setSelected(c.id)} title={c.lastPreview}>
-                      {c.unread > 0 && arr.findIndex((x) => x.unread > 0) === i && <span className="qc-bub">{c.lastPreview.replace(/^Sen: /, '')}</span>}
+                    <button key={c.id} className={`qc b ${c.id === selected ? 'on' : ''}`} onClick={() => setSelected(c.id)} title={stripLeadIcon(c.lastPreview)}>
+                      {c.unread > 0 && arr.findIndex((x) => x.unread > 0) === i && <span className="qc-bub">{stripLeadIcon(c.lastPreview.replace(/^Sen: /, ''))}</span>}
                       <span className="avwrap">
                         <Avatar name={c.name} size={46} url={c.avatarUrl} />
                         <Chip platform={c.platform} size={17} ring="var(--bg)" />
@@ -1620,7 +1620,9 @@ export default function App() {
                   <b>{t.chat.name}</b>
                   <span className="plat">{PLATFORMS[t.chat.platform].name}</span>
                 </span>
-                <span className="txt">{t.text}</span>
+                <span className="txt">
+                  <IconText text={t.text} size={12} />
+                </span>
               </span>
               <span
                 className="x"
@@ -1928,7 +1930,7 @@ function ChatRow({
           {chat.pinned && <Icon name="pin" size={12} color="var(--text3)" />}
           {kind && (
             <span className={`skind k-${kind}`} title={kind === 'order' ? 'Sipariş' : 'Müşteri sorusu'} aria-label={kind === 'order' ? 'Sipariş' : 'Müşteri sorusu'}>
-              {kind === 'order' ? '📦' : '❓'}
+              <Icon name={kind === 'order' ? 'box' : 'help'} size={12} sw={2} />
             </span>
           )}
           <span className="name">{isMail && mailSender ? mailSender : chat.name}</span>
@@ -1945,7 +1947,7 @@ function ChatRow({
               <span className="tdots"><i /><i /><i /></span>
             </span>
           ) : (
-            <span className="prev">{(isMail ? mailPreview : chat.lastPreview) || '…'}</span>
+            <span className="prev">{(isMail ? mailPreview : chat.lastPreview) ? <IconText text={(isMail ? mailPreview : chat.lastPreview)!} size={12} /> : '…'}</span>
           )}
           {chat.unread > 0 && <span className="badge" aria-label={`${chat.unread} okunmamış`}>{fmtBadge(chat)}</span>}
         </span>
