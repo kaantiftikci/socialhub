@@ -103,6 +103,15 @@ export class DemoConnector extends BaseConnector {
     setTimeout(() => {
       this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'read' });
     }, 1500);
+    // E2E aracı (scripts/e2e.mjs) demo çekirdeğiyle sınanabilsin: "#e2e-…" etiketli mesaja karşı taraf 2 sn sonra etiketle cevap verir
+    const tag = /#e2e-[a-z0-9]+(?:-g)?/.exec(text)?.[0];
+    if (tag && /#e2e-[a-z0-9]+-d\b/.test(text)) return { remoteId: id }; // dönüş mesajına yankı yok
+    if (tag) {
+      const p = PEOPLE.find((x) => x.id === remoteChatId);
+      setTimeout(() => {
+        this.upsertMessage({ remoteChatId, remoteId: `echo-${Date.now()}`, senderId: remoteChatId, senderName: p?.name ?? 'Demo', fromMe: false, text: `${tag} dönüş · teşekkürler 👍`, ts: Date.now() - 400, status: 'delivered' }, { live: true });
+      }, 2000);
+    }
     return { remoteId: id };
   }
 

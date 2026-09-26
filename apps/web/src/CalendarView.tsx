@@ -483,7 +483,7 @@ export function CalendarView({
               <span className="cv-muted">
                 Yaklaşan etkinlik yok. Bir mesajın üstüne gelip{' '}
                 <span className="cv-inline-ic" aria-label="takvim">
-                  <Icon name="calendar" size={12} />
+                  <Icon name="calendar" size={13} />
                 </span>{' '}
                 ile ekleyebilirsin.
               </span>

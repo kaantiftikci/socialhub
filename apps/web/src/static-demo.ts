@@ -130,6 +130,13 @@ function seed(): void {
         participants: s.handle && PLATFORMS[acc.platform].category === 'mail' ? [{ id: s.handle, name: s.handle.split('@')[0] ?? s.handle, handle: s.handle, avatarUrl: demoAsset(`avatars/${s.avatar}`) }] : undefined,
       });
     });
+    // platformun kendi arşivi (WhatsApp "Arşivlenmiş", Telegram arşiv klasörü): en eski, okunmuş 2 birebir sohbet
+    if (acc.platform === 'whatsapp' || acc.platform === 'telegram')
+      chats
+        .filter((c) => c.accountId === acc.id && c.kind === 'direct' && c.unread === 0)
+        .sort((a, b) => a.lastMessageAt - b.lastMessageAt)
+        .slice(0, 2)
+        .forEach((c) => (c.meta = { ...(c.meta ?? {}), archived: true }));
   }
 }
 

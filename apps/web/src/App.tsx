@@ -607,7 +607,7 @@ export default function App() {
     // Telegram "Arşiv" sekmesi yalnızca arşivlenmişleri, iMessage klasör sekmeleri o klasörü; diğer her görünüm gelen kutusunu listeler
     const imActive = platformFilter === 'imessage' ? imFolder : null;
     const mailActive = platformFilter && PLATFORMS[platformFilter].category === 'mail' ? mailFolder : null;
-    let list = platformFilter === 'telegram' && tgArchive ? activeChats.filter((c) => c.platform === 'telegram' && !!c.meta?.archived) : imActive ? activeChats : mailActive ? activeChats.filter((c) => c.platform === platformFilter && (mailActive === 'junk' ? c.meta?.folder === 'junk' : c.meta?.folder === 'sent' || (c.meta?.folder !== 'junk' && !!c.lastFromMe))) : [...inboxChats];
+    let list = platformFilter && ARCHIVE_TABS.has(platformFilter) && tgArchive ? activeChats.filter((c) => c.platform === platformFilter && !!c.meta?.archived) : imActive ? activeChats : mailActive ? activeChats.filter((c) => c.platform === platformFilter && (mailActive === 'junk' ? c.meta?.folder === 'junk' : c.meta?.folder === 'sent' || (c.meta?.folder !== 'junk' && !!c.lastFromMe))) : [...inboxChats];
     if (platformFilter) list = list.filter((c) => c.platform === platformFilter);
     // iMessage klasörleri: filtrelenmiş sohbetler (bilinmeyen/istenmeyen/SMS) gelen kutusunda görünmez; klasör seçilince yalnızca o klasör
     list = list.filter((c) => {
@@ -1182,8 +1182,8 @@ export default function App() {
                     )}
                   </label>
                 )}
-                {view === 'inbox' && platformFilter === 'telegram' && (
-                  <div className="tabs" role="tablist" aria-label="Telegram klasörleri">
+                {view === 'inbox' && platformFilter && ARCHIVE_TABS.has(platformFilter) && (
+                  <div className="tabs" role="tablist" aria-label={`${PLATFORMS[platformFilter].name} klasörleri`}>
                     <button role="tab" aria-selected={!tgArchive} className={!tgArchive ? 'active' : ''} onClick={() => setTgArchive(false)}>
                       Sohbetler
                     </button>
@@ -1844,6 +1844,9 @@ function fmtBadge(c: Chat): string {
 /** Son mesaj karşı taraftan geldiyse ve 20 dakikadır cevaplanmadıysa "yanıt bekliyor". */
 /** Kısayol öneki: Mac'te "⌘1", diğerlerinde "Ctrl+1" */
 const MOD = MOD_KEY === '⌘' ? '⌘' : `${MOD_KEY}+`;
+
+/** Platformun kendi arşivi olan kanallar: arşivdekiler "Tümü"de görünmez, ayrı "Arşiv" sekmesinde (Telegram klasörü, WhatsApp Arşivlenmiş) */
+const ARCHIVE_TABS = new Set<Platform>(['telegram', 'whatsapp']);
 
 export function isWaiting(c: Chat): boolean {
   // son olay yalnızca bir tepkiyse ("😂 Mert bir mesajı beğendi") yanıt beklemiyor

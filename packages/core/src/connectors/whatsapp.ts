@@ -462,6 +462,8 @@ export class WhatsAppConnector extends BaseConnector {
             unread,
             lastMessageAt: ts > (existing?.lastMessageAt ?? 0) ? ts : undefined,
             handle: jid.endsWith('@s.whatsapp.net') ? '+' + jid.split('@')[0] : undefined,
+            // telefondaki "Arşivlenmiş" (Telegram arşivi gibi: gelen kutusunda görünmez, WhatsApp → Arşiv sekmesinde)
+            meta: typeof c.archived === 'boolean' && c.archived !== !!existing?.meta?.archived ? { ...(existing?.meta ?? {}), archived: c.archived } : undefined,
           });
         }
         for (const m of messages ?? []) this.ingest(m, false);
@@ -555,6 +557,9 @@ export class WhatsAppConnector extends BaseConnector {
     });
 
     sock.ev.on('messages.upsert', ({ messages, type }) => {
+      // "Sohbetleri arşivde tut" kapalıysa (unarchiveChats) arşivdeki sohbete yeni mesaj gelince telefonda arşivden çıkar; burada da
+      if (type === 'notify' && this.sock?.authState.creds.accountSettings?.unarchiveChats === true)
+        for (const m of messages) if (m.key.remoteJid && !m.key.fromMe && isChatJid(m.key.remoteJid)) this.setArchived(this.canon(m.key.remoteJid), false);
       if (messages.length > 1) this.store.transaction(() => messages.forEach((m) => this.ingest(m, type === 'notify')));
       else for (const m of messages) this.ingest(m, type === 'notify');
     });
@@ -569,6 +574,8 @@ export class WhatsAppConnector extends BaseConnector {
     sock.ev.on('chats.update', (updates) => {
       for (const u of updates) {
         if (!u.id || !isChatJid(u.id)) continue;
+        // telefonda arşivle / arşivden çıkar (uygulama durumu archiveChatAction)
+        if (typeof u.archived === 'boolean') this.setArchived(this.canon(u.id), u.archived);
         const n = u.unreadCount;
         if (n === null || n === undefined) continue;
         const jid = this.canon(u.id);
@@ -1384,6 +1391,13 @@ export class WhatsAppConnector extends BaseConnector {
     fs.writeFileSync(file, body);
     fs.writeFileSync(file + '.type', type);
     return { body, type };
+  }
+
+  /** Arşiv işaretini sohbet meta'sına yaz (diğer meta alanları korunur; değişmediyse dokunma) */
+  private setArchived(jid: string, archived: boolean): void {
+    const existing = this.store.getChat(chatIdOf(this.account.id, jid));
+    if (!existing || !!existing.meta?.archived === archived) return;
+    this.upsertChat({ remoteId: jid, name: existing.name, meta: { ...(existing.meta ?? {}), archived } });
   }
 
   private ingest(m: WAMessage, live: boolean): void {

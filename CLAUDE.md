@@ -13,6 +13,13 @@ Dil: arayüz ve yorumlar Türkçe.
   modunda (`npm run demo`) Playwright ile görsel doğrulama.
 
 ## Test ve doğrulama
+- **Canlı E2E** (`npm run e2e -- <komut>`, `scripts/e2e.mjs`; kullanıcının Mac'inde, `npm run dev` açıkken): `setup` ana ⇄ test hesap/sohbet
+  eşleştirmesi (`~/.kavsak/e2e.json`; ikisi de Mivelo'ya bağlı; tek hesapta "elle" mod), `run [--ui] [wa ig …]` gidiş (`#e2e-ID-g`) /
+  dönüş (`-d`) turu: gönderim API ms, karşı tarafta görülme ve platform zamanından gecikme, kendi kaydı, kopya, Türkçe/emoji bütünlüğü;
+  canlı günlük sınıflandırma (`RULES`: derleme/port/hız sınırı/doğrulama/PIN/oturum/API→HTML/medya…) + hesap durum değişimleri;
+  `--ui` Chromium'da duman testi (⌘K, mesaja gidiş, Takvim, konsol/sayfa/istek hataları). `watch` yalnız izleme. Rapor
+  `~/.kavsak/e2e/rapor-*.md` → Claude'a yapıştırılır. Bekleyiciler gönderimden ÖNCE kurulur (çekirdek kendi kaydını HTTP yanıtından önce yayar).
+  Demo çekirdeği `#e2e-` etiketli mesaja 2 sn'de yankı verir (aracın kendisi demo ile sınanır).
 - `npm test -w packages/core` — sahte sayfa nesnesiyle strateji birim testleri (Slack: client.counts/conversations.list/history biçimlendirme,
   before, conversations.mark). Yeni strateji mantığı için buraya test ekle.
 - `node scripts/verify-strategy.mjs <slack|instagram|linkedin|x|messenger>` — canlı oturumun profil KOPYASIYLA (uygulamaya dokunmadan)
@@ -94,6 +101,8 @@ Dil: arayüz ve yorumlar Türkçe.
 - **Genel arama** (⌘K / Ctrl+K, `SearchPalette.tsx`): görünüm/filtreden bağımsız; sohbet adları + FTS5 mesaj metni + ek adları
   (`store.search` LIKE yedeği; `/api/search?limit=` ≤200). "N uygulamada M sonuç", uygulama çipleriyle süzme; mesaja tıklayınca sohbet açılır,
   gerekirse eski mesajlar yüklenir (`focusMsg`), `data-mid` balon ortalanıp `.flash` ile vurgulanır. Liste başındaki arama kutusu ayrıca duruyor.
+- WhatsApp arşivi: `meta.archived` (geçmiş paketi `archived`, `chats.update {archived}`, bağlanınca regular_low tam eşitleme; unarchiveChats
+  açıksa yeni mesaj arşivden çıkarır). Telegram gibi "Sohbetler · Arşiv" sekmeleri (`ARCHIVE_TABS`), arşivdekiler Tümü'de/gelen kutusunda yok.
 - Gelen kutusu sekmeleri Tümü · Okunmamış · Bekleyen (`isWaiting`; birebirler önde, gruplar arkada) · Takip. (Ekip/Pazaryeri
   kenar çubuğu görünümleri kullanıcı isteğiyle KALDIRILDI; yerinde Takvim.)
 - **Odak**: "Yanıtla" satır içi yanıt kutusu (Enter gönderir; kart listeden çıkar, "X ile gönderildi"). Taslak yalnız "Taslak yaz" ile
