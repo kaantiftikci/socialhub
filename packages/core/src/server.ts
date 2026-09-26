@@ -12,7 +12,7 @@ import type { Registry } from './registry.js';
 import type { Connector } from './connectors/base.js';
 import { resolveOAuth } from './connectors/mail.js';
 import { bus } from './bus.js';
-import { aiEnabled, draftReply } from './ai.js';
+import { aiEnabled, aiKey, aiKeySource, draftReply, setAiKey } from './ai.js';
 import { analyzeStyle, describeStyle } from './style.js';
 import { buildIcs, parseStart } from './calendar.js';
 import { openExternal } from './platform.js';
@@ -300,6 +300,9 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   });
   // Bağlantı önizlemesi (Open Graph); güvenli getirici link-preview.ts
   route('GET', '/api/preview', async (req) => {
+    // Dış istek başlatan uç: başka bir sitenin <img src> ile (Origin'siz GET) tetiklemesine izin verme.
+    // Arayüz her istekte x-mivelo-client gönderir (özel başlık → çapraz sitede ön kontrol + Origin → belirteç şart)
+    if (!req.headers['x-mivelo-client'] && givenToken(req) !== token) throw new HttpError(403, 'İstemci doğrulanamadı');
     const url = new URL(req.url ?? '/', 'http://x').searchParams.get('url') ?? '';
     if (!/^https?:\/\//i.test(url) || url.length > 2048) throw new HttpError(400, 'url gerekli');
     return (await fetchPreview(url)) ?? { url, none: true };
@@ -345,6 +348,24 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     return result;
   });
   // "Senin tarzın": kendi mesajlarından yerelde çıkarılan üslup profili (AI anahtarı gerekmez)
+  // AI anahtarı (Ayarlar → AI özellikleri): yalnız bu bilgisayardan değiştirilebilir; değer asla geri döndürülmez, yalnız maske
+  route('GET', '/api/ai/key', () => {
+    const k = aiKey();
+    return { set: Boolean(k), source: aiKeySource(), hint: k ? `${k.slice(0, 7)}…${k.slice(-4)}` : null };
+  });
+  route('POST', '/api/ai/key', (req, _s, _p, body) => {
+    localOnly(req);
+    const key = (body as { key?: string | null }).key;
+    if (key === null || key === '') {
+      setAiKey(null);
+    } else {
+      const k = String(key).trim();
+      if (!/^sk-ant-[A-Za-z0-9_-]{20,200}$/.test(k)) throw new HttpError(400, 'Geçerli bir Anthropic API anahtarı gir (sk-ant- ile başlar)');
+      setAiKey(k);
+    }
+    bus.log('info', `AI anahtarı ${key ? 'kaydedildi' : 'kaldırıldı'}`);
+    return { ok: true, ai: aiEnabled() };
+  });
   route('GET', '/api/style', (req) => {
     const platform = new URL(req.url ?? '/', 'http://x').searchParams.get('platform') || undefined;
     const profile = analyzeStyle([...(platform ? store.myTexts(platform, 250) : []), ...store.myTexts(undefined, platform ? 250 : 500)]);
@@ -410,7 +431,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'content-type, x-kavsak-token');
+      res.setHeader('Access-Control-Allow-Headers', 'content-type, x-kavsak-token, x-mivelo-client');
     }
     if (req.method === 'OPTIONS') return void res.writeHead(204).end();
     if (!authorized(req)) {

@@ -9,7 +9,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   const token = await coreToken;
   const init: RequestInit = {
     method,
-    headers: { ...(body ? { 'content-type': 'application/json' } : {}), ...(token ? { 'x-kavsak-token': token } : {}) },
+    headers: { 'x-mivelo-client': '1', ...(body ? { 'content-type': 'application/json' } : {}), ...(token ? { 'x-kavsak-token': token } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   };
   let res: Response;
@@ -53,6 +53,8 @@ const liveApi = {
   draft: (chatId: string, tone?: string) => call<DraftResult>('POST', `/chats/${enc(chatId)}/draft`, { tone }),
   openChat: (accountId: string, participant: { id: string; name: string; handle?: string; avatarUrl?: string }) => call<Chat>('POST', '/chats/open', { accountId, participant }),
   action: (chatId: string, payload: Record<string, unknown>) => call<Chat>('POST', `/chats/${enc(chatId)}/action`, payload),
+  aiKey: () => call<{ set: boolean; source: 'settings' | 'env' | null; hint: string | null }>('GET', '/ai/key'),
+  setAiKey: (key: string | null) => call<{ ok: boolean; ai: boolean }>('POST', '/ai/key', { key }),
   lan: () => call<{ enabled: boolean; urls: string[]; qr?: string }>('GET', '/lan'),
   setLan: (enabled: boolean) => call<{ enabled: boolean; urls: string[]; qr?: string }>('POST', '/lan', { enabled }),
   logs: () => call<Array<{ ts: number; level: 'info' | 'warn' | 'error'; text: string }>>('GET', '/logs'),

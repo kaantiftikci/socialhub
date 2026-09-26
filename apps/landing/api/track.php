@@ -15,6 +15,13 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
     http_response_code(405);
     exit('{}');
 }
+// yalnız kendi sayfamızdan (sendBeacon aynı origin'i gönderir)
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+$host = strtolower(preg_replace('/:\d+$/', '', $_SERVER['HTTP_HOST'] ?? ''));
+if ($origin === '' || strtolower((string) parse_url($origin, PHP_URL_HOST)) !== $host) {
+    http_response_code(403);
+    exit('{}');
+}
 $ua = (string) ($_SERVER['HTTP_USER_AGENT'] ?? '');
 if ($ua === '' || preg_match('/bot|crawl|spider|slurp|preview|facebookexternalhit|headless|lighthouse/i', $ua)) {
     exit('{}');
@@ -24,7 +31,6 @@ if (!is_array($body)) {
     exit('{}');
 }
 
-$host = strtolower(preg_replace('/:\d+$/', '', $_SERVER['HTTP_HOST'] ?? ''));
 $clean = static fn ($v, int $n = 40): string => substr(preg_replace('/[^a-z0-9._\/-]/', '', strtolower((string) $v)), 0, $n);
 $src = $clean($body['u'] ?? '');
 if ($src === '') {
@@ -69,9 +75,23 @@ if (!is_array($data)) {
     $data = ['days' => []];
 }
 $d = $data['days'][$day] ?? ['v' => 0, 'u' => 0, 'ids' => [], 'src' => [], 'dev' => [], 'page' => []];
+// tekil kümesi anahtar olarak tutulur (O(1)); eski biçim (liste) dönüştürülür
+if (array_is_list($d['ids'])) {
+    $d['ids'] = array_fill_keys($d['ids'], 1);
+}
+// IP başına dakikalık sınır (sahte UA ile şişirmeye karşı): aynı IP'den dakikada en çok 30 kayıt
+$ipKey = substr(hash('sha256', ($_SERVER['REMOTE_ADDR'] ?? '') . '|' . date('Y-m-d H:i')), 0, 12);
+$d['rl'] = ($d['rl']['m'] ?? '') === date('H:i') ? $d['rl'] : ['m' => date('H:i'), 'c' => []];
+$d['rl']['c'][$ipKey] = ($d['rl']['c'][$ipKey] ?? 0) + 1;
+if ($d['rl']['c'][$ipKey] > 30) {
+    flock($fh, LOCK_UN);
+    fclose($fh);
+    exit('{}');
+}
 $d['v']++;
-if (!in_array($vid, $d['ids'], true)) {
-    $d['ids'][] = $vid;
+// günlük tekil sınırı 50 000 (dosya sınırsız büyümesin; aşılırsa yalnız görüntülenme sayılır)
+if (!isset($d['ids'][$vid]) && count($d['ids']) < 50000) {
+    $d['ids'][$vid] = 1;
     $d['u']++;
     // kaynak ve cihaz tekil ziyaretçi başına sayılır
     $d['src'][$src] = ($d['src'][$src] ?? 0) + 1;

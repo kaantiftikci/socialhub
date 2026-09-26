@@ -102,6 +102,15 @@ function authed(): bool
     return true;
 }
 
+/** CSV formül enjeksiyonu: = + - @ sekme/CR ile başlayan hücreler Excel/LibreOffice'te formül olarak çalışır → başına ' */
+function csv_safe(mixed $v): mixed
+{
+    if (is_string($v) && $v !== '' && strpbrk($v[0], "=+-@\t\r") !== false) {
+        return "'" . $v;
+    }
+    return $v;
+}
+
 function mask_ip(string $ip): string
 {
     if (str_contains($ip, ':')) {
@@ -186,7 +195,7 @@ function stat_days(int $months = 3): array
         $m = date('Y-m', strtotime(date('Y-m-01') . " -$i month"));
         $d = read_json("stats/$m.json", ['days' => []])['days'] ?? [];
         foreach ($d as $day => $v) {
-            unset($v['ids']);
+            unset($v['ids'], $v['rl']);
             $out[$day] = $v;
         }
     }
@@ -296,7 +305,7 @@ if ($a === 'csv') {
     fputcsv($f, ['Sıra', 'E-posta', 'Kayıt', 'Kaynak', 'Durum', 'Davet kodu', 'Davet eden', 'Getirdiği', 'Not'], ';');
     $tr = ['waiting' => 'Bekliyor', 'invited' => 'Davet edildi', 'joined' => 'Katıldı', 'spam' => 'Spam'];
     foreach (entries() as $i => $e) {
-        fputcsv($f, [$i + 1, $e['email'], date('Y-m-d H:i', (int) $e['at']), $e['src'] ?? '', $tr[$e['status'] ?? 'waiting'] ?? '', $e['code'] ?? '', $e['ref'] ?? '', (int) ($e['refs'] ?? 0), $e['note'] ?? ''], ';');
+        fputcsv($f, array_map('csv_safe', [$i + 1, $e['email'], date('Y-m-d H:i', (int) $e['at']), $e['src'] ?? '', $tr[$e['status'] ?? 'waiting'] ?? '', $e['code'] ?? '', $e['ref'] ?? '', (int) ($e['refs'] ?? 0), $e['note'] ?? '']), ';');
     }
     exit;
 }

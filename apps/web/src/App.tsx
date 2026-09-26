@@ -203,11 +203,15 @@ export default function App() {
   useEffect(() => {
     const onErr = (e: ErrorEvent) => notify(`Arayüz hatası: ${e.message}`, true);
     const onRej = (e: PromiseRejectionEvent) => notify(`Arayüz hatası: ${String((e.reason as Error)?.message ?? e.reason)}`, true);
+    // uygulama kapalıyken zamanı geçen zamanlanmış mesajlar sessizce gönderilmez (Conversation.tsx flushScheduled)
+    const onMissed = (e: Event) => notify(`${(e as CustomEvent<number>).detail} zamanlanmış mesaj uygulama kapalıyken zamanını kaçırdı; gönderilmedi.`, true);
     window.addEventListener('error', onErr);
     window.addEventListener('unhandledrejection', onRej);
+    window.addEventListener('mivelo:scheduled-missed', onMissed);
     return () => {
       window.removeEventListener('error', onErr);
       window.removeEventListener('unhandledrejection', onRej);
+      window.removeEventListener('mivelo:scheduled-missed', onMissed);
     };
   }, [notify]);
 
@@ -853,6 +857,7 @@ export default function App() {
             </button>
             {/* AI senin kontrolünde: her özellik ayrı açılıp kapanır (cihaza özel) */}
             <span className="set-sub">AI özellikleri{!ai && <em> · anahtar yok</em>}</span>
+            <AiKeyRow ai={ai} onChange={(on) => setAi(on)} notify={notify} />
             {(
               [
                 ['summary', 'Özetler'],
@@ -867,8 +872,8 @@ export default function App() {
             ))}
             <span className="set-sub">Genel</span>
             <label className="row-toggle">
-              <span>Aynı Wi‑Fi'daki telefondan aç</span>
-              <input type="checkbox" checked={!!lan?.enabled} onChange={(e) => api.setLan(e.target.checked).then(setLanState).catch((err) => notify(err.message, true))} />
+              <span>Aynı Wi‑Fi'daki telefondan aç{STATIC_DEMO && <em className="set-hint">Masaüstü uygulamasında</em>}</span>
+              <input type="checkbox" disabled={STATIC_DEMO} checked={!!lan?.enabled} onChange={(e) => api.setLan(e.target.checked).then(setLanState).catch((err) => notify(err.message, true))} />
             </label>
             {STATIC_DEMO && (
               <button className="row-toggle b psounds-head" onClick={() => leaveDemoPanel()}>
@@ -1599,6 +1604,63 @@ function ChatRow({
           {chat.unread > 0 && <span className="badge" aria-label={`${chat.unread} okunmamış`}>{fmtBadge(chat)}</span>}
         </span>
       </span>
+    </div>
+  );
+}
+
+/** Ayarlar → AI anahtarı: kullanıcının kendi Anthropic anahtarı; çekirdekte Anahtar Zinciri/DPAPI'de saklanır, geri okunmaz */
+function AiKeyRow({ ai, onChange, notify }: { ai: boolean; onChange: (on: boolean) => void; notify: (t: string, err?: boolean) => void }) {
+  const [info, setInfo] = useState<{ set: boolean; source: 'settings' | 'env' | null; hint: string | null } | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api.aiKey().then(setInfo).catch(() => setInfo(null));
+  }, [ai]);
+  const save = (key: string | null) => {
+    setBusy(true);
+    api
+      .setAiKey(key)
+      .then((r) => {
+        onChange(r.ai);
+        setEditing(false);
+        setVal('');
+        notify(key ? 'AI anahtarı kaydedildi' : 'AI anahtarı kaldırıldı');
+        return api.aiKey().then(setInfo);
+      })
+      .catch((e) => notify((e as Error).message, true))
+      .finally(() => setBusy(false));
+  };
+  if (editing)
+    return (
+      <form className="ai-key-form" onSubmit={(e) => (e.preventDefault(), val.trim() && save(val.trim()))}>
+        <input autoFocus type="password" placeholder="sk-ant-…" value={val} onChange={(e) => setVal(e.target.value)} aria-label="Anthropic API anahtarı" autoComplete="off" spellCheck={false} />
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button type="submit" className="btn primary xs b b2" disabled={busy || !val.trim()}>
+            Kaydet
+          </button>
+          <button type="button" className="btn ghost xs b b2" onClick={() => (setEditing(false), setVal(''))}>
+            Vazgeç
+          </button>
+        </div>
+        <span className="ai-key-note">Anahtar bu bilgisayarda güvenli depoda saklanır. AI kullandığında ilgili sohbetin son mesajları Anthropic'e gönderilir.</span>
+      </form>
+    );
+  return (
+    <div className="row-toggle ai-key-row">
+      <span>
+        Anthropic anahtarı
+        <em>{info?.set ? (info.source === 'env' ? 'ortam değişkeninden' : info.hint) : 'eklenmedi'}</em>
+      </span>
+      {info?.source === 'settings' ? (
+        <button type="button" className="btn ghost xs b b2" onClick={() => save(null)} disabled={busy}>
+          Kaldır
+        </button>
+      ) : (
+        <button type="button" className="btn soft xs b b2" onClick={() => setEditing(true)}>
+          {info?.set ? 'Değiştir' : 'Ekle'}
+        </button>
+      )}
     </div>
   );
 }

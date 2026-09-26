@@ -992,3 +992,14 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .qacts.one { grid-template-columns: 1fr; }
 /* Video kartında saat rozeti alt çubukla çakışmasın: sağ üst */
 .bub:has(.att-video) .bt { top: 12px; bottom: auto; }
+
+/* Ayarlar → AI anahtarı */
+.settings .ai-key-row > span { display: flex; flex-direction: column; gap: 1px; }
+.settings .ai-key-row em { font-style: normal; font-size: 11.5px; color: var(--text3); }
+.settings .ai-key-row:hover em { color: rgba(255,255,255,.8); }
+.settings .ai-key-form { display: flex; flex-direction: column; gap: 6px; padding: 6px 10px 8px; }
+.settings .ai-key-form input { height: 32px; border-radius: 9px; border: 1px solid var(--line); padding: 0 10px; font-size: 13px; background: #fff; outline: none; }
+.settings .ai-key-form input:focus { border-color: var(--v); box-shadow: 0 0 0 3px rgba(108,71,255,.15); }
+.settings .ai-key-note { font-size: 11.5px; color: var(--text3); line-height: 1.4; }
+.settings .set-hint { display: block; font-style: normal; font-size: 11.5px; color: var(--text3); }
+.settings .row-toggle:hover .set-hint { color: rgba(255,255,255,.8); }

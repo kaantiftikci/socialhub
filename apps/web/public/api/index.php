@@ -94,15 +94,8 @@ function data_dir(): string
     if (is_dir($outside) || @mkdir($outside, 0700, true)) {
         return $outside;
     }
-    $inside = dirname(__DIR__) . '/.private';
-    if (!is_dir($inside) && !@mkdir($inside, 0700, true)) {
-        fail(500, 'Kayıt alanı açılamadı');
-    }
-    $guard = $inside . '/.htaccess';
-    if (!is_file($guard)) {
-        file_put_contents($guard, "Require all denied\nDeny from all\n");
-    }
-    return $inside;
+    // web kökü içine asla düşme (sunucu .htaccess'i yok sayarsa kullanıcı dosyası herkese açık olurdu)
+    fail(500, 'Kayıt alanı açılamadı');
 }
 
 /** @param callable(array): array $fn */
@@ -214,6 +207,18 @@ if ($action === 'login' && $method === 'POST') {
     $username = strtolower(trim((string) ($body['username'] ?? $body['email'] ?? '')));
     $password = (string) ($body['password'] ?? '');
     usleep(250000); // kaba kuvvete karşı küçük gecikme
+    // IP başına kilit: 8 hatalı denemede 10 dakika (demo-auth.json, kayıt alanında)
+    $authFile = data_dir() . '/demo-auth.json';
+    $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+    $auth = is_file($authFile) ? (json_decode((string) file_get_contents($authFile), true) ?: []) : [];
+    foreach ($auth as $k => $v) {
+        if (($v['last'] ?? 0) < time() - 3600) {
+            unset($auth[$k]);
+        }
+    }
+    if (($auth[$ip]['until'] ?? 0) > time()) {
+        fail(429, 'Çok fazla hatalı deneme. Birkaç dakika sonra tekrar dene.');
+    }
     $user = with_users(function (array &$data) use ($username, $password) {
         foreach ($data['users'] as &$u) {
             if (strtolower((string) ($u['username'] ?? $u['email'] ?? '')) === $username && password_verify($password, (string) ($u['pass'] ?? ''))) {
@@ -227,7 +232,14 @@ if ($action === 'login' && $method === 'POST') {
         return ['write' => false, 'out' => null];
     });
     if ($user === null) {
+        $f = (int) ($auth[$ip]['fails'] ?? 0) + 1;
+        $auth[$ip] = ['fails' => $f >= 8 ? 0 : $f, 'last' => time(), 'until' => $f >= 8 ? time() + 600 : 0];
+        @file_put_contents($authFile, json_encode($auth), LOCK_EX);
         fail(401, 'Kullanıcı adı veya şifre hatalı');
+    }
+    if (isset($auth[$ip])) {
+        unset($auth[$ip]);
+        @file_put_contents($authFile, json_encode($auth), LOCK_EX);
     }
     session_regenerate_id(true);
     $_SESSION['uid'] = $user['id'];

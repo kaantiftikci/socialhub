@@ -32,26 +32,37 @@ function privateIp(ip: string): boolean {
   return v6 === '::1' || v6 === '::' || v6.startsWith('fc') || v6.startsWith('fd') || v6.startsWith('fe8') || v6.startsWith('fe9') || v6.startsWith('fea') || v6.startsWith('feb');
 }
 
-async function safeHost(u: URL): Promise<boolean> {
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
-  if (u.port && u.port !== '80' && u.port !== '443') return false;
-  if (u.username || u.password) return false;
-  const host = u.hostname;
-  if (!host || host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) return false;
-  if (net.isIP(host)) return !privateIp(host);
+/** Denetlenmiş adres: bağlantı bu IP'ye sabitlenir (DNS yeniden bağlama / TOCTOU ile iç ağa sızılamaz) */
+interface Vetted {
+  address: string;
+  family: number;
+}
+
+async function safeHost(u: URL): Promise<Vetted | null> {
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+  if (u.port && u.port !== '80' && u.port !== '443') return null;
+  if (u.username || u.password) return null;
+  const host = u.hostname.replace(/^\[|\]$/g, '');
+  if (!host || host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) return null;
+  if (net.isIP(host)) return privateIp(host) ? null : { address: host, family: net.isIP(host) };
   try {
     const addrs = await dns.lookup(host, { all: true });
-    return addrs.length > 0 && addrs.every((a) => !privateIp(a.address));
+    if (!addrs.length || addrs.some((a) => privateIp(a.address))) return null;
+    return { address: addrs[0].address, family: addrs[0].family };
   } catch {
-    return false;
+    return null;
   }
 }
 
-function get(u: URL): Promise<{ status: number; headers: http.IncomingHttpHeaders; body: string }> {
+function get(u: URL, pin: Vetted): Promise<{ status: number; headers: http.IncomingHttpHeaders; body: string }> {
   return new Promise((resolve, reject) => {
     const req = (u.protocol === 'https:' ? https : http).get(
       u,
-      { headers: { 'user-agent': 'Mozilla/5.0 (compatible; Mivelo/1.0; +https://mivelo.app) facebookexternalhit/1.1', accept: 'text/html,application/xhtml+xml', 'accept-language': 'tr,en;q=0.8' }, timeout: 6000 },
+      {
+        // ad çözümlemesi yeniden yapılmaz: safeHost'un onayladığı adrese bağlan (SNI/Host yine asıl ad)
+        lookup: ((_h: string, opts: { all?: boolean }, cb: (...a: unknown[]) => void) =>
+          opts?.all ? cb(null, [{ address: pin.address, family: pin.family }]) : cb(null, pin.address, pin.family)) as unknown as http.RequestOptions['lookup'],
+        headers: { 'user-agent': 'Mozilla/5.0 (compatible; Mivelo/1.0; +https://mivelo.app) facebookexternalhit/1.1', accept: 'text/html,application/xhtml+xml', 'accept-language': 'tr,en;q=0.8' }, timeout: 6000 },
       (res) => {
         const type = String(res.headers['content-type'] ?? '');
         if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400) {
@@ -136,8 +147,9 @@ export async function fetchPreview(raw: string): Promise<LinkPreview | null> {
   try {
     let cur = u;
     for (let i = 0; i < 4; i++) {
-      if (!(await safeHost(cur))) break;
-      const r = await get(cur);
+      const pin = await safeHost(cur);
+      if (!pin) break;
+      const r = await get(cur, pin);
       if (r.status >= 300 && r.status < 400 && r.headers.location) {
         cur = new URL(String(r.headers.location), cur);
         continue;

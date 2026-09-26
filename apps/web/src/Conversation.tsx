@@ -17,6 +17,7 @@ interface ScheduledSend {
 }
 
 const SCHED_KEY = 'kavsak.scheduled';
+const MISSED_KEY = 'kavsak.scheduled.missed';
 let schedTimer = 0;
 const schedListeners = new Set<() => void>();
 
@@ -45,8 +46,20 @@ export function startScheduledSends(): void {
 async function flushScheduled(): Promise<void> {
   const now = Date.now();
   const all = readScheduled();
-  const due = all.filter((s) => s.at <= now);
+  // 15 dakikadan fazla gecikmiş olanlar (uygulama kapalıydı) gönderilmez: gece yarısı sürpriz mesaj gitmesin.
+  // Kullanıcıya bildirilir ve kompozöre geri konması için "kaçırıldı" listesinde kalır.
+  const late = all.filter((s) => s.at <= now - 15 * 60_000);
+  const due = all.filter((s) => s.at <= now && s.at > now - 15 * 60_000);
   let rest = all.filter((s) => s.at > now);
+  if (late.length) {
+    try {
+      const missed = JSON.parse(localStorage.getItem(MISSED_KEY) || '[]') as ScheduledSend[];
+      localStorage.setItem(MISSED_KEY, JSON.stringify([...missed, ...late].slice(-50)));
+    } catch {
+      /* yok */
+    }
+    window.dispatchEvent(new CustomEvent('mivelo:scheduled-missed', { detail: late.length }));
+  }
   for (const s of due) {
     try {
       await api.send(s.chatId, s.text);
@@ -226,6 +239,8 @@ export function Conversation({
   const summary = draft && draft.summary.length > 0 ? draft.summary : sampleSummary;
   /** E-posta kanalları: balon yerine ileti kartları ve e-posta yanıt alanı */
   const isMail = platform.category === 'mail';
+  // Pazaryeri yanıtları (Trendyol/HB/n11 soru-cevap, sipariş notu) yalnız metin: dosya ve ses gönderilemez
+  const canMedia = platform.category !== 'shop';
   /** Sohbet notu: hızlı ve yerel (localStorage, sohbet kimliğine göre); sohbet değişince yeniden okunur */
   const noteKey = `kavsak.note.${chat.id}`;
   const sampleNote = typeof chat.meta?.note === 'string' ? chat.meta.note : '';
@@ -923,10 +938,12 @@ export function Conversation({
             </div>
           )}
           <div className="comp-bottom">
+            {canMedia && (
             <label className="btn ghost sm icon b" aria-label="Fotoğraf, video veya dosya ekle" title="Fotoğraf / video / dosya gönder" style={{ cursor: uploading ? 'progress' : 'pointer' }}>
               <Icon name="link" size={16} />
               <input type="file" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.txt" style={{ display: 'none' }} disabled={!!uploading} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) pickFile(f); }} />
             </label>
+            )}
             <span className="emoji-anchor">
               <button className={`btn ghost sm icon b ${emojiOpen ? 'soft' : ''}`} onClick={() => setEmojiOpen((v) => !v)} aria-label="Emoji ekle" title="Emoji" aria-expanded={emojiOpen}>
                 <Icon name="smile" size={16} />
@@ -946,7 +963,7 @@ export function Conversation({
                 </button>
               </span>
             ) : (
-              !isMail && (
+              !isMail && canMedia && (
                 <button className="btn ghost sm icon b" onClick={() => void startRec()} disabled={!!uploading} aria-label="Sesli mesaj kaydet" title="Sesli mesaj kaydet">
                   <Icon name="mic" size={16} />
                 </button>

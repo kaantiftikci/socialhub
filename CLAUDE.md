@@ -33,7 +33,8 @@ Dil: arayüz ve yorumlar Türkçe.
 - **Herkese açık demo** (`VITE_STATIC_DEMO=1`, `static-demo.ts`): main'e push → `.github/workflows/deploy-demo.yml` FTP ile
   `demo.mivelo.app/` klasörüne (cPanel hesabı kaantiftikci.com; demo hesapları `~/mivelo-data`, `public/api/index.php`). Aynı iş akışı
   `apps/landing/` (bekleme listesi sayfası, tek dosya `index.html`; iletişim hello@mivelo.app) → `mivelo.app/`; kayıtlar
-  `api/waitlist.php` → `~/mivelo-data/waitlist.json` (e-posta tekil, davet kodu `?ref=`, `refs` sayacı).
+  `api/waitlist.php` → `~/mivelo-data/waitlist.json` (e-posta tekil ve sıkı biçim, davet kodu `?ref=`, `refs` sayacı, gizli `website`
+  bot tuzağı, IP başına 20/saat + günlük 2000). `gizlilik.html`, `kosullar.html`, `og.png`, `apple-touch-icon.png` de burada.
   Landing hero'su: sahne sonunda yüzen cam görünüm çubuğu (`#dockSeg`, alttaki `#seg` ile eşzamanlı); her sekme imleçle ufak bir görev
   oynatır (`TASKS` dizisi, kaplamalar 1440×900 kare koordinatlarında). Telefon/tablette de masaüstü penceresi gösterilir.
 - **Yönetim paneli** `mivelo.app/admin` (`apps/landing/admin/`: `index.html` tek sayfa + `api.php`): bekleme listesi (durum
@@ -72,7 +73,9 @@ Dil: arayüz ve yorumlar Türkçe.
   div.adn iletileri, span.aZo ekleri) okunur; yanıt Gmail düzenleyicisiyle. IMAP/uygulama şifresi yalnızca token dosyası varsa (registry).
 - **Shopier** (`connectors/shopier.ts`): resmi API `https://api.shopier.com/v1`, `Authorization: Bearer <PAT>`, 200 istek/dk.
   Sipariş = sohbet; olaylar mesaj; `action('fulfill')` → `PUT /orders/{id}`. API'de mesajlaşma ucu YOK.
-- Trendyol/Hepsiburada/Etsy/Shopify: yalnızca kart (`available: false`), connector yok.
+- **Pazaryerleri**: `trendyol.ts` (resmi Satıcı API: soru-cevap + sipariş), `hepsiburada.ts` (Satıcıya Sor + OMS), `n11.ts` (REST sipariş + SOAP
+  soru), `etsy.ts`/`shopify.ts`/`amazon.ts` (resmi API siparişler + tarayıcı köprüsüyle mesaj/inbox; deneysel). Pazaryeri yanıtları
+  yalnız metin (arayüz dosya/ses düğmesini gizler). Shopier `available:false` ("Yakında").
 
 ## Üretkenlik özellikleri
 - **Takip hatırlatıcısı**: `chats.followup` {at, since, due}; `POST /api/chats/:id/followup {at|null}`. Sunucu dakikada bir
@@ -82,6 +85,8 @@ Dil: arayüz ve yorumlar Türkçe.
   düğme ipucunda kısayol yazar); sıra `DEFAULT_TAGS` + kullanılanlar.
 - **Takvime ekle**: `POST /api/calendar` → `calendar.ts` .ics (kayan yerel saat); yerelde `openExternal` ile takvim uygulamasında
   açılır, uzakta/demoda indirilir. Ön doldurma `apps/web/src/when.ts` (Türkçe tarih/saat tahmini); AI taslağı `events` da döndürür.
+- **AI anahtarı**: Ayarlar → AI özellikleri → "Anthropic anahtarı" (`POST /api/ai/key`, yalnız yerel); `secrets.ts` ile Anahtar Zinciri/
+  DPAPI/0600 dosyada; ortam değişkeni `ANTHROPIC_API_KEY` yedek. Değer asla geri döndürülmez (yalnız maske).
 - **AI özellikleri anahtarları** (Ayarlar → AI özellikleri; `apps/web/src/ai-prefs.ts`, localStorage `mivelo.aiPrefs`): Özetler / Taslaklar /
   Aksiyon çıkarma ayrı ayrı. Taslak kapalıyken `api.draft` yalnızca özet/aksiyon için çağrılır (sağ paneldeki "Özetle"), metin tutulmaz.
   Waitlist'teki "AI senin kontrolünde" kartı bunu anlatır.

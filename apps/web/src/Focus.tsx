@@ -258,9 +258,9 @@ export function Focus({
 
           <div className="muted">
             <h2>
-              <Icon name="eyeoff" size={17} color="#fff" sw={2} /> {muted.length} sohbet sessize alındı
+              <Icon name="eyeoff" size={17} color="#fff" sw={2} /> {muted.length} sohbet odak dışında
             </h2>
-            <p>Gruplar, kanallar ve “sessiz” etiketliler odağın dışında tutuluyor. Önemli bir şey kaçmadı.</p>
+            <p>Gruplar, kanallar ve “sessiz” etiketliler bu listede yer almıyor; gelen kutusunda duruyorlar.</p>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {mutedGroups > 0 && <span className="chip">Gruplar · {mutedGroups}</span>}
               {mutedChannels > 0 && <span className="chip">Kanallar · {mutedChannels}</span>}

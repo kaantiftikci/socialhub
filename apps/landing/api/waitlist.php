@@ -31,7 +31,13 @@ $email = strtolower(trim((string) ($body['email'] ?? '')));
 $ref = preg_replace('/[^a-z0-9]/', '', strtolower((string) ($body['ref'] ?? '')));
 // nereden geldi: utm_source ya da yönlendiren alan adı (landing gönderir); admin panelinde kaynak kırılımı için
 $src = substr(preg_replace('/[^a-z0-9._-]/', '', strtolower((string) ($body['src'] ?? ''))), 0, 40);
-if (strlen($email) > 254 || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+// Botlar gizli "website" alanını doldurur: sessizce başarılı gibi yanıtla, kaydetme
+if (trim((string) ($body['website'] ?? '')) !== '') {
+    echo json_encode(['position' => 0, 'code' => substr(bin2hex(random_bytes(4)), 0, 6)]);
+    exit;
+}
+// Yalın adres biçimi: tırnaklı yerel kısımlar, < > " ve formül başlatan ilk karakterler (= + - @) reddedilir
+if (strlen($email) > 254 || !filter_var($email, FILTER_VALIDATE_EMAIL) || !preg_match('/^[a-z0-9][a-z0-9._%+-]{0,63}@[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)+$/', $email)) {
     fail(400, 'Geçerli bir e-posta adresi yaz.');
 }
 
@@ -41,15 +47,8 @@ function data_dir(): string
     if (is_dir($outside) || @mkdir($outside, 0700, true)) {
         return $outside;
     }
-    $inside = dirname(__DIR__) . '/.private';
-    if (!is_dir($inside) && !@mkdir($inside, 0700, true)) {
-        fail(500, 'Kayıt alanı açılamadı');
-    }
-    $guard = $inside . '/.htaccess';
-    if (!is_file($guard)) {
-        file_put_contents($guard, "Require all denied\nDeny from all\n");
-    }
-    return $inside;
+    // web kökü içine asla düşme (sunucu .htaccess'i yok sayarsa kayıtlar herkese açık olurdu)
+    fail(500, 'Kayıt alanı açılamadı');
 }
 
 $fh = fopen(data_dir() . '/waitlist.json', 'c+');
@@ -79,7 +78,13 @@ if ($out === null) {
             $recent++;
         }
     }
-    if ($recent >= 20) {
+    // Günlük toplam sınır (çok IP'den seri kayıt): 2000/gün
+    $today = 0;
+    $dayStart = strtotime('today');
+    for ($k = count($data['entries']) - 1; $k >= 0 && ($data['entries'][$k]['at'] ?? 0) >= $dayStart; $k--) {
+        $today++;
+    }
+    if ($recent >= 20 || $today >= 2000) {
         flock($fh, LOCK_UN);
         fclose($fh);
         fail(429, 'Çok fazla deneme, biraz sonra tekrar dene.');

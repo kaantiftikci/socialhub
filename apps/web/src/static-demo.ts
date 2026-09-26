@@ -444,6 +444,9 @@ export const staticApi = {
     return chat;
   },
   action: async (chatId: string, _payload?: Record<string, unknown>) => chatOf(chatId),
+  // Demo: örnek AI hazır (model çağrısı yok); anahtar alanı gösterim amaçlı
+  aiKey: async () => ({ set: true, source: 'settings' as const, hint: 'sk-ant-…demo' }),
+  setAiKey: async () => ({ ok: true, ai: true }),
   lan: async () => ({ enabled: false, urls: [] as string[] }),
   setLan: async () => ({ enabled: false, urls: [] as string[] }),
   logs: async () => [{ ts: Date.now(), level: 'info' as const, text: 'Herkese açık demo. Gerçek hesap veya kişisel veri yok.' }],

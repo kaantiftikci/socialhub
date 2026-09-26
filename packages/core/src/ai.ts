@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { ANTHROPIC_API_KEY, ANTHROPIC_MODEL } from './config.js';
+import { getSecret, setSecret } from './secrets.js';
 import type { Chat, Message } from './model.js';
 import { describeStyle, type StyleProfile } from './style.js';
 
@@ -32,7 +33,20 @@ export interface DraftResult {
   style: string[];
 }
 
-export const aiEnabled = (): boolean => Boolean(ANTHROPIC_API_KEY);
+/**
+ * Anahtar kaynağı: önce kullanıcının Ayarlar'dan girdiği (Anahtar Zinciri/DPAPI), yoksa ANTHROPIC_API_KEY ortam değişkeni.
+ * Paketli uygulama ortam değişkeni almadığı için asıl yol Ayarlar.
+ */
+let stored: string | null | undefined;
+const storedKey = () => (stored === undefined ? (stored = getSecret('anthropic-key')) : stored);
+export const aiKey = (): string => storedKey() || ANTHROPIC_API_KEY;
+export const aiKeySource = (): 'settings' | 'env' | null => (storedKey() ? 'settings' : ANTHROPIC_API_KEY ? 'env' : null);
+export const aiEnabled = (): boolean => Boolean(aiKey());
+export function setAiKey(key: string | null): void {
+  setSecret('anthropic-key', key);
+  stored = key;
+  client = undefined;
+}
 
 let client: Anthropic | undefined;
 
@@ -68,7 +82,7 @@ göreli ifadeleri ("yarın 14:00", "cuma") çöz ve start'ı yerel saatle "YYYY-
 
 export async function draftReply(input: DraftInput): Promise<DraftResult | null> {
   if (!aiEnabled()) return null;
-  client ??= new Anthropic({ apiKey: ANTHROPIC_API_KEY });
+  client ??= new Anthropic({ apiKey: aiKey() });
   const toneLine = {
     default: 'Ek ton isteği yok: tamamen kullanıcının kendi tarzı.',
     short: 'Ek ton isteği: çok kısa, en fazla iki cümle (kullanıcının tarzını koruyarak).',
