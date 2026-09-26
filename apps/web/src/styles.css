@@ -1279,3 +1279,12 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .freply textarea { border: 0; outline: none; resize: vertical; min-height: 44px; max-height: 200px; background: transparent; font: inherit; font-size: 14px; line-height: 1.5; color: var(--text); }
 .freply-bar { display: flex; align-items: center; gap: 6px; }
 .todo.kept > span > span:first-child { text-decoration: line-through; color: var(--text3); }
+/* Takvime ekle: cihaz takvimi onayı / izin uyarısı */
+.cal-consent { display: flex; gap: 12px; padding: 14px; border-radius: 16px; background: var(--v-soft); border: 1px solid var(--v-line); color: var(--text); animation: bubIn .14s ease-out both; }
+.cal-consent > svg { flex: none; margin-top: 2px; }
+.cal-consent > div { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cal-consent b { font-size: 14px; font-weight: 600; }
+.cal-consent span { font-size: 12.5px; line-height: 1.5; color: var(--text2); }
+.cal-consent-bar { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; margin-top: 4px; }
+.cal-consent.warn { background: var(--warn-bg); border-color: var(--warn-line); }
+.cal-consent.warn > svg { color: var(--warn-head); }

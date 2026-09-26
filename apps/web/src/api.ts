@@ -61,7 +61,9 @@ const liveApi = {
   setLan: (enabled: boolean) => call<{ enabled: boolean; urls: string[]; qr?: string }>('POST', '/lan', { enabled }),
   logs: () => call<Array<{ ts: number; level: 'info' | 'warn' | 'error'; text: string }>>('GET', '/logs'),
   setFollowUp: (chatId: string, at: number | null) => call<Chat>('POST', `/chats/${enc(chatId)}/followup`, { at }),
-  calendar: (ev: CalendarDraft) => call<{ ics: string; opened: boolean }>('POST', '/calendar', ev),
+  calendar: (ev: CalendarDraft & { mode?: 'device' | 'file'; calendar?: string }) => call<CalendarResult>('POST', '/calendar', ev),
+  calendars: (probe = false) => call<DeviceCalendars>('GET', `/calendars${probe ? '?probe=1' : ''}`),
+  calendarPermission: () => call<{ ok: boolean }>('POST', '/calendars/permission'),
   style: (platform?: string) => call<{ lines: string[] }>('GET', `/style${platform ? `?platform=${enc(platform)}` : ''}`),
   search: (q: string, limit = 50) => call<Array<{ message: Message; chat: Chat }>>('GET', `/search?q=${enc(q)}&limit=${limit}`),
   // zamanlanmış gönderim (çekirdekte; arayüz kapalıyken de gider)
@@ -69,6 +71,25 @@ const liveApi = {
   schedule: (chatId: string, text: string, at: number, threadId?: string) => call<ScheduledItem>('POST', '/scheduled', { chatId, text, at, threadId }),
   unschedule: (id: string) => call<{ ok: boolean }>('DELETE', `/scheduled/${enc(id)}`),
 };
+
+/** Takvime ekleme sonucu: added → cihaz takvimine eklendi; denied → izin yok; opened → .ics takvim uygulamasında açıldı */
+export interface CalendarResult {
+  ics: string;
+  opened: boolean;
+  added?: boolean;
+  calendar?: string;
+  denied?: boolean;
+  error?: string;
+  fallback?: string;
+}
+export interface DeviceCalendars {
+  supported: boolean;
+  app?: string;
+  reason?: 'remote' | 'os';
+  calendars?: string[];
+  denied?: boolean;
+  error?: string;
+}
 
 export interface ScheduledItem {
   id: string;

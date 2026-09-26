@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { EmojiPicker } from './emoji';
-import { api, USE_STATIC } from './api';
+import { api, USE_STATIC, type DeviceCalendars } from './api';
 import { API_BASE, mediaUrl, openExternal } from './desktop';
 import { DEFAULT_TAGS, PLATFORMS, isOrderPage, shopKind, QUICK_REACTIONS, REACT_PLATFORMS, TAG_COLORS, openInAppLink, type Attachment, type CalendarDraft, type Chat, type ChatFlags, type DraftResult, type LinkPreview, type Message, type Reaction } from './types';
 import { guessWhen } from './when';
@@ -1584,9 +1584,26 @@ function fmtEventWhen(start: string): string {
 }
 
 /**
- * Takvime ekle: çekirdek .ics üretip sistemin takvim uygulamasında açar (Mac: Takvim, Windows: Outlook/Takvim);
- * kullanıcı orada kaydeder. Uzak oturumda/demoda dosya indirilir.
+ * Takvime ekle: etkinlik cihazın kendi takvimine doğrudan eklenir (Mac: Takvim uygulaması, Windows: Outlook) — indirme yok.
+ * İlk seferde uygulama içinde onay istenir; sonra macOS kendi izin penceresini bir kez gösterir. Onay yoksa / desteklenmiyorsa
+ * .ics takvim uygulamasında açılır; telefondan (uzak) erişimde dosya indirilir (telefonun takvimi açar).
  */
+const CAL_CONSENT = 'mivelo.calConsent';
+const CAL_NAME = 'mivelo.calName';
+const lsGet = (k: string) => {
+  try {
+    return localStorage.getItem(k);
+  } catch {
+    return null;
+  }
+};
+const lsSet = (k: string, v: string) => {
+  try {
+    localStorage.setItem(k, v);
+  } catch {
+    /* yok */
+  }
+};
 function CalendarModal({ initial, notify, onClose }: { initial: CalendarDraft; notify: (t: string, err?: boolean) => void; onClose: () => void }) {
   const [title, setTitle] = useState(initial.title);
   const [date, setDate] = useState(initial.start.slice(0, 10));
@@ -1594,27 +1611,96 @@ function CalendarModal({ initial, notify, onClose }: { initial: CalendarDraft; n
   const [duration, setDuration] = useState(initial.durationMin ?? 60);
   const [notes, setNotes] = useState(initial.notes ?? '');
   const [busy, setBusy] = useState(false);
-  async function save() {
-    if (!title.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return notify('Başlık ve tarih gerekli', true);
+  const [dev, setDev] = useState<DeviceCalendars | null>(null);
+  const [consent, setConsent] = useState(() => lsGet(CAL_CONSENT) === '1');
+  const [asking, setAsking] = useState(false);
+  const [denied, setDenied] = useState(false);
+  const [calName, setCalName] = useState(() => lsGet(CAL_NAME) ?? '');
+  // onay verilmişse takvim adlarını getir (izin zaten verildiyse pencere çıkmaz)
+  useEffect(() => {
+    let alive = true;
+    api
+      .calendars(consent)
+      .then((d) => {
+        if (!alive) return;
+        setDev(d);
+        if (d.denied) setDenied(true);
+        if (d.calendars?.length && !d.calendars.includes(calName)) setCalName(d.calendars[0]);
+      })
+      .catch(() => alive && setDev({ supported: false }));
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const draft = () => ({ title: title.trim(), start: time ? `${date}T${time}` : date, durationMin: duration, notes: notes.trim() || undefined });
+  const valid = () => {
+    if (!title.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return notify('Başlık ve tarih gerekli', true), false;
+    return true;
+  };
+  function download(ics: string) {
+    const url = URL.createObjectURL(new Blob([ics], { type: 'text/calendar' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${title.trim().replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 60) || 'etkinlik'}.ics`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+  /** mode: device → cihaz takvimine; file → .ics (takvim uygulamasında aç / uzakta indir) */
+  async function add(mode: 'device' | 'file', cal = calName) {
+    if (!valid()) return;
     setBusy(true);
     try {
-      const r = await api.calendar({ title: title.trim(), start: time ? `${date}T${time}` : date, durationMin: duration, notes: notes.trim() || undefined });
-      if (r.opened) notify('Takvim uygulamasında açıldı; oradan kaydet');
-      else {
-        const url = URL.createObjectURL(new Blob([r.ics], { type: 'text/calendar' }));
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${title.trim().replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 60) || 'etkinlik'}.ics`;
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 5000);
-        notify('Takvim dosyası indirildi; açınca takvimine eklenir');
+      const r = await api.calendar({ ...draft(), mode, calendar: cal || undefined });
+      if (r.added) {
+        if (cal) lsSet(CAL_NAME, cal);
+        notify(`Takvime eklendi · ${r.calendar ?? cal ?? dev?.app ?? 'Takvim'}`);
+        onClose();
+      } else if (r.denied) {
+        setDenied(true);
+      } else if (r.opened) {
+        notify(r.fallback ? `Doğrudan eklenemedi (${r.fallback}); takvim uygulamasında açıldı, oradan kaydet` : 'Takvim uygulamasında açıldı; oradan kaydet');
+        onClose();
+      } else {
+        download(r.ics);
+        notify('Takvim dosyası indirildi; telefonda açınca takvime eklenir');
+        onClose();
       }
-      onClose();
     } catch (e) {
       notify((e as Error).message, true);
     } finally {
       setBusy(false);
     }
+  }
+  /** Uygulama içi onay → izin (macOS bir kez sorar) → takvimleri getir → ekle */
+  async function allowAndAdd() {
+    if (!valid()) return;
+    lsSet(CAL_CONSENT, '1');
+    setConsent(true);
+    setAsking(false);
+    setBusy(true);
+    try {
+      const d = await api.calendars(true);
+      setDev(d);
+      if (d.denied) {
+        setDenied(true);
+        return;
+      }
+      const cal = d.calendars?.includes(calName) ? calName : d.calendars?.[0] ?? '';
+      setCalName(cal);
+      setBusy(false);
+      await add('device', cal);
+    } catch (e) {
+      notify((e as Error).message, true);
+    } finally {
+      setBusy(false);
+    }
+  }
+  const direct = !!dev?.supported;
+  function save() {
+    if (!direct) return void add('file');
+    if (!consent) return setAsking(true);
+    void add('device');
   }
   return (
     <div className="overlay" onClick={onClose}>
@@ -1629,7 +1715,7 @@ function CalendarModal({ initial, notify, onClose }: { initial: CalendarDraft; n
         </div>
         <label className="fld">
           <span>Başlık</span>
-          <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void save()} />
+          <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && save()} />
         </label>
         <div className="fld-row">
           <label className="fld">
@@ -1656,14 +1742,80 @@ function CalendarModal({ initial, notify, onClose }: { initial: CalendarDraft; n
           <span>Not</span>
           <textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="İsteğe bağlı" />
         </label>
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button className="btn b b2" onClick={onClose}>
-            Vazgeç
-          </button>
-          <button className="btn primary b b2" onClick={() => void save()} disabled={busy}>
-            {busy ? <span className="spin" /> : <Icon name="calendar" size={14} />} Takvime ekle
-          </button>
-        </div>
+        {direct && consent && !denied && (dev?.calendars?.length ?? 0) > 1 && (
+          <label className="fld">
+            <span>Takvim</span>
+            <select value={calName} onChange={(e) => (setCalName(e.target.value), lsSet(CAL_NAME, e.target.value))}>
+              {dev!.calendars!.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {asking && !denied && (
+          <div className="cal-consent" role="alertdialog" aria-label="Takvim izni">
+            <Icon name="shield" size={18} color="var(--v)" />
+            <div>
+              <b>Etkinlikler {dev?.app === 'Outlook' ? "Outlook takvimine" : 'cihazının Takvim uygulamasına'} doğrudan eklensin mi?</b>
+              <span>
+                {dev?.app === 'Outlook'
+                  ? 'Mivelo etkinliği Outlook takvimine kaydeder; dosya indirmen gerekmez.'
+                  : 'Mivelo etkinliği Takvim uygulamasına kaydeder. macOS bir kez “Mivelo, Takvim’i denetlemek istiyor” diye soracak; İzin Ver de.'}{' '}
+                Takvimdeki etkinlikler okunmaz, hiçbir yere gönderilmez; yalnız takvim adları seçim için listelenir. Bu onay bu cihazda hatırlanır.
+              </span>
+              <div className="cal-consent-bar">
+                <button className="btn ghost sm b" onClick={() => (setAsking(false), void add('file'))} disabled={busy}>
+                  Bu sefer dosyayla aç
+                </button>
+                <button className="btn primary sm b b2" onClick={() => void allowAndAdd()} disabled={busy}>
+                  {busy ? <span className="spin" /> : <Icon name="check" size={14} sw={2} />} İzin ver ve ekle
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {denied && (
+          <div className="cal-consent warn" role="alert">
+            <Icon name="lock" size={18} />
+            <div>
+              <b>Takvim izni kapalı</b>
+              <span>macOS, Mivelo'nun Takvim'e erişimini engelliyor. Sistem Ayarları → Gizlilik ve Güvenlik → Otomasyon → Mivelo altında “Takvim”i aç, sonra yeniden dene.</span>
+              <div className="cal-consent-bar">
+                <button className="btn ghost sm b" onClick={() => void add('file')} disabled={busy}>
+                  Dosyayla aç
+                </button>
+                <button className="btn sm b b2" onClick={() => api.calendarPermission().catch(() => undefined)}>
+                  Sistem Ayarları'nı aç
+                </button>
+                <button className="btn primary sm b b2" onClick={() => (setDenied(false), void allowAndAdd())} disabled={busy}>
+                  Yeniden dene
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {!asking && !denied && (
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
+            {direct && consent && (
+              <span className="hint" style={{ marginRight: 'auto' }}>
+                {dev?.app === 'Outlook' ? "Outlook'a" : `${calName || 'Takvim'} takvimine`} doğrudan eklenir
+              </span>
+            )}
+            {dev?.reason === 'remote' && (
+              <span className="hint" style={{ marginRight: 'auto' }}>
+                Uzaktan erişimde dosya indirilir; açınca telefonunun takvimine eklenir
+              </span>
+            )}
+            <button className="btn b b2" onClick={onClose}>
+              Vazgeç
+            </button>
+            <button className="btn primary b b2" onClick={save} disabled={busy || !dev}>
+              {busy ? <span className="spin" /> : <Icon name="calendar" size={14} />} Takvime ekle
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

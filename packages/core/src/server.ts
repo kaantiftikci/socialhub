@@ -7,6 +7,7 @@ import os from 'node:os';
 import QRCode from 'qrcode';
 import { DATA_DIR } from './config.js';
 import { ScheduledQueue } from './scheduled.js';
+import { addToDeviceCalendar, deviceCalendarApp, listDeviceCalendars, type DeviceCalendarError } from './calendar-device.js';
 import { WebSocketServer, WebSocket } from 'ws';
 import { markActive } from './activity.js';
 import type { Store } from './store.js';
@@ -433,11 +434,45 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     return chat;
   });
   // Takvime ekle: .ics üretir; bu bilgisayardan istenmişse takvim uygulamasında açar, uzaktaysa dosyayı döndürür (tarayıcı indirir)
-  route('POST', '/api/calendar', (req, _s, _p, body) => {
-    const b = (body ?? {}) as { title?: string; start?: string; durationMin?: number; notes?: string; location?: string };
+  // Cihaz takvimi: destek var mı; probe=1 → yazılabilir takvim adları (macOS ilk seferde izin sorar — arayüz önce onay alır)
+  route('GET', '/api/calendars', async (req) => {
+    if (isRemote(req)) return { supported: false, reason: 'remote' };
+    const app = deviceCalendarApp();
+    if (!app) return { supported: false, reason: 'os' };
+    if (new URL(req.url ?? '/', 'http://x').searchParams.get('probe') !== '1') return { supported: true, app };
+    try {
+      return { supported: true, app, calendars: await listDeviceCalendars() };
+    } catch (e) {
+      const ce = e as DeviceCalendarError;
+      return { supported: true, app, calendars: [], denied: ce.code === 'denied', error: ce.message };
+    }
+  });
+  // macOS: Takvim iznini yeniden açmak için Gizlilik → Otomasyon bölmesi
+  route('POST', '/api/calendars/permission', (req) => {
+    localOnly(req);
+    openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Automation');
+    return { ok: true };
+  });
+  route('POST', '/api/calendar', async (req, _s, _p, body) => {
+    const b = (body ?? {}) as { title?: string; start?: string; durationMin?: number; notes?: string; location?: string; mode?: 'device' | 'file'; calendar?: string };
     if (!b.title?.trim() || !b.start || !parseStart(b.start)) throw new HttpError(400, 'Başlık ve geçerli tarih gerekli');
-    const ics = buildIcs({ title: b.title, start: b.start, durationMin: Number(b.durationMin) || undefined, notes: b.notes, location: b.location });
+    const ev = { title: b.title, start: b.start, durationMin: Number(b.durationMin) || undefined, notes: b.notes, location: b.location };
+    const ics = buildIcs(ev);
     if (isRemote(req)) return { ics, opened: false };
+    // Doğrudan cihaz takvimine (kullanıcı arayüzde onay verdiyse); izin reddi arayüze döner, diğer hatalarda .ics'e düşülür
+    let fallback: string | undefined;
+    if (b.mode === 'device' && deviceCalendarApp()) {
+      try {
+        const calendar = await addToDeviceCalendar(ev, b.calendar ? String(b.calendar).slice(0, 200) : undefined);
+        bus.log('info', `Takvime eklendi (${calendar}): ${ev.title.slice(0, 60)}`);
+        return { ics, opened: false, added: true, calendar };
+      } catch (e) {
+        const ce = e as DeviceCalendarError;
+        if (ce.code === 'denied') return { ics, opened: false, added: false, denied: true, error: ce.message };
+        fallback = ce.message;
+        bus.log('warn', `Takvime doğrudan eklenemedi, dosyayla açılıyor: ${ce.message}`);
+      }
+    }
     const dir = path.join(DATA_DIR, 'calendar');
     fs.mkdirSync(dir, { recursive: true });
     // eski dosyalar birikmesin (takvim uygulaması içeri aldıktan sonra gereksiz)
@@ -448,7 +483,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     const file = path.join(dir, `mivelo-${Date.now()}.ics`);
     fs.writeFileSync(file, ics, { mode: 0o600 });
     openExternal(file);
-    return { ics, opened: true };
+    return { ics, opened: true, fallback };
   });
   route('GET', '/api/logs', () => bus.recent.slice(-200));
   // Telefondan erişim (aynı Wi‑Fi): bağlantı + QR; açma/kapama

@@ -105,8 +105,12 @@ Dil: arayüz ve yorumlar Türkçe.
 - Mesaj üstü düğmeler (`.rpos.p0/p1/p2`): tepki · takvim · takip (2 gün; `.act` açıkken). Bildirim: "Grup ve kanal bildirimleri" anahtarı.
 - **Görünümler**: ⌘1 Tümü, ⌘2… etiketler (Windows'ta Ctrl; `MOD_KEY`); ayrı çip satırı yok (sol kenar çubuğundaki Etiketler aynı işi görür,
   düğme ipucunda kısayol yazar); sıra `DEFAULT_TAGS` + kullanılanlar.
-- **Takvime ekle**: `POST /api/calendar` → `calendar.ts` .ics (kayan yerel saat); yerelde `openExternal` ile takvim uygulamasında
-  açılır, uzakta/demoda indirilir. Ön doldurma `apps/web/src/when.ts` (Türkçe tarih/saat tahmini); AI taslağı `events` da döndürür.
+- **Takvime ekle**: cihaz takvimine DOĞRUDAN (`calendar-device.ts`): macOS Takvim (JXA/Apple Events; değerler JSON argümanla,
+  metne gömülmez), Windows klasik Outlook (COM, PowerShell ortam değişkeniyle). İlk seferde arayüz içi onay (`mivelo.calConsent`),
+  ardından `GET /api/calendars?probe=1` macOS izin penceresini tetikler ve yazılabilir takvim adlarını getirir (seçim `mivelo.calName`).
+  `POST /api/calendar {mode:'device', calendar}` → `{added, calendar}`; izin reddi `{denied}` (arayüz "Sistem Ayarları'nı aç" →
+  `POST /api/calendars/permission`, Otomasyon bölmesi); diğer hatada .ics takvim uygulamasında açılır (`fallback`). Uzak (telefon)
+  erişimde .ics indirilir. Demoda taklit (indirme yok). `npm run dev`de izin Terminal adına sorulur. Ön doldurma `apps/web/src/when.ts` (Türkçe tarih/saat tahmini); AI taslağı `events` da döndürür.
 - **AI anahtarı**: Ayarlar → AI özellikleri → "Anthropic anahtarı" (`POST /api/ai/key`, yalnız yerel); `secrets.ts` ile Anahtar Zinciri/
   DPAPI/0600 dosyada; ortam değişkeni `ANTHROPIC_API_KEY` yedek. Değer asla geri döndürülmez (yalnız maske).
 - **AI özellikleri anahtarları** (Ayarlar → AI özellikleri; `apps/web/src/ai-prefs.ts`, localStorage `mivelo.aiPrefs`): Özetler / Taslaklar /

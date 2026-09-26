@@ -1,3 +1,4 @@
+import type { CalendarResult, DeviceCalendars } from './api';
 import type { Account, Attachment, CalendarDraft, Chat, ChatFlags, CoreEvent, CoreOs, DraftResult, LinkPreview, Message, Platform } from './types';
 import { PLATFORMS } from './types';
 import { authSaveAccounts } from './auth-api';
@@ -446,7 +447,10 @@ export const staticApi = {
     }
     return next;
   },
-  calendar: async (ev: CalendarDraft) => ({ ics: demoIcs(ev), opened: false }),
+  // demo: cihaz takvimi taklidi (gerçek uygulamada Mac Takvim / Outlook'a doğrudan eklenir; indirme yok)
+  calendar: async (ev: CalendarDraft & { mode?: 'device' | 'file'; calendar?: string }): Promise<CalendarResult> => ({ ics: demoIcs(ev), opened: false, added: true, calendar: ev.calendar || 'Kişisel' }),
+  calendars: async (probe = false): Promise<DeviceCalendars> => ({ supported: true, app: 'Takvim', calendars: probe ? ['Kişisel', 'İş', 'Aile'] : undefined }),
+  calendarPermission: async () => ({ ok: true }),
   style: async () => ({ lines: DEMO_STYLE }),
   openChat: async (accountId: string, participant: { id: string; name: string; handle?: string; avatarUrl?: string }) => {
     const acc = accounts.find((a) => a.id === accountId);
