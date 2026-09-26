@@ -440,22 +440,21 @@ footer .legal{margin-top:18px;font-size:12px;line-height:1.5;color:var(--ink-4);
 .intro .scroll-cue:hover{background:#E2E0EA}
 @media (max-width:520px){.intro .form{flex-direction:column;padding:7px}.intro .form input{height:44px}.intro .form button{justify-content:center;height:44px}}
 
-/* Hero formu: kenarından içe yayılan, dönen yumuşak çok renkli ışık (beam) */
+/* Hero: yalnızca "Erken erişim" düğmesinin etrafında dönen çok renkli ışık (beam); e-posta kutusu sade */
 @property --beam{syntax:'<angle>';inherits:false;initial-value:0deg}
-.intro .form button{position:relative;padding:0 14px;gap:7px}
 .intro .form{position:relative;isolation:isolate}
 .intro .form>:not(.sr){position:relative;z-index:1}
-.intro .form::before,.intro .form::after{content:"";position:absolute;inset:-1px;border-radius:inherit;pointer-events:none;z-index:0;
-  background:conic-gradient(from var(--beam),transparent 0 8%,rgba(34,197,94,.9) 16%,rgba(20,184,166,.7) 24%,transparent 34% 52%,rgba(245,158,11,.75) 60%,rgba(236,72,153,.7) 68%,rgba(139,92,246,.9) 76%,transparent 86%);
-  animation:beam 7s linear infinite}
-/* ince renkli kenar */
-.intro .form::before{padding:1px;opacity:.9;-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0)}
-/* kenardan içe sızan yumuşak ışık: kenarda güçlü, ortaya doğru sönen (keskin iç kenar yok) */
-.intro .form::after{inset:0;filter:blur(10px);opacity:.45;
-  -webkit-mask:linear-gradient(90deg,#000,transparent 22%,transparent 78%,#000),linear-gradient(#000,transparent 45%,transparent 55%,#000);
-  mask:linear-gradient(90deg,#000,transparent 22%,transparent 78%,#000),linear-gradient(#000,transparent 45%,transparent 55%,#000)}
+/* düğme kendi yığın bağlamını açmasın: parıltı (z-index:-1) düğmenin arkasına, formun önüne düşer */
+.intro .form>button:not(.sr){position:relative;z-index:auto;padding:0 14px;gap:7px}
+.intro .form>button::before,.intro .form>button::after{content:"";position:absolute;inset:-2px;border-radius:12px;pointer-events:none;
+  background:conic-gradient(from var(--beam),transparent 0 8%,rgba(34,197,94,.95) 16%,rgba(20,184,166,.75) 24%,transparent 34% 52%,rgba(245,158,11,.8) 60%,rgba(236,72,153,.75) 68%,rgba(139,92,246,.95) 76%,transparent 86%);
+  animation:beam 4s linear infinite}
+/* ince renkli kenar (düğmenin dışında 2px halka) */
+.intro .form>button::before{padding:2px;z-index:0;-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0)}
+/* düğmenin çevresine yayılan yumuşak ışık */
+.intro .form>button::after{z-index:-1;filter:blur(9px);opacity:.6}
 @keyframes beam{to{--beam:360deg}}
-@media (prefers-reduced-motion:reduce){.intro .form::before,.intro .form::after{animation:none}}
+@media (prefers-reduced-motion:reduce){.intro .form>button::before,.intro .form>button::after{animation:none}}
 
 /* Başlıklar: düz siyah, orta kalınlık, sıkı harf aralığı (shotbase tarzı) */
 .h1,.h2{font-weight:500;letter-spacing:-.045em;color:var(--ink)}
