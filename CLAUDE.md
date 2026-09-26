@@ -94,6 +94,16 @@ Dil: arayüz ve yorumlar Türkçe.
   `store.styleSamples` gelen→yanıt çiftleri (önce aynı sohbet, sonra platform, sonra hepsi). `ai.ts` @anthropic-ai/sdk ile
   yapılandırılmış çıktı (json_schema). `GET /api/style` profil satırları.
 
+## Ban önleme (Eylül 2026 araştırması)
+- Tarayıcı köprüsü yoklaması sabit `setInterval` DEĞİL: `bridge.schedule()` her tur ±%30 sapmalı `setTimeout`. Aralıklar (registry):
+  LinkedIn 60 sn, X 60 sn, Instagram 30 sn, Messenger 30 sn, Slack(tarayıcı) 30 sn, Gmail/Outlook/iCloud 90 sn. API paralelliği en çok 2.
+- Hata sınıfları (`pollInner` catch): checkpoint/captcha/`account/access`/authwall → yoklama durur, durum 'pairing' (otomatik deneme yok);
+  429/999/rate limit → üstel bekleme 5→10→20… ≤120 dk (`rateHits`, başarılı turda sıfırlanır).
+- WhatsApp 402/403/406 → dur, oturumu SİLME (kısıtlı hesapta yeniden eşleşme yasağı kalıcılaştırabilir); kopmalarda üstel ≤5 dk + sapma.
+- Slack: `_x_id` web istemcisinden öğrenilen önekle (`noversion-…`), uygulama adı gönderilmez. xoxp connector'ı: liste 10 dk önbellek,
+  tur başına ≤20 `conversations.history` (DM/yakın etkin + dönüşümlü), ~60 sn.
+- Info.plist: NSAppleEventsUsageDescription + NSContactsUsageDescription (iMessage/Kişiler TCC istemi).
+
 ## Sunucu/arayüz sözleşmesi
 - CORS: localhost/127.0.0.1/tauri.localhost/tauri://localhost ve WKWebView'ın `null` kaynağı (paketli uygulama!).
 - keepAliveTimeout 120 s (WebKit "Load failed" önlemi); arayüz `api.ts` ağ hatasında bir kez yeniden dener; açılışta 45 s

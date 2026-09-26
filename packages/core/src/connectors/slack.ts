@@ -5,8 +5,10 @@ import type { Account } from '../model.js';
 import type { Store } from '../store.js';
 
 /**
- * Slack: resmi Web API, kullanıcı token'ı (xoxp-…) ile. Bu demo Socket Mode yerine
- * 15 saniyelik yoklama (polling) kullanır; Slack uygulaması kurmadan çalışır.
+ * Slack: resmi Web API, kullanıcı token'ı (xoxp-…) ile. Socket Mode yerine ~60 sn'lik (±%30) yoklama kullanır.
+ * Hız sınırları: conversations.list 10 dk önbellekli; conversations.history (Tier 3, ~50/dk) tur başına en çok
+ * HISTORY_PER_POLL kanal — DM'ler ve yakın zamanda etkin olanlar önce, kalanlar sırayla dönüşümlü. 429'da WebClient
+ * Retry-After kadar bekler.
  * Gerekli scope'lar: channels:history, groups:history, im:history, mpim:history,
  * channels:read, groups:read, im:read, mpim:read, users:read, chat:write.
  */
@@ -17,6 +19,10 @@ export class SlackConnector extends BaseConnector {
   private meId = '';
   private lastTs = new Map<string, string>();
   private polling = false;
+  private stopped = false;
+  private convs: Array<{ id: string; name: string; kind: 'direct' | 'group' | 'channel' }> = [];
+  private convsAt = 0;
+  private cursor = 0;
 
   constructor(account: Account, store: Store, private token: string) {
     super(account, store);
@@ -34,12 +40,22 @@ export class SlackConnector extends BaseConnector {
       this.setStatus('error', `Slack token doğrulanamadı: ${(e as Error).message}`);
       return;
     }
+    this.stopped = false;
     await this.poll(true);
-    this.timer = setInterval(() => void this.poll(false), 15_000);
+    this.schedule();
+  }
+
+  private schedule(): void {
+    if (this.stopped) return;
+    this.timer = setTimeout(async () => {
+      await this.poll(false);
+      this.schedule();
+    }, Math.round(60_000 * (0.7 + Math.random() * 0.6)));
   }
 
   async stop(): Promise<void> {
-    if (this.timer) clearInterval(this.timer);
+    this.stopped = true;
+    if (this.timer) clearTimeout(this.timer);
     this.setStatus('disconnected');
   }
 
@@ -65,17 +81,44 @@ export class SlackConnector extends BaseConnector {
     }
   }
 
+  /** Bu turda geçmişi çekilecek sohbetler: yarısı en son etkin olanlar (DM öncelikli), yarısı dönüşümlü sıradakiler */
+  private pickForPoll(first: boolean): typeof this.convs {
+    const HISTORY_PER_POLL = first ? 40 : 20;
+    if (this.convs.length <= HISTORY_PER_POLL) return this.convs;
+    const recent = [...this.convs]
+      .sort((a, b) => Number(this.lastTs.get(b.id) ?? 0) + (b.kind === 'direct' ? 1e9 : 0) - (Number(this.lastTs.get(a.id) ?? 0) + (a.kind === 'direct' ? 1e9 : 0)))
+      .slice(0, HISTORY_PER_POLL / 2);
+    const picked = new Set(recent.map((c) => c.id));
+    const out = [...recent];
+    for (let i = 0; i < this.convs.length && out.length < HISTORY_PER_POLL; i++) {
+      const c = this.convs[(this.cursor + i) % this.convs.length];
+      if (picked.has(c.id)) continue;
+      out.push(c);
+      picked.add(c.id);
+    }
+    this.cursor = (this.cursor + HISTORY_PER_POLL / 2) % this.convs.length;
+    return out;
+  }
+
   private async poll(first: boolean): Promise<void> {
     if (this.polling) return; // önceki yoklama sürüyorsa üst üste binme (rate limit)
     this.polling = true;
     try {
-      const list = await this.web.conversations.list({ types: 'im,mpim,private_channel,public_channel', limit: 200, exclude_archived: true });
-      for (const c of list.channels ?? []) {
-        if (!c.id) continue;
-        if (c.is_channel && !c.is_member) continue;
-        const kind = c.is_im ? 'direct' : c.is_mpim ? 'group' : 'channel';
-        const name = c.is_im ? await this.userName(String(c.user ?? '')) : `#${c.name ?? c.id}`;
-        this.ensureChat(c.id, name, kind);
+      if (first || Date.now() - this.convsAt > 10 * 60_000) {
+        const list = await this.web.conversations.list({ types: 'im,mpim,private_channel,public_channel', limit: 200, exclude_archived: true });
+        const next: typeof this.convs = [];
+        for (const c of list.channels ?? []) {
+          if (!c.id) continue;
+          if (c.is_channel && !c.is_member) continue;
+          const kind = c.is_im ? 'direct' : c.is_mpim ? 'group' : 'channel';
+          const name = c.is_im ? await this.userName(String(c.user ?? '')) : `#${c.name ?? c.id}`;
+          this.ensureChat(c.id, name, kind);
+          next.push({ id: c.id, name, kind });
+        }
+        this.convs = next;
+        this.convsAt = Date.now();
+      }
+      for (const c of this.pickForPoll(first)) {
         const hist = await this.web.conversations.history({
           channel: c.id,
           limit: first ? 30 : 20,

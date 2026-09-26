@@ -123,7 +123,7 @@ export class Registry {
         // xoxp token verildiyse resmi API; yoksa tarayıcı oturumu (app.slack.com girişi)
         const tokenFile = path.join(sessionDir(account.id), 'token');
         const token = fs.existsSync(tokenFile) ? fs.readFileSync(tokenFile, 'utf8').trim() : '';
-        c = token.startsWith('xox') ? new SlackConnector(account, this.store, token) : new BrowserConnector(account, this.store, slackStrategy, 20_000);
+        c = token.startsWith('xox') ? new SlackConnector(account, this.store, token) : new BrowserConnector(account, this.store, slackStrategy, 30_000);
         break;
       }
       case 'demo':
@@ -132,17 +132,18 @@ export class Registry {
       case 'imessage':
         c = new IMessageConnector(account, this.store);
         break;
+      // Resmi olmayan kanallarda yoklama aralıkları ban riskine göre (±%30 sapmayla, bridge.schedule): LinkedIn/X seyrek
       case 'linkedin':
-        c = new BrowserConnector(account, this.store, linkedin, 15_000);
+        c = new BrowserConnector(account, this.store, linkedin, 60_000);
         break;
       case 'instagram':
-        c = new BrowserConnector(account, this.store, instagram, 15_000);
+        c = new BrowserConnector(account, this.store, instagram, 30_000);
         break;
       case 'x':
-        c = new BrowserConnector(account, this.store, x, 20_000);
+        c = new BrowserConnector(account, this.store, x, 60_000);
         break;
       case 'messenger':
-        c = new BrowserConnector(account, this.store, messenger, 20_000);
+        c = new BrowserConnector(account, this.store, messenger, 30_000);
         break;
       case 'shopier': {
         const tokenFile = path.join(sessionDir(account.id), 'token');

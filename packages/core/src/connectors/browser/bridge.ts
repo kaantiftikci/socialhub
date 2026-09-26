@@ -136,6 +136,8 @@ export class BrowserConnector extends BaseConnector {
   private polling = false;
   /** 429/hız sınırı sonrası bu zamana kadar yoklama yok (oturum kilitlenmesin) */
   private backoffUntil = 0;
+  /** Art arda hız sınırı sayısı: bekleme 5 dk → 10 → 20 … (≤ 2 sa); başarılı yoklamada sıfırlanır */
+  private rateHits = 0;
   /** unloadWhenIdle: yoklamalar arasında tarayıcı kapalı (bellek); bir sonraki yoklama/işlem yeniden açar */
   private idleClosed = false;
   private known = new Map<string, number>(); // threadId → son görülen ts
@@ -228,8 +230,7 @@ export class BrowserConnector extends BaseConnector {
     await this.poll(true);
     if (this.account.status !== 'connected') return;
     this.syncProgress(100);
-    if (this.timer) clearInterval(this.timer);
-    this.timer = setInterval(() => void this.poll(false), this.pollMs);
+    this.schedule();
   }
 
   private get stateFile(): string {
@@ -365,7 +366,7 @@ export class BrowserConnector extends BaseConnector {
     ctx.on('close', () => {
       if (this.ctx !== ctx) return; // biz kapattık (görünürden görünmeze geçiş)
       if (!this.stopping) this.setStatus('disconnected', 'Tarayıcı penceresi kapatıldı');
-      if (this.timer) clearInterval(this.timer);
+      this.unschedule();
     });
     await this.page.goto(this.strategy.home, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
     return true;
@@ -454,7 +455,7 @@ export class BrowserConnector extends BaseConnector {
     await this.api?.dispose().catch(() => undefined);
     this.api = undefined;
     this.pageless = false;
-    if (this.timer) clearInterval(this.timer);
+    this.unschedule();
     await this.closeCtx();
     this.setStatus('disconnected');
   }
@@ -617,6 +618,24 @@ export class BrowserConnector extends BaseConnector {
     return out;
   }
 
+  /**
+   * Yoklama zamanlayıcısı: sabit setInterval yerine her tur ±%30 sapmalı setTimeout. Saat gibi düzenli istek deseni
+   * otomasyon imzasıdır (LinkedIn/X/Instagram/Slack); ayrıca önceki tur bitmeden yenisi planlanmaz.
+   */
+  private schedule(): void {
+    this.unschedule();
+    const t: NodeJS.Timeout = setTimeout(async () => {
+      await this.poll(false).catch(() => undefined);
+      if (this.timer === t && !this.stopping) this.schedule();
+    }, Math.round(this.pollMs * (0.7 + Math.random() * 0.6)));
+    this.timer = t;
+  }
+
+  private unschedule(): void {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = undefined;
+  }
+
   private async poll(first: boolean): Promise<void> {
     if (this.polling || Date.now() < this.backoffUntil) return;
     if ((!this.page || this.page.isClosed()) && !this.pageless && !(await this.ensureOpen())) return;
@@ -691,8 +710,8 @@ export class BrowserConnector extends BaseConnector {
       const batch = changed.slice(0, first ? 16 : 8);
       const failed: string[] = [];
       let firstErr = '';
-      // API stratejileri 4'lü paralel; DOM okuyanlar sıralı (tek sayfayı paylaşır)
-      const width = this.strategy.parallel ? 4 : 1;
+      // API stratejileri en çok 2'li paralel (patlamalı istek deseni hız sınırı/otomasyon algısını tetikler); DOM okuyanlar sıralı
+      const width = this.strategy.parallel ? 2 : 1;
       for (let i = 0; i < batch.length; i += width) {
         await Promise.all(
           batch.slice(i, i + width).map(async (t) => {
@@ -710,16 +729,29 @@ export class BrowserConnector extends BaseConnector {
       // aynı hata her sohbet için ayrı satır basmasın: yoklama başına tek özet
       if (failed.length) bus.log('warn', `${this.account.platform} mesajlar alınamadı: ${failed.length}/${batch.length} sohbet (ilk: ${failed[0]}): ${firstErr}`);
       if (first) bus.log('info', `${this.account.platform}: ${threads.length} sohbet yüklendi`);
+      this.rateHits = 0;
     } catch (e) {
       bus.log('warn', `${this.account.platform} yoklama: ${(e as Error).message}`);
-      if (/\b429\b|rate.?limit|too many/i.test((e as Error).message)) {
-        this.backoffUntil = Date.now() + 5 * 60_000;
-        bus.log('warn', `${this.account.platform}: hız sınırı, 5 dk beklenecek`);
+      const msg = (e as Error).message;
+      // Doğrulama/kilit sayfası (checkpoint, captcha, X /account/access, Google "kimliğinizi doğrulayın"): ısrar etmek
+      // kısıtlamayı yasağa çevirebilir → otomatik yoklamayı tamamen durdur, kullanıcı görünür pencerede çözsün
+      if (/checkpoint|challenge_required|captcha|account\/access|\/authwall|verify it'?s you/i.test(msg)) {
+        this.unschedule();
+        bus.log('warn', `${this.account.platform}: platform doğrulama istedi, otomatik yoklama durduruldu`);
+        this.setStatus('pairing', 'Platform güvenlik doğrulaması istiyor; kanala sağ tıklayıp "Yeniden bağlan" de ve doğrulamayı tamamla');
+        return;
+      }
+      // 429 / LinkedIn 999 / Slack ratelimited: üstel geri çekilme (5 dk, 10, 20 … ≤ 2 sa)
+      if (/\b(429|999)\b|rate.?limit|too many/i.test(msg)) {
+        this.rateHits += 1;
+        const mins = Math.min(5 * 2 ** (this.rateHits - 1), 120);
+        this.backoffUntil = Date.now() + mins * 60_000;
+        bus.log('warn', `${this.account.platform}: hız sınırı, ${mins} dk beklenecek`);
         return;
       }
       if (!(await this.isLoggedIn())) {
         bus.log('warn', `${this.account.platform}: oturum düşmüş, yeniden giriş gerekli`);
-        if (this.timer) clearInterval(this.timer);
+        this.unschedule();
         this.polling = false;
         await this.closeCtx();
         this.setStatus('pairing', 'Oturum düştü — kanala sağ tıklayıp "Yeniden bağlan" de');

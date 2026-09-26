@@ -37,6 +37,8 @@ export class WhatsAppConnector extends BaseConnector {
   private historySeen = false;
   /** Bu oturumda hiç 'open' görmeden üst üste kaç kez koptu (bayat kimlik tespiti) */
   private failedBeforeOpen = 0;
+  /** Son 10 dk'daki kopmalar: sunucu sürekli kapatıyorsa yeniden bağlanma aralığı büyür (sabit 2 sn döngüsü ban riskini artırır) */
+  private drops: number[] = [];
   private opened = false;
   private retryTimer?: NodeJS.Timeout;
   private refreshTimer?: NodeJS.Timeout;
@@ -275,7 +277,13 @@ export class WhatsAppConnector extends BaseConnector {
           bus.log('warn', `WhatsApp: ${why}; kayıtlı oturum silindi, yeni QR üretiliyor`);
           this.retry(800);
         };
-        if (code === DisconnectReason.loggedOut || code === DisconnectReason.badSession || code === DisconnectReason.multideviceMismatch || code === 403) {
+        // 402/403/406: WhatsApp hesabı geçici kısıtlamış/kilitlemiş olabilir. Oturumu silip yeniden eşleşmeye zorlamak ya da
+        // ısrarla yeniden bağlanmak durumu kalıcı yasağa çevirebilir → dur, kimliği koru, kullanıcıya bırak.
+        if (code === 402 || code === 403 || code === 406) {
+          this.setStatus('error', `WhatsApp bağlantıyı reddetti (${code}); hesap geçici kısıtlanmış olabilir. Telefonda WhatsApp'ı açıp uyarı olup olmadığına bak, sonra "Yeniden bağlan" de. Otomatik deneme durduruldu.`);
+          return;
+        }
+        if (code === DisconnectReason.loggedOut || code === DisconnectReason.badSession || code === DisconnectReason.multideviceMismatch) {
           resetAuth(code === DisconnectReason.loggedOut ? 'telefondan çıkış yapılmış' : `oturum geçersiz (${code})`);
           return;
         }
@@ -296,7 +304,11 @@ export class WhatsAppConnector extends BaseConnector {
             return;
           }
         }
-        const wait = Math.min(2000 * 2 ** Math.max(0, this.failedBeforeOpen - 1), 15_000);
+        const now = Date.now();
+        this.drops = this.drops.filter((t) => now - t < 10 * 60_000).concat(now);
+        const n = Math.max(this.failedBeforeOpen, this.drops.length);
+        // üstel geri çekilme (≤5 dk) + ±%25 sapma: art arda kopmalarda sunucuyu sabit aralıkla dövme
+        const wait = Math.round(Math.min(2000 * 2 ** Math.max(0, n - 1), 5 * 60_000) * (0.75 + Math.random() * 0.5));
         this.setStatus('connecting', `Bağlantı koptu (${code ?? '?'}), ${Math.round(wait / 1000)} sn sonra yeniden deneniyor`);
         this.retry(wait);
       }

@@ -43,7 +43,7 @@ interface TeamCfg {
  * (https://app.slack.com) + Allow-Credentials: true yansıtır.
  */
 const KEEP_QUERY = ['_x_version_ts', '_x_frontend_build_type', '_x_desktop_ia', '_x_gantry', 'fp'];
-const learned = { base: '', query: {} as Record<string, string> };
+const learned = { base: '', query: {} as Record<string, string>, xid: '' };
 const watched = new WeakSet<Page>();
 /** app.slack.com'un aynı-kaynak /api/ ucu çalıştıysa (çapraz kaynak başarısız) doğrudan onu kullan */
 let sameOriginOnly = false;
@@ -62,17 +62,20 @@ function watchClientRequests(page: Page): void {
       if (v) keep[k] = v;
     }
     learned.query = keep;
+    // _x_id önekini web istemcisinden öğren (ör. "noversion" ya da sürüm karması); uygulama adı asla gönderilmez
+    const xid = q.get('_x_id')?.match(/^([\w]+)-\d/)?.[1];
+    if (xid) learned.xid = xid;
   });
 }
 
 /** Denenecek API adresleri (sırayla): web istemcisinin host'u + _x_ parametreleri, sonra app.slack.com aynı-kaynak /api/ */
-export function apiUrls(t: Pick<TeamCfg, 'domain' | 'url'>, method: string, learnedCfg: { base: string; query: Record<string, string> } = learned, now = Date.now()): string[] {
+export function apiUrls(t: Pick<TeamCfg, 'domain' | 'url'>, method: string, learnedCfg: { base: string; query: Record<string, string>; xid?: string } = learned, now = Date.now()): string[] {
   const sameOrigin = `https://app.slack.com/api/${method}`;
   const teamBase = t.url ? t.url.replace(/\/?$/, '/') + 'api/' : t.domain ? `https://${t.domain}.slack.com/api/` : '';
   // öğrenilen host yalnızca bu çalışma alanınınsa (çoklu çalışma alanında başka takımın host'u değil)
   const base = learnedCfg.base && (!teamBase || learnedCfg.base === teamBase) ? learnedCfg.base : teamBase;
   if (!base || sameOriginOnly) return [sameOrigin];
-  const q = new URLSearchParams({ _x_id: `kavsak-${(now / 1000).toFixed(3)}`, ...learnedCfg.query, _x_gantry: 'true' });
+  const q = new URLSearchParams({ _x_id: `${learnedCfg.xid || 'noversion'}-${(now / 1000).toFixed(3)}`, ...learnedCfg.query, _x_gantry: 'true' });
   return [`${base}${method}?${q}`, sameOrigin];
 }
 

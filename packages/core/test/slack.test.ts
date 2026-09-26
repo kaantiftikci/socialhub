@@ -136,12 +136,12 @@ test('apiUrls: web istemcisinin host\'u + _x_gantry (CORS: kaynak yansıtılır)
   const now = 1790246809465;
   // öğrenilmiş parametre yok: çalışma alanı adresi + _x_id + _x_gantry=true
   assert.deepEqual(apiUrls({ domain: 'ws', url: 'https://ws.slack.com/' }, 'client.counts', { base: '', query: {} }, now), [
-    'https://ws.slack.com/api/client.counts?_x_id=kavsak-1790246809.465&_x_gantry=true',
+    'https://ws.slack.com/api/client.counts?_x_id=noversion-1790246809.465&_x_gantry=true',
     'https://app.slack.com/api/client.counts',
   ]);
   // url yoksa domain'den; web istemcisinden öğrenilen sabit parametreler eklenir
   const [u] = apiUrls({ domain: 'ws', url: '' }, 'auth.test', { base: 'https://ws.slack.com/api/', query: { _x_version_ts: '1790232454', fp: 'ef' } }, now);
-  assert.equal(u, 'https://ws.slack.com/api/auth.test?_x_id=kavsak-1790246809.465&_x_version_ts=1790232454&fp=ef&_x_gantry=true');
+  assert.equal(u, 'https://ws.slack.com/api/auth.test?_x_id=noversion-1790246809.465&_x_version_ts=1790232454&fp=ef&_x_gantry=true');
   // başka çalışma alanından öğrenilmiş host kullanılmaz
   assert.ok(apiUrls({ domain: 'ws', url: 'https://ws.slack.com/' }, 'auth.test', { base: 'https://baska.slack.com/api/', query: {} }, now)[0].startsWith('https://ws.slack.com/api/'));
   // hiç bilgi yoksa yalnız aynı-kaynak
