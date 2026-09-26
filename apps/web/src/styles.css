@@ -114,8 +114,12 @@ button:focus-visible, a:focus-visible, .sw:focus-visible { outline: 2px solid va
 .dot.pairing, .dot.connecting { background: #f59e0b; box-shadow: 0 0 0 3px rgba(245,158,11,.2); }
 .dot.error { background: #e5484d; }
 /* kullanıcı eylemi gereken kanal: yanıp sönen kırmızı uyarı işareti + açılır kart */
-.alert-ic { margin-left: 6px; width: 20px; height: 20px; display: inline-grid; place-items: center; border-radius: 50%; color: #e5484d; cursor: pointer; flex-shrink: 0; animation: alert-blink 1.2s ease-in-out infinite; }
-.alert-ic:hover, .alert-ic:focus-visible { background: rgba(229,72,77,.12); animation-play-state: paused; opacity: 1; outline: none; }
+/* yerleşim yeşil noktayla birebir aynı (7px kutu + 8px sol boşluk): sayı sütunu kaymaz, simge noktanın merkezine oturur */
+.alert-ic { margin-left: 8px; width: 7px; height: 7px; position: relative; display: inline-block; color: #e5484d; cursor: pointer; flex-shrink: 0; animation: alert-blink 1.2s ease-in-out infinite; }
+.alert-ic svg { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -56%); }
+.alert-ic::before { content: ''; position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; transform: translate(-50%, -50%); border-radius: 50%; }
+.alert-ic:hover, .alert-ic:focus-visible { animation-play-state: paused; opacity: 1; outline: none; }
+.alert-ic:hover::before, .alert-ic:focus-visible::before { background: rgba(229,72,77,.12); }
 @keyframes alert-blink { 0%, 100% { opacity: 1; filter: drop-shadow(0 0 0 rgba(229,72,77,0)); } 50% { opacity: .35; filter: drop-shadow(0 0 4px rgba(229,72,77,.7)); } }
 @media (prefers-reduced-motion: reduce) { .alert-ic { animation: none; } }
 .alert-pop { position: fixed; z-index: 400; width: 280px; padding: 12px 14px; border-radius: 14px; background: #fff; border: 1px solid #f3c2c4; box-shadow: 0 12px 32px rgba(17,16,22,.16); font-size: 12.5px; color: var(--text); animation: pop-in .14s ease-out; }
