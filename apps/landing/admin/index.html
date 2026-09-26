@@ -211,7 +211,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   .mbar .sp{flex-grow:1}
   .top h2{font-size:26px}
   .top{margin-bottom:16px}
-  /* yüzen liquid glass sekme çubuğu (altta); iOS Safari sekmesinde html.top-tabs ile üst çubuğun altına alınır */
+  /* yüzen liquid glass sekme çubuğu (altta); iOS 26 Safari'de html.ios-bar ile adres çubuğunun üstüne alınır */
   .tabbar{display:flex;position:fixed;left:50%;transform:translateX(-50%);width:min(440px,calc(100% - 24px));bottom:calc(max(env(safe-area-inset-bottom) + 10px,12px) + var(--chrome-b));
     z-index:30;padding:5px;border-radius:26px;justify-content:space-between}
   .tab{position:relative;z-index:1;flex:1;min-width:0;height:50px;border:0;border-radius:20px;background:transparent;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:10.5px;font-weight:500;color:var(--ink-3);cursor:pointer;transition:color .25s;-webkit-tap-highlight-color:transparent}
@@ -241,15 +241,10 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   .hb{grid-template-columns:90px minmax(0,1fr) 40px}
   .kv{grid-template-columns:130px 1fr}
   .toast{bottom:calc(max(env(safe-area-inset-bottom),12px) + var(--chrome-b) + 74px)}
-  /* iOS Safari sekmesi: menü üst çubuğun hemen altında yüzen cam kapsül (alttaki Safari çubuğuyla çakışmaz) */
-  html.top-tabs .tabbar{top:calc(env(safe-area-inset-top) + 58px);bottom:auto;width:calc(100% - 24px)}
-  html.top-tabs .tab{height:46px;font-size:10px;gap:2px}
-  html.top-tabs .tab svg{width:18px;height:18px}
-  html.top-tabs .tabbar .glass-pill{height:46px}
-  html.top-tabs .mbar{margin-bottom:76px}
-  html.top-tabs .main{padding-bottom:calc(28px + env(safe-area-inset-bottom))}
-  html.top-tabs .toast{top:calc(env(safe-area-inset-top) + 124px);bottom:auto}
-  html.top-tabs .bulk{top:calc(env(safe-area-inset-top) + 122px)}
+  /* iOS 26 Safari sekmesi: menü yüzen adres çubuğunun hemen üstünde */
+  html.ios-bar .tabbar{bottom:max(calc(env(safe-area-inset-bottom) + 28px),96px)}
+  html.ios-bar .main{padding-bottom:calc(max(calc(env(safe-area-inset-bottom) + 28px),96px) + 84px)}
+  html.ios-bar .toast{bottom:calc(max(calc(env(safe-area-inset-bottom) + 28px),96px) + 72px)}
   .bulk{top:70px}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
@@ -493,10 +488,10 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     var ua=navigator.userAgent, ios=/iP(hone|od|ad)/.test(ua)||(/Macintosh/.test(ua)&&navigator.maxTouchPoints>1);
     var safari=ios&&/Safari/.test(ua)&&!/CriOS|FxiOS|EdgiOS|OPiOS/.test(ua);
     var standalone=navigator.standalone||matchMedia('(display-mode: standalone)').matches;
-    // iOS Safari'nin alttaki yüzen çubuğu duruma göre (açık/küçük, sayfa sonu, özel mod) hem sayfanın üstüne binip binmemesini
-    // hem safe-area değerini değiştiriyor: altta sabit bir menü ya çubuğun arkasında kalıyor ya boşlukta asılı duruyor.
-    // Bu yüzden Safari sekmesinde menü üst çubuğun altına yerleşir; ana ekrana eklenmiş uygulamada altta kalır.
-    if(safari&&!standalone) document.documentElement.classList.add('top-tabs');
+    // iOS 26 Safari: alttaki yüzen adres çubuğu sayfanın üstüne biner; safe-area onu yalnız kısmen kapsar (ölçülen ~54–72 px,
+    // açık çubuğun üst kenarı ~85 px). Menü safe-area + 28 px'te, ama en az 96 px yukarıda durur → çubuğun hemen üstü.
+    var v=+((ua.match(/Version\/(\d+)/)||[])[1]||0);
+    if(safari&&v>=26&&!standalone) document.documentElement.classList.add('ios-bar');
   })();
   var loaded={};
   function route(){

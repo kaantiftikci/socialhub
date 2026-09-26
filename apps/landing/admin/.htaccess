@@ -1,0 +1,6 @@
+# Yönetim paneli: tarayıcı eski sürümü önbellekten göstermesin (her açılışta sunucuya sorar, değişmediyse 304)
+<IfModule mod_headers.c>
+  <FilesMatch "\.(html|php)$">
+    Header set Cache-Control "no-cache, must-revalidate"
+  </FilesMatch>
+</IfModule>
