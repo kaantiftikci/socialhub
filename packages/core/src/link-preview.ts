@@ -2,6 +2,7 @@ import dns from 'node:dns/promises';
 import net from 'node:net';
 import http from 'node:http';
 import https from 'node:https';
+import { bus } from './bus.js';
 
 /**
  * Bağlantı önizlemesi (Open Graph): mesajdaki http(s) adresinin başlık/açıklama/görselini getirir.
@@ -149,12 +150,22 @@ export function syndicationToken(id: string): string {
  */
 export function parseSyndication(url: string, j: Record<string, any>): LinkPreview | null { // eslint-disable-line @typescript-eslint/no-explicit-any
   if (!j || j.__typename === 'TweetTombstone' || !j.user) return null;
-  const text = String(j.text ?? '')
-    .replace(/\s*https:\/\/t\.co\/\w+\s*$/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  const media = (j.mediaDetails ?? []) as Array<{ media_url_https?: string }>;
-  const image: string | undefined = j.photos?.[0]?.url ?? media[0]?.media_url_https ?? j.video?.poster ?? (j.user.profile_image_url_https ? String(j.user.profile_image_url_https).replace('_normal.', '_bigger.') : undefined);
+  const clean = (t: unknown) =>
+    String(t ?? '')
+      .replace(/https:\/\/t\.co\/\w+/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  // metin yalnız bağlantıdan ibaretse (salt video/görsel paylaşımı) alıntılanan gönderinin ya da kartın metnine düş
+  const text = clean(j.text) || clean(j.quoted_tweet?.text) || clean(j.card?.binding_values?.title?.string_value);
+  const pick = (t: any): string | undefined => // eslint-disable-line @typescript-eslint/no-explicit-any
+    t?.photos?.[0]?.url ??
+    t?.mediaDetails?.find((m: { media_url_https?: string }) => m.media_url_https)?.media_url_https ??
+    t?.video?.poster ??
+    t?.entities?.media?.[0]?.media_url_https ??
+    t?.card?.binding_values?.thumbnail_image_original?.image_value?.url ??
+    t?.card?.binding_values?.player_image_original?.image_value?.url;
+  const avatar = j.user.profile_image_url_https ? String(j.user.profile_image_url_https).replace('_normal.', '_bigger.') : undefined;
+  const image = pick(j) ?? pick(j.quoted_tweet) ?? avatar;
   return {
     url,
     site: 'X',
@@ -169,8 +180,16 @@ async function fetchXPost(page: URL, id: string): Promise<LinkPreview | null> {
   const pin = await safeHost(api);
   if (!pin) return null;
   const r = await get(api, pin, true);
-  if (r.status !== 200 || !r.body) return null;
-  return parseSyndication(page.href, JSON.parse(r.body));
+  if (r.status !== 200 || !r.body) {
+    bus.log('info', `X önizleme: ${id} için gömme verisi yok (HTTP ${r.status})`);
+    return null;
+  }
+  const j = JSON.parse(r.body) as Record<string, unknown>;
+  const v = parseSyndication(page.href, j);
+  // tanı: metin ya da medya gelmediyse yanıtın yapısı (içerik değil, yalnız alan adları) günlüğe
+  if (v && (!v.description || !v.image || v.image.includes('profile_images')))
+    bus.log('info', `X önizleme: ${id} eksik (metin ${v.description ? 'var' : 'yok'}, görsel ${v.image ? (v.image.includes('profile_images') ? 'profil' : 'var') : 'yok'}); alanlar: ${Object.keys(j).join(',')}`);
+  return v;
 }
 
 export async function fetchPreview(raw: string): Promise<LinkPreview | null> {

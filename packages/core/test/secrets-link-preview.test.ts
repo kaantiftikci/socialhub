@@ -61,3 +61,13 @@ test('X gönderi önizlemesi: kimlik, gömme belirteci, gömme verisinden kart (
   assert.equal(noMedia?.image, 'https://pbs.twimg.com/p_bigger.jpg', 'medya yoksa profil fotoğrafı');
   assert.equal(lp.parseSyndication('u', { __typename: 'TweetTombstone' }), null);
 });
+
+test('X önizleme: salt medya gönderisi (metin yalnız t.co) → video kapağı; alıntılanan gönderiden yedek', async () => {
+  const lp = await import('../src/link-preview.js');
+  const v = lp.parseSyndication('u', { text: 'https://t.co/abc', user: { name: 'B', screen_name: 'balkolik' }, mediaDetails: [{ type: 'video', media_url_https: 'https://pbs.twimg.com/ext_tw_video_thumb/1/pu/img/k.jpg' }], video: { poster: 'https://p/x.jpg' } });
+  assert.equal(v?.description, undefined);
+  assert.equal(v?.image, 'https://pbs.twimg.com/ext_tw_video_thumb/1/pu/img/k.jpg');
+  const q = lp.parseSyndication('u', { text: 'https://t.co/q', user: { name: 'A', screen_name: 'a' }, quoted_tweet: { text: 'alıntı metni', photos: [{ url: 'https://pbs.twimg.com/media/q.jpg' }] } });
+  assert.equal(q?.description, 'alıntı metni');
+  assert.equal(q?.image, 'https://pbs.twimg.com/media/q.jpg');
+});
