@@ -1270,6 +1270,20 @@ export class WhatsAppConnector extends BaseConnector {
    * u biçimleri: "wa:<jid>/<id>" tam medya, "wa-thumb:<jid>/<id>" küçük önizleme (mesajın içindeki jpeg).
    * Sesli mesajlar (ogg/opus) ffmpeg varsa mp3'e çevrilir (WebKit ogg oynatamaz).
    */
+  private reuploadActive = 0;
+  private reuploadWaiters: Array<() => void> = [];
+  private reuploadSlot(): Promise<void> {
+    if (this.reuploadActive < 2) {
+      this.reuploadActive++;
+      return Promise.resolve();
+    }
+    return new Promise((r) => this.reuploadWaiters.push(() => (this.reuploadActive++, r())));
+  }
+  private reuploadDone(): void {
+    this.reuploadActive--;
+    this.reuploadWaiters.shift()?.();
+  }
+
   async fetchMedia(u: string): Promise<{ body: Buffer; type: string } | undefined> {
     const m = u.match(/^(wa|wa-thumb):(.+)\/([^/]+)$/);
     if (!m) throw new Error('geçersiz WhatsApp medya adresi');
@@ -1299,13 +1313,19 @@ export class WhatsAppConnector extends BaseConnector {
       // Süresi dolmuş CDN bağlantısı (404/410): telefondan yeniden yükleme istenmeli. Baileys 7.0.0-rc14 downloadMediaMessage bunu
       // error.status'a bakarak tetikliyor, oysa Boom hatasında kod output.statusCode'da → istek hiç gitmiyor. Burada elle istenir;
       // yeni directPath kalıcı kaydedilir ki bir dahaki sefere doğrudan insin.
+      // WhatsApp CDN süresi dolan imzalı bağlantıya (oe=) çoğunlukla 403 döner (Baileys getHttpStream statusCode=response.status)
       const code = (e as { output?: { statusCode?: number }; status?: number }).output?.statusCode ?? (e as { status?: number }).status;
-      if (code !== 404 && code !== 410) throw e;
+      if (code !== 403 && code !== 404 && code !== 410) throw e;
+      // Sohbet açılınca onlarca eski görsel birden istenir: telefona aynı anda en çok 2 yeniden yükleme isteği (WA Web de tek tek ister)
+      await this.reuploadSlot();
       let timer: NodeJS.Timeout | undefined;
       const updated = await Promise.race([
         sock.updateMediaMessage(msg),
         new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error('telefon medyayı 30 sn içinde yeniden yüklemedi (telefon çevrimdışı olabilir)')), 30_000))),
-      ]).finally(() => timer && clearTimeout(timer));
+      ]).finally(() => {
+        if (timer) clearTimeout(timer);
+        this.reuploadDone();
+      });
       try {
         fs.writeFileSync(idx, JSON.stringify(updated, BufferJSON.replacer));
       } catch {

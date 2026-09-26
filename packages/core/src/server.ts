@@ -78,6 +78,9 @@ function lanAddresses(): string[] {
 }
 const isLoopback = (addr: string | undefined) => !addr || addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
 
+/** Kalıcı hatayla dönen medya istekleri (hesap|adres → zaman, kod) */
+const mediaFailures = new Map<string, { at: number; code: number }>();
+
 export function createServer(store: Store, registry: Registry, port: number): http.Server {
   persistSendGuard(path.join(DATA_DIR, 'send-guard.json'));
   const token = loadToken();
@@ -489,10 +492,21 @@ export function createServer(store: Store, registry: Registry, port: number): ht
           const allow = (acc && PLATFORM_MEDIA_HOSTS[acc.platform]) ?? MEDIA_HOSTS;
           if (!allow.test(host)) throw new HttpError(403, `Bu sunucudan medya indirilmez: ${host}`);
         }
+        // Kalıcı hata (401/403/404/410: süresi dolmuş ya da yetkisiz medya) 30 dk hatırlanır: arayüz her çizimde yeniden
+        // istemesin — aynı platforma tekrarlanan yetkisiz istekler hem günlüğü doldurur hem otomasyon sinyalidir
+        const failKey = `${id}|${u}`;
+        const failed = mediaFailures.get(failKey);
+        if (failed && Date.now() - failed.at < 30 * 60_000) throw new HttpError(502, `Medya indirilemedi (${failed.code})`);
         // Uzak sunucu hatası (süresi dolmuş CDN bağlantısı → 403 vb.) 500 gibi yığın dökmesin; ayrıntı yalnızca günlüğe
         const m = await c.fetchMedia(u).catch((e: Error) => {
-          const code = (e as { response?: { status?: number } }).response?.status;
-          bus.log('warn', `Medya indirilemedi (${id}): ${e.message.split('\n')[0].slice(0, 200)}`);
+          const ee = e as { response?: { status?: number }; output?: { statusCode?: number } };
+          // şifre çözülemeyen medya (anahtar/dosya bozuk; "unable to authenticate data") da kalıcı hata
+          const code = /unable to authenticate data/i.test(e.message) ? 422 : (ee.response?.status ?? ee.output?.statusCode ?? Number(/\b(401|403|404|410)\b/.exec(e.message)?.[1] ?? 0));
+          if ([401, 403, 404, 410, 422].includes(code)) {
+            if (mediaFailures.size > 2000) mediaFailures.clear();
+            mediaFailures.set(failKey, { at: Date.now(), code });
+          }
+          bus.log('warn', `Medya indirilemedi (${id}): ${e.message.split('\n')[0].slice(0, 200)}${code ? ' — 30 dk yeniden denenmeyecek' : ''}`);
           throw new HttpError(502, `Medya indirilemedi${code ? ` (${code})` : ''}`);
         });
         if (!m) throw new HttpError(503, 'Oturum açık değil');

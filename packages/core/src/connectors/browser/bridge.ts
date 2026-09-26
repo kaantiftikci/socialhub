@@ -486,6 +486,10 @@ export class BrowserConnector extends BaseConnector {
           '--disable-features=Translate,MediaRouter,OptimizationHints,BackForwardCache,InterestFeedContentSuggestions,AutofillServerCommunication',
         ],
       });
+      // tsx (npm run dev) esbuild keepNames ile iç fonksiyonlara __name(...) ekler; page.evaluate / init betiklerine giden
+      // kodda sayfada bu yardımcı yoktur → "ReferenceError: __name is not defined" (Messenger mesajları, LinkedIn akış
+      // dinleyicisi). Derlenmiş (tsc) sürümde etkisiz; her belgeye (iframe'ler dahil) en önce tanımlanır.
+      await this.ctx.addInitScript({ content: 'globalThis.__name = globalThis.__name || function (t) { return t; };' });
       // Görünmez oturum: sayfa kendini "arka planda/odaksız" tanıtsın. Messenger, X, LinkedIn gibi siteler görünür ve odaklı
       // sekmeyi "aktif" sayıp telefona bildirim göndermeyi kesiyor; gizli sekme (WhatsApp Web'deki gibi) bunu yapmıyor.
       if (hidden && !this.strategy.keepVisible) {
