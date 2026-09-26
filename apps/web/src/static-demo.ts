@@ -23,6 +23,16 @@ let chats: Chat[] = [];
 let messages: Message[] = [];
 
 
+/**
+ * Demo: X kanalı kullanıcı eylemi bekler (şifreli sohbet PIN'i) → kenar çubuğunda yanıp sönen kırmızı uyarı işareti ve açılır kart
+ * gösterilir. "PIN'i gir" (restartAccount) 2 sn sonra girilmiş sayar; sayfa yenilenince uyarı geri gelir.
+ */
+let demoPinDone = false;
+const DEMO_X_ATTENTION = 'Şifreli sohbetler için PIN gerekli; girilene dek yeni mesajlar geç ve eksik gelir';
+function withDemoAttention(a: Account): Account {
+  return a.platform === 'x' && a.status === 'connected' && !demoPinDone ? { ...a, attention: DEMO_X_ATTENTION } : { ...a };
+}
+
 function demoAccount(platform: Platform): Account {
   return { id: `demo:${platform}`, platform, label: PLATFORMS[platform].name, status: 'connected', createdAt: 1_750_000_000_000 };
 }
@@ -257,7 +267,7 @@ function demoIcs(ev: CalendarDraft): string {
 export const staticApi = {
   activity: async (_active: boolean) => undefined,
   health: async () => ({ ok: true, ai: true, stats: { unread: chats.reduce((n, c) => n + c.unread, 0), chats: chats.length }, os: undefined as CoreOs | undefined }),
-  accounts: async () => accounts.map((a) => ({ ...a })),
+  accounts: async () => accounts.map(withDemoAttention),
   addAccount: async (platform: Platform, _token?: string): Promise<Account> => {
     const account: Account = {
       id: `${platform}:${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`,
@@ -274,7 +284,7 @@ export const staticApi = {
       accounts = prev;
       throw e;
     }
-    emit({ type: 'account.status', account });
+    emit({ type: 'account.status', account: withDemoAttention(account) });
     seed();
     for (const c of chats.filter((x) => x.accountId === account.id)) emit({ type: 'chat.upsert', chat: c });
     return account;
@@ -293,7 +303,15 @@ export const staticApi = {
     }
     for (const chatId of gone) emit({ type: 'chat.delete', chatId });
   },
-  restartAccount: async (_id: string) => {
+  restartAccount: async (id: string) => {
+    // X'in PIN uyarısı: gerçek uygulamada görünür pencere açılır, kullanıcı PIN'i girer; demoda 2 sn sonra girilmiş sayılır
+    const a = accounts.find((x) => x.id === id);
+    if (a?.platform === 'x' && !demoPinDone) {
+      await new Promise((r) => setTimeout(r, 2000));
+      demoPinDone = true;
+      emit({ type: 'account.status', account: { ...a } });
+      return;
+    }
     throw new Error(DEMO_BLOCK);
   },
   accountInput: async (_id: string, _kind: 'phone' | 'code' | 'password', _value: string) => {
