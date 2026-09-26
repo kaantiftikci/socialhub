@@ -155,10 +155,11 @@ export const PLATFORMS: Record<Platform, { name: string; code: string; color: st
 };
 
 export const TAG_COLORS: Record<string, [string, string]> = {
-  müşteri: ['#E1F6EC', '#0B6B45'],
-  fırsat: ['#FFEFDF', '#9C4700'],
-  ekip: ['#EFEAFF', '#4526C9'],
-  kişisel: ['#FFE8F1', '#A3195B'],
+  // renkler styles.css'te (gece modunda koyu karşılıkları)
+  müşteri: ['var(--tg-green-bg)', 'var(--tg-green)'],
+  fırsat: ['var(--tg-orange-bg)', 'var(--tg-orange)'],
+  ekip: ['var(--tg-violet-bg)', 'var(--tg-violet)'],
+  kişisel: ['var(--tg-pink-bg)', 'var(--tg-pink)'],
 };
 
 export const DEFAULT_TAGS = ['müşteri', 'ekip', 'fırsat', 'kişisel'];

@@ -6,7 +6,10 @@ import { DEMO_OFFLINE, STATIC_DEMO, setProfileName } from './profile';
 import { loadDemoAccounts } from './static-demo';
 import './styles.css';
 import { initSentry } from './sentry';
+import { applyTheme, watchSystemTheme } from './theme';
 
+applyTheme();
+watchSystemTheme();
 void initSentry(); // yalnız demo derlemesinde ve DSN varsa etkin
 
 if (DEMO_OFFLINE) {

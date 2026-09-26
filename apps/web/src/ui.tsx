@@ -10,6 +10,9 @@ const PATHS: Record<string, ReactNode> = {
   search: (<><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></>),
   inbox: (<><path d="M3 13h4.5l1.5 2.5h6l1.5-2.5H21" /><path d="M5.5 5h13L21 13v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-5z" /></>),
   sparkle: (<><path d="M12 3.5l1.8 4.9 4.9 1.8-4.9 1.8L12 16.9l-1.8-4.9-4.9-1.8 4.9-1.8z" /><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z" /></>),
+  sun: (<><circle cx="12" cy="12" r="4" /><path d="M12 2.5v2M12 19.5v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2.5 12h2M19.5 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4" /></>),
+  moon: (<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" />),
+  monitor: (<><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></>),
   bell: (<><path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z" /><path d="M10 21h4" /></>),
   archive: (<><rect x="3" y="4" width="18" height="5" rx="1.5" /><path d="M5 9v9.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V9M10 13h4" /></>),
   plus: <path d="M12 5v14M5 12h14" />,
@@ -81,7 +84,8 @@ export function useClosing<T>(value: T | null | undefined | false, ms = 160): { 
 
 export function Icon({ name, size = 16, color = 'currentColor', sw = 1.8 }: { name: string; size?: number; color?: string; sw?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0 }}>
+    // renk style üzerinden (currentColor): tema değişkenleri (var(--v)) SVG özniteliğinde her motorda çözülmüyor
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, color: color === 'currentColor' ? undefined : color }}>
       {PATHS[name]}
     </svg>
   );
@@ -150,7 +154,7 @@ export function Chip({ platform, size = 18, ring }: { platform: Platform; size?:
   if (brand) {
     const inner = Math.round(s * brand.ratio);
     return (
-      <span className="plat" title={p.name} style={{ ...base, background: brand.bg }}>
+      <span className={`plat plat-${platform}`} title={p.name} style={{ ...base, background: brand.bg }}>
         <svg width={inner} height={inner} viewBox={brand.vb ?? "0 0 24 24"} aria-hidden="true">
           <path d={brand.path} fill="#fff" />
         </svg>
@@ -159,7 +163,7 @@ export function Chip({ platform, size = 18, ring }: { platform: Platform; size?:
   }
   if (platform === 'imessage') {
     return (
-      <span className="plat" title={p.name} style={{ ...base, background: '#E8F7EC', color: '#1C8C3A' }}>
+      <span className="plat" title={p.name} style={{ ...base, background: 'var(--green-bg)', color: 'var(--green-txt)' }}>
         <svg width={Math.round(s * 0.62)} height={Math.round(s * 0.62)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M12 4c-4.4 0-8 2.9-8 6.5 0 2 1.1 3.8 2.8 5L6 19.5l3.9-1.6c.7.1 1.4.2 2.1.2 4.4 0 8-2.9 8-6.5S16.4 4 12 4z" />
         </svg>
@@ -173,10 +177,8 @@ export function Chip({ platform, size = 18, ring }: { platform: Platform; size?:
   );
 }
 
-const PALETTE: Array<[string, string]> = [
-  ['#DDEBFB', '#1E4E8C'], ['#FCE9E0', '#9A3412'], ['#E2F2EE', '#0B5E55'], ['#F4E8F4', '#86198F'],
-  ['#ECEBFE', '#3730A3'], ['#FCE7EF', '#9D174D'], ['#FFF3D6', '#8A5300'], ['#E6F1FB', '#0C447C'],
-];
+/** Baş harf avatarları: renkler styles.css'te (--avN-bg/--avN-fg), gece modunda koyu zemin + açık harf */
+const PALETTE: Array<[string, string]> = Array.from({ length: 8 }, (_, i) => [`var(--av${i}-bg)`, `var(--av${i}-fg)`]);
 
 export function Avatar({ name, size = 40, url }: { name: string; size?: number; url?: string }) {
   const [failed, setFailed] = useState(false);
@@ -195,7 +197,7 @@ export function Avatar({ name, size = 40, url }: { name: string; size?: number; 
 }
 
 export function Tag({ name, onRemove, mini = false }: { name: string; onRemove?: () => void; mini?: boolean }) {
-  const [bg, fg] = TAG_COLORS[name.toLowerCase()] ?? ['#efeee9', '#3f3e3a'];
+  const [bg, fg] = TAG_COLORS[name.toLowerCase()] ?? ['var(--tag-bg)', 'var(--tag-txt)'];
   return (
     <span className={`tag ${mini ? 'mini' : ''}`} style={{ background: bg, color: fg }}>
       {name}

@@ -646,7 +646,7 @@ export function Conversation({
             </span>
             {chat.followUp.due && draftOn && (
               <button type="button" className="btn xs soft b b2" onClick={() => void makeDraft()}>
-                <Icon name="sparkle" size={12} color="#6C47FF" sw={2} /> Hatırlatma yaz
+                <Icon name="sparkle" size={12} color="var(--v)" sw={2} /> Hatırlatma yaz
               </button>
             )}
             <button type="button" className="btn ghost xs b b2" onClick={() => void setFollowUp(null)}>
@@ -840,7 +840,7 @@ export function Conversation({
                       </div>
                     );
                   })}
-                  {g.fromMe && g.items[g.items.length - 1].status === 'failed' && <span className="meta" style={{ color: '#a32d2d' }}>Gönderilemedi</span>}
+                  {g.fromMe && g.items[g.items.length - 1].status === 'failed' && <span className="meta" style={{ color: 'var(--danger)' }}>Gönderilemedi</span>}
                 </div>
               </div>
             ),
@@ -855,7 +855,7 @@ export function Conversation({
               </div>
               {draft.events!.map((ev, i) => (
                 <div key={i} className="it">
-                  <Icon name="calendar" size={15} color="#4A4757" />
+                  <Icon name="calendar" size={15} color="var(--text2)" />
                   <span style={{ flexGrow: 1 }}>
                     {ev.title} · <span style={{ color: 'var(--text3)' }}>{fmtEventWhen(ev.start)}</span>
                   </span>
@@ -874,7 +874,7 @@ export function Conversation({
               </div>
               {draft.actions.map((a, i) => (
                 <div key={i} className="it">
-                  <Icon name="calendar" size={15} color="#4A4757" />
+                  <Icon name="calendar" size={15} color="var(--text2)" />
                   <span style={{ flexGrow: 1 }}>{a}</span>
                   <button className="btn soft xs b b2" onClick={() => setCalFor(calFromText(a, a))}>Takvime ekle</button>
                 </div>
@@ -931,7 +931,7 @@ export function Conversation({
                 </span>
               ) : (
                 <button className="aipill b b2" onClick={() => makeDraft()} disabled={drafting || !needsReply} title={needsReply ? 'Son mesaja taslak yanıt üret' : 'Yanıtlanacak yeni mesaj yok'}>
-                  {drafting ? <span className="spin" /> : <Icon name="sparkle" size={13} color="#6C47FF" sw={2} />} Taslak yaz
+                  {drafting ? <span className="spin" /> : <Icon name="sparkle" size={13} color="var(--v)" sw={2} />} Taslak yaz
                 </button>
               )}
               <span className="ctx-n">· {Math.min(messages.length, 30)} mesaj bağlamı</span>
@@ -1092,7 +1092,7 @@ export function Conversation({
         <div className="profile">
           <span className="avwrap">
             <Avatar name={chat.name} size={86} url={chat.avatarUrl} />
-            <Chip platform={chat.platform} size={22} ring="#f3f2f7" />
+            <Chip platform={chat.platform} size={22} ring="var(--ctx-bg)" />
           </span>
           <span className="name">{chat.name}</span>
           {role && (role.href ? <a className="role" href={role.href} target="_blank" rel="noreferrer">{role.text}</a> : <span className="role">{role.text}</span>)}
@@ -1224,7 +1224,7 @@ export function Conversation({
         {aiP.summary && (
           <div className="card sum">
             <span className="h">
-              <span className="sum-ic"><Icon name="sparkle" size={13} color="#6C47FF" sw={2} /></span>
+              <span className="sum-ic"><Icon name="sparkle" size={13} color="var(--v)" sw={2} /></span>
               Özet
               {draft && draft.summary.length > 0 && summaryAt > 0 && <span className="when">{fmtTime(summaryAt)}</span>}
             </span>
@@ -1236,7 +1236,7 @@ export function Conversation({
               </ul>
             ) : ai ? (
               <button type="button" className="btn xs soft b b2" style={{ alignSelf: 'flex-start' }} onClick={() => void makeDraft(tone, !needsReply)} disabled={drafting}>
-                {drafting ? <span className="spin" /> : <Icon name="sparkle" size={12} color="#6C47FF" sw={2} />} Özetle
+                {drafting ? <span className="spin" /> : <Icon name="sparkle" size={12} color="var(--v)" sw={2} />} Özetle
               </button>
             ) : (
               <span className="empty-sum">Özet için AI anahtarı gerekir.</span>
@@ -1265,7 +1265,7 @@ export function Conversation({
           <div className="ctx-tags">
             {chat.tags.map((t) => (
               <button key={t} type="button" className="ctx-tag b" title="Etiketi kaldır" aria-label={`${t} etiketini kaldır`} onClick={() => (onTags(chat.tags.filter((x) => x !== t)), notify(`“${t}” etiketi kaldırıldı`))}>
-                {t === 'fırsat' ? <Icon name="sparkle" size={11} color={TAG_COLORS[t][1]} sw={2} /> : <span className="dot" style={{ background: TAG_COLORS[t]?.[1] ?? '#8c889b' }} />}
+                {t === 'fırsat' ? <Icon name="sparkle" size={11} color={TAG_COLORS[t][1]} sw={2} /> : <span className="dot" style={{ background: TAG_COLORS[t]?.[1] ?? 'var(--text3)' }} />}
                 {t}
                 <span className="x" aria-hidden><Icon name="x" size={10} sw={2.2} /></span>
               </button>
@@ -1383,17 +1383,17 @@ export function Conversation({
                   }}
                   onKeyDown={(e) => e.key === 'Enter' && (e.currentTarget as HTMLElement).click()}
                 >
-                  <span className="ic" style={att.kind === 'image' || att.kind === 'video' ? { background: 'var(--v-soft)', color: 'var(--v-txt)' } : { background: '#fdecea', color: '#c2261a' }}>
+                  <span className="ic" style={att.kind === 'image' || att.kind === 'video' ? { background: 'var(--v-soft)', color: 'var(--v-txt)' } : { background: 'var(--danger-bg)', color: '#c2261a' }}>
                     {att.url ? (
                       <img src={abs(att.url)} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(e) => (e.currentTarget.style.display = 'none')} />
                     ) : att.kind === 'image' ? (
-                      <Icon name="image" size={15} color="#4526C9" />
+                      <Icon name="image" size={15} color="var(--v-txt)" />
                     ) : att.kind === 'video' ? (
-                      <Icon name="play" size={15} color="#4526C9" />
+                      <Icon name="play" size={15} color="var(--v-txt)" />
                     ) : att.mime?.includes('pdf') ? (
                       'PDF'
                     ) : (
-                      <Icon name="file" size={15} color="#C2261A" />
+                      <Icon name="file" size={15} color="var(--danger-txt)" />
                     )}
                   </span>
                   <span style={{ minWidth: 0 }}>
@@ -1529,7 +1529,7 @@ function CalendarModal({ initial, notify, onClose }: { initial: CalendarDraft; n
     <div className="overlay" onClick={onClose}>
       <div className="modal cal-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Takvime ekle" onKeyDown={(e) => e.key === 'Escape' && (e.preventDefault(), onClose())}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Icon name="calendar" size={20} color="#6C47FF" />
+          <Icon name="calendar" size={20} color="var(--v)" />
           <h2 style={{ fontSize: 20 }}>Takvime ekle</h2>
           <span style={{ flexGrow: 1 }} />
           <button className="btn icon b b2" onClick={onClose} aria-label="Kapat">
@@ -1898,7 +1898,8 @@ function groupMessages(msgs: Message[]): Group[] {
 /** Platformların metin olarak verdiği tepki/beğeni olayları */
 export const REACT_TEXT = /^(👍|❤️|❤|😂|🔥|👏|😮|🎉|🙏) .+ (bir mesajı beğendi|mesajına tepki verdi)$/;
 
-const SENDER_COLORS = ['#6c47ff', '#0b6b45', '#b45309', '#a3195b', '#0a66c2', '#b42318', '#0e7490', '#6d28d9', '#047857', '#c2410c'];
+/** Grup sohbetinde gönderen adı renkleri: styles.css --sc0…--sc9 (gece modunda koyu zeminde okunur tonlar) */
+const SENDER_COLORS = Array.from({ length: 10 }, (_, i) => `var(--sc${i})`);
 /** Grup sohbetinde her gönderene sabit bir renk (kimlikten türetilir; oturumlar arasında aynı kalır) */
 export function senderColor(id: string): string {
   let h = 0;
@@ -2051,12 +2052,12 @@ function statusLabel(s: Message['status']) {
   if (s === 'read')
     return (
       <>
-        · Görüldü <Icon name="checks" size={14} color="#6C47FF" sw={2} />
+        · Görüldü <Icon name="checks" size={14} color="var(--v)" sw={2} />
       </>
     );
   if (s === 'delivered') return <> · İletildi</>;
   if (s === 'pending') return <> · Gönderiliyor</>;
-  if (s === 'failed') return <span style={{ color: '#a32d2d' }}> · Gönderilemedi</span>;
+  if (s === 'failed') return <span style={{ color: 'var(--danger)' }}> · Gönderilemedi</span>;
   return null;
 }
 

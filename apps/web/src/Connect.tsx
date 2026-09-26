@@ -631,9 +631,9 @@ export function ConnectModal({
                   <div style={{ minWidth: 0 }}>
                     <div className="nm" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       {meta.name}
-                      {meta.experimental && <span className="pill" style={{ background: '#FFF3D6', color: '#8A5300' }}>deneysel</span>}
+                      {meta.experimental && <span className="pill" style={{ background: 'var(--amber-bg)', color: 'var(--amber-txt)' }}>deneysel</span>}
                       {UNOFFICIAL[p] && (
-                        <span className="pill" style={{ background: '#EEEDF2', color: '#5b5868' }} title={UNOFFICIAL[p]}>
+                        <span className="pill" style={{ background: 'var(--tabs-bg)', color: 'var(--text2)' }} title={UNOFFICIAL[p]}>
                           resmi değil
                         </span>
                       )}
@@ -643,7 +643,7 @@ export function ConnectModal({
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   {available && (acc.length ? (
-                    <span className="st" style={{ color: isConn ? '#15803d' : undefined, display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flexGrow: 1 }}>
+                    <span className="st" style={{ color: isConn ? 'var(--green-txt)' : undefined, display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flexGrow: 1 }}>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                         <span className={`dot ${acc[0].status === 'connected' ? 'on' : acc[0].status}`} />
                         {sync[acc[0].id] ? (sync[acc[0].id].label ?? 'Eşitleniyor') : statusText(acc[0])}

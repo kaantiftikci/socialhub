@@ -103,7 +103,7 @@ export function Focus({
       <div className="focus-hero">
         <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <span className="chip" style={{ alignSelf: 'flex-start', background: 'var(--v-soft)', color: 'var(--v-txt)' }}>
-            <Icon name="sparkle" size={13} color="#6C47FF" sw={2} /> Odak · günlük özet
+            <Icon name="sparkle" size={13} color="var(--v)" sw={2} /> Odak · günlük özet
           </span>
           <h1>
             {greet}, <em>{PROFILE_NAME}.</em>
@@ -146,7 +146,7 @@ export function Focus({
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <span className="avwrap">
                     <Avatar name={c.name} size={42} url={c.avatarUrl} />
-                    <Chip platform={c.platform} size={17} ring="#fff" />
+                    <Chip platform={c.platform} size={17} ring="var(--card)" />
                   </span>
                   <div style={{ flexGrow: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -170,7 +170,7 @@ export function Focus({
                 {draftOn && (
                   <div className="fdraft">
                     <span className="h">
-                      <Icon name="sparkle" size={13} color="#6C47FF" sw={2} /> Taslak · senin tarzında
+                      <Icon name="sparkle" size={13} color="var(--v)" sw={2} /> Taslak · senin tarzında
                     </span>
                     {d === 'loading' && (
                       <span style={{ color: 'var(--text3)', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -251,7 +251,7 @@ export function Focus({
             ))}
             {awaiting.length > 0 && (
               <button className="btn b b2" style={{ alignSelf: 'flex-start' }} onClick={() => onOpen(awaiting[0].id, { autoDraft: true })} title={`${awaiting[0].name} için hatırlatma taslağı`}>
-                <Icon name="sparkle" size={14} color="#6C47FF" sw={2} /> Nazik hatırlatma yaz
+                <Icon name="sparkle" size={14} color="var(--v)" sw={2} /> Nazik hatırlatma yaz
               </button>
             )}
           </div>

@@ -10,6 +10,7 @@
     "core:window:allow-set-focus",
     "core:window:allow-start-dragging",
     "core:window:allow-is-focused",
+    "core:window:allow-set-theme",
     "core:event:allow-listen",
     "notification:default",
     "opener:default"

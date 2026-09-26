@@ -5,6 +5,7 @@ import { Avatar, Chip, Icon, Logo, Resizer, SyncBar, Tag, ago, fmtTime, loadPane
 import { Conversation, REACT_TEXT, startScheduledSends } from './Conversation';
 import { ConnectModal } from './Connect';
 import { Focus } from './Focus';
+import { getThemePref, setThemePref, type ThemePref } from './theme';
 import { MOD_KEY, isTauri, notify as desktopNotify, onDesktopEvent, playPing, SOUNDS, getPlatformSound, getPlatformTone, setPlatformSound, setPlatformTone, setBadge, windowFocused, coreInfo, playNotifySound, platformNotifyOn, soundsEnabled, setSoundsEnabled, bannersEnabled, setBannersEnabled, getVolume, setVolume, getPlatformVolume, setPlatformVolume, unlockAudio } from './desktop';
 import { DEMO_OFFLINE, PROFILE_NAME, STATIC_DEMO } from './profile';
 import { leaveDemoPanel } from './demo-session';
@@ -113,6 +114,7 @@ export default function App() {
   const [bnrOn, setBnrOn] = useState(bannersEnabled);
   const [vol, setVol] = useState(getVolume);
   const [pVols, setPVols] = useState<Record<string, number>>({});
+  const [themePref, setThemePrefState] = useState<ThemePref>(getThemePref);
   useEffect(() => unlockAudio(), []);
   const changePlatformNotify = (platform: string, on: boolean) => {
     const tone = getPlatformTone(platform);
@@ -964,6 +966,21 @@ export default function App() {
                 <Icon name="chev" size={14} sw={2} />
               </span>
             </button>
+            <span className="set-sub">Görünüm</span>
+            <div className="seg3" role="radiogroup" aria-label="Görünüm">
+              {(
+                [
+                  ['system', 'Sistem', 'monitor'],
+                  ['light', 'Açık', 'sun'],
+                  ['dark', 'Koyu', 'moon'],
+                ] as const
+              ).map(([k, l, ic]) => (
+                <button key={k} type="button" role="radio" aria-checked={themePref === k} className={themePref === k ? 'on' : ''} onClick={() => (setThemePref(k), setThemePrefState(k))}>
+                  <Icon name={ic} size={14} />
+                  {l}
+                </button>
+              ))}
+            </div>
             {/* AI senin kontrolünde: her özellik ayrı açılıp kapanır (cihaza özel) */}
             <span className="set-sub">AI özellikleri{!ai && <em> · anahtar yok</em>}</span>
             <AiKeyRow ai={ai} onChange={(on) => setAi(on)} notify={notify} />
@@ -1155,7 +1172,7 @@ export default function App() {
                       {c.unread > 0 && arr.findIndex((x) => x.unread > 0) === i && <span className="qc-bub">{c.lastPreview.replace(/^Sen: /, '')}</span>}
                       <span className="avwrap">
                         <Avatar name={c.name} size={46} url={c.avatarUrl} />
-                        <Chip platform={c.platform} size={17} ring="#f7f6fa" />
+                        <Chip platform={c.platform} size={17} ring="var(--bg)" />
                       </span>
                       <span className="qc-nm">{c.name}</span>
                     </button>
@@ -1504,7 +1521,7 @@ export default function App() {
             >
               <span className="avwrap">
                 <Avatar name={t.chat.name} size={34} url={t.chat.avatarUrl} />
-                <Chip platform={t.chat.platform} size={16} ring="#fff" />
+                <Chip platform={t.chat.platform} size={16} ring="var(--card)" />
               </span>
               <span className="body">
                 <span className="top">
@@ -1644,7 +1661,7 @@ function ComposePane({ accounts, preferred, chats, onClose, onOpen, notify }: { 
                   <button key={c.id} className="nc-row b" onClick={() => onOpen(c.id)}>
                     <span className="avwrap">
                       <Avatar name={c.name} size={32} url={c.avatarUrl} />
-                      <Chip platform={c.platform} size={14} ring="#fff" />
+                      <Chip platform={c.platform} size={14} ring="var(--card)" />
                     </span>
                     <span className="nm">
                       {c.name}
@@ -1777,7 +1794,7 @@ function groupByDay(list: Chat[]): Array<[string, Chat[]]> {
 function NavItem({ icon, label, count, active, onClick, badge, title }: { icon: string; label: string; count: number; active: boolean; onClick: () => void; badge?: string; title?: string }) {
   return (
     <button className={`nav-item b ${active ? 'active' : ''}`} onClick={onClick} title={title}>
-      <Icon name={icon} size={17} color={active ? '#6C47FF' : '#6B6878'} />
+      <Icon name={icon} size={17} color={active ? 'var(--v)' : 'var(--text3)'} />
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
         {label}
         {badge && <span className="pill lime" style={{ fontSize: 10, padding: '1px 5px', borderRadius: 5 }}>{badge}</span>}
@@ -1809,11 +1826,11 @@ function ChatRow({
     <div className={`row ${selected ? 'selected' : ''} ${chat.unread > 0 ? 'unread' : ''} ${isMail ? 'mailrow' : ''}`} onClick={onClick} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onClick()}>
       <span className="avwrap">
         <Avatar name={isMail && mailSender ? mailSender : chat.name} size={44} url={chat.avatarUrl} />
-        <Chip platform={chat.platform} size={17} ring={selected ? '#fff' : '#f7f6fa'} />
+        <Chip platform={chat.platform} size={17} ring={selected ? 'var(--surface)' : 'var(--bg)'} />
       </span>
       <span className="body">
         <span className="top">
-          {chat.pinned && <Icon name="pin" size={12} color="#8c889b" />}
+          {chat.pinned && <Icon name="pin" size={12} color="var(--text3)" />}
           {kind && (
             <span className={`skind k-${kind}`} title={kind === 'order' ? 'Sipariş' : 'Müşteri sorusu'} aria-label={kind === 'order' ? 'Sipariş' : 'Müşteri sorusu'}>
               {kind === 'order' ? '📦' : '❓'}

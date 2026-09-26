@@ -23,7 +23,10 @@ Dil: arayüz ve yorumlar Türkçe.
   `~/.kavsak/sessions/<hesapId>/`. REST + WS sunucu 127.0.0.1:7788 (`server.ts`). `registry.ts` hesap↔connector.
   Ortak model `model.ts` (Account/Chat/Message/Participant/Attachment; Chat.handle/link/participants/meta).
   Connector arayüzü `connectors/base.ts` (start(opts)/stop/sendText, isteğe bağlı fetchMedia/openDirect/logout/action/loadHistory).
-- `apps/web` — Vite + React 19, açık tema (Inter, mor #6c47ff, lime #d4ff3f). `App.tsx` (liste/filtre/kanallar/ayarlar),
+- `apps/web` — Vite + React 19, açık + gece modu (Inter, mor #6c47ff, lime #d4ff3f). Tema `theme.ts` (Ayarlar → Görünüm: Sistem/Açık/Koyu,
+  localStorage `mivelo.theme`, `<html data-theme>`; index.html'deki satır içi betik ilk karede uygular, Tauri `setTheme`). Renkler YALNIZ
+  token'la (`styles.css` :root + `:root[data-theme="dark"]`: --card/--field/--raise/--ctx-bg/--danger*/--warn*/--avN/--tg-*/--scN…); yeni
+  stilde sabit açık renk (#fff zemin vb.) yazma. İkon rengi `color="var(--v)"` olabilir (Icon style üzerinden currentColor). `App.tsx` (liste/filtre/kanallar/ayarlar),
   `Conversation.tsx` (mesajlar, arama, medya penceresi, sağ ayrıntı paneli + Shopier sipariş kartı), `Connect.tsx`
   (kanal bağlama, formlar), `ui.tsx` (marka ikonları: simple-icons + Font Awesome brands), `desktop.ts` (Tauri köprüsü, sesler).
 - `apps/desktop` — Tauri 2 kabuğu (`src-tauri/src/lib.rs`): tray, Dock rozeti, ⌘⇧K, çekirdeği `node` ile başlatır ve bekçiyle
