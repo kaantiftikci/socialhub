@@ -340,3 +340,50 @@ test('Mail sendMedia: alıcı/konu/In-Reply-To sendText ile aynı, nodemailer at
   assert.equal(sent[1].inReplyTo, '<in@example.com>');
   await assert.rejects(() => c.sendMedia('yok', file), /Sohbet yok/);
 });
+
+test('Mail IMAP IDLE: yeni e-posta bildirimi (exists) 1 sn içinde yoklatır; açıkken yoklama yedeğe iner, kopunca yeniden bağlanır', async () => {
+  const { EventEmitter } = await import('node:events');
+  const { store, account } = setup('imap');
+  const c = new mail.MailConnector(account, store, { user: 'me@example.com', pass: 'p', host: 'h', smtpHost: 's' });
+  let box = [1, 2];
+  const fake = {
+    search: async (q: Record<string, unknown>) => {
+      if (q.since) return box;
+      const lo = Number(/^(\d+):/.exec(String(q.uid))![1]);
+      return box.filter((u) => u >= lo);
+    },
+    async *fetch(uids: number[]) {
+      for (const uid of uids) yield { uid, source: rawMail(uid), flags: new Set<string>() };
+    },
+  };
+  const priv = c as unknown as { withInbox: unknown; pollFolders: unknown; createIdleClient: unknown; idleUp: boolean; lastUid: number; timer?: NodeJS.Timeout; idleRetry?: NodeJS.Timeout };
+  priv.withInbox = async (fn: (client: unknown) => Promise<unknown>) => fn(fake);
+  priv.pollFolders = async () => undefined;
+  const clients: Array<InstanceType<typeof EventEmitter> & { opened?: string }> = [];
+  priv.createIdleClient = () => {
+    const e = Object.assign(new EventEmitter(), {
+      connect: async () => undefined,
+      mailboxOpen: async (p: string) => void ((e as { opened?: string }).opened = p),
+      logout: async () => undefined,
+      close: () => undefined,
+    });
+    clients.push(e);
+    return e;
+  };
+  await c.start();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(clients.length, 1);
+  assert.equal(clients[0].opened, 'INBOX');
+  assert.equal(priv.idleUp, true);
+  assert.equal(priv.lastUid, 2);
+  // yeni e-posta
+  box = [1, 2, 3];
+  clients[0].emit('exists', { path: 'INBOX', count: 3, prevCount: 2 });
+  await new Promise((r) => setTimeout(r, 1300));
+  assert.equal(priv.lastUid, 3, 'bildirimden sonra yeni UID çekildi');
+  // kopma → idleUp düşer, yeniden bağlanma planlanır
+  clients[0].emit('close');
+  assert.equal(priv.idleUp, false);
+  assert.ok(priv.idleRetry, 'yeniden bağlanma planlandı');
+  await c.stop();
+});

@@ -124,6 +124,8 @@ Dil: arayüz ve yorumlar Türkçe.
 - Slack: Bağlan formu önce resmi yol — manifest bağlantısı (`SLACK_MANIFEST`, Connect.tsx'teki kopyayla aynı; test denetler) ile kendi
   dahili uygulaması, xoxp + isteğe bağlı xapp (Socket Mode: olay gelen sohbet hemen çekilir, yoklama ~5 dk). Belirteç dosyası düz xoxp
   ya da JSON {token, appToken} (`parseSlackToken`). Tarayıcı girişi formdaki "yedek" bağlantısıyla.
+- E-posta (IMAP): ikinci uzun ömürlü oturum INBOX'ta IMAP IDLE (imapflow auto-IDLE, `maxIdleTime` 20 dk); 'exists' → 1 sn içinde
+  yoklama. IDLE açıkken yoklama ~5 dk yedek, yoksa ~60 sn (±%30); kopmada üstel yeniden bağlanma 5 sn → ≤5 dk.
 - Amazon Seller Central / Etsy Mesajları / Shopify Inbox tarayıcı köprüleri varsayılan KAPALI (yapılandırmada messaging/inbox:true ile açılır).
 - Bağlan: resmi olmayan kanallarda "resmi değil" etiketi + Sosyal Medya altında açıklama (`UNOFFICIAL`, Connect.tsx).
 

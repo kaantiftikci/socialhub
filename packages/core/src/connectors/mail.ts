@@ -152,7 +152,8 @@ export class MailConnector extends BaseConnector {
       if (this.stopping) return;
       await this.poll(true);
       this.setStatus('connected', this.cfg.user);
-      this.timer = setInterval(() => void this.poll(false), 60_000);
+      this.schedule();
+      void this.startIdle();
     } catch (e) {
       this.setStatus('error', (e as Error).message.split('\n')[0]);
     }
@@ -160,8 +161,100 @@ export class MailConnector extends BaseConnector {
 
   async stop(): Promise<void> {
     this.stopping = true;
-    if (this.timer) clearInterval(this.timer);
+    if (this.timer) clearTimeout(this.timer);
+    if (this.idleRetry) clearTimeout(this.idleRetry);
+    if (this.idleDebounce) clearTimeout(this.idleDebounce);
+    const c = this.idleClient;
+    this.idleClient = undefined;
+    this.idleUp = false;
+    if (c) {
+      c.removeAllListeners();
+      await c.logout().catch(() => undefined);
+      c.close();
+    }
     this.setStatus('disconnected');
+  }
+
+  /**
+   * Yoklama: IMAP IDLE bağlantısı açıkken yeni e-posta zaten anında haber verir → yoklama yalnız yedek (~5 dk);
+   * IDLE yoksa/koptuysa ~60 sn. Her tur ±%30 sapmalı.
+   */
+  private schedule(): void {
+    if (this.stopping) return;
+    if (this.timer) clearTimeout(this.timer);
+    const base = this.idleUp ? 300_000 : 60_000;
+    this.timer = setTimeout(async () => {
+      await this.poll(false);
+      this.schedule();
+    }, Math.round(base * (0.7 + Math.random() * 0.6)));
+    this.timer.unref?.();
+  }
+
+  // ---------- IMAP IDLE (anlık bildirim, RFC 2177) ----------
+  private idleClient?: ImapFlow;
+  private idleUp = false;
+  private idleFails = 0;
+  private idleRetry?: NodeJS.Timeout;
+  private idleDebounce?: NodeJS.Timeout;
+
+  /** IDLE için ayrı, uzun ömürlü IMAP oturumu açar (testler ezer: gerçek sunucuya bağlanılmasın) */
+  protected createIdleClient(): ImapFlow {
+    // maxIdleTime: IDLE 20 dk'da bir yenilenir (sunucular ~30 dk'da boştaki IDLE'ı düşürür; RFC 2177 29 dk önerir)
+    return new ImapFlow({ host: this.cfg.host!, port: this.cfg.port!, secure: this.cfg.secure ?? true, auth: this.auth(), logger: false, maxIdleTime: 20 * 60_000 });
+  }
+
+  /**
+   * INBOX'ı seçili tutan ikinci oturum: imapflow boştayken kendiliğinden IDLE'a geçer; sunucu yeni e-posta bildirince
+   * ('exists') 1 sn içinde normal yoklama çalışır (yalnız yeni UID'ler çekilir). Sunucu IDLE desteklemiyorsa imapflow
+   * NOOP ile yoklar, 'exists' yine gelir. Kopmada üstel yeniden bağlanma (5 sn → ≤5 dk, sapmalı); OAuth belirteci yenilenir.
+   */
+  private async startIdle(): Promise<void> {
+    if (this.stopping || this.idleClient) return;
+    let client: ImapFlow | undefined;
+    try {
+      if (this.cfg.accessToken) await this.ensureOAuth();
+      client = this.createIdleClient();
+      this.idleClient = client;
+      const c = client;
+      c.on('exists', (d: { count?: number; prevCount?: number }) => {
+        if ((d.count ?? 0) <= (d.prevCount ?? 0)) return; // silme/taşıma
+        if (this.idleDebounce) clearTimeout(this.idleDebounce);
+        this.idleDebounce = setTimeout(() => void this.poll(false), 1000);
+      });
+      c.on('close', () => {
+        if (this.idleClient !== c) return;
+        this.idleClient = undefined;
+        this.idleUp = false;
+        this.retryIdle();
+      });
+      c.on('error', () => undefined); // 'close' ardından gelir; yeniden bağlanma orada
+      await c.connect();
+      await c.mailboxOpen('INBOX');
+      if (this.stopping || this.idleClient !== c) return;
+      if (!this.idleUp) bus.log('info', `${this.account.platform}: anlık e-posta bildirimi (IMAP IDLE) açık`);
+      this.idleUp = true;
+      this.idleFails = 0;
+      this.schedule(); // yoklama yedeğe insin
+      void this.poll(false); // bağlantı arası kaçan e-postalar
+    } catch (e) {
+      if (client && this.idleClient === client) {
+        this.idleClient = undefined;
+        client.removeAllListeners();
+        client.close();
+      }
+      this.idleUp = false;
+      if (this.idleFails === 0) bus.log('warn', `${this.account.platform}: IMAP IDLE açılamadı (${(e as Error).message.split('\n')[0]}); dakikalık yoklamayla devam`);
+      this.retryIdle();
+    }
+  }
+
+  private retryIdle(): void {
+    if (this.stopping) return;
+    this.schedule(); // IDLE yokken yoklama sıklaşsın
+    const ms = Math.min(300_000, 5_000 * 2 ** this.idleFails++) * (0.7 + Math.random() * 0.6);
+    if (this.idleRetry) clearTimeout(this.idleRetry);
+    this.idleRetry = setTimeout(() => void this.startIdle(), ms);
+    this.idleRetry.unref?.();
   }
 
   // ---------- Microsoft OAuth (cihaz kodu) ----------
@@ -295,8 +388,15 @@ export class MailConnector extends BaseConnector {
     return { mails, chats };
   }
 
+  /** Yoklama sürerken gelen IDLE bildirimi: tur bitince bir kez daha (yeni e-posta 5 dk'lık yedeğe kalmasın) */
+  private pollAgain = false;
+
   private async poll(first: boolean): Promise<void> {
-    if (this.polling || this.stopping) return;
+    if (this.stopping) return;
+    if (this.polling) {
+      if (!first) this.pollAgain = true;
+      return;
+    }
     this.polling = true;
     try {
       await this.withInbox(async (client) => {
@@ -319,6 +419,10 @@ export class MailConnector extends BaseConnector {
       if (/auth|login|credential/i.test((e as Error).message)) this.setStatus('error', 'Giriş reddedildi: uygulama şifresini kontrol et');
     } finally {
       this.polling = false;
+      if (this.pollAgain && !this.stopping) {
+        this.pollAgain = false;
+        setTimeout(() => void this.poll(false), 500).unref?.();
+      }
     }
   }
 
