@@ -7,6 +7,7 @@ import os from 'node:os';
 import QRCode from 'qrcode';
 import { DATA_DIR } from './config.js';
 import { WebSocketServer, WebSocket } from 'ws';
+import { markActive } from './activity.js';
 import type { Store } from './store.js';
 import type { Registry } from './registry.js';
 import type { Connector } from './connectors/base.js';
@@ -367,6 +368,10 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   route('GET', '/api/ai/key', () => {
     const k = aiKey();
     return { set: Boolean(k), source: aiKeySource(), hint: k ? `${k.slice(0, 7)}…${k.slice(-4)}` : null };
+  });
+  route('POST', '/api/activity', (_r, _s, _p, body) => {
+    markActive((body as { active?: unknown }).active === true);
+    return { ok: true };
   });
   route('POST', '/api/ai/key', (req, _s, _p, body) => {
     localOnly(req);

@@ -114,6 +114,15 @@ Dil: arayüz ve yorumlar Türkçe.
 - WhatsApp: `cachedGroupMetadata` + `getMessage` (gönderilen son 500) + `gateSend` (0,8–2 sn aralık, dakikada ≤20).
 - `send-guard.ts` (server /send ve /send-file): aynı metin (≥16 kr.) 30 dk'da >5 farklı sohbete → 429; günlük sınır kanal başına
   (LinkedIn/X 100, Instagram/Messenger 150, WhatsApp/Telegram 500…); e-posta/pazaryeri muaf.
+- WhatsApp geçmiş boşluğu doldurma tur başına ≤60 istek (1,5–4 sn aralık; kalanı 30–45 dk sonra). "unavailable" presence yalnız
+  bağlanınca ve gönderim/okundu sonrası tek sefer (`offlineSoon`); 4 dk'lık düzenli zamanlayıcı kaldırıldı.
+- Uyarlamalı yoklama: arayüz `POST /api/activity {active}` (App.tsx, odak/görünürlük + dakikada bir) → `activity.ts`. Köprü seçeneği
+  `idlePollMs` (Instagram: odakta 30 sn, boşta 2 dk); boştan etkine geçişte bekleyen tur öne çekilir (`pollSoon`).
+- LinkedIn anlık akış: `Strategy.watch` → sayfaya init betiği, istemcinin kendi `/realtime/connect` akışının kopyası okunur (fetch/XHR/
+  EventSource; kendi bağlantımız YOK). Mesaj konuları → birkaç sn içinde yoklama (≥10 sn arayla); akış canlıyken aralık 3 kat (60→180 sn).
+- Slack: Bağlan formu önce resmi yol — manifest bağlantısı (`SLACK_MANIFEST`, Connect.tsx'teki kopyayla aynı; test denetler) ile kendi
+  dahili uygulaması, xoxp + isteğe bağlı xapp (Socket Mode: olay gelen sohbet hemen çekilir, yoklama ~5 dk). Belirteç dosyası düz xoxp
+  ya da JSON {token, appToken} (`parseSlackToken`). Tarayıcı girişi formdaki "yedek" bağlantısıyla.
 - Amazon Seller Central / Etsy Mesajları / Shopify Inbox tarayıcı köprüleri varsayılan KAPALI (yapılandırmada messaging/inbox:true ile açılır).
 - Bağlan: resmi olmayan kanallarda "resmi değil" etiketi + Sosyal Medya altında açıklama (`UNOFFICIAL`, Connect.tsx).
 

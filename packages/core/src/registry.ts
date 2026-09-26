@@ -8,7 +8,7 @@ import { sessionDir } from './config.js';
 import type { Connector } from './connectors/base.js';
 import { WhatsAppConnector } from './connectors/whatsapp.js';
 import { TelegramConnector } from './connectors/telegram.js';
-import { SlackConnector } from './connectors/slack.js';
+import { SlackConnector, parseSlackToken } from './connectors/slack.js';
 import { DemoConnector } from './connectors/demo.js';
 import { IMessageConnector } from './connectors/imessage.js';
 import { BrowserConnector } from './connectors/browser/bridge.js';
@@ -122,8 +122,9 @@ export class Registry {
       case 'slack': {
         // xoxp token verildiyse resmi API; yoksa tarayıcı oturumu (app.slack.com girişi)
         const tokenFile = path.join(sessionDir(account.id), 'token');
-        const token = fs.existsSync(tokenFile) ? fs.readFileSync(tokenFile, 'utf8').trim() : '';
-        c = token.startsWith('xox') ? new SlackConnector(account, this.store, token) : new BrowserConnector(account, this.store, slackStrategy, 30_000);
+        // belirteç dosyası: düz xoxp (eski) ya da {token, appToken} (Bağlan → Slack uygulaması; appToken varsa Socket Mode)
+        const tok = fs.existsSync(tokenFile) ? parseSlackToken(fs.readFileSync(tokenFile, 'utf8')) : undefined;
+        c = tok ? new SlackConnector(account, this.store, tok.token, tok.appToken) : new BrowserConnector(account, this.store, slackStrategy, 30_000);
         break;
       }
       case 'demo':
@@ -137,7 +138,7 @@ export class Registry {
         c = new BrowserConnector(account, this.store, linkedin, 60_000);
         break;
       case 'instagram':
-        c = new BrowserConnector(account, this.store, instagram, 30_000);
+        c = new BrowserConnector(account, this.store, instagram, 30_000, { idlePollMs: 120_000 }); // Mivelo açık ve odaktayken 30 sn, boşta 2 dk
         break;
       case 'x':
         c = new BrowserConnector(account, this.store, x, 60_000);

@@ -9,6 +9,7 @@ import { bus } from '../../bus.js';
 import { sessionDir } from '../../config.js';
 import { killProcessesMatching } from '../../platform.js';
 import { mediaHostAllowed, MEDIA_MAX } from '../../media-hosts.js';
+import { isUiActive, onUiActive } from '../../activity.js';
 import type { Account, Attachment, Chat, ChatKind, Participant, Reaction } from '../../model.js';
 import type { Store } from '../../store.js';
 
@@ -120,6 +121,17 @@ export interface Strategy {
   needsWindow?(page: Page): Promise<boolean>;
   /** Görünür pencere kapatılmadan önce: kullanıcının tamamlaması gereken ek adım (PIN) için bekle */
   afterLogin?(page: Page): Promise<void>;
+  /**
+   * Anlık bildirim: sayfanın kendi gerçek zamanlı akışını (LinkedIn /realtime/connect) dinle. Sayfa her açıldığında
+   * gezinmeden önce çağrılır. notify('alive'): akış açık (kalp atışı) → yoklama seyrekleşir; notify('event'): yeni
+   * mesaj/sohbet olayı → birkaç saniye içinde yoklama.
+   */
+  watch?(page: Page, notify: (kind: 'alive' | 'event') => void): Promise<void>;
+}
+
+export interface BridgeOptions {
+  /** Arayüz boştayken (pencere kapalı/odaksız) yoklama aralığı; verilmezse her zaman pollMs */
+  idlePollMs?: number;
 }
 
 export class BrowserConnector extends BaseConnector {
@@ -147,8 +159,37 @@ export class BrowserConnector extends BaseConnector {
     store: Store,
     private strategy: Strategy,
     private pollMs = 20_000,
+    private opts: BridgeOptions = {},
   ) {
     super(account, store);
+  }
+
+  /** Anlık akış en son ne zaman yaşam belirtisi verdi (0: hiç) */
+  private rtAliveAt = 0;
+  private rtLogged = false;
+  /** Yoklama sürerken gelen anlık olay: tur bitince hemen bir tur daha */
+  private pendingPoll = false;
+  private lastPollAt = 0;
+  private offActive?: () => void;
+
+  /** Anlık akıştan haber: 'event' ise yakında yokla (en az 10 sn arayla), 'alive' yalnız akışı canlı sayar */
+  private onRealtime(kind: 'alive' | 'event'): void {
+    this.rtAliveAt = Date.now();
+    if (!this.rtLogged) {
+      this.rtLogged = true;
+      bus.log('info', `${this.account.platform}: sayfanın anlık bildirim akışı dinleniyor; yoklama seyrekleşti, yeni mesajda hemen okunur`);
+    }
+    if (kind === 'event') this.pollSoon();
+  }
+
+  /** Bekleyen turu öne çek. Yoklama durmuşsa (doğrulama sayfası, kapalı) canlandırmaz. */
+  private pollSoon(): void {
+    if (!this.timer || this.stopping || this.account.status !== 'connected' || Date.now() < this.backoffUntil) return;
+    if (this.polling) {
+      this.pendingPoll = true;
+      return;
+    }
+    this.schedule(Math.max(1500 + Math.random() * 2500, 10_000 - (Date.now() - this.lastPollAt)));
   }
 
   async start(opts: StartOptions = {}): Promise<void> {
@@ -231,6 +272,9 @@ export class BrowserConnector extends BaseConnector {
     if (this.account.status !== 'connected') return;
     this.syncProgress(100);
     this.schedule();
+    // uyarlamalı yoklama: arayüz boştan etkine geçince uzun bekleyen turu öne çek
+    this.offActive?.();
+    if (this.opts.idlePollMs) this.offActive = onUiActive(() => this.pollSoon());
   }
 
   private get stateFile(): string {
@@ -363,6 +407,7 @@ export class BrowserConnector extends BaseConnector {
     }
     const ctx = this.ctx;
     this.page = ctx.pages()[0] ?? (await ctx.newPage());
+    if (this.strategy.watch) await this.strategy.watch(this.page, (k) => this.onRealtime(k)).catch((e) => bus.log('warn', `${this.account.platform}: anlık akış dinlenemedi: ${(e as Error).message}`));
     ctx.on('close', () => {
       if (this.ctx !== ctx) return; // biz kapattık (görünürden görünmeze geçiş)
       if (!this.stopping) this.setStatus('disconnected', 'Tarayıcı penceresi kapatıldı');
@@ -452,6 +497,8 @@ export class BrowserConnector extends BaseConnector {
 
   async stop(): Promise<void> {
     this.stopping = true;
+    this.offActive?.();
+    this.offActive = undefined;
     await this.api?.dispose().catch(() => undefined);
     this.api = undefined;
     this.pageless = false;
@@ -622,13 +669,27 @@ export class BrowserConnector extends BaseConnector {
    * Yoklama zamanlayıcısı: sabit setInterval yerine her tur ±%30 sapmalı setTimeout. Saat gibi düzenli istek deseni
    * otomasyon imzasıdır (LinkedIn/X/Instagram/Slack); ayrıca önceki tur bitmeden yenisi planlanmaz.
    */
-  private schedule(): void {
+  private schedule(delay?: number): void {
     this.unschedule();
     const t: NodeJS.Timeout = setTimeout(async () => {
       await this.poll(false).catch(() => undefined);
-      if (this.timer === t && !this.stopping) this.schedule();
-    }, Math.round(this.pollMs * (0.7 + Math.random() * 0.6)));
+      if (this.timer !== t || this.stopping) return;
+      if (this.pendingPoll) {
+        this.pendingPoll = false;
+        this.schedule(10_000 + Math.random() * 5000);
+      } else this.schedule();
+    }, Math.round(delay ?? this.nextDelay()));
     this.timer = t;
+  }
+
+  /**
+   * Sıradaki tur: temel aralık (arayüz boştaysa idlePollMs), anlık akış son 5 dk'da canlıysa 3 katı (yeni mesaj zaten
+   * akıştan haber verir; yoklama yalnız yedek), üstüne ±%30 sapma.
+   */
+  private nextDelay(): number {
+    const base = this.opts.idlePollMs && !isUiActive() ? this.opts.idlePollMs : this.pollMs;
+    const rt = Date.now() - this.rtAliveAt < 5 * 60_000 ? 3 : 1;
+    return base * rt * (0.7 + Math.random() * 0.6);
   }
 
   private unschedule(): void {
@@ -640,6 +701,7 @@ export class BrowserConnector extends BaseConnector {
     if (this.polling || Date.now() < this.backoffUntil) return;
     if ((!this.page || this.page.isClosed()) && !this.pageless && !(await this.ensureOpen())) return;
     this.polling = true;
+    this.lastPollAt = Date.now();
     try {
       await this.serial(() => this.pollInner(first));
       // API tabanlı kanal: ilk başarılı yoklamadan sonra tarayıcı kapanır; sayfasızda çerezler her yoklamada diske

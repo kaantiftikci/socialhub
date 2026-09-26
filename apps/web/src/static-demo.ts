@@ -255,6 +255,7 @@ function demoIcs(ev: CalendarDraft): string {
 }
 
 export const staticApi = {
+  activity: async (_active: boolean) => undefined,
   health: async () => ({ ok: true, ai: true, stats: { unread: chats.reduce((n, c) => n + c.unread, 0), chats: chats.length }, os: undefined as CoreOs | undefined }),
   accounts: async () => accounts.map((a) => ({ ...a })),
   addAccount: async (platform: Platform, _token?: string): Promise<Account> => {

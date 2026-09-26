@@ -8,6 +8,22 @@ const ORDER: Platform[] = ['whatsapp', 'telegram', 'slack', 'imessage', 'linkedi
 const MAIL_ORDER: Platform[] = ['gmail', 'outlook', 'yahoo', 'icloud', 'imap'];
 // Alışveriş kanalları yalnızca müşteri sorularını/mesajlarını görmek ve yanıtlamak için; Shopier'de mesajlaşma ucu olmadığından listede yok
 /** Resmi (kişisel hesaba açık) API'si olmayan, web oturumu/bağlı cihazla çalışan kanallar: kartta şeffaflık etiketi */
+/**
+ * Slack uygulama bildirimi (çekirdekteki connectors/slack.ts SLACK_MANIFEST ile aynı tutulmalı): yalnız kullanıcı kapsamları
+ * (xoxp), kullanıcı olayları Socket Mode ile. "Create app from manifest" bağlantısı formu hazır doldurur.
+ */
+const SLACK_MANIFEST = {
+  display_information: { name: 'Mivelo', description: 'Mivelo birleşik gelen kutusu — yalnız bu bilgisayarda, kişisel kullanım', background_color: '#6c47ff' },
+  oauth_config: { scopes: { user: ['channels:history', 'groups:history', 'im:history', 'mpim:history', 'channels:read', 'groups:read', 'im:read', 'mpim:read', 'users:read', 'chat:write'] } },
+  settings: {
+    event_subscriptions: { user_events: ['message.channels', 'message.groups', 'message.im', 'message.mpim'] },
+    socket_mode_enabled: true,
+    org_deploy_enabled: false,
+    token_rotation_enabled: false,
+  },
+};
+const SLACK_APP_URL = `https://api.slack.com/apps?new_app=1&manifest_json=${encodeURIComponent(JSON.stringify(SLACK_MANIFEST))}`;
+
 const UNOFFICIAL: Partial<Record<Platform, string>> = {
   whatsapp: 'WhatsApp kişisel hesaplar için API sunmaz; Mivelo WhatsApp Web gibi "bağlı cihaz" olarak bağlanır.',
   instagram: 'Instagram kişisel hesaplar için mesaj API’si sunmaz; Mivelo kendi web oturumunla bağlanır.',
@@ -56,6 +72,8 @@ export function ConnectModal({
 }) {
   const [active, setActive] = useState<string | null>(null); // account id
   const [tg, setTg] = useState({ apiId: '', apiHash: '' });
+  /** Slack resmi uygulama: User OAuth Token (xoxp) + isteğe bağlı App-Level Token (xapp, Socket Mode) */
+  const [slackTok, setSlackTok] = useState({ user: '', app: '' });
   const [pat, setPat] = useState('');
   /** Pazar yeri formları (Trendyol/Hepsiburada/Etsy/Shopify): alan adı → değer */
   const [shop, setShop] = useState<Record<string, string>>({});
@@ -72,6 +90,7 @@ export function ConnectModal({
     setMail(EMPTY_MAIL);
     setShop({});
     setPat('');
+    setSlackTok({ user: '', app: '' });
     if (!active) return;
     requestAnimationFrame(() => document.querySelector('.overlay .pairbox')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
   }, [active]);
@@ -82,9 +101,14 @@ export function ConnectModal({
   }, []);
   const macOnlyOff = (p: Platform) => MAC_ONLY.has(p) && !!coreOs && coreOs !== 'darwin';
 
-  async function add(platform: Platform) {
+  /** opts.browser: Slack'i resmi uygulama yerine tarayıcı oturumuyla bağla (yedek yol) */
+  async function add(platform: Platform, opts: { browser?: boolean } = {}) {
     setBusy(true);
     try {
+      if (platform === 'slack' && !opts.browser && (active !== 'slack:new' || !slackTok.user.trim())) {
+        setActive('slack:new');
+        return;
+      }
       if (platform === 'telegram' && active !== 'telegram:new') {
         setActive('telegram:new');
         return;
@@ -116,6 +140,7 @@ export function ConnectModal({
       let token: string | undefined;
       if (platform === 'telegram' && tg.apiId.trim() && tg.apiHash.trim()) token = JSON.stringify({ apiId: Number(tg.apiId.trim()), apiHash: tg.apiHash.trim() });
       if (platform === 'shopier') token = pat.trim();
+      if (platform === 'slack' && !opts.browser) token = JSON.stringify({ token: slackTok.user.trim(), appToken: slackTok.app.trim() || undefined });
       if (shopFields) {
         const cfg: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(shop)) if (v.trim()) cfg[k] = v.trim();
@@ -356,6 +381,48 @@ export function ConnectModal({
               </div>
             </div>
           ) : null,
+        )}
+
+        {active === 'slack:new' && (
+          <div className="pairbox">
+            <div style={{ flexGrow: 1 }}>
+              <h3>Slack’i bağla</h3>
+              <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.5 }}>
+                Önerilen yol resmi Slack API’si: kendi çalışma alanında yalnız sana ait küçük bir uygulama oluşturursun (ücretsiz, ~1 dk; çalışma alanı ayarlarına göre yönetici onayı isteyebilir).
+              </p>
+              <ol style={{ margin: '10px 0 0', paddingLeft: 20, fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.6 }}>
+                <li>
+                  <a href={SLACK_APP_URL} target="_blank" rel="noreferrer" style={{ color: 'var(--v-txt)' }}>
+                    <b>Slack’te Mivelo uygulamasını oluştur</b>
+                  </a>{' '}
+                  → çalışma alanını seç → <b>Next</b> → <b>Create</b> (izinler hazır gelir)
+                </li>
+                <li>
+                  Sol menüde <b>Install App → Install to Workspace</b> → İzin ver
+                </li>
+                <li>
+                  Çıkan <b>User OAuth Token</b>’ı (<code>xoxp-…</code>) aşağıya yapıştır
+                </li>
+                <li>
+                  İsteğe bağlı, mesajların anında gelmesi için: <b>Basic Information → App-Level Tokens → Generate</b> (kapsam: <code>connections:write</code>) → <code>xapp-…</code>
+                </li>
+              </ol>
+              <div className="field" style={{ marginTop: 12, gap: 8 }}>
+                <input value={slackTok.user} onChange={(e) => setSlackTok({ ...slackTok, user: e.target.value })} placeholder="User OAuth Token (xoxp-…)" type="password" autoComplete="off" />
+                <input value={slackTok.app} onChange={(e) => setSlackTok({ ...slackTok, app: e.target.value })} placeholder="App-Level Token (xapp-…, isteğe bağlı)" type="password" autoComplete="off" />
+                <button className="btn lime b" onClick={() => add('slack')} disabled={busy || !slackTok.user.trim().startsWith('xoxp-') || (!!slackTok.app.trim() && !slackTok.app.trim().startsWith('xapp-'))}>
+                  Bağlan
+                </button>
+              </div>
+              <p style={{ margin: '10px 0 0', fontSize: 12.5, color: 'var(--text3, var(--text2))', lineHeight: 1.5 }}>
+                Uygulama oluşturamıyorsan{' '}
+                <a href="#browser" onClick={(e) => (e.preventDefault(), void add('slack', { browser: true }))} style={{ color: 'var(--v-txt)', fontWeight: 600 }}>
+                  tarayıcı girişiyle bağlan
+                </a>{' '}
+                (resmi değil, yedek yol: Slack web oturumun kullanılır).
+              </p>
+            </div>
+          </div>
         )}
 
         {active === 'telegram:new' && (

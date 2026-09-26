@@ -228,8 +228,9 @@ export class WhatsAppConnector extends BaseConnector {
         this.account.label = 'WhatsApp';
         this.setStatus('connected', me ? `+${me.split('@')[0]}` : undefined);
         bus.log('info', 'WhatsApp bağlandı; telefon geçmişi gönderiyor (ilk seferde 10-60 sn sürebilir)');
-        // Telefon bildirimleri: bağlı cihaz "aktif" görünürse WhatsApp telefona bildirim göndermez. Bağlantıda ve her 4 dk'da
-        // bir açıkça çevrimdışı (unavailable) bildir; yoklamayı kesen bir durumda telefonun sessiz kalmasını önler.
+        // Telefon bildirimleri: bağlı cihaz "aktif" görünürse WhatsApp telefona bildirim göndermez. Bağlantıda açıkça çevrimdışı
+        // (unavailable) bildir. Ban önleme: eskiden her 4 dk'da bir yineleniyordu (gerçek istemcide olmayan düzenli sinyal);
+        // artık yalnız bağlanınca ve cihazı etkin gösterebilecek işlerden (gönderim, okundu) sonra, tek sefer (offlineSoon).
         // Baileys, creds.me.name yoksa presence isteğini sessizce ATLIYOR ("no name present"): cihaz hiç "çevrimdışı"
         // diyemediği için WhatsApp onu "Aktif" gösteriyor ve telefon bildirimlerini bastırıyordu. Adı yoksa ver ve kaydet.
         const creds = sock.authState.creds;
@@ -238,11 +239,9 @@ export class WhatsAppConnector extends BaseConnector {
           sock.ev.emit('creds.update', creds);
           bus.log('info', `WhatsApp: cihaz adı yoktu, "${creds.me.name}" olarak ayarlandı (presence gönderilebilsin)`);
         }
-        const offline = () => sock.sendPresenceUpdate('unavailable').catch(() => undefined);
-        void offline();
-        if (this.presenceTimer) clearInterval(this.presenceTimer);
-        this.presenceTimer = setInterval(() => void offline(), 4 * 60_000);
-        this.presenceTimer.unref?.();
+        if (this.presenceTimer) clearTimeout(this.presenceTimer);
+        this.presenceTimer = undefined;
+        void sock.sendPresenceUpdate('unavailable').catch(() => undefined);
         void this.syncGroups(sock);
         setTimeout(() => void this.syncGroups(sock), 20_000);
         // Rehber adları uygulama durumu (app state) eşitlemesindeki contactAction kayıtlarından gelir; bazı hesaplarda
@@ -693,6 +692,10 @@ export class WhatsAppConnector extends BaseConnector {
     const DAY = 86_400_000;
     const GAP = 3 * DAY;
     const cutoff = Date.now() - 14 * DAY;
+    // Ban önleme: tek turda telefondan en çok GAP_BUDGET geçmiş isteği (eskiden 30 sohbet × 40 dilim = ~1.200'e çıkabiliyordu);
+    // bütçe biterse kalan boşluklar 30-45 dk sonra devam eder. İstekler arası 1,5-4 sn sapmalı bekleme.
+    const GAP_BUDGET = 60;
+    let requests = 0;
     let total = 0;
     let fails = 0;
     try {
@@ -718,7 +721,13 @@ export class WhatsAppConnector extends BaseConnector {
           if (boundary < 0) break;
           const anchor = msgs.slice(boundary).find((m) => !m.remoteId.startsWith('local-'));
           if (!anchor) break;
+          if (requests >= GAP_BUDGET) {
+            bus.log('info', `WhatsApp: boşluk doldurma bu tur için sınıra ulaştı (${GAP_BUDGET} istek, ${total} mesaj); kalanı daha sonra`);
+            this.scheduleGapFill((30 + Math.random() * 15) * 60_000);
+            return;
+          }
           if (round === 0) touched++;
+          requests++;
           const ok = await this.requestHistory(chat.remoteId, 200, anchor);
           if (!ok) {
             if (++fails >= 2) {
@@ -732,7 +741,7 @@ export class WhatsAppConnector extends BaseConnector {
           const got = this.store.listMessages(chat.id, 1500).length - msgs.length;
           total += Math.max(0, got);
           if (got <= 0) break;
-          await new Promise((r) => setTimeout(r, 800));
+          await new Promise((r) => setTimeout(r, 1500 + Math.random() * 2500));
         }
       }
       if (touched) bus.log('info', `WhatsApp: boşluk doldurma — ${touched} sohbet denetlendi, ${total} eski mesaj telefondan alındı`);
@@ -762,7 +771,7 @@ export class WhatsAppConnector extends BaseConnector {
     if (this.retryTimer) clearTimeout(this.retryTimer);
     if (this.gapTimer) clearTimeout(this.gapTimer);
     this.gapTimer = undefined;
-    if (this.presenceTimer) clearInterval(this.presenceTimer);
+    if (this.presenceTimer) clearTimeout(this.presenceTimer);
     this.presenceTimer = undefined;
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.refreshTimer = undefined;
@@ -785,11 +794,26 @@ export class WhatsAppConnector extends BaseConnector {
     this.setStatus('disconnected');
   }
 
+  /**
+   * Gönderim/okundu sonrası cihazın "çevrimdışı" durumunu tek sefer yinele (20-40 sn sonra; art arda işler tek bildirime iner).
+   * Düzenli zamanlayıcı yok: sinyal yalnız kullanıcı bir iş yaptığında gider.
+   */
+  private offlineSoon(): void {
+    if (this.presenceTimer) clearTimeout(this.presenceTimer);
+    const sock = this.sock;
+    this.presenceTimer = setTimeout(() => {
+      this.presenceTimer = undefined;
+      if (sock && sock === this.sock && sock.ws.isOpen) void sock.sendPresenceUpdate('unavailable').catch(() => undefined);
+    }, 20_000 + Math.random() * 20_000);
+    this.presenceTimer.unref?.();
+  }
+
   async sendText(remoteChatId: string, text: string): Promise<{ remoteId: string }> {
     if (!this.sock) throw new Error('WhatsApp bağlı değil');
     await this.gateSend();
     const sent = await this.sock.sendMessage(remoteChatId, { text });
     this.rememberSent(sent);
+    this.offlineSoon();
     const id = sent?.key.id ?? `local-${Date.now()}`;
     this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent' });
     return { remoteId: id };
@@ -812,6 +836,7 @@ export class WhatsAppConnector extends BaseConnector {
     await this.gateSend();
     const sent = await this.sock.sendMessage(remoteChatId, content);
     this.rememberSent(sent);
+    this.offlineSoon();
     const id = sent?.key?.id ?? `local-${Date.now()}`;
     if (sent?.key?.id && sent.message) {
       // sendMessage'ın döndürdüğü mesajda remoteJid bizim verdiğimiz jid; ingest LID→numara eşlemesini kendisi yapar
@@ -958,6 +983,7 @@ export class WhatsAppConnector extends BaseConnector {
       participant: remoteChatId.endsWith('@g.us') && m.senderId !== 'me' ? this.participantOf(remoteChatId, m.senderId) : undefined,
     }));
     await this.sock.readMessages(keys);
+    this.offlineSoon();
   }
 
   /**

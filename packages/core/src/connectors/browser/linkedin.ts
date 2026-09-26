@@ -463,8 +463,89 @@ export function _seedLinkedinForTests(conversationsUrl: string, me: string): voi
   olderPages = undefined;
 }
 
+/**
+ * Anlık akış (mautrix-linkedin modeli, ama kendi bağlantımızı AÇMADAN): LinkedIn web istemcisi açık sayfada
+ * `/realtime/connect` akışını zaten tutuyor (SSE biçimi, fetch/XHR/EventSource ile). Sayfaya eklenen betik bu akışın
+ * kopyasını okur; mesaj/sohbet konuları gelince Node'a 'event', kalp atışlarında (en çok 30 sn'de bir) 'alive' bildirir.
+ * Yazma alanı göstergesi (typingIndicatorsTopic) ve çevrimiçi durumu (presenceStatusTopic) olay sayılmaz.
+ * Akış hiç görülmezse yoklama eskisi gibi (60 sn) sürer; görülürse köprü aralığı 3 katına çıkarır.
+ */
+export const RT_EVENT_RE = /messagesTopic|conversationsTopic|messageReactionSummariesTopic|messageSeenReceiptsTopic|conversationDeletesTopic/;
+export function realtimeKind(chunk: string): 'event' | 'alive' {
+  return RT_EVENT_RE.test(chunk) ? 'event' : 'alive';
+}
+
+async function watchRealtime(page: Page, notify: (kind: 'alive' | 'event') => void): Promise<void> {
+  await page.exposeBinding('__miveloRt', (_src, kind: string) => notify(kind === 'event' ? 'event' : 'alive'));
+  await page.addInitScript((eventRe: string) => {
+    const w = window as unknown as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+    if (w.__miveloRtHooked) return;
+    w.__miveloRtHooked = true;
+    const re = new RegExp(eventRe);
+    const isRt = (u: unknown) => /\/realtime\/connect/.test(String(u ?? ''));
+    let aliveAt = 0;
+    const emit = (text: string) => {
+      try {
+        if (re.test(text)) w.__miveloRt?.('event');
+        else if (Date.now() - aliveAt > 30_000) {
+          aliveAt = Date.now();
+          w.__miveloRt?.('alive');
+        }
+      } catch {
+        /* bağlama yok */
+      }
+    };
+    // fetch: yanıtın kopyası okunur, istemciye özgün yanıt döner
+    const of = w.fetch;
+    if (typeof of === 'function') {
+      w.fetch = function (this: unknown, input: any, init?: unknown) { // eslint-disable-line @typescript-eslint/no-explicit-any
+        const p = of.call(this, input, init);
+        try {
+          const url = typeof input === 'string' ? input : input?.url ?? String(input);
+          if (isRt(url))
+            p.then((res: Response) => {
+              const reader = res.clone().body?.getReader();
+              if (!reader) return;
+              const dec = new TextDecoder();
+              const pump = (): Promise<void> => reader.read().then(({ done, value }) => (done ? undefined : (emit(dec.decode(value, { stream: true })), pump())));
+              pump().catch(() => undefined);
+            }).catch(() => undefined);
+        } catch {
+          /* yok say */
+        }
+        return p;
+      };
+    }
+    // XHR: akış progress olaylarıyla büyüyen responseText
+    const XO = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (this: XMLHttpRequest, ...args: unknown[]) {
+      if (isRt(args[1])) {
+        let seen = 0;
+        this.addEventListener('progress', () => {
+          const t = this.responseText ?? '';
+          if (t.length > seen) emit(t.slice(seen));
+          seen = t.length;
+        });
+      }
+      return (XO as (...a: unknown[]) => void).apply(this, args);
+    } as typeof XO;
+    // EventSource
+    const ES = w.EventSource;
+    if (typeof ES === 'function') {
+      const Wrapped = function (url: unknown, cfg?: unknown) {
+        const es = new ES(url, cfg);
+        if (isRt(url)) es.addEventListener('message', (e: MessageEvent) => emit(String(e.data ?? '')));
+        return es;
+      } as unknown as Record<string, unknown>;
+      Wrapped.prototype = ES.prototype;
+      w.EventSource = Wrapped;
+    }
+  }, RT_EVENT_RE.source);
+}
+
 export const linkedin: Strategy = {
   home: HOME,
+  watch: watchRealtime,
   loginHint: 'Açılan pencerede LinkedIn hesabına giriş yap',
   // API tabanlı: mesaj sorguları sayfa gezdirmeden fetch ile yapılır, paralel çağrılabilir
   parallel: true,

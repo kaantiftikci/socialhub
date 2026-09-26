@@ -56,6 +56,33 @@ export default function App() {
   useEffect(() => {
     if (settingsOpen) api.lan().then(setLanState).catch(() => setLanState(null));
   }, [settingsOpen]);
+  // Etkinlik sinyali: pencere açık ve odaktayken çekirdek bazı kanalları (Instagram) sık, boştayken seyrek yoklar.
+  // Odak/görünürlük değişince hemen, odaktayken dakikada bir bildirilir; değişmeyen "boşta" durumu yinelenmez.
+  useEffect(() => {
+    let last: boolean | null = null;
+    let lastSent = 0;
+    const report = () =>
+      void windowFocused()
+        .catch(() => true)
+        .then((f) => {
+          const active = f && document.visibilityState === 'visible';
+          if (active === last && (!active || Date.now() - lastSent < 55_000)) return;
+          last = active;
+          lastSent = Date.now();
+          void api.activity(active);
+        });
+    report();
+    const t = setInterval(report, 60_000);
+    window.addEventListener('focus', report);
+    window.addEventListener('blur', report);
+    document.addEventListener('visibilitychange', report);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener('focus', report);
+      window.removeEventListener('blur', report);
+      document.removeEventListener('visibilitychange', report);
+    };
+  }, []);
   // Dar ekran (telefon): sol menü gizli, liste ↔ sohbet tek sütun
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 820);
   const [navOpen, setNavOpen] = useState(false);

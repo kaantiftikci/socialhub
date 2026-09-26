@@ -33,6 +33,8 @@ const enc = encodeURIComponent;
 
 const liveApi = {
   health: () => call<{ ok: boolean; ai: boolean; stats: { unread: number; chats: number }; os?: CoreOs }>('GET', '/health'),
+  /** Pencere açık ve odakta mı (uyarlamalı yoklama için; ağ hatası sessizce yutulur) */
+  activity: (active: boolean) => call('POST', '/activity', { active }).catch(() => undefined),
   accounts: () => call<Account[]>('GET', '/accounts'),
   addAccount: (platform: Platform, token?: string) => call<Account>('POST', '/accounts', { platform, token }),
   removeAccount: (id: string) => call('DELETE', `/accounts/${enc(id)}`),
