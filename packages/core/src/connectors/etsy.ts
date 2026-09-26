@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import { ordersFlag, BaseConnector, type StartOptions } from './base.js';
-import { PollTimer, marketDelay } from './poll-timer.js';
+import { PollTimer, marketDelay, retryAfterSec } from './poll-timer.js';
 import { BrowserConnector } from './browser/bridge.js';
 import { etsy as etsyStrategy } from './browser/etsy.js';
 import { OAUTH_CALLBACK, waitOAuth, withAuthWindow } from './mail.js';
@@ -231,6 +231,7 @@ export class EtsyConnector extends BaseConnector {
       }
       throw new Error('Etsy yetkisi düştü (401) — kanala sağ tıklayıp "Yeniden bağlan" de');
     }
+    if (r.status === 429) this.timer?.backoff(retryAfterSec(r.headers.get('retry-after')));
     if (r.status === 429) throw new Error(`Etsy istek limiti; ${r.headers.get('retry-after') ?? '60'} sn sonra`);
     if (!r.ok) throw new Error(`Etsy ${r.status} ${p}: ${text.slice(0, 160)}`);
     return text ? (JSON.parse(text) as J) : {};

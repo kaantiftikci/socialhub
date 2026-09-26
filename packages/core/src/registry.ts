@@ -138,7 +138,7 @@ export class Registry {
         c = new BrowserConnector(account, this.store, linkedin, 60_000, { rtSlowdown: 5 }); // anlık akış canlıyken yedek 5 dk
         break;
       case 'instagram':
-        c = new BrowserConnector(account, this.store, instagram, 30_000, { idlePollMs: 120_000, keepOpen: 'always', rtSlowdown: 10 }); // sayfa açık + soket dinleme; soket yoksa odakta 30 sn / boşta 2 dk, canlıyken yedek 5 dk
+        c = new BrowserConnector(account, this.store, instagram, 30_000, { idlePollMs: 120_000, keepOpen: 'always', rtSlowdown: 10, softReloadHours: [12, 20] }); // sayfa açık + soket dinleme; soket yoksa odakta 30 sn / boşta 2 dk, canlıyken yedek 5 dk
         break;
       case 'x':
         c = new BrowserConnector(account, this.store, x, 60_000, { rtSlowdown: 3 }); // soket canlıyken yedek 3 dk

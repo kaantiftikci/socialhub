@@ -101,3 +101,19 @@ test('PollTimer: sapmalı sıralı turlar; stop sonrası yeniden planlamaz; paza
   assert.ok(a >= 21_000 && a <= 39_000, String(a));
   assert.ok(i >= 42_000 && i <= 78_000, String(i));
 });
+
+test('429: Retry-After/X-RateLimit-Reset çözümleme ve PollTimer.backoff turu erteler', async () => {
+  const { PollTimer, retryAfterSec } = await import('../src/connectors/poll-timer.js');
+  const now = 1_800_000_000_000;
+  assert.equal(retryAfterSec('120', 60, now), 120);
+  assert.equal(retryAfterSec(null, 60, now), 60);
+  assert.equal(retryAfterSec(String(now / 1000 + 90), 60, now), 90);
+  assert.equal(retryAfterSec(new Date(now + 30_000).toUTCString(), 60, now), 30);
+  assert.equal(retryAfterSec('bozuk', 45, now), 45);
+  let n = 0;
+  const t = new PollTimer(async () => void n++, () => 5).start();
+  t.backoff(30); // ≥30 sn ertelenir
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(n, 0, 'bekleme sürerken tur yok');
+  t.stop();
+});

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ordersFlag, BaseConnector, type StartOptions } from './base.js';
-import { PollTimer, marketDelay } from './poll-timer.js';
+import { PollTimer, marketDelay, retryAfterSec } from './poll-timer.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
 import type { Participant } from '../model.js';
@@ -151,6 +151,7 @@ export class TrendyolConnector extends BaseConnector {
       const r = await fetch(url, { method, headers: this.headers(body), body: body ? JSON.stringify(body) : undefined });
       const text = await r.text();
       if (r.status === 401 || r.status === 403) throw new TrendyolAuthError('Trendyol kimlik bilgileri reddedildi');
+      if (r.status === 429) this.timer?.backoff(retryAfterSec(r.headers.get('retry-after')));
       if (r.status === 429) throw new TrendyolRateLimit(`Trendyol istek limiti (429); ${r.headers.get('retry-after') ?? '60'} sn sonra`);
       if ((r.status === 404 || r.status === 410) && attempt < GATEWAYS.length - 1) {
         gi = (gi + 1) % GATEWAYS.length;

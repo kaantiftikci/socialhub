@@ -25,14 +25,48 @@ export class PollTimer {
     this.t = undefined;
   }
 
+  private pauseUntil = 0;
+  private hits = 0;
+  private hitAt = 0;
+
+  /**
+   * 429 geldi: sunucunun istediği süre (Retry-After / X-RateLimit-Reset) kadar, art arda gelirse katlanarak (≤30 dk)
+   * bekle. Bekleme bitince normal aralığa dönülür; 10 dk sorunsuz geçerse sayaç sıfırlanır.
+   */
+  backoff(sec: number): void {
+    const now = Date.now();
+    this.hits = now - this.hitAt < 10 * 60_000 ? this.hits + 1 : 1;
+    this.hitAt = now;
+    const ms = Math.min(30 * 60_000, Math.max(sec, 30) * 1000 * 2 ** (this.hits - 1)) * (1 + Math.random() * 0.3);
+    this.pauseUntil = Math.max(this.pauseUntil, now + ms);
+    if (this.on) {
+      if (this.t) clearTimeout(this.t);
+      this.next();
+    }
+  }
+
   private next(): void {
     if (!this.on) return;
+    const wait = Math.max(this.delay(), this.pauseUntil - Date.now());
     this.t = setTimeout(async () => {
       await this.fn().catch(() => undefined);
       this.next();
-    }, Math.round(this.delay()));
+    }, Math.round(wait));
     this.t.unref?.();
   }
+}
+
+/** Retry-After / X-RateLimit-Reset başlığından saniye (Unix zamanı ya da HTTP tarihi de olabilir); yoksa def */
+export function retryAfterSec(v: string | null | undefined, def = 60, now = Date.now()): number {
+  if (!v) return def;
+  const n = Number(v);
+  if (Number.isFinite(n)) {
+    if (n > 1e12) return Math.max(1, Math.round((n - now) / 1000)); // ms zaman damgası
+    if (n > 1e9) return Math.max(1, Math.round(n - now / 1000)); // sn zaman damgası
+    return Math.max(1, n);
+  }
+  const d = Date.parse(v);
+  return Number.isFinite(d) ? Math.max(1, Math.round((d - now) / 1000)) : def;
 }
 
 /**

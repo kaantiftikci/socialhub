@@ -138,6 +138,9 @@ Dil: arayüz ve yorumlar Türkçe.
   LinkedIn ×5, Messenger ×5, X ×3. X tam yeniden yükleme 20–30 dk. LinkedIn `tabBadgeUpdateTopic` yalnız MESSAGING ise olay.
 - Pazaryerleri `PollTimer` + `marketDelay` (poll-timer.ts): Trendyol/Hepsiburada/Shopify odakta 30 sn / boşta 60 sn, n11 45/90, Etsy 60/90,
   Amazon 120 sn (getOrders 1/dk). Belgeli sınırlar çok üstte (Trendyol soru/sipariş 1000/dk, HB OMS ~240/dk); webhook'lar genel HTTPS ister.
+- 429'da `PollTimer.backoff(retryAfterSec(Retry-After|X-RateLimit-Reset))`: sunucunun istediği süre, art arda gelirse katlanarak ≤30 dk.
+  Açık tutulan sayfalar `softReloadHours` (varsayılan 6–10 sa, Instagram 12–20) aralığında bir kez yenilenir (SPA bellek sızıntısı).
+  LinkedIn: akışın ClientConnection kimliği değişince (yeniden bağlandı) eşitleme olayı.
 - Amazon Seller Central / Etsy Mesajları / Shopify Inbox tarayıcı köprüleri varsayılan KAPALI (yapılandırmada messaging/inbox:true ile açılır).
 - Bağlan: resmi olmayan kanallarda "resmi değil" etiketi + Sosyal Medya altında açıklama (`UNOFFICIAL`, Connect.tsx).
 

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ordersFlag, BaseConnector, type StartOptions } from './base.js';
-import { PollTimer, marketDelay } from './poll-timer.js';
+import { PollTimer, marketDelay, retryAfterSec } from './poll-timer.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
 import type { Attachment, Participant } from '../model.js';
@@ -168,6 +168,7 @@ export class HepsiburadaConnector extends BaseConnector {
     const r = await fetch(url, { method, headers, body });
     const text = await r.text();
     if (r.status === 401 || r.status === 403) throw new HbError(r.status, 'Hepsiburada kimlik bilgileri reddedildi');
+    if (r.status === 429) this.timer?.backoff(retryAfterSec(r.headers.get('x-ratelimit-reset') ?? r.headers.get('retry-after')));
     if (r.status === 429) throw new HbError(429, `Hepsiburada istek limiti; ${r.headers.get('x-ratelimit-reset') ?? r.headers.get('retry-after') ?? '60'} sn sonra`);
     if (!r.ok) throw new HbError(r.status, `Hepsiburada ${r.status} ${new URL(url).pathname}: ${text.slice(0, 160)}`);
     let data: J | J[] = {};

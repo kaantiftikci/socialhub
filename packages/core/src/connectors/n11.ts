@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ordersFlag, BaseConnector, type StartOptions } from './base.js';
-import { PollTimer, marketDelay } from './poll-timer.js';
+import { PollTimer, marketDelay, retryAfterSec } from './poll-timer.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
 import type { Participant } from '../model.js';
@@ -182,6 +182,7 @@ export class N11Connector extends BaseConnector {
     const r = await fetch(url, { method: 'GET', headers: { appkey: c.appKey, appsecret: c.appSecret, accept: 'application/json' } });
     const text = await r.text();
     if (r.status === 401 || r.status === 403) throw new N11AuthError('n11 kimlik bilgileri reddedildi');
+    if (r.status === 429) this.timer?.backoff(retryAfterSec(r.headers.get('retry-after')));
     if (r.status === 429) throw new N11RateLimit(`n11 istek limiti (429); ${r.headers.get('retry-after') ?? '60'} sn sonra`);
     if (r.status === 400) throw new N11BadRequest(`n11 400: ${text.slice(0, 160)}`);
     if (!r.ok) throw new Error(`n11 ${r.status} shipmentPackages: ${text.slice(0, 160)}`);
@@ -205,6 +206,7 @@ export class N11Connector extends BaseConnector {
     const r = await fetch(N11_SOAP_URL, { method: 'POST', headers: { 'content-type': 'text/xml; charset=utf-8', soapaction: '""', accept: 'text/xml' }, body: envelope });
     const text = await r.text();
     if (r.status === 401 || r.status === 403) throw new N11AuthError('n11 kimlik bilgileri reddedildi');
+    if (r.status === 429) this.timer?.backoff(retryAfterSec(r.headers.get('retry-after')));
     if (r.status === 429) throw new N11RateLimit(`n11 istek limiti (429); ${r.headers.get('retry-after') ?? '60'} sn sonra`);
     const fault = xmlText(text, 'faultstring');
     if (fault) throw this.soapError(op, fault, xmlText(text, 'faultcode'));

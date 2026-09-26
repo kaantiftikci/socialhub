@@ -162,6 +162,7 @@ export class ShopifyConnector extends BaseConnector {
         await new Promise((res) => setTimeout(res, wait * 1000));
         return this.api(p, true);
       }
+      this.timer?.backoff(wait);
       throw new Error(`Shopify istek limiti; ${wait} sn sonra yeniden dene`);
     }
     if (!r.ok) throw new Error(`Shopify ${r.status} ${p.replace(/^https?:\/\/[^/]+/, '')}: ${text.slice(0, 160)}`);

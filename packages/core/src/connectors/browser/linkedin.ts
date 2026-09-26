@@ -486,9 +486,14 @@ async function watchRealtime(page: Page, notify: (kind: 'alive' | 'event') => vo
     const re = new RegExp(eventRe);
     const isRt = (u: unknown) => /\/realtime\/connect/.test(String(u ?? ''));
     let aliveAt = 0;
+    // ClientConnection kimliği değişince (akış koptu, yeniden bağlandı) arada olay kaçmış olabilir: mautrix-linkedin gibi eşitle
+    let connId = '';
     const emit = (text: string) => {
       try {
-        if (re.test(text) || (/tabBadgeUpdateTopic/.test(text) && /MESSAGING/.test(text))) w.__miveloRt?.('event');
+        const cid = /realtimefrontend\.ClientConnection"\s*:\s*\{[^}]*"id"\s*:\s*"([^"]+)"/.exec(text)?.[1];
+        const reconnected = !!cid && !!connId && cid !== connId;
+        if (cid) connId = cid;
+        if (reconnected || re.test(text) || (/tabBadgeUpdateTopic/.test(text) && /MESSAGING/.test(text))) w.__miveloRt?.('event');
         else if (Date.now() - aliveAt > 30_000) {
           aliveAt = Date.now();
           w.__miveloRt?.('alive');

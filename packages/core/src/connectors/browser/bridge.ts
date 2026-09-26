@@ -208,6 +208,11 @@ export interface BridgeOptions {
    * 'event' hiç görülmediyse seyrekleşme yok: dinleyici yanlış çerçeveye bakıyorsa mesajlar gecikmesin.
    */
   rtSlowdown?: number;
+  /**
+   * Uzun süre açık kalan sayfa (Facebook/X/Instagram SPA'ları bellek sızdırır) bu aralıkta rastgele bir anda yumuşak yenilenir
+   * (saat; varsayılan 6–10). Dinleyiciler (init betikleri, page.on) yenilemeden sonra da geçerli. Instagram 12–20 (mautrix-meta 20 sa).
+   */
+  softReloadHours?: [number, number];
 }
 
 export class BrowserConnector extends BaseConnector {
@@ -251,6 +256,24 @@ export class BrowserConnector extends BaseConnector {
   private pendingPoll = false;
   private lastPollAt = 0;
   private offActive?: () => void;
+  /** Sıradaki yumuşak yenileme zamanı (0: sayfa yeni açıldı, hesaplanacak) */
+  private nextSoftReload = 0;
+
+  /** Açık tutulan sayfayı saatler sonra bir kez yenile (bellek sızıntısı; soketler sayfanın kendisince yeniden kurulur) */
+  private async maybeSoftReload(): Promise<void> {
+    const page = this.page;
+    if (!page || page.isClosed() || this.account.status !== 'connected' || this.stopping) return;
+    const [a, b] = this.opts.softReloadHours ?? [6, 10];
+    const due = () => Date.now() + (a + Math.random() * (b - a)) * 3_600_000;
+    if (!this.nextSoftReload) {
+      this.nextSoftReload = due();
+      return;
+    }
+    if (Date.now() < this.nextSoftReload) return;
+    this.nextSoftReload = due();
+    bus.log('info', `${this.account.platform}: açık sayfa yumuşak yenileniyor (uzun süreli bellek birikimi)`);
+    await this.serial(() => page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 })).catch(() => undefined);
+  }
 
   /** Anlık akıştan haber: 'event' ise yakında yokla (en az 10 sn arayla), 'alive' yalnız akışı canlı sayar */
   private onRealtime(kind: 'alive' | 'event'): void {
@@ -496,6 +519,7 @@ export class BrowserConnector extends BaseConnector {
     }
     const ctx = this.ctx;
     this.page = ctx.pages()[0] ?? (await ctx.newPage());
+    this.nextSoftReload = 0;
     const onRt = (k: 'alive' | 'event') => this.onRealtime(k);
     const watching = this.strategy.watch ? this.strategy.watch(this.page, onRt) : this.strategy.watchSelector ? watchDom(this.page, this.strategy.watchSelector, onRt) : undefined;
     await watching?.catch((e) => bus.log('warn', `${this.account.platform}: anlık izleme kurulamadı: ${(e as Error).message}`));
@@ -808,6 +832,7 @@ export class BrowserConnector extends BaseConnector {
       }
       // Boşta boşaltma: sekme kapatmak/about:blank render sürecini bırakmıyor (service worker, site izolasyonu); tarayıcıyı
       // tamamen kapat, sonraki yoklama/işlem yeniden açar (kalıcı profil oturumu korur; açılış ~3-5 sn)
+      await this.maybeSoftReload();
       const keep = this.wantPage();
       if (this.strategy.unloadWhenIdle && !keep && this.ctx && this.account.status === 'connected' && !this.stopping) {
         await this.serial(() => this.closeCtx()).catch(() => undefined);
