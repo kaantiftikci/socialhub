@@ -44,7 +44,7 @@ export function parseShopifyConfig(config: string): { handle: string; host: stri
     .replace(/^https?:\/\//, '')
     .replace(/\/.*$/, '');
   const handle = raw.replace(/\.myshopify\.com$/i, '').toLowerCase();
-  return { handle, host: handle ? `${handle}.myshopify.com` : '', token: String(cfg.accessToken ?? '').trim(), inbox: cfg.inbox !== false };
+  return { handle, host: handle ? `${handle}.myshopify.com` : '', token: String(cfg.accessToken ?? '').trim(), inbox: cfg.inbox === true }; // Inbox tarayıcı köprüsü varsayılan kapalı (ban önleme); açıkça true ile açılır
 }
 
 /** Belirteç reddi (401/403): yoklama durdurulur, durum error */

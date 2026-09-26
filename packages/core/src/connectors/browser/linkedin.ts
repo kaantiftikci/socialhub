@@ -17,7 +17,26 @@ type J = Record<string, any>; // eslint-disable-line @typescript-eslint/no-expli
 
 const HOME = 'https://www.linkedin.com/messaging/';
 
+/**
+ * Ban önleme (Unipile modeli): ardışık Voyager istekleri arasında 400–1500 ms rastgele aralık. Patlamalı istek dizisi
+ * (ör. 6 sayfa + 8 sohbet art arda) LinkedIn'in otomasyon algısını tetikler. Birim testlerinde (node --test) atlanır.
+ */
+let lastCallAt = 0;
+let paceChain: Promise<void> = Promise.resolve();
+function pace(): Promise<void> {
+  if (process.env.NODE_TEST_CONTEXT) return Promise.resolve();
+  // eşzamanlı çağrılar (köprü 2'li paralel) sıraya girer: her biri bir öncekinden sonra kendi aralığını bekler
+  const next = paceChain.then(async () => {
+    const wait = lastCallAt + 400 + Math.random() * 1100 - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    lastCallAt = Date.now();
+  });
+  paceChain = next.catch(() => undefined);
+  return next;
+}
+
 async function voyager(page: Page, cookies: Record<string, string>, url: string, init?: { method?: string; body?: unknown; graphql?: boolean }): Promise<J> {
+  await pace();
   const csrf = (cookies.JSESSIONID ?? '').replace(/"/g, '');
   return page.evaluate(
     async ({ url, csrf, init, extra }) => {
@@ -58,8 +77,8 @@ const captured: { conversations?: string; conversationsPage?: string; messages?:
 const CONV_PAGE_QUERY_ID = 'messengerConversations.9501074288a12f3ae9e3c7ea243bccbf';
 /** İlk sayfadan sonra en çok bu kadar sayfa (20'şer sohbet) okunur */
 const MAX_CONV_PAGES = 5;
-/** Eski sohbet sayfaları seyrek değişir (yeni etkinlik ilk sayfaya çıkar): 30 dk önbellek — gereksiz istek (ve oturum riski) olmasın */
-const PAGE_TTL = 30 * 60_000;
+/** Eski sohbet sayfaları seyrek değişir (yeni etkinlik ilk sayfaya çıkar): 3 sa önbellek — gereksiz istek (ve oturum riski) olmasın */
+const PAGE_TTL = 3 * 60 * 60_000;
 let olderPages: { at: number; els: J[] } | undefined;
 /** Yakalanamazsa kullanılacak bilinen "daha eski" sorgu kimliği (istemci sürümüyle değişebilir) */
 const OLDER_QUERY_ID = 'messengerMessages.d8ea76885a52fd5dc5c317078ab7c977';

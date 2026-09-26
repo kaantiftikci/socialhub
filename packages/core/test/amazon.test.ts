@@ -76,7 +76,8 @@ test('parseAmazonConfig: varsayılan Türkiye pazar yeri, bölge pazar yerinden 
   assert.equal(p.messaging, false);
   assert.equal(parseAmazonConfig(JSON.stringify({ orders: true, ...CFG, marketplaceId: 'ATVPDKIKX0DER' })).region, 'na');
   assert.equal(parseAmazonConfig(JSON.stringify({ orders: true, ...CFG, marketplaceId: 'A1VC38T7YXB528', region: 'eu' })).region, 'eu', 'açık bölge baskın');
-  assert.equal(parseAmazonConfig('{}').messaging, true);
+  assert.equal(parseAmazonConfig('{}').messaging, false); // köprü varsayılan kapalı (Amazon ajan politikası)
+  assert.equal(parseAmazonConfig('{"messaging":true}').messaging, true);
   assert.equal(parseAmazonConfig('bozuk').clientId, '');
   assert.equal(sellerCentralHost('A1PA6795UKMFR9'), 'sellercentral-europe.amazon.com');
   assert.equal(sellerCentralHost('bilinmiyor'), 'sellercentral.amazon.com.tr');

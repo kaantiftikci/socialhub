@@ -6,7 +6,7 @@ import QRCode from 'qrcode';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as Baileys from '@whiskeysockets/baileys';
-import type { WASocket, WAMessage, Contact, proto } from '@whiskeysockets/baileys';
+import type { WASocket, WAMessage, Contact, proto, GroupMetadata } from '@whiskeysockets/baileys';
 import { BaseConnector, type OutFile, type StartOptions } from './base.js';
 import { bus } from '../bus.js';
 import { FFMPEG_HINT } from '../platform.js';
@@ -28,6 +28,34 @@ const execFileP = promisify(execFile);
  * bu Mac bir bağlı cihaz olur. Mesajlar uçtan uca şifreli gelir, burada çözülür.
  */
 export class WhatsAppConnector extends BaseConnector {
+  /**
+   * Ban önleme (Baileys README): grup gönderiminde her seferinde katılımcı listesi sorgulanmasın → önbellek.
+   * Aksi halde hız sınırı ve olası ban. syncGroups / groups.upsert / groupMetadata ile dolar; üye değişince güncellenir.
+   */
+  private groupMetaCache = new Map<string, GroupMetadata>();
+  /** Yeniden deneme (retry) isteklerinde Baileys gönderdiğimiz mesajın içeriğini ister (getMessage); son 500 gönderim */
+  private sentCache = new Map<string, proto.IMessage>();
+  /** Gönderim sırası: ardışık gönderimler arasında 0,8–2 sn; 1 dk'da en çok 20 (toplu/otomatik mesaj deseni oluşmasın) */
+  private sendChain: Promise<void> = Promise.resolve();
+  private sentAt: number[] = [];
+  private gateSend(): Promise<void> {
+    const next = this.sendChain.then(async () => {
+      const now = Date.now();
+      this.sentAt = this.sentAt.filter((t) => now - t < 60_000);
+      if (this.sentAt.length >= 20) await new Promise((r) => setTimeout(r, 60_000 - (now - this.sentAt[0]) + 250));
+      const last = this.sentAt[this.sentAt.length - 1] ?? 0;
+      const wait = last + 800 + Math.random() * 1200 - Date.now();
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      this.sentAt.push(Date.now());
+    });
+    this.sendChain = next.catch(() => undefined);
+    return next;
+  }
+  private rememberSent(sent: WAMessage | undefined): void {
+    if (!sent?.key?.id || !sent.message) return;
+    this.sentCache.set(sent.key.id, sent.message);
+    if (this.sentCache.size > 500) this.sentCache.delete(this.sentCache.keys().next().value as string);
+  }
   private sock?: WASocket;
   private stopping = false;
   private nameCache = new Map<string, string>();
@@ -107,6 +135,8 @@ export class WhatsAppConnector extends BaseConnector {
       shouldSyncHistoryMessage: () => history,
       markOnlineOnConnect: false,
       generateHighQualityLinkPreview: false,
+      cachedGroupMetadata: async (jid) => this.groupMetaCache.get(jid),
+      getMessage: async (key) => (key.id ? this.sentCache.get(key.id) : undefined),
     });
     sock.ev.on('creds.update', saveCreds);
     return { sock, state };
@@ -412,7 +442,11 @@ export class WhatsAppConnector extends BaseConnector {
       this.scheduleRefresh();
     });
     sock.ev.on('groups.upsert', (gs) => {
-      for (const g of gs) this.applyGroup(g.id, g.subject, g.participants, g.addressingMode);
+      for (const g of gs) (this.groupMetaCache.set(g.id, g), this.applyGroup(g.id, g.subject, g.participants, g.addressingMode));
+    });
+    // üyelik değişince önbellekteki grup bilgisi bayatlar: sil, sıradaki gönderimde Baileys taze bilgiyi kendisi çeker
+    sock.ev.on('group-participants.update', ({ id }) => {
+      this.groupMetaCache.delete(id);
     });
     sock.ev.on('groups.update', (gs) => {
       for (const g of gs) if (g.id && g.subject) this.applyGroup(g.id, g.subject, undefined);
@@ -753,7 +787,9 @@ export class WhatsAppConnector extends BaseConnector {
 
   async sendText(remoteChatId: string, text: string): Promise<{ remoteId: string }> {
     if (!this.sock) throw new Error('WhatsApp bağlı değil');
+    await this.gateSend();
     const sent = await this.sock.sendMessage(remoteChatId, { text });
+    this.rememberSent(sent);
     const id = sent?.key.id ?? `local-${Date.now()}`;
     this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent' });
     return { remoteId: id };
@@ -773,7 +809,9 @@ export class WhatsAppConnector extends BaseConnector {
       if (ogg) file = { ...file, path: ogg, mime: 'audio/ogg; codecs=opus', size: fs.statSync(ogg).size };
     }
     const content = waMediaContent(file, caption);
+    await this.gateSend();
     const sent = await this.sock.sendMessage(remoteChatId, content);
+    this.rememberSent(sent);
     const id = sent?.key?.id ?? `local-${Date.now()}`;
     if (sent?.key?.id && sent.message) {
       // sendMessage'ın döndürdüğü mesajda remoteJid bizim verdiğimiz jid; ingest LID→numara eşlemesini kendisi yapar
@@ -833,6 +871,7 @@ export class WhatsAppConnector extends BaseConnector {
       const all = await sock.groupFetchAllParticipating();
       let n = 0;
       for (const g of Object.values(all)) {
+        this.groupMetaCache.set(g.id, g);
         this.applyGroup(g.id, g.subject, g.participants, g.addressingMode);
         n++;
       }
@@ -851,7 +890,7 @@ export class WhatsAppConnector extends BaseConnector {
     setTimeout(() => {
       sock
         .groupMetadata(jid)
-        .then((g) => this.applyGroup(g.id, g.subject, g.participants, g.addressingMode))
+        .then((g) => (this.groupMetaCache.set(g.id, g), this.applyGroup(g.id, g.subject, g.participants, g.addressingMode)))
         .catch((e) => bus.log('warn', `WhatsApp grup bilgisi alınamadı (${jid}): ${(e as Error).message}`))
         .finally(() => this.groupPending.delete(jid));
     }, 300 * this.groupPending.size);

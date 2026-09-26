@@ -107,6 +107,13 @@ Dil: arayüz ve yorumlar Türkçe.
 - Slack: `_x_id` web istemcisinden öğrenilen önekle (`noversion-…`), uygulama adı gönderilmez. xoxp connector'ı: liste 10 dk önbellek,
   tur başına ≤20 `conversations.history` (DM/yakın etkin + dönüşümlü), ~60 sn.
 - Info.plist: NSAppleEventsUsageDescription + NSContactsUsageDescription (iMessage/Kişiler TCC istemi).
+- X: /i/chat her yoklamada yeniden YÜKLENMEZ (`freshSnapshot`): görünen liste imzası değişmediyse yalnız OPFS yedeği okunur; tam
+  yükleme liste değişince ya da 6–9 dk'da bir. LinkedIn: tüm Voyager istekleri `pace()` ile sıralı, aralarında 400–1500 ms; eski sayfa önbelleği 3 sa.
+- WhatsApp: `cachedGroupMetadata` + `getMessage` (gönderilen son 500) + `gateSend` (0,8–2 sn aralık, dakikada ≤20).
+- `send-guard.ts` (server /send ve /send-file): aynı metin (≥16 kr.) 30 dk'da >5 farklı sohbete → 429; günlük sınır kanal başına
+  (LinkedIn/X 100, Instagram/Messenger 150, WhatsApp/Telegram 500…); e-posta/pazaryeri muaf.
+- Amazon Seller Central / Etsy Mesajları / Shopify Inbox tarayıcı köprüleri varsayılan KAPALI (yapılandırmada messaging/inbox:true ile açılır).
+- Bağlan: resmi olmayan kanallarda "resmi değil" etiketi + Sosyal Medya altında açıklama (`UNOFFICIAL`, Connect.tsx).
 
 ## Sunucu/arayüz sözleşmesi
 - CORS: localhost/127.0.0.1/tauri.localhost/tauri://localhost ve WKWebView'ın `null` kaynağı (paketli uygulama!).

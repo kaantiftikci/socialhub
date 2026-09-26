@@ -398,7 +398,43 @@ async function syncAndSnapshot(page: Page): Promise<boolean> {
 }
 async function ensureSnapshot(page: Page): Promise<boolean> {
   if (snap && snap.me === meId && Date.now() - snap.at < 5 * 60e3) return true;
-  return syncAndSnapshot(page);
+  return freshSnapshot(page);
+}
+
+/**
+ * Ban önleme: /i/chat'i her yoklamada baştan yüklemek (günde binlerce tam sayfa yükü) insan dışı bir desen.
+ * Sayfa açık kalır; XChat istemcisi yeni mesajı kendisi alır ve listeyi günceller. Tam yeniden yükleme yalnızca
+ * (a) görünen sohbet listesi değiştiyse, (b) 6–9 dk'lık (rastgele) süre dolduysa ya da (c) sayfa /i/chat'te değilse.
+ * Aradaki turlarda yalnız yerel yedek okunur (ağ isteği yok).
+ */
+let nextReloadAt = 0;
+let lastListSig = '';
+async function listSignature(page: Page): Promise<string> {
+  if (!page.url().startsWith(CHAT)) return '';
+  return page
+    .evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLElement>('[data-testid^="dm-conversation-item-"]'))
+        .slice(0, 25)
+        .map((el) => {
+          // göreli zaman ("5 dk", "2h", "şimdi") her dakika değişir: imzaya katılmaz
+          const lines = el.innerText.split('\n').map((t) => t.trim()).filter((t) => t && !/^(\d+\s*(sn|dk|sa|g|ha|ay|y|s|m|h|d|w|mo)|şimdi|now)$/i.test(t));
+          return `${el.getAttribute('data-testid')}|${lines.join(' ').slice(0, 200)}|${el.getAttribute('aria-description') ?? ''}`;
+        })
+        .join('\n'),
+    )
+    .catch(() => '');
+}
+async function freshSnapshot(page: Page): Promise<boolean> {
+  const sig = await listSignature(page);
+  const due = !snap || snap.me !== meId || !sig || sig !== lastListSig || Date.now() >= nextReloadAt;
+  if (!due) {
+    const ok = await readSnapshot(page); // sayfanın yazdığı yedek değiştiyse aktarılır, değilse eldeki geçerli
+    if (ok) return true;
+  }
+  const ok = await syncAndSnapshot(page);
+  nextReloadAt = Date.now() + (6 + Math.random() * 3) * 60e3;
+  lastListSig = await listSignature(page);
+  return ok;
 }
 
 /** dm_user.contents (CBOR {user:{…}}) → ad/kullanıcı adı/avatar haritaları */
@@ -1014,7 +1050,7 @@ export const x: Strategy & { fetchMedia(page: Page, cookies: Record<string, stri
     // 2) Yerel XChat veritabanı: güncel liste, gerçek zaman ve okunmamış sayısı (aynı sohbette DB kazanır)
     let fromDb = false;
     try {
-      if (await syncAndSnapshot(page)) {
+      if (await freshSnapshot(page)) {
         await loadReadMarks(page);
         const list = dbThreads(snap!.db); // şema uyuşmazlığında burada patlar → DOM yedeğine düş
         // görünen sohbetlerde sayfanın canlı okunmamış işareti yedekten yetkili (telefonda okunan sohbet yedekte okunmamış kalıyor)

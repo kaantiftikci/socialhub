@@ -25,7 +25,8 @@ import type { Store } from '../store.js';
  *     Şablonlu gönderim `action(remoteChatId, { kind: 'message', type: '<şablon>', text })` ile.
  *
  * Yapılandırma (token dosyası JSON): { clientId, clientSecret, refreshToken, marketplaceId?: 'A33AVAJ2PDY3EV' (Türkiye),
- *   region?: 'eu'|'na'|'fe' (varsayılan pazar yerinden türetilir), messaging?: boolean (köprü; varsayılan true) }
+ *   region?: 'eu'|'na'|'fe' (varsayılan pazar yerinden türetilir), messaging?: boolean (Seller Central köprüsü; varsayılan KAPALI —
+ *   Amazon'un 4 Mart 2026 ajan/otomasyon politikası; açıkça true verilirse başlar) }
  * Client ID/Secret: Seller Central → Uygulamalar ve Hizmetler → Geliştirici Merkezi (özel uygulama); Refresh Token: uygulamayı
  * yetkilendirince ("Self authorization").
  */
@@ -67,7 +68,7 @@ export function parseAmazonConfig(config: string): { clientId: string; clientSec
     refreshToken: String(cfg.refreshToken ?? '').trim(),
     marketplace,
     region,
-    messaging: cfg.messaging !== false,
+    messaging: cfg.messaging === true,
   };
 }
 

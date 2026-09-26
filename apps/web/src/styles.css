@@ -1066,3 +1066,6 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .op-msg { flex-direction: row; align-items: center; gap: 12px; font-size: 13px; color: var(--text2); line-height: 1.5; background: var(--bg2); box-shadow: none; }
 .op-msg span { flex: 1; }
 .app.mobile .msgs.order-page { padding: 14px 12px 20px; }
+
+/* Bağlan: resmi olmayan kanallar için şeffaflık notu */
+.grid-note { grid-column: 1 / -1; margin: -4px 2px 4px; font-size: 12.5px; line-height: 1.5; color: var(--text3); }

@@ -7,6 +7,14 @@ import { Chip, Icon, SyncBar } from './ui';
 const ORDER: Platform[] = ['whatsapp', 'telegram', 'slack', 'imessage', 'linkedin', 'x', 'instagram', 'messenger'];
 const MAIL_ORDER: Platform[] = ['gmail', 'outlook', 'yahoo', 'icloud', 'imap'];
 // Alışveriş kanalları yalnızca müşteri sorularını/mesajlarını görmek ve yanıtlamak için; Shopier'de mesajlaşma ucu olmadığından listede yok
+/** Resmi (kişisel hesaba açık) API'si olmayan, web oturumu/bağlı cihazla çalışan kanallar: kartta şeffaflık etiketi */
+const UNOFFICIAL: Partial<Record<Platform, string>> = {
+  whatsapp: 'WhatsApp kişisel hesaplar için API sunmaz; Mivelo WhatsApp Web gibi "bağlı cihaz" olarak bağlanır.',
+  instagram: 'Instagram kişisel hesaplar için mesaj API’si sunmaz; Mivelo kendi web oturumunla bağlanır.',
+  messenger: 'Messenger kişisel hesaplar için API sunmaz; Mivelo kendi web oturumunla bağlanır.',
+  linkedin: 'LinkedIn mesaj API’sini yalnız onaylı iş ortaklarına açar; Mivelo kendi web oturumunla bağlanır.',
+  x: 'X’in DM API’si ücretli ve şifreli sohbetleri göstermez; Mivelo kendi web oturumunla bağlanır.',
+};
 const SHOP_ORDER: Platform[] = ['trendyol', 'hepsiburada', 'n11', 'etsy', 'shopify', 'amazon'];
 
 interface MailForm {
@@ -277,7 +285,7 @@ export function ConnectModal({
                   )}
                   {p === 'etsy' && (
                     <>
-                      etsy.com/developers’ta bir uygulama oluştur, <b>Keystring</b>’i gir; uygulamanın geri dönüş adresine <code>http://127.0.0.1:7788/oauth/callback</code> ekle. Bağlan deyince Etsy girişi açılır. Siparişler API’den; Etsy Mesajları API’de olmadığından tarayıcı oturumuyla okunur (deneysel).
+                      etsy.com/developers’ta bir uygulama oluştur, <b>Keystring</b>’i gir; uygulamanın geri dönüş adresine <code>http://127.0.0.1:7788/oauth/callback</code> ekle. Bağlan deyince Etsy girişi açılır. Siparişler resmi API’den gelir. Etsy Mesajları API’de olmadığından okunmaz (hesabını riske atmamak için tarayıcıyla okuma varsayılan kapalı).
                     </>
                   )}
                   {p === 'n11' && (
@@ -287,12 +295,12 @@ export function ConnectModal({
                   )}
                   {p === 'amazon' && (
                     <>
-                      Seller Central → <b>Uygulamalar ve Hizmetler → Uygulama geliştir</b> (SP-API, kendi kendine yetkilendirme): LWA Client ID, Client Secret ve Refresh Token. Siparişler API’den; alıcı mesajları SP-API’de okunamadığından Seller Central oturumuyla okunur (deneysel). Pazar yeri varsayılan Türkiye.
+                      Seller Central → <b>Uygulamalar ve Hizmetler → Uygulama geliştir</b> (SP-API, kendi kendine yetkilendirme): LWA Client ID, Client Secret ve Refresh Token. Siparişler resmi API’den gelir. Alıcı mesajları Amazon’un e-posta bildirimleriyle gelir: Amazon e-posta adresini Mivelo’ya bağlaman yeterli (Seller Central’ı tarayıcıyla okumak Amazon politikası gereği kapalı). Pazar yeri varsayılan Türkiye.
                     </>
                   )}
                   {p === 'shopify' && (
                     <>
-                      Shopify yönetici → <b>Ayarlar → Uygulamalar → Uygulama geliştir</b>: read_orders, read_customers, read_fulfillments kapsamlarıyla Admin API erişim belirteci (shpat_…). Siparişler API’den; Inbox sohbetleri tarayıcı oturumuyla okunur (deneysel).
+                      Shopify yönetici → <b>Ayarlar → Uygulamalar → Uygulama geliştir</b>: read_orders, read_customers, read_fulfillments kapsamlarıyla Admin API erişim belirteci (shpat_…). Siparişler resmi API’den gelir. Shopify Inbox sohbetleri API’de olmadığından okunmaz (hesabını riske atmamak için tarayıcıyla okuma varsayılan kapalı).
                     </>
                   )}
                 </p>
@@ -509,9 +517,15 @@ export function ConnectModal({
             return (
               <div key={p} style={{ display: 'contents' }}>
                 {p === 'whatsapp' && (
-                  <div className="grid-head">
-                    <Icon name="users" size={16} sw={2} /> Sosyal Medya
-                  </div>
+                  <>
+                    <div className="grid-head">
+                      <Icon name="users" size={16} sw={2} /> Sosyal Medya
+                    </div>
+                    <p className="grid-note">
+                      “Resmi değil” etiketli kanallar kişisel hesaplar için API sunmadığı için senin oturumunla, kendi bilgisayarından bağlanır. Mivelo istekleri seyrek ve düzensiz tutar,
+                      toplu ya da aşırı gönderimi kendiliğinden durdurur. Yine de bu uygulamaların kurallarına göre otomatik veya toplu mesaj gönderme.
+                    </p>
+                  </>
                 )}
                 {p === 'gmail' && (
                   <div className="grid-head">
@@ -530,6 +544,11 @@ export function ConnectModal({
                     <div className="nm" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       {meta.name}
                       {meta.experimental && <span className="pill" style={{ background: '#FFF3D6', color: '#8A5300' }}>deneysel</span>}
+                      {UNOFFICIAL[p] && (
+                        <span className="pill" style={{ background: '#EEEDF2', color: '#5b5868' }} title={UNOFFICIAL[p]}>
+                          resmi değil
+                        </span>
+                      )}
                     </div>
                     <div className="mt">{macOnly ? 'Yalnız macOS · Mesajlar uygulaması' : meta.method}</div>
                   </div>

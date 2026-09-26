@@ -166,7 +166,8 @@ export class Registry {
             : account.platform === 'hepsiburada'
               ? new HepsiburadaConnector(account, this.store, cfg)
               : account.platform === 'etsy'
-                ? new EtsyConnector(account, this.store, cfg)
+                ? // Etsy Mesajları tarayıcı köprüsü varsayılan kapalı (ban önleme); yapılandırmada messaging:true ile açılır
+                  new EtsyConnector(account, this.store, cfg, (() => { try { return (JSON.parse(cfg) as { messaging?: boolean }).messaging === true; } catch { return false; } })())
                 : account.platform === 'n11'
                   ? new N11Connector(account, this.store, cfg)
                   : account.platform === 'amazon'

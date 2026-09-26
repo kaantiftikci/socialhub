@@ -19,6 +19,7 @@ import { openExternal } from './platform.js';
 import { ALL_PLATFORMS } from './model.js';
 import { MEDIA_HOSTS, PLATFORM_MEDIA_HOSTS, MEDIA_MAX } from './media-hosts.js';
 import { fetchPreview } from './link-preview.js';
+import { checkSend, SendBlocked } from './send-guard.js';
 import type { Platform } from './model.js';
 
 /**
@@ -207,6 +208,18 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     if (chat) bus.emit({ type: 'chat.upsert', chat });
     return chat;
   });
+  /** Ban önleme: toplu/aşırı gönderim desenini gönderimden önce durdur (send-guard.ts) */
+  const guardSend = (chat: { id: string; accountId: string; platform: Platform }, text?: string) => {
+    try {
+      checkSend({ accountId: chat.accountId, platform: chat.platform, chatId: chat.id, text });
+    } catch (e) {
+      if (e instanceof SendBlocked) {
+        bus.log('warn', `${chat.platform}: gönderim güvenlik sınırı: ${e.message}`);
+        throw new HttpError(429, e.message);
+      }
+      throw e;
+    }
+  };
   // Dosya gönderme: JSON {name, mime, data(base64), caption} → ~/.kavsak/outbox/<zaman>-<ad> → connector.sendMedia
   route('POST', '/api/chats/:id/send-file', async (_r, _s, p, body) => {
     const id = dec(p.id);
@@ -217,6 +230,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     const c = registry.get(chat.accountId);
     if (!c) throw new HttpError(409, 'Hesap bağlı değil');
     if (!c.sendMedia) throw new HttpError(400, 'Bu platformda dosya gönderme desteklenmiyor');
+    guardSend(chat, b.caption ? String(b.caption) : undefined);
     const dir = path.join(DATA_DIR, 'outbox');
     fs.mkdirSync(dir, { recursive: true });
     const safe = String(b.name).replace(/[^\w.\-çğıöşüÇĞİÖŞÜ ]+/g, '_').slice(0, 120) || 'dosya';
@@ -249,6 +263,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     if (!text) throw new HttpError(400, 'Boş mesaj');
     const c = registry.get(chat.accountId);
     if (!c) throw new HttpError(409, 'Hesap bağlı değil');
+    guardSend(chat, text);
     try {
       return await c.sendText(chat.remoteId, text, b.threadId ? { threadId: String(b.threadId).slice(0, 64) } : undefined);
     } catch (e) {

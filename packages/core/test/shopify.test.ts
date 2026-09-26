@@ -71,7 +71,8 @@ function fakeFetch(handler: (url: string) => { status?: number; body?: unknown; 
 const ORDERS = 'https://mivelo-test.myshopify.com/admin/api/2025-07/orders.json';
 
 test('parseShopifyConfig: mağaza tanıtıcısı ve ana bilgisayar türetilir', () => {
-  assert.deepEqual(parseShopifyConfig('{"shop":"Magaza.myshopify.com","accessToken":" shpat_1 "}'), { handle: 'magaza', host: 'magaza.myshopify.com', token: 'shpat_1', inbox: true });
+  assert.deepEqual(parseShopifyConfig('{"shop":"Magaza.myshopify.com","accessToken":" shpat_1 "}'), { handle: 'magaza', host: 'magaza.myshopify.com', token: 'shpat_1', inbox: false }); // Inbox köprüsü varsayılan kapalı
+  assert.equal(parseShopifyConfig('{"shop":"m","accessToken":"t","inbox":true}').inbox, true);
   assert.equal(parseShopifyConfig('{"shop":"https://magaza.myshopify.com/admin","accessToken":"t","inbox":false}').inbox, false);
   assert.equal(parseShopifyConfig('{"shop":"magaza","accessToken":"t"}').host, 'magaza.myshopify.com');
   assert.equal(parseShopifyConfig('bozuk').host, '');
