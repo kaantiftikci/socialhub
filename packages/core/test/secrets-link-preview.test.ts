@@ -43,3 +43,21 @@ test('bağlantı önizlemesi yerel/özel adreslere istek atmaz', async () => {
     assert.equal(await fetchPreview(u), null, u);
   }
 });
+
+test('X gönderi önizlemesi: kimlik, gömme belirteci, gömme verisinden kart (oturumsuz)', async () => {
+  const lp = await import('../src/link-preview.js');
+  assert.equal(lp.xStatusId(new URL('https://x.com/laonzr4/status/1834567890123456789?s=20')), '1834567890123456789');
+  assert.equal(lp.xStatusId(new URL('https://twitter.com/i/status/20')), '20');
+  assert.equal(lp.xStatusId(new URL('https://example.com/a/status/20')), undefined);
+  assert.equal(lp.syndicationToken('20'), ((20 / 1e15) * Math.PI).toString(36).replace(/(0+|\.)/g, ''));
+  const v = lp.parseSyndication('https://x.com/a/status/1', {
+    __typename: 'Tweet',
+    text: 'Zeytinyağı ile 31 çektim https://t.co/abc123',
+    user: { name: 'Laon', screen_name: 'laonzr4', profile_image_url_https: 'https://pbs.twimg.com/p_normal.jpg' },
+    photos: [{ url: 'https://pbs.twimg.com/media/x.jpg' }],
+  });
+  assert.deepEqual(v, { url: 'https://x.com/a/status/1', site: 'X', title: 'Laon (@laonzr4)', description: 'Zeytinyağı ile 31 çektim', image: 'https://pbs.twimg.com/media/x.jpg' });
+  const noMedia = lp.parseSyndication('u', { text: 'selam', user: { name: 'A', screen_name: 'a', profile_image_url_https: 'https://pbs.twimg.com/p_normal.jpg' } });
+  assert.equal(noMedia?.image, 'https://pbs.twimg.com/p_bigger.jpg', 'medya yoksa profil fotoğrafı');
+  assert.equal(lp.parseSyndication('u', { __typename: 'TweetTombstone' }), null);
+});

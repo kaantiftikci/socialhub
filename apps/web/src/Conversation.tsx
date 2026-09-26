@@ -1952,6 +1952,56 @@ function ReactionChips({ list, onToggle }: { list: Reaction[]; onToggle?: (emoji
 
 const previewCache = new Map<string, Promise<LinkPreview>>();
 /** Bağlantı kartı (Open Graph): site · başlık · açıklama · görsel; önizleme yoksa hiç görünmez */
+const X_STATUS = /^https?:\/\/(www\.|mobile\.)?(x|twitter)\.com\/[^?#]*\/status(es)?\/\d+/i;
+
+/** Önizleme isteği (önbellekli; aynı adres bir kez istenir) */
+function usePreview(url: string | undefined): LinkPreview | null {
+  const [p, setP] = useState<LinkPreview | null>(null);
+  useEffect(() => {
+    if (!url) return;
+    let alive = true;
+    let req = previewCache.get(url);
+    if (!req) {
+      req = api.preview(url).catch(() => ({ url, none: true }) as LinkPreview);
+      previewCache.set(url, req);
+    }
+    void req.then((v) => alive && setP(v));
+    return () => {
+      alive = false;
+    };
+  }, [url]);
+  return p;
+}
+
+/**
+ * Paylaşılan X gönderisi, yerel önbellekte içeriği yoksa: çekirdek X'in herkese açık gömme verisinden (oturumsuz) yazar,
+ * metin ve görseli getirir. Gelmezse (silinmiş/korumalı) sade bir kart; eskiden boş siyah kutu kalıyordu.
+ */
+function XPostCard({ a, page }: { a: Attachment; page: string }) {
+  const p = usePreview(page);
+  const ok = p && !p.none && p.title;
+  const handle = ok ? p.title!.match(/\((@[^)]+)\)\s*$/)?.[1] : undefined;
+  return (
+    <a className={`att-card b xpost${ok && p.image ? '' : ' noimg'}`} href={page} target="_blank" rel="noreferrer" title="Gönderiyi tarayıcıda aç">
+      {ok && p.image && <img src={p.image} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(e) => (e.currentTarget.style.display = 'none')} />}
+      <span className="att-cap">
+        <Icon name="link" size={13} />
+        <span className="xpost-txt">
+          {ok ? (
+            <>
+              <b>{handle ?? p.title}</b>
+              {p.description ? `: ${p.description}` : ''}
+            </>
+          ) : (
+            (a.name ?? 'Gönderi')
+          )}
+        </span>
+        <Icon name="external" size={12} />
+      </span>
+    </a>
+  );
+}
+
 function LinkCard({ url }: { url: string }) {
   const [p, setP] = useState<LinkPreview | null>(null);
   useEffect(() => {
@@ -2044,6 +2094,7 @@ function AttachmentView({ a, onOpen }: { a: Attachment; onOpen: (a: Attachment) 
     );
   }
   const page = a.page ?? (isPageLink(a.link) ? a.link : undefined);
+  if (page && !url && X_STATUS.test(page)) return <XPostCard a={a} page={page} />;
   if (page) {
     return (
       <a className="att-card b" href={page} target="_blank" rel="noreferrer" title="Gönderiyi tarayıcıda aç">

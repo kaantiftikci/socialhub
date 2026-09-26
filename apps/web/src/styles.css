@@ -306,6 +306,13 @@ a.att-card { cursor: pointer; }
 .grp.me .att-video { background: rgba(255,255,255,.12); color: #fff; }
 .att-card .att-cap { display: flex; align-items: center; gap: 6px; padding: 7px 10px; font-size: 12px; font-weight: 500; }
 .att-card .att-cap svg:last-child { margin-left: auto; opacity: .6; }
+/* paylaşılan X gönderisi (gömme verisinden): görsel yatay, metin 4 satıra kadar */
+.att-card.xpost { width: 280px; }
+.att-card.xpost img { aspect-ratio: auto; max-height: 260px; }
+.att-card.xpost .att-cap { align-items: flex-start; font-weight: 400; line-height: 1.4; }
+.att-card.xpost .att-cap svg { flex: none; margin-top: 2px; }
+.xpost-txt { flex: 1; min-width: 0; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.xpost-txt b { font-weight: 600; }
 .grp.me .att-card { border-color: rgba(255,255,255,.25); }
 .bub:has(.att-card) { padding: 6px; }
 .bub > .att-card:first-child, .bub > .att:first-child, .bub > .att-audio:first-child { margin-top: 0; }

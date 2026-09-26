@@ -54,7 +54,7 @@ async function safeHost(u: URL): Promise<Vetted | null> {
   }
 }
 
-function get(u: URL, pin: Vetted): Promise<{ status: number; headers: http.IncomingHttpHeaders; body: string }> {
+function get(u: URL, pin: Vetted, json = false): Promise<{ status: number; headers: http.IncomingHttpHeaders; body: string }> {
   return new Promise((resolve, reject) => {
     const req = (u.protocol === 'https:' ? https : http).get(
       u,
@@ -62,14 +62,14 @@ function get(u: URL, pin: Vetted): Promise<{ status: number; headers: http.Incom
         // ad çözümlemesi yeniden yapılmaz: safeHost'un onayladığı adrese bağlan (SNI/Host yine asıl ad)
         lookup: ((_h: string, opts: { all?: boolean }, cb: (...a: unknown[]) => void) =>
           opts?.all ? cb(null, [{ address: pin.address, family: pin.family }]) : cb(null, pin.address, pin.family)) as unknown as http.RequestOptions['lookup'],
-        headers: { 'user-agent': 'Mozilla/5.0 (compatible; Mivelo/1.0; +https://mivelo.app) facebookexternalhit/1.1', accept: 'text/html,application/xhtml+xml', 'accept-language': 'tr,en;q=0.8' }, timeout: 6000 },
+        headers: { 'user-agent': 'Mozilla/5.0 (compatible; Mivelo/1.0; +https://mivelo.app) facebookexternalhit/1.1', accept: json ? 'application/json' : 'text/html,application/xhtml+xml', 'accept-language': 'tr,en;q=0.8' }, timeout: 6000 },
       (res) => {
         const type = String(res.headers['content-type'] ?? '');
         if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400) {
           res.resume();
           return resolve({ status: res.statusCode, headers: res.headers, body: '' });
         }
-        if (!/text\/html|application\/xhtml/i.test(type)) {
+        if (!(json ? /json/i : /text\/html|application\/xhtml/i).test(type)) {
           res.resume();
           return resolve({ status: res.statusCode ?? 0, headers: res.headers, body: '' });
         }
@@ -132,6 +132,47 @@ export function parsePreview(url: string, html: string): LinkPreview | null {
   return { url, site: site || new URL(url).hostname.replace(/^www\./, ''), title: title?.slice(0, 200) || undefined, description: description?.slice(0, 300), image };
 }
 
+/** x.com / twitter.com gönderi adresinden kimlik (…/status/<id>) */
+export function xStatusId(u: URL): string | undefined {
+  if (!/(^|\.)(x|twitter)\.com$/i.test(u.hostname)) return undefined;
+  return u.pathname.match(/\/status(?:es)?\/(\d{1,25})/)?.[1];
+}
+
+/** Gömme ucunun istediği belirteç (react-tweet ile aynı hesap: kimlikten türetilir, gizli değil) */
+export function syndicationToken(id: string): string {
+  return ((Number(id) / 1e15) * Math.PI).toString(6 ** 2).replace(/(0+|\.)/g, '');
+}
+
+/**
+ * X gönderi önizlemesi: x.com botlara Open Graph vermiyor; herkese açık gömme verisi (cdn.syndication.twimg.com/tweet-result,
+ * Vercel react-tweet'in kullandığı uç) okunur. Hesap oturumu KULLANILMAZ — X hesabı için risk yok. Silinmiş/korumalı gönderide null.
+ */
+export function parseSyndication(url: string, j: Record<string, any>): LinkPreview | null { // eslint-disable-line @typescript-eslint/no-explicit-any
+  if (!j || j.__typename === 'TweetTombstone' || !j.user) return null;
+  const text = String(j.text ?? '')
+    .replace(/\s*https:\/\/t\.co\/\w+\s*$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const media = (j.mediaDetails ?? []) as Array<{ media_url_https?: string }>;
+  const image: string | undefined = j.photos?.[0]?.url ?? media[0]?.media_url_https ?? j.video?.poster ?? (j.user.profile_image_url_https ? String(j.user.profile_image_url_https).replace('_normal.', '_bigger.') : undefined);
+  return {
+    url,
+    site: 'X',
+    title: `${j.user.name ?? ''} (@${j.user.screen_name ?? '?'})`.trim(),
+    description: text ? (text.length > 280 ? text.slice(0, 279) + '…' : text) : undefined,
+    image,
+  };
+}
+
+async function fetchXPost(page: URL, id: string): Promise<LinkPreview | null> {
+  const api = new URL(`https://cdn.syndication.twimg.com/tweet-result?id=${id}&lang=tr&token=${syndicationToken(id)}`);
+  const pin = await safeHost(api);
+  if (!pin) return null;
+  const r = await get(api, pin, true);
+  if (r.status !== 200 || !r.body) return null;
+  return parseSyndication(page.href, JSON.parse(r.body));
+}
+
 export async function fetchPreview(raw: string): Promise<LinkPreview | null> {
   let u: URL;
   try {
@@ -144,9 +185,11 @@ export async function fetchPreview(raw: string): Promise<LinkPreview | null> {
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < (hit.v ? TTL_OK : TTL_FAIL)) return hit.v;
   let v: LinkPreview | null = null;
+  const xid = xStatusId(u);
   try {
+    if (xid) v = await fetchXPost(u, xid);
     let cur = u;
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < (xid ? 0 : 4); i++) {
       const pin = await safeHost(cur);
       if (!pin) break;
       const r = await get(cur, pin);
