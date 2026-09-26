@@ -206,3 +206,22 @@ export function openInAppLink(c: Chat): { href: string; label: string } | null {
       return c.link ? { href: c.link, label } : null;
   }
 }
+
+/** Pazaryeri sohbeti türü: sipariş (meta.order) ya da müşteri sorusu/mesajı (diğerleri). Pazaryeri değilse null. */
+export type ShopKind = 'order' | 'question';
+export function shopKind(c: Pick<Chat, 'platform' | 'meta'>): ShopKind | null {
+  if (PLATFORMS[c.platform]?.category !== 'shop') return null;
+  return c.meta?.order ? 'order' : 'question';
+}
+/** Kapanmış sipariş durumları (gönderildi/teslim/iptal/iade): bunlar "bekleyen" sayılmaz */
+export const ORDER_CLOSED = /^(fulfilled|delivered|shipped|cancelled|canceled|returned|completed|closed)$/i;
+/** Satıcıdan bir şey bekleyen pazaryeri sohbeti: açık sipariş ya da yanıt bekleyen soru */
+export function shopPending(c: Pick<Chat, 'platform' | 'meta' | 'unread'>): boolean {
+  const kind = shopKind(c);
+  if (kind === 'order') return !ORDER_CLOSED.test(String((c.meta?.order as { status?: string } | undefined)?.status ?? ''));
+  if (kind === 'question') {
+    const q = c.meta?.question as { status?: string; statusLabel?: string } | undefined;
+    return q ? /wait|bekl/i.test(`${q.status ?? ''} ${q.statusLabel ?? ''}`) : c.unread > 0;
+  }
+  return false;
+}

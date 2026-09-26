@@ -1076,6 +1076,7 @@ export function Conversation({
           </span>
         </div>
         {PLATFORMS[chat.platform].category === 'shop' && (chat.meta?.order as OrderMeta | undefined)?.items ? <OrderPanel chat={chat} notify={notify} /> : null}
+        {PLATFORMS[chat.platform].category === 'shop' && !chat.meta?.order && chat.meta?.question ? <QuestionPanel chat={chat} /> : null}
 
         <div className="qacts one">
           <button className={`b b2 ${noteOpen || chatNote ? 'go' : ''}`} onClick={() => (setNoteDraft(chatNote), setNoteOpen((v) => !v))}>
@@ -1626,6 +1627,45 @@ function OrderPanel({ chat, notify }: { chat: Chat; notify: (t: string, err?: bo
           </button>
         </div>
       )}
+    </div>
+  );
+}
+/** Pazaryeri müşteri sorusu kartı: ürün, durum, konu, bağlı sipariş. Alan adları pazaryerine göre değişir (Trendyol/Hepsiburada/n11). */
+function QuestionPanel({ chat }: { chat: Chat }) {
+  const q = chat.meta!.question as {
+    status?: string; statusLabel?: string; subject?: string; productName?: string; product?: { name?: string; imageUrl?: string; sku?: string };
+    imageUrl?: string; webUrl?: string; orderNumber?: string; dateCreated?: string; expireDate?: string; public?: boolean; reportReason?: string;
+  };
+  const waiting = /wait|bekl/i.test(`${q.status ?? ''} ${q.statusLabel ?? ''}`);
+  const product = q.productName ?? q.product?.name;
+  const img = q.imageUrl ?? q.product?.imageUrl;
+  const when = (v?: string) => (v ? new Date(v).toLocaleString('tr-TR', { dateStyle: 'medium', timeStyle: 'short' }) : '');
+  return (
+    <div className="order question">
+      <div className="order-head">
+        <span className={`order-status ${waiting ? 'open' : 'done'}`}>{q.statusLabel ?? (waiting ? 'Cevap bekliyor' : 'Cevaplandı')}</span>
+        <span className="q-kind">❓ Müşteri sorusu</span>
+      </div>
+      {product && (
+        <div className="q-product">
+          {img && <img src={img} alt="" />}
+          {q.webUrl ? (
+            <a href={q.webUrl} target="_blank" rel="noreferrer">
+              {product}
+            </a>
+          ) : (
+            <span>{product}</span>
+          )}
+        </div>
+      )}
+      <div className="order-rows">
+        {q.subject ? <Row k="Konu" v={q.subject} /> : null}
+        {q.orderNumber ? <Row k="Sipariş" v={`#${q.orderNumber}`} /> : null}
+        {q.dateCreated ? <Row k="Soruldu" v={when(q.dateCreated)} /> : null}
+        {waiting && q.expireDate ? <Row k="Son gün" v={when(q.expireDate)} /> : null}
+        {q.public !== undefined ? <Row k="Görünür" v={q.public ? 'Ürün sayfasında herkese açık' : 'Yalnız müşteriye'} /> : null}
+        {q.reportReason ? <Row k="Rapor" v={q.reportReason} /> : null}
+      </div>
     </div>
   );
 }

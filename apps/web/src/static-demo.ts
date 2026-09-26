@@ -104,7 +104,15 @@ function seed(): void {
         tags: s.tags,
         handle: s.handle,
         avatarUrl: demoAsset(`avatars/${s.avatar}`),
-        meta: s.summary?.length || s.note || s.order ? { ...(s.summary?.length ? { summary: s.summary } : {}), ...(s.note ? { note: s.note } : {}), ...(s.order ? { order: s.order } : {}) } : undefined,
+        meta: (() => {
+          // pazaryeri: sipariş kartı olmayan sohbetler müşteri sorusudur (gerçek bağlayıcılardaki meta.question biçimi)
+          const question =
+            PLATFORMS[acc.platform].category === 'shop' && !s.order
+              ? { status: s.unread ? 'WAITING_FOR_ANSWER' : 'ANSWERED', statusLabel: s.unread ? 'Cevap bekliyor' : 'Cevaplandı', productName: s.name.split('·')[1]?.trim() || undefined, dateCreated: new Date(lastAt - 3 * 3_600_000).toISOString(), public: true }
+              : undefined;
+          const m = { ...(s.summary?.length ? { summary: s.summary } : {}), ...(s.note ? { note: s.note } : {}), ...(s.order ? { order: s.order } : {}), ...(question ? { question } : {}) };
+          return Object.keys(m).length ? m : undefined;
+        })(),
         participants: s.handle && PLATFORMS[acc.platform].category === 'mail' ? [{ id: s.handle, name: s.handle.split('@')[0] ?? s.handle, handle: s.handle, avatarUrl: demoAsset(`avatars/${s.avatar}`) }] : undefined,
       });
     });

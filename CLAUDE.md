@@ -76,6 +76,8 @@ Dil: arayüz ve yorumlar Türkçe.
 - **Pazaryerleri**: `trendyol.ts` (resmi Satıcı API: soru-cevap + sipariş), `hepsiburada.ts` (Satıcıya Sor + OMS), `n11.ts` (REST sipariş + SOAP
   soru), `etsy.ts`/`shopify.ts`/`amazon.ts` (resmi API siparişler + tarayıcı köprüsüyle mesaj/inbox; deneysel). Pazaryeri yanıtları
   yalnız metin (arayüz dosya/ses düğmesini gizler). Shopier `available:false` ("Yakında").
+  Pazaryeri kanal listesi sekmeleri **Tümü · Siparişler · Sorular** (`types.ts` `shopKind`: meta.order → sipariş, diğerleri soru; sayılar
+  `shopPending`: açık sipariş / cevap bekleyen soru). Satırda 📦/❓ işareti (`.skind`); sağ panelde `OrderPanel` ya da `QuestionPanel` (meta.question).
 
 ## Üretkenlik özellikleri
 - **Takip hatırlatıcısı**: `chats.followup` {at, since, due}; `POST /api/chats/:id/followup {at|null}`. Sunucu dakikada bir

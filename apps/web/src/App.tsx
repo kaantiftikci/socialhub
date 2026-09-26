@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, connectEvents } from './api';
-import { PLATFORMS, type Account, type Chat, type ChatFlags, type CoreEvent, type Message, type Platform, DEFAULT_TAGS } from './types';
+import { PLATFORMS, shopKind, shopPending, type Account, type Chat, type ChatFlags, type CoreEvent, type Message, type Platform, type ShopKind, DEFAULT_TAGS } from './types';
 import { Avatar, Chip, Icon, Logo, Resizer, SyncBar, Tag, ago, fmtTime, loadPaneSizes, useClosing } from './ui';
 import { Conversation, REACT_TEXT, startScheduledSends } from './Conversation';
 import { ConnectModal } from './Connect';
@@ -36,12 +36,17 @@ export default function App() {
   const [mailFolder, setMailFolder] = useState<'sent' | 'junk' | null>(null);
   /** Telegram: üstteki "Arşiv" sekmesi (chat.meta.archived) */
   const [tgArchive, setTgArchive] = useState(false);
+  /** Pazaryeri kanalları: Tümü · Siparişler · Sorular sekmesi */
+  const [shopTab, setShopTab] = useState<ShopKind | null>(null);
   /** Platform seçimi değişince platforma özel sekmeler (iMessage klasörü, Telegram arşivi) sıfırlanır */
   const selectPlatform = useCallback((p: Platform | null) => {
     setMailFolder(null);
     setPlatformFilter(p);
     setImFolder(null);
     setTgArchive(false);
+    setShopTab(null);
+    // pazaryerinde "Okunmamış" sekmesi yok (Tümü · Siparişler · Sorular): başka kanaldan kalan filtre Tümü'ye döner
+    if (p && PLATFORMS[p].category === 'shop') setFilter((f) => (f === 'unread' ? 'all' : f));
   }, []);
   const [olderBusy, setOlderBusy] = useState(false);
   const [noMoreOlder, setNoMoreOlder] = useState<string | null>(null);
@@ -450,6 +455,14 @@ export default function App() {
   const storyChats = useMemo(() => (storyPlatform ? waitingChats.filter((c) => c.platform === storyPlatform) : waitingChats), [waitingChats, storyPlatform]);
   const storyPlatforms = useMemo(() => [...new Set(waitingChats.map((c) => c.platform))], [waitingChats]);
 
+  const isShop = !!platformFilter && PLATFORMS[platformFilter].category === 'shop';
+  /** Pazaryeri sekmelerindeki sayılar: açık sipariş ve yanıt bekleyen soru */
+  const shopCounts = useMemo(() => {
+    const n: Record<ShopKind, number> = { order: 0, question: 0 };
+    if (!isShop) return n;
+    for (const c of inboxChats) if (c.platform === platformFilter && shopPending(c)) n[shopKind(c)!] += 1;
+    return n;
+  }, [inboxChats, platformFilter, isShop]);
   const chatList = useMemo(() => {
     // Telegram "Arşiv" sekmesi yalnızca arşivlenmişleri, iMessage klasör sekmeleri o klasörü; diğer her görünüm gelen kutusunu listeler
     const imActive = platformFilter === 'imessage' ? imFolder : null;
@@ -467,6 +480,7 @@ export default function App() {
       return folder !== 'junk';
     });
     if (tagFilter) list = list.filter((c) => c.tags.includes(tagFilter));
+    if (shopTab && platformFilter && PLATFORMS[platformFilter].category === 'shop') list = list.filter((c) => shopKind(c) === shopTab);
     // iMessage'da Okunmamış/Bekleyen sekmeleri yok (Mesajlar uygulamasındaki klasörler var)
     const effFilter = platformFilter === 'imessage' && filter !== 'followup' ? 'all' : filter;
     if (effFilter === 'unread') list = list.filter((c) => c.unread > 0);
@@ -479,10 +493,10 @@ export default function App() {
     // Takip sekmesi kendi sırasında kalır: süresi dolanlar önce, sonra en yakın hatırlatma
     if (filter !== 'followup') list.sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || (smartSort ? score(b) - score(a) : 0) || b.lastMessageAt - a.lastMessageAt);
     return list;
-  }, [activeChats, inboxChats, filter, platformFilter, tagFilter, query, smartSort, imFolder, tgArchive, mailFolder]);
+  }, [activeChats, inboxChats, filter, platformFilter, tagFilter, query, smartSort, imFolder, tgArchive, mailFolder, shopTab]);
 
   /** Boş liste metni: hangi sekme/filtre boşsa ona göre anlamlı bir açıklama */
-  const emptyText = filter === 'followup' ? 'Takipte sohbet yok. Sohbetin sağ panelinden "Yanıt gelmezse hatırlat" ile ekle.' : imFolder || tgArchive || mailFolder ? 'Bu klasörde sohbet yok.' : query.trim() ? 'Aramayla eşleşen sohbet yok.' : filter === 'unread' && platformFilter !== 'imessage' ? 'Okunmamış sohbet yok.' : tagFilter ? 'Bu etikette sohbet yok.' : platformFilter ? 'Bu kanalda henüz sohbet yok.' : 'Bu filtreye uyan sohbet yok.';
+  const emptyText = shopTab && isShop && filter === 'all' && !query.trim() ? (shopTab === 'order' ? 'Bu kanalda sipariş yok.' : 'Bu kanalda müşteri sorusu yok.') : filter === 'followup' ? 'Takipte sohbet yok. Sohbetin sağ panelinden "Yanıt gelmezse hatırlat" ile ekle.' : imFolder || tgArchive || mailFolder ? 'Bu klasörde sohbet yok.' : query.trim() ? 'Aramayla eşleşen sohbet yok.' : filter === 'unread' && platformFilter !== 'imessage' ? 'Okunmamış sohbet yok.' : tagFilter ? 'Bu etikette sohbet yok.' : platformFilter ? 'Bu kanalda henüz sohbet yok.' : 'Bu filtreye uyan sohbet yok.';
 
   const totals = useMemo(() => {
     let unread = 0;
@@ -979,14 +993,25 @@ export default function App() {
                 {view === 'inbox' && (
                   <div className="tabs" role="tablist" aria-label={platformFilter === 'imessage' ? 'Mesajlar klasörleri' : 'Filtreler'}>
                     {/* iMessage: Okunmamış yerine Mesajlar uygulamasındaki klasörler */}
-                    {(platformFilter === 'imessage' ? (['all'] as Filter[]) : (['all', 'unread'] as Filter[])).map((f) => (
+                    {isShop ? (
+                      <>
+                        <button role="tab" aria-selected={filter === 'all' && !shopTab} className={filter === 'all' && !shopTab ? 'active' : ''} onClick={() => (setFilter('all'), setShopTab(null))}>
+                          Tümü
+                        </button>
+                        {([['order', 'Siparişler', 'Açık (kargolanmamış) siparişler'], ['question', 'Sorular', 'Yanıt bekleyen müşteri soruları']] as Array<[ShopKind, string, string]>).map(([k, label, title]) => (
+                          <button key={k} role="tab" title={`${label} · sayı: ${title.toLowerCase()}`} aria-selected={shopTab === k && filter === 'all'} className={shopTab === k && filter === 'all' ? 'active' : ''} onClick={() => (setFilter('all'), setShopTab(k))}>
+                            {label} {shopCounts[k] > 0 && <span className="c">{fmtCount(shopCounts[k])}</span>}
+                          </button>
+                        ))}
+                      </>
+                    ) : (platformFilter === 'imessage' ? (['all'] as Filter[]) : (['all', 'unread'] as Filter[])).map((f) => (
                       <button key={f} role="tab" aria-selected={filter === f && !imFolder && !mailFolder} className={filter === f && !imFolder && !mailFolder ? 'active' : ''} onClick={() => (setFilter(f), setImFolder(null), setMailFolder(null))}>
                         {f === 'all' ? (platformFilter === 'imessage' ? 'Mesajlar' : 'Tümü') : 'Okunmamış '}
                         {f === 'unread' && scoped.unread > 0 && <span className="c">{fmtCount(scoped.unread)}</span>}
                       </button>
                     ))}
                     {(follow.n > 0 || filter === 'followup') && !imFolder && !mailFolder && (
-                      <button role="tab" aria-selected={filter === 'followup'} className={`fol ${filter === 'followup' ? 'active' : ''} ${follow.due ? 'due' : ''}`} title="Yanıt gelmezse hatırlatılacak sohbetler" onClick={() => (setFilter('followup'), setImFolder(null), setMailFolder(null), setTgArchive(false))}>
+                      <button role="tab" aria-selected={filter === 'followup'} className={`fol ${filter === 'followup' ? 'active' : ''} ${follow.due ? 'due' : ''}`} title="Yanıt gelmezse hatırlatılacak sohbetler" onClick={() => (setFilter('followup'), setImFolder(null), setMailFolder(null), setTgArchive(false), setShopTab(null))}>
                         Takip {follow.n > 0 && <span className="c">{follow.due ? `${follow.due}/${follow.n}` : follow.n}</span>}
                       </button>
                     )}
@@ -1588,6 +1613,7 @@ function ChatRow({
 }) {
   const waiting = chat.platform !== 'imessage' && isWaiting(chat); // Mesajlar'da "bekleyen" kavramı yok
   const isMail = PLATFORMS[chat.platform].category === 'mail';
+  const kind = shopKind(chat);
   // E-posta: üstte gönderen, ortada konu, altta özet (posta istemcisi düzeni)
   const mailSender = isMail ? (chat.participants?.[0]?.name || chat.handle || '').replace(/<.*>/, '').trim() : '';
   const mailPreview = isMail && mailSender && chat.lastPreview?.startsWith(mailSender + ':') ? chat.lastPreview.slice(mailSender.length + 1).trim() : chat.lastPreview;
@@ -1600,6 +1626,11 @@ function ChatRow({
       <span className="body">
         <span className="top">
           {chat.pinned && <Icon name="pin" size={12} color="#8c889b" />}
+          {kind && (
+            <span className={`skind k-${kind}`} title={kind === 'order' ? 'Sipariş' : 'Müşteri sorusu'} aria-label={kind === 'order' ? 'Sipariş' : 'Müşteri sorusu'}>
+              {kind === 'order' ? '📦' : '❓'}
+            </span>
+          )}
           <span className="name">{isMail && mailSender ? mailSender : chat.name}</span>
           {chat.tags.slice(0, 2).map((t) => (
             <Tag key={t} name={t} mini />

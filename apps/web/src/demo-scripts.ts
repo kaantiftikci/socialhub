@@ -575,6 +575,27 @@ function handleFor(platform: Platform, folk: (typeof FOLK)[number], n: number): 
   return `@${folk.user}`;
 }
 
+/** Sipariş numaralı pazaryeri sohbetleri (sipariş / iade / fatura) sipariş kartı taşır; diğerleri müşteri sorusudur */
+const DEMO_PRODUCTS: Array<[string, string, string[]]> = [
+  ['Keten gömlek · ekru', '1249.90', ['Ekru', 'M']],
+  ['Seramik kupa · 2’li', '349.00', []],
+  ['Keten elbise · kırmızı', '1890.00', ['Kırmızı', '38']],
+  ['Pamuk tişört · siyah', '449.90', ['Siyah', 'L']],
+];
+function demoOrder(name: string, no: number, buyer: string, i: number): Record<string, unknown> | undefined {
+  const kind = name.includes(`sipariş ${no}`) ? 'open' : name.includes(`iade ${no}`) ? 'returned' : name.includes(`fatura ${no}`) ? 'delivered' : null;
+  if (!kind) return undefined;
+  const [title, total, selection] = DEMO_PRODUCTS[i % DEMO_PRODUCTS.length];
+  const [status, statusLabel] = kind === 'open' ? ['Picking', 'Hazırlanıyor'] : kind === 'returned' ? ['Returned', 'İade talebi'] : ['Delivered', 'Teslim edildi'];
+  const d = new Date(Date.now() - (kind === 'open' ? 1 : kind === 'returned' ? 8 : 5) * 86_400_000).toISOString();
+  return {
+    id: String(no), status, statusLabel, dateCreated: d, currency: 'TRY',
+    totals: { total }, items: [{ title, quantity: 1, total, selection }],
+    shipping: { name: buyer, address: ['Kadıköy, İstanbul', 'Çankaya, Ankara', 'Karşıyaka, İzmir', 'Nilüfer, Bursa'][i % 4] },
+    fulfillments: kind === 'open' ? [] : [{ status: 'delivered', company: 'Yurtiçi', trackingNumber: `7340 ${String(no).padStart(4, '0')} 118${i}` }],
+  };
+}
+
 /** Var olan iki örneğin üstüne, uygulamaya uygun ek sohbetler. Alışverişte hepsi müşteri sorusu. */
 function extraScripts(platform: Platform, used: Set<string>): Script[] {
   const shop = PLATFORMS[platform].category === 'shop';
@@ -591,7 +612,7 @@ function extraScripts(platform: Platform, used: Set<string>): Script[] {
     const base = { remoteId: f.id, handle: handleFor(platform, f, i), avatar: f.avatar, unread };
     if (shop) {
       const pack = shopThread(topic, f.name, no);
-      out.push({ ...base, name: pack.name, kind: 'direct', tags: pack.tags, lines: pack.lines });
+      out.push({ ...base, name: pack.name, kind: 'direct', tags: pack.tags, lines: pack.lines, order: demoOrder(pack.name, no, f.name, i) });
       return;
     }
     if (mail) {
@@ -998,11 +1019,6 @@ const SAMPLE_ORDER: Partial<Record<Platform, Record<string, Record<string, unkno
       totals: { total: '1249.90' }, items: [{ title: 'Keten gömlek · ekru', quantity: 1, total: '1249.90', selection: ['Ekru', 'M'] }],
       shipping: { name: 'Nisa A.', address: 'Çankaya, Ankara' },
       fulfillments: [{ status: 'shipped', company: 'Trendyol Express', trackingNumber: '7340 1182 0931' }],
-    },
-    'soru-kalip': {
-      id: '1042977', status: 'Created', statusLabel: 'Hazırlanıyor', dateCreated: day(0, 9), currency: 'TRY',
-      totals: { total: '1890.00' }, items: [{ title: 'Keten elbise · kırmızı', quantity: 1, total: '1890.00', selection: ['Kırmızı', '38'] }],
-      shipping: { name: 'Deniz K.', address: 'Karşıyaka, İzmir' }, fulfillments: [],
     },
   },
   n11: {
