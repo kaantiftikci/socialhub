@@ -1036,6 +1036,9 @@ export const x: Strategy & { fetchMedia(page: Page, cookies: Record<string, stri
     for (let i = 0; i < 16 && !/\/i\/chat\/pin/.test(page.url()); i++) await page.waitForTimeout(500);
     return /\/i\/chat\/pin/.test(page.url());
   },
+  async attention(page) {
+    return /\/i\/chat\/pin/.test(page.url()) ? 'Şifreli sohbetler için X PIN\'i gerekli — girilene dek yeni mesajlar geç ve eksik gelir' : undefined;
+  },
   async afterLogin(page) {
     if (!(await this.needsWindow!(page).catch(() => false))) return;
     bus.log('info', 'X: açık pencerede XChat PIN adımı bekleniyor (şifreli sohbetler için). 3 dk içinde girilmezse atlanır.');

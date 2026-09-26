@@ -110,6 +110,16 @@ export abstract class BaseConnector implements Connector {
     this.syncTimer.unref?.();
   }
 
+  /** Bağlıyken kullanıcı eylemi bekleyen durum (PIN vb.); değişince arayüze bildirilir */
+  attention?: string;
+  protected setAttention(msg: string | undefined): void {
+    if ((msg ?? '') === (this.attention ?? '')) return;
+    this.attention = msg;
+    this.account.attention = msg;
+    bus.emit({ type: 'account.status', account: { ...this.account } });
+    if (msg) bus.log('warn', `${this.account.platform}: ${msg}`);
+  }
+
   protected setStatus(status: AccountStatus, detail?: string): void {
     this.account.status = status;
     this.account.detail = detail;

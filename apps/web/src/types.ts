@@ -10,6 +10,8 @@ export interface Account {
   detail?: string;
   createdAt: number;
   qrDataUrl?: string;
+  /** Bağlı ama kullanıcı eylemi bekliyor (şifreli sohbet PIN'i vb.) */
+  attention?: string;
 }
 
 export interface Chat {

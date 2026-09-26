@@ -120,6 +120,8 @@ Dil: arayüz ve yorumlar Türkçe.
 - WhatsApp arka plan boşluk doldurma varsayılan KAPALI (`MIVELO_WA_GAPFILL=1` ile açılır): her fetchMessageHistory telefonda "… senkronize ediliyor / durduruldu"
   bildirimi çıkarıyor (canlı testte arka arkaya). Eski mesajlar yalnız kullanıcı yukarı kaydırınca (loadHistory). İçeriksiz mesaj için yeniden gönderim
   isteği mesaj başına bir kez (`resend.json`). X: `/i/chat/pin/recovery` = XChat PIN bekleniyor → uyarı, needsWindow/afterLogin ile Yeniden bağlan'da PIN.
+- Kullanıcı eylemi bekleyen durum: `Strategy.attention(page)` her yoklamadan sonra (X PIN sayfası, Messenger PIN penceresi) → `Account.attention`
+  (kalıcı değil; registry.list connector'dan ekler) → arayüzde kanal noktası turuncu + sohbet listesi üstünde "PIN'i gir" şeridi (restartAccount).
 - (açıksa) WhatsApp geçmiş boşluğu doldurma tur başına ≤25 istek × 50 mesaj (1,5–4 sn aralık; kalanı 30–45 dk sonra). "unavailable" presence yalnız
   bağlanınca ve gönderim/okundu sonrası tek sefer (`offlineSoon`); 4 dk'lık düzenli zamanlayıcı kaldırıldı (Baileys README: bildirim
   için yalnız `markOnlineOnConnect: false` yeterli).

@@ -42,7 +42,11 @@ export class Registry {
   constructor(private store: Store) {}
 
   list(): Account[] {
-    return this.store.listAccounts();
+    // attention kalıcı değil: çalışan connector'dan eklenir
+    return this.store.listAccounts().map((a) => {
+      const att = (this.connectors.get(a.id) as { attention?: string } | undefined)?.attention;
+      return att ? { ...a, attention: att } : a;
+    });
   }
 
   get(id: string): Connector | undefined {

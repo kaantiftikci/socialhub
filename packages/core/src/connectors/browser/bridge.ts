@@ -122,6 +122,11 @@ export interface Strategy {
   /** Görünür pencere kapatılmadan önce: kullanıcının tamamlaması gereken ek adım (PIN) için bekle */
   afterLogin?(page: Page): Promise<void>;
   /**
+   * Her yoklamadan sonra ucuz denetim: bağlı ama kullanıcı eylemi bekleyen durum (şifreli sohbet PIN'i vb.) varsa kısa açıklama,
+   * yoksa undefined. Arayüz kanal satırında uyarı + "PIN'i gir" düğmesi gösterir (Yeniden bağlan → görünür pencere → afterLogin).
+   */
+  attention?(page: Page): Promise<string | undefined>;
+  /**
    * Anlık bildirim: sayfanın kendi gerçek zamanlı akışını (LinkedIn /realtime/connect) dinle. Sayfa her açıldığında
    * gezinmeden önce çağrılır. notify('alive'): akış açık (kalp atışı) → yoklama seyrekleşir; notify('event'): yeni
    * mesaj/sohbet olayı → birkaç saniye içinde yoklama.
@@ -864,6 +869,8 @@ export class BrowserConnector extends BaseConnector {
       }
       // Boşta boşaltma: sekme kapatmak/about:blank render sürecini bırakmıyor (service worker, site izolasyonu); tarayıcıyı
       // tamamen kapat, sonraki yoklama/işlem yeniden açar (kalıcı profil oturumu korur; açılış ~3-5 sn)
+      if (this.strategy.attention && this.page && !this.page.isClosed() && this.account.status === 'connected')
+        this.setAttention(await this.strategy.attention(this.page).catch(() => undefined));
       await this.maybeSoftReload();
       const keep = this.wantPage();
       if (this.strategy.unloadWhenIdle && !keep && this.ctx && this.account.status === 'connected' && !this.stopping) {

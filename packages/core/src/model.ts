@@ -17,6 +17,8 @@ export interface Account {
   status: AccountStatus;
   detail?: string; // hata mesajı, eşleşme adımı vb.
   createdAt: number;
+  /** Bağlı ama kullanıcı eylemi bekleyen durum (ör. "şifreli sohbetler için PIN gerekli"); kalıcı değil, connector'dan gelir */
+  attention?: string;
 }
 
 export type ChatKind = 'direct' | 'group' | 'channel';

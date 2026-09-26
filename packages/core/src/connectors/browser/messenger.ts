@@ -475,6 +475,7 @@ function safeUrl(u: string): string {
 interface PinHooks {
   needsWindow(page: Page): Promise<boolean>;
   afterLogin(page: Page): Promise<void>;
+  attention(page: Page): Promise<string | undefined>;
 }
 
 export const messenger: Strategy & PinHooks = {
@@ -497,6 +498,10 @@ export const messenger: Strategy & PinHooks = {
     return pinPendingOnFirstThread(page).catch(() => false);
   },
 
+  async attention() {
+    // PIN penceresi bir sohbette görüldüyse (pinDialogOpen) PIN adımı tamamlanana dek
+    return pinWarned ? 'Şifreli sohbet geçmişi için Messenger PIN\'i gerekli — girilene dek eski mesajlar yüklenmez' : undefined;
+  },
   async afterLogin(page) {
     if (!(await pinPendingOnFirstThread(page).catch(() => false))) return;
     bus.log('info', 'Messenger: açık pencerede "PIN kodunu gir" adımı bekleniyor (eski mesajlar için). 3 dk içinde girilmezse atlanır.');

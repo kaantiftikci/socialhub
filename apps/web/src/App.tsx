@@ -797,7 +797,7 @@ export default function App() {
             {handleOf(a) && <span className="handle"> ({handleOf(a)})</span>}
           </span>
           <span className="count">{fmtCount(perPlatform.get(a.platform) ?? 0)}</span>
-          <span className={`dot ${a.status}`} style={{ marginLeft: 8 }} />
+          <span className={`dot ${a.status}${a.attention ? ' attn' : ''}`} style={{ marginLeft: 8 }} title={a.attention} />
           {sync[a.id] && <SyncBar compact progress={/%\d+/.test(a.detail ?? '') ? Number((a.detail ?? '').match(/%(\d+)/)?.[1] ?? 0) : sync[a.id].progress} since={sync[a.id].since} />}
         </button>
         );
@@ -987,6 +987,19 @@ export default function App() {
                   </button>
                 </div>
               )}
+              {accounts
+                .filter((a) => a.attention && a.status === 'connected' && (!platformFilter || a.platform === platformFilter))
+                .map((a) => (
+                  <div key={a.id} className="attn-bar" role="status">
+                    <Icon name="lock" size={14} sw={2} />
+                    <span>
+                      <b>{PLATFORMS[a.platform].name}:</b> {a.attention}
+                    </span>
+                    <button className="btn sm b" onClick={() => api.restartAccount(a.id).then(() => notify(`${PLATFORMS[a.platform].name} penceresi açılıyor — PIN'ini gir`)).catch((e) => notify(e.message, true))}>
+                      PIN'i gir
+                    </button>
+                  </div>
+                ))}
               <div className="list-head">
                 <div className="list-top" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div className="list-title">
