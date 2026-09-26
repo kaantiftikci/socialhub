@@ -1,5 +1,5 @@
 import type { Page } from 'playwright';
-import { hashId, type Msg, type Strategy, type Thread } from './bridge.js';
+import { hashId, LIGHTSPEED_EVENT, type Msg, type Strategy, type Thread } from './bridge.js';
 import { bus } from '../../bus.js';
 import type { Attachment } from '../../model.js';
 
@@ -480,6 +480,13 @@ interface PinHooks {
 export const messenger: Strategy & PinHooks = {
   // giriş penceresi: Facebook girişi her iki adres için ortak (c_user/xs çerezleri); kapanan messenger.com'u açmıyoruz
   home: `${SITES[0].base}${SITES[0].prefix}/`,
+  // Anlık: sayfanın kendi soketleri (mautrix-meta: DGW gateway.facebook.com/ws/lightspeed; şifreli sohbetler
+  // web-chat-e2ee.facebook.com — çerçeveler opak, yalnız büyüklüğe bakılır) + kenar çubuğu önizlemeleri (DOM).
+  watchSockets: [
+    { url: /gateway\.facebook\.com\/ws\/lightspeed|edge-chat\.(facebook|messenger)\.com/, event: LIGHTSPEED_EVENT },
+    { url: /web-chat-e2ee\.facebook\.com/, minBytes: 300 },
+  ],
+  watchSelector: CHAT_LINK,
   loginHint: 'Açılan pencerede Facebook hesabına giriş yap; "PIN kodunu gir" çıkarsa eski mesajlar için PIN\'ini gir',
 
   async loggedIn(_page, cookies) {

@@ -59,3 +59,45 @@ test('e-posta tarayıcı stratejileri canlı liste izleyicisi tanımlar', async 
   }
   assert.equal(gmail.watchSelector, 'tr.zA');
 });
+
+test('soket dinleyici: yalnız eşleşen soket; olay regex/boyut; diğer çerçeveler canlılık', async () => {
+  const { EventEmitter } = await import('node:events');
+  const { watchSocketFrames, LIGHTSPEED_EVENT } = await import('../src/connectors/browser/bridge.js');
+  const page = new EventEmitter();
+  const got: string[] = [];
+  watchSocketFrames(page as never, [{ url: /gateway\.instagram\.com\/ws\/lightspeed/, event: LIGHTSPEED_EVENT }, { url: /chat-ws\.x\.com/, minBytes: 96 }], (k) => got.push(k));
+  const sock = (url: string) => Object.assign(new EventEmitter(), { url: () => url });
+  const ig = sock('wss://gateway.instagram.com/ws/lightspeed?x=1');
+  const other = sock('wss://example.com/ws');
+  const x = sock('wss://chat-ws.x.com/ws');
+  for (const s of [ig, other, x]) page.emit('websocket', s);
+  ig.emit('framereceived', { payload: Buffer.from('\x00\x01{"sp":["updateTypingIndicator"]}') });
+  ig.emit('framereceived', { payload: Buffer.from('\x00\x01{"sp":["insertMessage","updateThreadSnippet"]}') });
+  other.emit('framereceived', { payload: 'insertMessage' });
+  x.emit('framereceived', { payload: Buffer.alloc(20) }); // ping
+  x.emit('framereceived', { payload: Buffer.alloc(400) }); // şifreli mesaj
+  assert.deepEqual(got, ['alive', 'event', 'alive', 'event']);
+});
+
+test('linkedin: mesajlaşma rozeti olay, bildirim rozeti değil', () => {
+  assert.equal(realtimeKind('data: {"topic":"urn:li-realtime:tabBadgeUpdateTopic:x","payload":{"tab":"MESSAGING","count":2}}'), 'event');
+  assert.equal(realtimeKind('data: {"topic":"urn:li-realtime:tabBadgeUpdateTopic:x","payload":{"tab":"NOTIFICATIONS","count":2}}'), 'alive');
+});
+
+test('PollTimer: sapmalı sıralı turlar; stop sonrası yeniden planlamaz; pazaryeri aralığı etkinliğe göre', async () => {
+  const { PollTimer, marketDelay } = await import('../src/connectors/poll-timer.js');
+  let n = 0;
+  const t = new PollTimer(async () => void n++, () => 5).start();
+  await new Promise((r) => setTimeout(r, 60));
+  t.stop();
+  const after = n;
+  assert.ok(after >= 3, `tur: ${after}`);
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(n, after, 'durduktan sonra tur yok');
+  markActive(true);
+  const a = marketDelay();
+  markActive(false);
+  const i = marketDelay();
+  assert.ok(a >= 21_000 && a <= 39_000, String(a));
+  assert.ok(i >= 42_000 && i <= 78_000, String(i));
+});

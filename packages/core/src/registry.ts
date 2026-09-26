@@ -135,16 +135,16 @@ export class Registry {
         break;
       // Resmi olmayan kanallarda yoklama aralıkları ban riskine göre (±%30 sapmayla, bridge.schedule): LinkedIn/X seyrek
       case 'linkedin':
-        c = new BrowserConnector(account, this.store, linkedin, 60_000);
+        c = new BrowserConnector(account, this.store, linkedin, 60_000, { rtSlowdown: 5 }); // anlık akış canlıyken yedek 5 dk
         break;
       case 'instagram':
-        c = new BrowserConnector(account, this.store, instagram, 30_000, { idlePollMs: 120_000 }); // Mivelo açık ve odaktayken 30 sn, boşta 2 dk
+        c = new BrowserConnector(account, this.store, instagram, 30_000, { idlePollMs: 120_000, keepOpen: 'always', rtSlowdown: 10 }); // sayfa açık + soket dinleme; soket yoksa odakta 30 sn / boşta 2 dk, canlıyken yedek 5 dk
         break;
       case 'x':
-        c = new BrowserConnector(account, this.store, x, 60_000);
+        c = new BrowserConnector(account, this.store, x, 60_000, { rtSlowdown: 3 }); // soket canlıyken yedek 3 dk
         break;
       case 'messenger':
-        c = new BrowserConnector(account, this.store, messenger, 30_000);
+        c = new BrowserConnector(account, this.store, messenger, 30_000, { rtSlowdown: 5 }); // soket/liste canlıyken yedek 2,5 dk
         break;
       case 'shopier': {
         const tokenFile = path.join(sessionDir(account.id), 'token');

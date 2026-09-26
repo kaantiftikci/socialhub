@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ordersFlag, BaseConnector, type StartOptions } from './base.js';
+import { PollTimer, marketDelay } from './poll-timer.js';
 import { BrowserConnector } from './browser/bridge.js';
 import { makeShopifyInbox } from './browser/shopify.js';
 import { bus } from '../bus.js';
@@ -22,7 +23,6 @@ import type { Store } from '../store.js';
  */
 type J = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 const API_VERSION = '2025-07';
-const POLL_MS = 120_000;
 
 export interface ShopifyConfig {
   shop: string;
@@ -118,7 +118,7 @@ class InboxBridge extends BrowserConnector {
 export class ShopifyConnector extends BaseConnector {
   /** sipariş sohbetleri açık mı (token JSON orders:true); kapalıysa yalnız müşteri soruları/mesajları */
   private ordersOn = false;
-  private timer?: NodeJS.Timeout;
+  private timer?: PollTimer;
   private polling = false;
   private stopping = false;
   private readonly handle: string;
@@ -197,8 +197,9 @@ export class ShopifyConnector extends BaseConnector {
       this.account.label = shop.name ?? this.handle;
       await this.poll(true);
       this.setApiStatus('connected', shop.email ?? undefined);
-      if (this.timer) clearInterval(this.timer);
-      this.timer = setInterval(() => void this.poll(false), POLL_MS);
+      this.timer?.stop();
+      this.timer?.stop();
+      this.timer = new PollTimer(() => this.poll(false), () => marketDelay()).start();
     } catch (e) {
       this.setApiStatus('error', (e as Error).message.split('\n')[0]);
       return;
@@ -212,7 +213,7 @@ export class ShopifyConnector extends BaseConnector {
 
   async stop(): Promise<void> {
     this.stopping = true;
-    if (this.timer) clearInterval(this.timer);
+    this.timer?.stop();
     this.timer = undefined;
     await this.inbox?.stop().catch(() => undefined);
     this.inboxState = undefined;
@@ -249,7 +250,7 @@ export class ShopifyConnector extends BaseConnector {
       this.saveState();
     } catch (e) {
       if (e instanceof AuthError) {
-        if (this.timer) clearInterval(this.timer);
+        this.timer?.stop();
         this.timer = undefined;
         if (!first) this.setApiStatus('error', e.message);
         throw e;

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ordersFlag, BaseConnector, type StartOptions } from './base.js';
+import { PollTimer, marketDelay } from './poll-timer.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
 import type { Participant } from '../model.js';
@@ -42,7 +43,6 @@ export const ORDER_STATUSES = ['Created', 'Picking', 'Shipped', 'Cancelled', 'De
 const DAY = 86_400_000;
 /** Sipariş penceresi: 14 gün (startDate'in hangi tarihe baktığı belirsiz; geniş pencere kargo/teslim olaylarını da yakalar) */
 const WINDOW = 14 * DAY - 60_000;
-const POLL_MS = 120_000;
 const PAGE_SIZE = 100;
 const Q_PAGE_SIZE = 50;
 
@@ -152,7 +152,7 @@ interface State {
 export class N11Connector extends BaseConnector {
   /** sipariş sohbetleri açık mı (token JSON orders:true); kapalıysa yalnız müşteri soruları/mesajları */
   private ordersOn = false;
-  private timer?: NodeJS.Timeout;
+  private timer?: PollTimer;
   private polling = false;
   private stopping = false;
   private cfg?: N11Config;
@@ -232,8 +232,8 @@ export class N11Connector extends BaseConnector {
     try {
       await this.poll(true);
       this.setStatus('connected', `App Key ${this.cfg.appKey.slice(0, 8)}…`);
-      this.timer = setInterval(() => void this.poll(false), POLL_MS);
-      this.timer.unref?.();
+      this.timer?.stop();
+      this.timer = new PollTimer(() => this.poll(false), () => marketDelay(45_000, 90_000)).start();
     } catch (e) {
       this.setStatus('error', (e as Error).message.split('\n')[0]);
     }
@@ -241,7 +241,7 @@ export class N11Connector extends BaseConnector {
 
   async stop(): Promise<void> {
     this.stopping = true;
-    if (this.timer) clearInterval(this.timer);
+    this.timer?.stop();
     this.setStatus('disconnected');
   }
 
@@ -290,7 +290,7 @@ export class N11Connector extends BaseConnector {
       if (e instanceof N11AuthError) {
         if (first) throw e;
         this.setStatus('error', e.message);
-        if (this.timer) clearInterval(this.timer);
+        this.timer?.stop();
         return;
       }
       if (first) throw e;

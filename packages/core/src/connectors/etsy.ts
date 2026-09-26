@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import { ordersFlag, BaseConnector, type StartOptions } from './base.js';
+import { PollTimer, marketDelay } from './poll-timer.js';
 import { BrowserConnector } from './browser/bridge.js';
 import { etsy as etsyStrategy } from './browser/etsy.js';
 import { OAUTH_CALLBACK, waitOAuth, withAuthWindow } from './mail.js';
@@ -92,7 +93,7 @@ export class EtsyConnector extends BaseConnector {
   /** sipariş sohbetleri açık mı (token JSON orders:true); kapalıysa yalnız müşteri soruları/mesajları */
   private ordersOn = false;
   private cfg: EtsyConfig;
-  private timer?: NodeJS.Timeout;
+  private timer?: PollTimer;
   private polling = false;
   private stopping = false;
   private seen = new Map<string, string>();
@@ -268,9 +269,9 @@ export class EtsyConnector extends BaseConnector {
       if (shop.shop_name) this.account.label = `Etsy · ${shop.shop_name}`;
       await this.poll(true);
       this.setApi('connected');
-      if (this.timer) clearInterval(this.timer);
-      this.timer = setInterval(() => void this.poll(false), 120_000);
-      this.timer.unref?.(); // süreç yalnızca bu zamanlayıcı için ayakta kalmasın (testler)
+      this.timer?.stop();
+      this.timer?.stop();
+      this.timer = new PollTimer(() => this.poll(false), () => marketDelay(60_000, 90_000)).start();
     } catch (e) {
       this.setApi('error', (e as Error).message.split('\n')[0]);
     }
@@ -286,7 +287,7 @@ export class EtsyConnector extends BaseConnector {
 
   async stop(): Promise<void> {
     this.stopping = true;
-    if (this.timer) clearInterval(this.timer);
+    this.timer?.stop();
     this.timer = undefined;
     await this.bridge?.stop().catch(() => undefined);
     this.apiStatus = 'disconnected';

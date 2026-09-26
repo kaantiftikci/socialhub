@@ -103,7 +103,7 @@ Dil: arayüz ve yorumlar Türkçe.
 
 ## Ban önleme (Eylül 2026 araştırması)
 - Tarayıcı köprüsü yoklaması sabit `setInterval` DEĞİL: `bridge.schedule()` her tur ±%30 sapmalı `setTimeout`. Aralıklar (registry):
-  LinkedIn 60 sn, X 60 sn, Instagram 30 sn, Messenger 30 sn, Slack(tarayıcı) 30 sn, Gmail/iCloud (tarayıcı) odakta 30 sn / boşta 90 sn, Outlook 90 sn. API paralelliği en çok 2.
+  LinkedIn 60 sn, X 60 sn, Instagram 30 sn (boşta 120), Messenger 30 sn (anlık sinyal canlıyken seyrekleşir), Slack(tarayıcı) 30 sn, Gmail/iCloud (tarayıcı) odakta 30 sn / boşta 90 sn, Outlook 90 sn. API paralelliği en çok 2.
 - Hata sınıfları (`pollInner` catch): checkpoint/captcha/`account/access`/authwall → yoklama durur, durum 'pairing' (otomatik deneme yok);
   429/999/rate limit → üstel bekleme 5→10→20… ≤120 dk (`rateHits`, başarılı turda sıfırlanır).
 - WhatsApp 402/403/406 → dur, oturumu SİLME (kısıtlı hesapta yeniden eşleşme yasağı kalıcılaştırabilir); kopmalarda üstel ≤5 dk + sapma.
@@ -130,6 +130,14 @@ Dil: arayüz ve yorumlar Türkçe.
 - E-posta tarayıcı yolları canlı liste izler (`Strategy.watchSelector` → `bridge.watchDom`: ilk 6 satırın metni 2 sn'de bir, zaman
   ifadeleri hariç; değişince yoklama). Köprü `keepOpen`: Outlook 'always' (IMAP yok; sürekli açık, ~200-300 MB, yoklama 90 sn → izleyici
   canlıyken 270 sn), Gmail/iCloud tarayıcı 'whileActive' (odakta açık + 30 sn, boşta kapalı + 90 sn).
+- Anlık sinyal altyapısı (Eylül 2026 araştırması: mautrix-meta/-twitter/-linkedin kaynakları): `Strategy.watchSockets` → sayfanın KENDİ
+  WebSocket çerçeveleri pasif dinlenir (`watchSocketFrames`; soket açılmaz/yazılmaz). Instagram `gateway.instagram.com/ws/lightspeed`,
+  Messenger `gateway.facebook.com/ws/lightspeed` + `web-chat-e2ee` (boyut), olay regex'i `LIGHTSPEED_EVENT` (insertMessage/upsertMessage/
+  updateThreadSnippet…); X `chat-ws.x.com` (şifreli, ≥96 bayt). Olay → `pollSoon` (≥10 sn arayla, `soonAt` bekleyen turu ertelemez).
+  Seyrekleşme (`rtSlowdown`) ancak en az bir 'event' görüldükten sonra: Instagram ×10 (yedek 5 dk; sayfa `keepOpen:'always'`),
+  LinkedIn ×5, Messenger ×5, X ×3. X tam yeniden yükleme 20–30 dk. LinkedIn `tabBadgeUpdateTopic` yalnız MESSAGING ise olay.
+- Pazaryerleri `PollTimer` + `marketDelay` (poll-timer.ts): Trendyol/Hepsiburada/Shopify odakta 30 sn / boşta 60 sn, n11 45/90, Etsy 60/90,
+  Amazon 120 sn (getOrders 1/dk). Belgeli sınırlar çok üstte (Trendyol soru/sipariş 1000/dk, HB OMS ~240/dk); webhook'lar genel HTTPS ister.
 - Amazon Seller Central / Etsy Mesajları / Shopify Inbox tarayıcı köprüleri varsayılan KAPALI (yapılandırmada messaging/inbox:true ile açılır).
 - Bağlan: resmi olmayan kanallarda "resmi değil" etiketi + Sosyal Medya altında açıklama (`UNOFFICIAL`, Connect.tsx).
 

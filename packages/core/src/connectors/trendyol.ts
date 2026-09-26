@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ordersFlag, BaseConnector, type StartOptions } from './base.js';
+import { PollTimer, marketDelay } from './poll-timer.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
 import type { Participant } from '../model.js';
@@ -51,7 +52,6 @@ const DAY = 86_400_000;
 const FIRST_WINDOW = 14 * DAY - 60_000;
 /** Sonraki yoklamalar: son değişenler (PackageLastModifiedDate'e göre) — 3 günlük pencere geç gelen kargo/teslim olaylarını da yakalar */
 const NEXT_WINDOW = 3 * DAY;
-const POLL_MS = 120_000;
 const PAGE_SIZE = 200;
 
 /** Paket durumu → mesaj metni. `Created` yeni sipariş mesajıyla zaten anlatılıyor, ayrıca yazılmaz. */
@@ -101,7 +101,7 @@ export function parseConfig(raw: string): TrendyolConfig | undefined {
 export class TrendyolConnector extends BaseConnector {
   /** sipariş sohbetleri açık mı (token JSON orders:true); kapalıysa yalnız müşteri soruları/mesajları */
   private ordersOn = false;
-  private timer?: NodeJS.Timeout;
+  private timer?: PollTimer;
   private polling = false;
   private stopping = false;
   private cfg?: TrendyolConfig;
@@ -177,8 +177,8 @@ export class TrendyolConnector extends BaseConnector {
     try {
       await this.poll(true);
       this.setStatus('connected', `Satıcı ${this.sellerId}`);
-      this.timer = setInterval(() => void this.poll(false), POLL_MS);
-      this.timer.unref?.();
+      this.timer?.stop();
+      this.timer = new PollTimer(() => this.poll(false), () => marketDelay()).start();
     } catch (e) {
       this.setStatus('error', (e as Error).message.split('\n')[0]);
     }
@@ -186,7 +186,7 @@ export class TrendyolConnector extends BaseConnector {
 
   async stop(): Promise<void> {
     this.stopping = true;
-    if (this.timer) clearInterval(this.timer);
+    this.timer?.stop();
     this.setStatus('disconnected');
   }
 
@@ -222,7 +222,7 @@ export class TrendyolConnector extends BaseConnector {
       if (e instanceof TrendyolAuthError) {
         if (first) throw e;
         this.setStatus('error', e.message);
-        if (this.timer) clearInterval(this.timer);
+        this.timer?.stop();
         return;
       }
       if (first) throw e;

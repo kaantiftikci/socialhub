@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ordersFlag, BaseConnector, type StartOptions } from './base.js';
+import { PollTimer, marketDelay } from './poll-timer.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
 import type { Attachment, Participant } from '../model.js';
@@ -37,7 +38,6 @@ type J = Record<string, any>; // eslint-disable-line @typescript-eslint/no-expli
 
 const OMS = 'https://oms-external.hepsiburada.com';
 const ASK = 'https://api-asktoseller-merchant.hepsiburada.com';
-const POLL_MS = 120_000;
 /** İlk yoklamada paket/kargo geçmişi: son 14 gün (saat) */
 const FIRST_TIMESPAN_H = 14 * 24;
 
@@ -120,7 +120,7 @@ function issueStatus(v: unknown): 'WaitingForAnswer' | 'Answered' | 'Rejected' |
 export class HepsiburadaConnector extends BaseConnector {
   /** sipariş sohbetleri açık mı (token JSON orders:true); kapalıysa yalnız müşteri soruları/mesajları */
   private ordersOn = false;
-  private timer?: NodeJS.Timeout;
+  private timer?: PollTimer;
   private polling = false;
   private stopping = false;
   private cfg: HepsiburadaConfig;
@@ -189,8 +189,8 @@ export class HepsiburadaConnector extends BaseConnector {
     try {
       await this.poll(true);
       this.setStatus('connected', `merchant ${this.cfg.merchantId.slice(0, 8)}…`);
-      this.timer = setInterval(() => void this.poll(false), POLL_MS);
-      this.timer.unref?.();
+      this.timer?.stop();
+      this.timer = new PollTimer(() => this.poll(false), () => marketDelay()).start();
     } catch (e) {
       this.setStatus('error', (e as Error).message.split('\n')[0]);
     }
@@ -198,7 +198,7 @@ export class HepsiburadaConnector extends BaseConnector {
 
   async stop(): Promise<void> {
     this.stopping = true;
-    if (this.timer) clearInterval(this.timer);
+    this.timer?.stop();
     this.setStatus('disconnected');
   }
 
@@ -227,7 +227,7 @@ export class HepsiburadaConnector extends BaseConnector {
       const err = e as HbError;
       if (err.status === 401 || err.status === 403) {
         this.setStatus('error', err.message);
-        if (this.timer) clearInterval(this.timer);
+        this.timer?.stop();
       } else bus.log('warn', `Hepsiburada yoklama: ${err.message}`);
       if (first) throw e;
     } finally {

@@ -1,5 +1,5 @@
 import type { Page } from 'playwright';
-import { apiOf, needsPage, type Msg, type Strategy, type Thread } from './bridge.js';
+import { apiOf, LIGHTSPEED_EVENT, needsPage, type Msg, type Strategy, type Thread } from './bridge.js';
 import { pickFileInput } from './outlook.js';
 import type { Attachment, Reaction } from '../../model.js';
 import { bus } from '../../bus.js';
@@ -382,6 +382,10 @@ export const instagram: Strategy = {
   loginHint: 'Açılan pencerede Instagram hesabına giriş yap',
 
   pageless: true,
+  // Anlık: /direct/inbox/ sayfası açık tutulur (registry keepOpen), sayfanın kendi DGW soketi dinlenir (mautrix-meta'nın
+  // kullandığı gateway.instagram.com/ws/lightspeed; eski edge-chat MQTT de). Yeni mesaj çerçevesinde birkaç sn içinde
+  // tek bir inbox isteği. Soket biz açmıyoruz, yazmıyoruz.
+  watchSockets: [{ url: /gateway\.instagram\.com\/ws\/(lightspeed|mqttbypass)|edge-chat\.instagram\.com/, event: LIGHTSPEED_EVENT }],
 
   async loggedIn(_page, cookies) {
     return Boolean(cookies.ds_user_id && cookies.sessionid);

@@ -432,7 +432,8 @@ async function freshSnapshot(page: Page): Promise<boolean> {
     if (ok) return true;
   }
   const ok = await syncAndSnapshot(page);
-  nextReloadAt = Date.now() + (6 + Math.random() * 3) * 60e3;
+  // sayfa XChat soketinden canlı güncelleniyor (liste imzası değişince zaten tam eşitleme): güvenlik için 20-30 dk'da bir tam yükleme
+  nextReloadAt = Date.now() + (20 + Math.random() * 10) * 60e3;
   lastListSig = await listSignature(page);
   return ok;
 }
@@ -1015,6 +1016,10 @@ function mergeMsgs(...lists: Msg[][]): Msg[] {
 
 export const x: Strategy & { fetchMedia(page: Page, cookies: Record<string, string>, u: string): Promise<{ body: Buffer; type: string } | undefined> } = {
   home: CHAT,
+  // Anlık: XChat sayfasının kendi soketi (mautrix-twitter: wss://chat-ws.x.com/ws, Thrift ikili + uçtan uca şifreli →
+  // yalnız çerçeve büyüklüğü; 30 sn'lik ping'ler küçük) + sohbet listesi (DOM). Olayda freshSnapshot sayfayı yeniden yüklemez.
+  watchSockets: [{ url: /chat-ws\.x\.com/, minBytes: 96 }],
+  watchSelector: '[data-testid^="dm-conversation-item-"]',
   loginHint: 'Açılan pencerede X hesabına giriş yap',
 
   async loggedIn(_page, cookies) {

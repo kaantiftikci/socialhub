@@ -132,6 +132,32 @@ export interface Strategy {
    * değişince (yeni e-posta listeye düştü) 'event'. Ağ trafiği yok, yalnız sayfanın kendi DOM'u okunur (Gmail tr.zA vb.).
    */
   watchSelector?: string;
+  /**
+   * Sayfanın KENDİ WebSocket'leri (Playwright page.on('websocket') → framereceived): yalnız dinlenir, soket açılmaz/yazılmaz.
+   * url'ye uyan sokette `event` eşleşen çerçeve (ya da event yoksa minBytes'tan büyük çerçeve) → 'event', diğerleri → 'alive'.
+   * Kaynak: mautrix-meta (Instagram/Messenger DGW lightspeed), mautrix-twitter (XChat chat-ws.x.com).
+   */
+  watchSockets?: Array<{ url: RegExp; event?: RegExp; minBytes?: number }>;
+}
+
+/**
+ * Meta Lightspeed (Instagram ve Messenger web, DGW `gateway.<site>/ws/lightspeed`) yeni mesaj/sohbet saklı yordamları.
+ * Kaynak: mautrix-meta pkg/messagix/table/table.go. Çerçeve ikili ama yük JSON; latin1 metinde aranır.
+ */
+export const LIGHTSPEED_EVENT = /insertMessage|upsertMessage|updateThreadSnippet|deleteThenInsertThread|insertNewMessageRange/;
+
+/** Sayfanın kendi WebSocket çerçevelerini pasif dinle (Strategy.watchSockets) */
+export function watchSocketFrames(page: Page, rules: NonNullable<Strategy['watchSockets']>, notify: (kind: 'alive' | 'event') => void): void {
+  page.on('websocket', (ws) => {
+    const rule = rules.find((r) => r.url.test(ws.url()));
+    if (!rule) return;
+    ws.on('framereceived', (f) => {
+      const p = f.payload;
+      const text = typeof p === 'string' ? p : Buffer.from(p).toString('latin1');
+      const hit = rule.event ? rule.event.test(text) : text.length >= (rule.minBytes ?? 64);
+      notify(hit ? 'event' : 'alive');
+    });
+  });
 }
 
 /**
@@ -177,6 +203,11 @@ export interface BridgeOptions {
    * 'whileActive' (Gmail/iCloud tarayıcı yolu: Mivelo odaktayken açık, boşta bellek için kapanır).
    */
   keepOpen?: 'always' | 'whileActive';
+  /**
+   * Anlık sinyal canlıyken (son 5 dk'da sinyal + en az bir kez 'event' görülmüş) yedek yoklama bu kat seyrekleşir (varsayılan 3).
+   * 'event' hiç görülmediyse seyrekleşme yok: dinleyici yanlış çerçeveye bakıyorsa mesajlar gecikmesin.
+   */
+  rtSlowdown?: number;
 }
 
 export class BrowserConnector extends BaseConnector {
@@ -212,6 +243,10 @@ export class BrowserConnector extends BaseConnector {
   /** Anlık akış en son ne zaman yaşam belirtisi verdi (0: hiç) */
   private rtAliveAt = 0;
   private rtLogged = false;
+  /** Son 'event' zamanı (0: hiç) — seyrekleşme ancak dinleyicinin gerçekten olay yakaladığı görülünce */
+  private rtEventAt = 0;
+  /** Öne çekilmiş tur ne zaman çalışacak (üst üste olaylar bekleyen turu sürekli ertelemesin) */
+  private soonAt = 0;
   /** Yoklama sürerken gelen anlık olay: tur bitince hemen bir tur daha */
   private pendingPoll = false;
   private lastPollAt = 0;
@@ -220,6 +255,7 @@ export class BrowserConnector extends BaseConnector {
   /** Anlık akıştan haber: 'event' ise yakında yokla (en az 10 sn arayla), 'alive' yalnız akışı canlı sayar */
   private onRealtime(kind: 'alive' | 'event'): void {
     this.rtAliveAt = Date.now();
+    if (kind === 'event') this.rtEventAt = Date.now();
     if (!this.rtLogged) {
       this.rtLogged = true;
       bus.log('info', `${this.account.platform}: sayfanın anlık bildirim akışı dinleniyor; yoklama seyrekleşti, yeni mesajda hemen okunur`);
@@ -234,7 +270,15 @@ export class BrowserConnector extends BaseConnector {
       this.pendingPoll = true;
       return;
     }
-    this.schedule(Math.max(1500 + Math.random() * 2500, 10_000 - (Date.now() - this.lastPollAt)));
+    if (this.soonAt > Date.now()) return; // zaten öne çekildi
+    const delay = Math.max(1500 + Math.random() * 2500, 10_000 - (Date.now() - this.lastPollAt));
+    this.soonAt = Date.now() + delay;
+    this.schedule(delay);
+  }
+
+  /** Tarayıcı sayfası şimdi açık tutulmalı mı (keepOpen) */
+  private wantPage(): boolean {
+    return this.opts.keepOpen === 'always' || (this.opts.keepOpen === 'whileActive' && isUiActive());
   }
 
   async start(opts: StartOptions = {}): Promise<void> {
@@ -383,7 +427,7 @@ export class BrowserConnector extends BaseConnector {
     try {
       return await fn(this.page!, await this.cookies());
     } finally {
-      if (this.strategy.pageless && this.account.status === 'connected' && !this.stopping) await this.goPageless().catch(() => undefined);
+      if (this.strategy.pageless && !this.wantPage() && this.account.status === 'connected' && !this.stopping) await this.goPageless().catch(() => undefined);
     }
   }
 
@@ -455,6 +499,7 @@ export class BrowserConnector extends BaseConnector {
     const onRt = (k: 'alive' | 'event') => this.onRealtime(k);
     const watching = this.strategy.watch ? this.strategy.watch(this.page, onRt) : this.strategy.watchSelector ? watchDom(this.page, this.strategy.watchSelector, onRt) : undefined;
     await watching?.catch((e) => bus.log('warn', `${this.account.platform}: anlık izleme kurulamadı: ${(e as Error).message}`));
+    if (this.strategy.watchSockets) watchSocketFrames(this.page, this.strategy.watchSockets, onRt);
     ctx.on('close', () => {
       if (this.ctx !== ctx) return; // biz kapattık (görünürden görünmeze geçiş)
       if (!this.stopping) this.setStatus('disconnected', 'Tarayıcı penceresi kapatıldı');
@@ -719,6 +764,7 @@ export class BrowserConnector extends BaseConnector {
   private schedule(delay?: number): void {
     this.unschedule();
     const t: NodeJS.Timeout = setTimeout(async () => {
+      this.soonAt = 0;
       await this.poll(false).catch(() => undefined);
       if (this.timer !== t || this.stopping) return;
       if (this.pendingPoll) {
@@ -736,7 +782,8 @@ export class BrowserConnector extends BaseConnector {
   private nextDelay(): number {
     const base = this.opts.idlePollMs && !isUiActive() ? this.opts.idlePollMs : this.pollMs;
     // tarayıcı boşta kapalıysa (unloadWhenIdle) izleyici çalışmıyor: seyrekleştirme yok
-    const rt = !this.idleClosed && Date.now() - this.rtAliveAt < 5 * 60_000 ? 3 : 1;
+    const live = !this.idleClosed && !this.pageless && this.rtEventAt > 0 && Date.now() - this.rtAliveAt < 5 * 60_000;
+    const rt = live ? (this.opts.rtSlowdown ?? 3) : 1;
     return base * rt * (0.7 + Math.random() * 0.6);
   }
 
@@ -747,19 +794,21 @@ export class BrowserConnector extends BaseConnector {
 
   private async poll(first: boolean): Promise<void> {
     if (this.polling || Date.now() < this.backoffUntil) return;
+    // keepOpen: sayfasız (API) moddaki kanal için sayfa açılır → sayfanın kendi anlık soketi dinlenebilir
+    if (this.pageless && this.wantPage() && this.account.status === 'connected') await this.ensureOpen().catch(() => false);
     if ((!this.page || this.page.isClosed()) && !this.pageless && !(await this.ensureOpen())) return;
     this.polling = true;
     this.lastPollAt = Date.now();
     try {
       await this.serial(() => this.pollInner(first));
       // API tabanlı kanal: ilk başarılı yoklamadan sonra tarayıcı kapanır; sayfasızda çerezler her yoklamada diske
-      if (this.strategy.pageless && this.account.status === 'connected' && !this.stopping) {
+      if (this.strategy.pageless && !this.wantPage() && this.account.status === 'connected' && !this.stopping) {
         if (this.ctx) await this.serial(() => this.goPageless()).catch((e) => bus.log('warn', `${this.account.platform}: sayfasız moda geçilemedi: ${(e as Error).message}`));
         else if (this.api) this.saveState(await this.api.storageState().catch(() => this.state!));
       }
       // Boşta boşaltma: sekme kapatmak/about:blank render sürecini bırakmıyor (service worker, site izolasyonu); tarayıcıyı
       // tamamen kapat, sonraki yoklama/işlem yeniden açar (kalıcı profil oturumu korur; açılış ~3-5 sn)
-      const keep = this.opts.keepOpen === 'always' || (this.opts.keepOpen === 'whileActive' && isUiActive());
+      const keep = this.wantPage();
       if (this.strategy.unloadWhenIdle && !keep && this.ctx && this.account.status === 'connected' && !this.stopping) {
         await this.serial(() => this.closeCtx()).catch(() => undefined);
         this.idleClosed = true;

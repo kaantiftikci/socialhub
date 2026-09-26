@@ -471,8 +471,10 @@ export function _seedLinkedinForTests(conversationsUrl: string, me: string): voi
  * Akış hiç görülmezse yoklama eskisi gibi (60 sn) sürer; görülürse köprü aralığı 3 katına çıkarır.
  */
 export const RT_EVENT_RE = /messagesTopic|conversationsTopic|messageReactionSummariesTopic|messageSeenReceiptsTopic|conversationDeletesTopic/;
+/** Sekme rozeti güncellemesi (mautrix-linkedin bunu da "sohbet değişti" sayar) — yalnız mesajlaşma rozetiyse */
+const BADGE_RE = /tabBadgeUpdateTopic[\s\S]*MESSAGING|MESSAGING[\s\S]*tabBadgeUpdateTopic/;
 export function realtimeKind(chunk: string): 'event' | 'alive' {
-  return RT_EVENT_RE.test(chunk) ? 'event' : 'alive';
+  return RT_EVENT_RE.test(chunk) || BADGE_RE.test(chunk) ? 'event' : 'alive';
 }
 
 async function watchRealtime(page: Page, notify: (kind: 'alive' | 'event') => void): Promise<void> {
@@ -486,7 +488,7 @@ async function watchRealtime(page: Page, notify: (kind: 'alive' | 'event') => vo
     let aliveAt = 0;
     const emit = (text: string) => {
       try {
-        if (re.test(text)) w.__miveloRt?.('event');
+        if (re.test(text) || (/tabBadgeUpdateTopic/.test(text) && /MESSAGING/.test(text))) w.__miveloRt?.('event');
         else if (Date.now() - aliveAt > 30_000) {
           aliveAt = Date.now();
           w.__miveloRt?.('alive');
