@@ -138,9 +138,31 @@ export type CoreEvent =
   | { type: 'chat.followup'; chat: Chat }
   /** Zamanlanmış gönderim listesi değişti (eklendi/iptal/gönderildi) */
   | { type: 'scheduled.update' }
+  /** Mivelo takvimi değişti / etkinlik hatırlatması */
+  | { type: 'events.update' }
+  | { type: 'event.reminder'; event: CalEvent }
   /** Zamanlanmış mesaj gönderilemedi / kaçırıldı */
   | { type: 'scheduled.missed'; item: { id: string; chatId: string; text: string; at: number; missed?: { reason: string; at: number } }; chatName: string }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; text: string };
+
+export interface CalEvent {
+  id: string;
+  title: string;
+  /** yerel saat "YYYY-MM-DDTHH:mm" ya da tüm gün "YYYY-MM-DD" */
+  start: string;
+  durationMin?: number;
+  allDay?: boolean;
+  notes?: string;
+  location?: string;
+  /** mesajdan eklendiyse: sohbet ve mesaj (Takvim'den "Sohbete git") */
+  chatId?: string;
+  messageId?: string;
+  /** başlangıçtan kaç dk önce bildirim (yok = hatırlatma yok) */
+  remindMin?: number;
+  /** cihaz takvimine de eklendiyse takvim adı */
+  deviceCalendar?: string;
+  createdAt: number;
+}
 
 export function chatId(accountId: string, remoteId: string): string {
   return `${accountId}/${remoteId}`;

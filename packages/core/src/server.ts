@@ -7,6 +7,7 @@ import os from 'node:os';
 import QRCode from 'qrcode';
 import { DATA_DIR } from './config.js';
 import { ScheduledQueue } from './scheduled.js';
+import type { CalEvent } from './model.js';
 import { addToDeviceCalendar, deviceCalendarApp, listDeviceCalendars, type DeviceCalendarError } from './calendar-device.js';
 import { WebSocketServer, WebSocket } from 'ws';
 import { markActive } from './activity.js';
@@ -434,6 +435,51 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     return chat;
   });
   // Takvime ekle: .ics üretir; bu bilgisayardan istenmişse takvim uygulamasında açar, uzaktaysa dosyayı döndürür (tarayıcı indirir)
+  // ---------- Mivelo takvimi (uygulama içi) ----------
+  route('GET', '/api/events', (req) => {
+    const sp = new URL(req.url ?? '/', 'http://x').searchParams;
+    return store.listEvents(sp.get('from') ?? undefined, sp.get('to') ?? undefined);
+  });
+  // oluştur / güncelle (id verilirse); device:true → cihaz takvimine de (arayüz onay aldıysa)
+  route('POST', '/api/events', async (req, _s, _p, body) => {
+    const b = (body ?? {}) as Partial<CalEvent> & { device?: boolean; calendar?: string };
+    const title = String(b.title ?? '').trim().slice(0, 200);
+    const start = String(b.start ?? '');
+    const pv = parseStart(start);
+    if (!title || !pv) throw new HttpError(400, 'Başlık ve geçerli tarih gerekli');
+    const prev = b.id ? store.getEvent(String(b.id)) : undefined;
+    const ev: CalEvent = {
+      id: prev?.id ?? crypto.randomUUID(),
+      title,
+      start,
+      allDay: pv.allDay,
+      durationMin: Math.max(5, Math.min(24 * 60, Number(b.durationMin) || 60)),
+      notes: b.notes ? String(b.notes).slice(0, 4000) : undefined,
+      location: b.location ? String(b.location).slice(0, 200) : undefined,
+      chatId: prev?.chatId ?? (b.chatId && store.getChat(String(b.chatId)) ? String(b.chatId) : undefined),
+      messageId: prev?.messageId ?? (b.messageId ? String(b.messageId).slice(0, 300) : undefined),
+      remindMin: b.remindMin === null || b.remindMin === undefined || (b.remindMin as unknown) === '' ? undefined : Math.max(0, Math.min(7 * 24 * 60, Number(b.remindMin))),
+      createdAt: prev?.createdAt ?? Date.now(),
+    };
+    let device: { added?: boolean; calendar?: string; denied?: boolean; error?: string } | undefined;
+    if (b.device && !isRemote(req) && deviceCalendarApp()) {
+      try {
+        ev.deviceCalendar = await addToDeviceCalendar(ev, b.calendar ? String(b.calendar).slice(0, 200) : undefined);
+        device = { added: true, calendar: ev.deviceCalendar };
+      } catch (e) {
+        const ce = e as DeviceCalendarError;
+        device = { added: false, denied: ce.code === 'denied', error: ce.message };
+      }
+    }
+    const saved = store.saveEvent(ev);
+    bus.emit({ type: 'events.update' });
+    return { event: saved, device };
+  });
+  route('DELETE', '/api/events/:eid', (_r, _s, p) => {
+    const ok = store.deleteEvent(dec(p.eid));
+    if (ok) bus.emit({ type: 'events.update' });
+    return { ok };
+  });
   // Cihaz takvimi: destek var mı; probe=1 → yazılabilir takvim adları (macOS ilk seferde izin sorar — arayüz önce onay alır)
   route('GET', '/api/calendars', async (req) => {
     if (isRemote(req)) return { supported: false, reason: 'remote' };
@@ -682,6 +728,10 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   // Takip hatırlatıcıları: dakikada bir; yanıt gelenler kapanır, süresi dolanlar bir kez bildirilir
   const followTimer = setInterval(() => {
     try {
+      for (const event of store.dueEventReminders()) {
+        bus.emit({ type: 'event.reminder', event });
+        bus.log('info', `Takvim hatırlatması: ${event.title}`);
+      }
       const { resolved, due } = store.checkFollowUps();
       for (const chat of resolved) bus.emit({ type: 'chat.upsert', chat });
       for (const chat of due) {

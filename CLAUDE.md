@@ -94,8 +94,8 @@ Dil: arayüz ve yorumlar Türkçe.
 - **Genel arama** (⌘K / Ctrl+K, `SearchPalette.tsx`): görünüm/filtreden bağımsız; sohbet adları + FTS5 mesaj metni + ek adları
   (`store.search` LIKE yedeği; `/api/search?limit=` ≤200). "N uygulamada M sonuç", uygulama çipleriyle süzme; mesaja tıklayınca sohbet açılır,
   gerekirse eski mesajlar yüklenir (`focusMsg`), `data-mid` balon ortalanıp `.flash` ile vurgulanır. Liste başındaki arama kutusu ayrıca duruyor.
-- **Birleşik görünümler** (kenar çubuğu): Ekip (`isTeamChat`: grup/kanal + "ekip" etiketi), Pazaryeri (tüm pazaryerleri; Tümü·Siparişler·Sorular),
-  `scope` durumu. Gelen kutusu sekmeleri Tümü · Okunmamış · Bekleyen (`isWaiting`; birebirler önde, gruplar arkada) · Takip.
+- Gelen kutusu sekmeleri Tümü · Okunmamış · Bekleyen (`isWaiting`; birebirler önde, gruplar arkada) · Takip. (Ekip/Pazaryeri
+  kenar çubuğu görünümleri kullanıcı isteğiyle KALDIRILDI; yerinde Takvim.)
 - **Odak**: "Yanıtla" satır içi yanıt kutusu (Enter gönderir; kart listeden çıkar, "X ile gönderildi"). Taslak yalnız "Taslak yaz" ile
   (SSS sözü: içerik ancak istenince Anthropic'e gider); `aiPrefs.focusAuto` (Ayarlar, varsayılan kapalı) ilk 3'ü önceden hazırlar.
   Söz onayları `mivelo.promisesDone`.
@@ -105,6 +105,12 @@ Dil: arayüz ve yorumlar Türkçe.
 - Mesaj üstü düğmeler (`.rpos.p0/p1/p2`): tepki · takvim · takip (2 gün; `.act` açıkken). Bildirim: "Grup ve kanal bildirimleri" anahtarı.
 - **Görünümler**: ⌘1 Tümü, ⌘2… etiketler (Windows'ta Ctrl; `MOD_KEY`); ayrı çip satırı yok (sol kenar çubuğundaki Etiketler aynı işi görür,
   düğme ipucunda kısayol yazar); sıra `DEFAULT_TAGS` + kullanılanlar.
+- **Mivelo takvimi** (kenar çubuğu → Takvim, `CalendarView.tsx`): ay görünümü + seçili günün ajandası + Yaklaşan; ←/→ ay, T bugün,
+  N yeni, çift tık gün → yeni. Çekirdek `events` tablosu (`store.saveEvent/listEvents/deleteEvent`, `/api/events` GET/POST/DELETE,
+  olay `events.update`); mesajdan eklenen `chatId/messageId` taşır ("Sohbete git" mesaja kaydırır). Hatırlatma `remindMin`
+  (dakikalık döngüde `dueEventReminders`, bir kez; başlangıçtan 30 dk sonrasına kadar) → `event.reminder` bildirimi.
+  `EventEditor` (mesaj üstü 📅, AI olayları, Takvim): kaydet = Mivelo takvimi; "Cihazın Takvim uygulamasına da ekle" kutusu
+  (`mivelo.calDevice`) aşağıdaki cihaz yolunu kullanır; Dışa aktar = .ics. Demo: bellekte örnek etkinlikler.
 - **Takvime ekle**: cihaz takvimine DOĞRUDAN (`calendar-device.ts`): macOS Takvim (JXA/Apple Events; değerler JSON argümanla,
   metne gömülmez), Windows klasik Outlook (COM, PowerShell ortam değişkeniyle). İlk seferde arayüz içi onay (`mivelo.calConsent`),
   ardından `GET /api/calendars?probe=1` macOS izin penceresini tetikler ve yazılabilir takvim adlarını getirir (seçim `mivelo.calName`).

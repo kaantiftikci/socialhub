@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3-multiple-ciphers';
 import fs from 'node:fs';
 import { DB_PATH } from './config.js';
-import type { Account, Chat, ChatFlags, FollowUp, Message, Platform, Reaction } from './model.js';
+import type { Account, CalEvent, Chat, ChatFlags, FollowUp, Message, Platform, Reaction } from './model.js';
 
 /**
  * Yerel SQLite deposu. Şema küçük tutuldu; FTS5 ile tam metin arama var.
@@ -125,6 +125,23 @@ export class Store {
     // gönderen bazlı güncellemeler (ad/fotoğraf/lid→numara) tam tablo taraması yapmasın
     this.db.exec('CREATE INDEX IF NOT EXISTS messages_sender ON messages(sender_id)');
     this.db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    // Mivelo takvimi: "Takvime ekle" ve Takvim görünümünden eklenen etkinlikler (yerel; isteğe bağlı cihaz takvimine de yazılır)
+    this.db.exec(`CREATE TABLE IF NOT EXISTS events (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      start TEXT NOT NULL,
+      duration_min INTEGER NOT NULL DEFAULT 60,
+      all_day INTEGER NOT NULL DEFAULT 0,
+      notes TEXT,
+      location TEXT,
+      chat_id TEXT,
+      message_id TEXT,
+      remind_min INTEGER,
+      reminded INTEGER NOT NULL DEFAULT 0,
+      device_calendar TEXT,
+      created_at INTEGER NOT NULL
+    )`);
+    this.db.exec('CREATE INDEX IF NOT EXISTS events_start ON events(start)');
     // Onarım: Instagram Reels/gönderi paylaşımlarında gönderi açıklaması mesaj metni olarak yazılmıştı ("@kullanıcı: açıklama");
     // metin boşaltılır, etkilenen sohbetlerin önizlemesi son mesajdan yeniden türetilir
     if (!this.flag('fix_ig_caption_v1')) {
@@ -557,6 +574,63 @@ export class Store {
     });
   }
 
+  // ---------- takvim ----------
+  listEvents(from?: string, to?: string): CalEvent[] {
+    const rows = from && to ? this.db.prepare('SELECT * FROM events WHERE start >= ? AND start < ? ORDER BY start').all(from, to) : this.db.prepare('SELECT * FROM events ORDER BY start').all();
+    return rows.map(rowToEvent);
+  }
+
+  getEvent(id: string): CalEvent | undefined {
+    const r = this.db.prepare('SELECT * FROM events WHERE id = ?').get(id);
+    return r ? rowToEvent(r) : undefined;
+  }
+
+  saveEvent(ev: CalEvent): CalEvent {
+    this.db
+      .prepare(
+        `INSERT INTO events (id, title, start, duration_min, all_day, notes, location, chat_id, message_id, remind_min, reminded, device_calendar, created_at)
+         VALUES (@id, @title, @start, @durationMin, @allDay, @notes, @location, @chatId, @messageId, @remindMin, 0, @deviceCalendar, @createdAt)
+         ON CONFLICT(id) DO UPDATE SET title = excluded.title, start = excluded.start, duration_min = excluded.duration_min, all_day = excluded.all_day,
+           notes = excluded.notes, location = excluded.location, remind_min = excluded.remind_min,
+           reminded = CASE WHEN events.start = excluded.start AND events.remind_min IS excluded.remind_min THEN events.reminded ELSE 0 END,
+           device_calendar = COALESCE(excluded.device_calendar, events.device_calendar)`,
+      )
+      .run({
+        id: ev.id,
+        title: ev.title,
+        start: ev.start,
+        durationMin: ev.durationMin ?? 60,
+        allDay: ev.allDay ? 1 : 0,
+        notes: ev.notes ?? null,
+        location: ev.location ?? null,
+        chatId: ev.chatId ?? null,
+        messageId: ev.messageId ?? null,
+        remindMin: ev.remindMin ?? null,
+        deviceCalendar: ev.deviceCalendar ?? null,
+        createdAt: ev.createdAt,
+      });
+    return this.getEvent(ev.id)!;
+  }
+
+  deleteEvent(id: string): boolean {
+    return this.db.prepare('DELETE FROM events WHERE id = ?').run(id).changes > 0;
+  }
+
+  /** Hatırlatma zamanı gelmiş (başlangıç − remind_min ≤ şimdi) ve henüz bildirilmemiş etkinlikler; bir kez işaretlenir */
+  dueEventReminders(now = new Date()): CalEvent[] {
+    const out: CalEvent[] = [];
+    const rows = this.db.prepare('SELECT * FROM events WHERE reminded = 0 AND remind_min IS NOT NULL AND all_day = 0').all().map(rowToEvent);
+    for (const ev of rows) {
+      const start = localDate(ev.start);
+      if (!start) continue;
+      const at = start.getTime() - (ev.remindMin ?? 0) * 60_000;
+      // geçmişte kalmış (çekirdek kapalıydı) etkinlik için geç hatırlatma yapma: başlangıçtan 30 dk sonrasına kadar
+      if (at <= now.getTime() && now.getTime() - start.getTime() < 30 * 60_000) out.push(ev);
+      if (at <= now.getTime()) this.db.prepare('UPDATE events SET reminded = 1 WHERE id = ?').run(ev.id);
+    }
+    return out;
+  }
+
   stats(): { accounts: number; chats: number; messages: number; unread: number } {
     const one = (sql: string) => Number((this.db.prepare(sql).get() as { n: number }).n);
     return {
@@ -579,6 +653,30 @@ function ftsQuery(q: string): string {
     .filter(Boolean)
     .map((w) => `"${w.replace(/"/g, '""')}"*`)
     .join(' ');
+}
+
+function localDate(start: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?$/.exec(start);
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4] ?? 0), Number(m[5] ?? 0));
+}
+
+function rowToEvent(r: unknown): CalEvent {
+  const x = r as Record<string, unknown>;
+  return {
+    id: String(x.id),
+    title: String(x.title),
+    start: String(x.start),
+    durationMin: Number(x.duration_min),
+    allDay: !!x.all_day,
+    notes: (x.notes as string | null) ?? undefined,
+    location: (x.location as string | null) ?? undefined,
+    chatId: (x.chat_id as string | null) ?? undefined,
+    messageId: (x.message_id as string | null) ?? undefined,
+    remindMin: x.remind_min === null || x.remind_min === undefined ? undefined : Number(x.remind_min),
+    deviceCalendar: (x.device_calendar as string | null) ?? undefined,
+    createdAt: Number(x.created_at),
+  };
 }
 
 function rowToAccount(r: unknown): Account {

@@ -7,12 +7,13 @@ import { ConnectModal } from './Connect';
 import { Focus } from './Focus';
 import { getThemePref, setThemePref, type ThemePref } from './theme';
 import { SearchPalette } from './SearchPalette';
+import { CalendarView, ymd } from './CalendarView';
 import { MOD_KEY, isTauri, notify as desktopNotify, onDesktopEvent, playPing, SOUNDS, getPlatformSound, getPlatformTone, setPlatformSound, setPlatformTone, setBadge, windowFocused, coreInfo, playNotifySound, platformNotifyOn, soundsEnabled, setSoundsEnabled, bannersEnabled, setBannersEnabled, groupsNotify, setGroupsNotify, getVolume, setVolume, getPlatformVolume, setPlatformVolume, unlockAudio } from './desktop';
 import { DEMO_OFFLINE, PROFILE_NAME, STATIC_DEMO } from './profile';
 import { leaveDemoPanel } from './demo-session';
 import { setAiPrefs, useAiPrefs } from './ai-prefs';
 
-export type View = 'inbox' | 'focus' | 'archived' | 'muted' | 'hidden';
+export type View = 'inbox' | 'focus' | 'calendar' | 'archived' | 'muted' | 'hidden';
 const FLAG_VIEWS: Array<{ view: View; flag: 'archived' | 'muted' | 'hidden'; label: string; icon: string; empty: string }> = [
   { view: 'archived', flag: 'archived', label: 'Arşiv', icon: 'archive', empty: 'Arşivlenmiş sohbet yok. Sağ paneldeki Eylemler’den arşivleyebilirsin.' },
   { view: 'muted', flag: 'muted', label: 'Sessiz', icon: 'mute', empty: 'Sessize alınmış sohbet yok.' },
@@ -24,6 +25,8 @@ export type Filter = 'all' | 'unread' | 'waiting' | 'followup';
 export default function App() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [chats, setChats] = useState<Map<string, Chat>>(new Map());
+  const chatsRef = useRef(chats);
+  chatsRef.current = chats;
   const [selected, setSelected] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [view, setView] = useState<View>('inbox');
@@ -41,10 +44,7 @@ export default function App() {
   /** Pazaryeri kanalları: Tümü · Siparişler · Sorular sekmesi */
   const [shopTab, setShopTab] = useState<ShopKind | null>(null);
   /** Platform seçimi değişince platforma özel sekmeler (iMessage klasörü, Telegram arşivi) sıfırlanır */
-  /** Birleşik görünümler: Ekip (gruplar/kanallar + "ekip" etiketi), Pazaryeri (tüm pazaryeri kanalları birlikte) */
-  const [scope, setScope] = useState<'team' | 'market' | null>(null);
   const selectPlatform = useCallback((p: Platform | null) => {
-    setScope(null);
     setMailFolder(null);
     setPlatformFilter(p);
     setImFolder(null);
@@ -396,6 +396,21 @@ export default function App() {
         case 'messages.read':
           if (ev.chatId === selectedRef.current) setMessages((prev) => prev.map((m) => (m.fromMe && m.ts <= ev.before && m.status !== 'read' ? { ...m, status: 'read' } : m)));
           break;
+        case 'events.update':
+          setCalTick((x) => x + 1);
+          break;
+        case 'event.reminder': {
+          const e = ev.event;
+          const when = e.start.includes('T') ? e.start.slice(11, 16) : 'bugün';
+          const chatName = e.chatId ? chatsRef.current.get(e.chatId)?.name : undefined;
+          const body = `${when}${e.location ? ' · ' + e.location : ''}${chatName ? ' · ' + chatName : ''}`;
+          void windowFocused().then((focused) => {
+            if (focused) notify(`📅 ${e.title} — ${body}`);
+            else if (bannersEnabled()) desktopNotify(`📅 ${e.title}`, body);
+            if (soundsEnabled()) playPing(undefined, true);
+          });
+          break;
+        }
         case 'scheduled.update':
           refreshScheduled();
           break;
@@ -497,6 +512,23 @@ export default function App() {
 
   // ---- türetilmiş listeler ----
   const allChats = useMemo(() => [...chats.values()], [chats]);
+  // Mivelo takvimi: bugünkü etkinlik sayısı (kenar çubuğu) ve değişince görünümü tazeleme sayacı
+  const [calTick, setCalTick] = useState(0);
+  const [todayEvents, setTodayEvents] = useState(0);
+  useEffect(() => {
+    const d = new Date();
+    const t = ymd(d);
+    const n = ymd(new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1));
+    api
+      .events(t, n)
+      .then((l) => setTodayEvents(l.length))
+      .catch(() => undefined);
+  }, [calTick]);
+  // gün dönünce sayaç tazelensin
+  useEffect(() => {
+    const id = window.setInterval(() => setCalTick((x) => x + 1), 15 * 60_000);
+    return () => clearInterval(id);
+  }, []);
   // Genel arama (⌘K) ve arama sonucundan açılan mesaj: sohbet açılınca o mesaja gidilip vurgulanır
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [focusMsg, setFocusMsg] = useState<{ chatId: string; id: string; ts: number } | null>(null);
@@ -554,7 +586,7 @@ export default function App() {
   const storyChats = useMemo(() => (storyPlatform ? waitingChats.filter((c) => c.platform === storyPlatform) : waitingChats), [waitingChats, storyPlatform]);
   const storyPlatforms = useMemo(() => [...new Set(waitingChats.map((c) => c.platform))], [waitingChats]);
 
-  const isShop = (!!platformFilter && PLATFORMS[platformFilter].category === 'shop') || scope === 'market';
+  const isShop = !!platformFilter && PLATFORMS[platformFilter].category === 'shop';
   /** Sipariş sayfası: aynı hesapta bu siparişe bağlı müşteri sorusu (meta.question.orderNumber) */
   const relatedQuestion = useMemo(() => {
     const cur = selected ? chats.get(selected) : undefined;
@@ -568,9 +600,9 @@ export default function App() {
   const shopCounts = useMemo(() => {
     const n: Record<ShopKind, number> = { order: 0, question: 0 };
     if (!isShop) return n;
-    for (const c of inboxChats) if ((scope === 'market' ? PLATFORMS[c.platform].category === 'shop' : c.platform === platformFilter) && shopPending(c)) n[shopKind(c)!] += 1;
+    for (const c of inboxChats) if (c.platform === platformFilter && shopPending(c)) n[shopKind(c)!] += 1;
     return n;
-  }, [inboxChats, platformFilter, isShop, scope]);
+  }, [inboxChats, platformFilter, isShop]);
   const chatList = useMemo(() => {
     // Telegram "Arşiv" sekmesi yalnızca arşivlenmişleri, iMessage klasör sekmeleri o klasörü; diğer her görünüm gelen kutusunu listeler
     const imActive = platformFilter === 'imessage' ? imFolder : null;
@@ -587,8 +619,6 @@ export default function App() {
       // "Mesajlar": tümü (istenmeyen hariç) — son gelenlerin çoğu bilinmeyen gönderenlerden
       return folder !== 'junk';
     });
-    if (scope === 'team') list = list.filter(isTeamChat);
-    if (scope === 'market') list = list.filter((c) => PLATFORMS[c.platform].category === 'shop');
     if (tagFilter) list = list.filter((c) => c.tags.includes(tagFilter));
     if (shopTab && isShop) list = list.filter((c) => shopKind(c) === shopTab);
     // iMessage'da Okunmamış/Bekleyen sekmeleri yok (Mesajlar uygulamasındaki klasörler var)
@@ -605,7 +635,7 @@ export default function App() {
     if (effFilter === 'waiting') list.sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || Number(a.kind !== 'direct') - Number(b.kind !== 'direct') || b.lastMessageAt - a.lastMessageAt);
     else if (filter !== 'followup') list.sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || (smartSort ? score(b) - score(a) : 0) || b.lastMessageAt - a.lastMessageAt);
     return list;
-  }, [activeChats, inboxChats, filter, platformFilter, tagFilter, query, smartSort, imFolder, tgArchive, mailFolder, shopTab, scope, isShop]);
+  }, [activeChats, inboxChats, filter, platformFilter, tagFilter, query, smartSort, imFolder, tgArchive, mailFolder, shopTab, isShop]);
 
   /** Boş liste metni: hangi sekme/filtre boşsa ona göre anlamlı bir açıklama */
   const emptyText = shopTab && isShop && filter === 'all' && !query.trim() ? (shopTab === 'order' ? 'Bu kanalda sipariş yok.' : 'Bu kanalda müşteri sorusu yok.') : filter === 'followup' ? 'Takipte sohbet yok. Sohbetin sağ panelinden "Yanıt gelmezse hatırlat" ile ekle.' : imFolder || tgArchive || mailFolder ? 'Bu klasörde sohbet yok.' : query.trim() ? 'Aramayla eşleşen sohbet yok.' : filter === 'unread' && platformFilter !== 'imessage' ? 'Okunmamış sohbet yok.' : filter === 'waiting' && platformFilter !== 'imessage' ? 'Yanıt bekleyen sohbet yok.' : tagFilter ? 'Bu etikette sohbet yok.' : platformFilter ? 'Bu kanalda henüz sohbet yok.' : 'Bu filtreye uyan sohbet yok.';
@@ -689,7 +719,6 @@ export default function App() {
           e.preventDefault();
           setView('inbox');
           setFilter('all');
-          setScope(null);
           setTagFilter(n === 1 ? null : viewTags[n - 2]);
         }
         return;
@@ -901,15 +930,7 @@ export default function App() {
     selectPlatform(null);
     setTagFilter(null);
   };
-  const goScope = (sc: 'team' | 'market') => {
-    setView('inbox');
-    selectPlatform(null);
-    setTagFilter(null);
-    setFilter('all');
-    setScope(sc);
-  };
-  const teamUnread = useMemo(() => inboxChats.reduce((n, c) => n + (isTeamChat(c) ? countable(c) : 0), 0), [inboxChats]);
-  const marketPending = useMemo(() => inboxChats.reduce((n, c) => n + (PLATFORMS[c.platform].category === 'shop' && shopPending(c) ? 1 : 0), 0), [inboxChats]);
+
   /** Odak'tan açılışta kompozöre taşınacak taslak/niyet (Düzenle, Nazik hatırlatma yaz) */
   const [seed, setSeed] = useState<{ id: string; text?: string; autoDraft?: boolean } | null>(null);
   const openChat = (id: string, s?: { text?: string; autoDraft?: boolean }) => {
@@ -940,11 +961,10 @@ export default function App() {
           Uygulama bağla
         </button>
         <div className="nav">
-          <NavItem icon="inbox" label="Gelen kutusu" count={totals.unread} active={view === 'inbox' && filter === 'all' && !platformFilter && !tagFilter && !scope} onClick={() => goInbox('all')} />
+          <NavItem icon="inbox" label="Gelen kutusu" count={totals.unread} active={view === 'inbox' && filter === 'all' && !platformFilter && !tagFilter} onClick={() => goInbox('all')} />
           <NavItem icon="sparkle" label="Odak" badge="AI" count={totals.waiting} active={view === 'focus'} onClick={() => setView('focus')} />
-          <NavItem icon="archive" label="Okunmamış" count={totals.unread} active={view === 'inbox' && filter === 'unread' && !platformFilter && !tagFilter && !scope} onClick={() => goInbox('unread')} />
-          <NavItem icon="users" label="Ekip" title="Grup sohbetleri, kanallar ve “ekip” etiketliler" count={teamUnread} active={view === 'inbox' && scope === 'team'} onClick={() => goScope('team')} />
-          {shopAccounts.length > 0 && <NavItem icon="bag" label="Pazaryeri" title="Tüm pazaryerlerinin siparişleri ve soruları birlikte" count={marketPending} active={view === 'inbox' && scope === 'market'} onClick={() => goScope('market')} />}
+          <NavItem icon="archive" label="Okunmamış" count={totals.unread} active={view === 'inbox' && filter === 'unread' && !platformFilter && !tagFilter} onClick={() => goInbox('unread')} />
+          <NavItem icon="calendar" label="Takvim" title="Mivelo takvimi: mesajlardan eklenenler ve kendi etkinliklerin" count={todayEvents} active={view === 'calendar'} onClick={() => setView('calendar')} />
           {FLAG_VIEWS.filter((f) => f.view === 'archived' || flagged[f.flag].length > 0).map((f) => (
             <NavItem key={f.view} icon={f.icon} label={f.label} count={flagged[f.flag].length} active={view === f.view} onClick={() => setView(f.view)} />
           ))}
@@ -969,7 +989,7 @@ export default function App() {
           {mailAccounts.map((a) => renderChan(a, mailAccounts))}
           {shopAccounts.length > 0 && (
             <div className="section-head" style={{ marginTop: chatAccounts.length > 0 || mailAccounts.length > 0 ? 10 : 0 }}>
-              <span className="label">Pazaryeri</span>
+              <span className="label">Alışveriş</span>
             </div>
           )}
           {shopAccounts.map((a) => renderChan(a, shopAccounts))}
@@ -981,7 +1001,7 @@ export default function App() {
             </div>
             <div className="tagrow">
               {[...new Set([...DEFAULT_TAGS, ...allTags.map(([t]) => t)])].map((t) => (
-                <button key={t} className={`tagbtn b ${tagFilter === t ? 'active' : ''}`} title={viewTags.indexOf(t) >= 0 ? `${MOD}${viewTags.indexOf(t) + 2}` : undefined} onClick={() => (setView('inbox'), setScope(null), setTagFilter(tagFilter === t ? null : t))}>
+                <button key={t} className={`tagbtn b ${tagFilter === t ? 'active' : ''}`} title={viewTags.indexOf(t) >= 0 ? `${MOD}${viewTags.indexOf(t) + 2}` : undefined} onClick={() => (setView('inbox'), setTagFilter(tagFilter === t ? null : t))}>
                   <span className="dot" style={{ background: tagDot(t) }} />
                   {t}
                   {allTags.find(([x]) => x === t)?.[1] ? <span className="c">{allTags.find(([x]) => x === t)![1]}</span> : null}
@@ -1099,7 +1119,15 @@ export default function App() {
         </div>
       )}
       <div className="surface">
-        {view === 'focus' ? (
+        {view === 'calendar' ? (
+          <CalendarView
+            chats={chats}
+            notify={notify}
+            refreshKey={calTick}
+            onMenu={isMobile ? () => setNavOpen(true) : undefined}
+            onOpenChat={(chatId, messageId) => (setView('inbox'), setSelected(chatId), setFocusMsg(messageId ? { chatId, id: messageId, ts: Date.now() } : null))}
+          />
+        ) : view === 'focus' ? (
           <Focus waiting={waitingChats} chats={inboxChats} ai={ai} notify={notify} onOpen={openChat} onBack={() => setView('inbox')} onMenu={isMobile ? () => setNavOpen(true) : undefined} />
         ) : (
           <>
@@ -1129,7 +1157,7 @@ export default function App() {
                 <div className="list-top" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div className="list-title">
                     {platformFilter && view === 'inbox' && <Chip platform={platformFilter} size={26} />}
-                    <h1>{FLAG_VIEWS.find((f) => f.view === view)?.label ?? (platformFilter ? PLATFORMS[platformFilter].name : scope === 'team' ? 'Ekip' : scope === 'market' ? 'Pazaryeri' : tagFilter ? capitalize(tagFilter) : 'Gelen kutusu')}</h1>
+                    <h1>{FLAG_VIEWS.find((f) => f.view === view)?.label ?? (platformFilter ? PLATFORMS[platformFilter].name : tagFilter ? capitalize(tagFilter) : 'Gelen kutusu')}</h1>
                     {view === 'inbox' && scoped.unread > 0 && <span className="pill">{fmtCount(scoped.unread)} yeni</span>}
                   </div>
                   <span style={{ flexGrow: 1 }} />
@@ -1816,11 +1844,6 @@ function fmtBadge(c: Chat): string {
 /** Son mesaj karşı taraftan geldiyse ve 20 dakikadır cevaplanmadıysa "yanıt bekliyor". */
 /** Kısayol öneki: Mac'te "⌘1", diğerlerinde "Ctrl+1" */
 const MOD = MOD_KEY === '⌘' ? '⌘' : `${MOD_KEY}+`;
-
-/** Ekip görünümü: grup/kanal sohbetleri (Slack kanalları, WhatsApp/Telegram grupları…) ve "ekip" etiketliler */
-export function isTeamChat(c: Chat): boolean {
-  return c.kind !== 'direct' || c.tags.includes('ekip');
-}
 
 export function isWaiting(c: Chat): boolean {
   // son olay yalnızca bir tepkiyse ("😂 Mert bir mesajı beğendi") yanıt beklemiyor

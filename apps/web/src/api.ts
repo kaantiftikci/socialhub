@@ -1,4 +1,4 @@
-import type { Account, CalendarDraft, Chat, ChatFlags, CoreEvent, CoreOs, DraftResult, LinkPreview, Message, Platform } from './types';
+import type { Account, CalEvent, CalendarDraft, Chat, ChatFlags, CoreEvent, CoreOs, DraftResult, LinkPreview, Message, Platform } from './types';
 import { API_BASE, REMOTE_CORE, coreToken } from './desktop';
 import { STATIC_DEMO } from './profile';
 import { connectStaticEvents, staticApi } from './static-demo';
@@ -62,6 +62,9 @@ const liveApi = {
   logs: () => call<Array<{ ts: number; level: 'info' | 'warn' | 'error'; text: string }>>('GET', '/logs'),
   setFollowUp: (chatId: string, at: number | null) => call<Chat>('POST', `/chats/${enc(chatId)}/followup`, { at }),
   calendar: (ev: CalendarDraft & { mode?: 'device' | 'file'; calendar?: string }) => call<CalendarResult>('POST', '/calendar', ev),
+  events: (from?: string, to?: string) => call<CalEvent[]>('GET', `/events${from && to ? `?from=${enc(from)}&to=${enc(to)}` : ''}`),
+  saveEvent: (ev: Partial<CalEvent> & { title: string; start: string; device?: boolean; calendar?: string }) => call<{ event: CalEvent; device?: { added?: boolean; calendar?: string; denied?: boolean; error?: string } }>('POST', '/events', ev),
+  deleteEvent: (id: string) => call<{ ok: boolean }>('DELETE', `/events/${enc(id)}`),
   calendars: (probe = false) => call<DeviceCalendars>('GET', `/calendars${probe ? '?probe=1' : ''}`),
   calendarPermission: () => call<{ ok: boolean }>('POST', '/calendars/permission'),
   style: (platform?: string) => call<{ lines: string[] }>('GET', `/style${platform ? `?platform=${enc(platform)}` : ''}`),

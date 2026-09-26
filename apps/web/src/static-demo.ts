@@ -1,4 +1,5 @@
 import type { CalendarResult, DeviceCalendars } from './api';
+import type { CalEvent } from './types';
 import type { Account, Attachment, CalendarDraft, Chat, ChatFlags, CoreEvent, CoreOs, DraftResult, LinkPreview, Message, Platform } from './types';
 import { PLATFORMS } from './types';
 import { authSaveAccounts } from './auth-api';
@@ -257,6 +258,31 @@ if (STATIC_DEMO) {
 
 
 /** Demo: çekirdek yok; tek etkinlikli .ics tarayıcıda üretilir ve indirilir */
+/** Demo takvimi: bellekte; açılışta bu haftaya birkaç örnek etkinlik (sohbetlere bağlı olanlar "Sohbete git" gösterir) */
+let calEvents: CalEvent[] | null = null;
+const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+function demoEvents(): CalEvent[] {
+  if (calEvents) return calEvents;
+  const at = (days: number, hm?: string) => {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    return hm ? `${ymd(d)}T${hm}` : ymd(d);
+  };
+  const byName = (n: string) => chats.find((c) => c.name === n);
+  const mk = (title: string, start: string, extra: Partial<CalEvent> = {}): CalEvent => ({ id: `ev-${Math.random().toString(36).slice(2, 9)}`, title, start, durationMin: 60, allDay: !start.includes('T'), createdAt: Date.now(), ...extra });
+  const ayse = byName('Ayşe Demir');
+  const ekip = byName('Satış Ekibi');
+  calEvents = [
+    mk('Ayşe Demir · kargo takip kodu', at(0, '17:30'), { durationMin: 15, chatId: ayse?.id, remindMin: 10, notes: 'Ayşe Demir: Çıkınca takip numarasını da buradan atar mısınız?' }),
+    mk('Kampanya maili çıkışı', at(1, '10:00'), { chatId: ekip?.id, remindMin: 30, notes: 'Satış Ekibi: Yarın 10:00’da maile çıksın.' }),
+    mk('Tedarikçi görüşmesi', at(2, '14:00'), { durationMin: 45, location: 'Zoom', remindMin: 15 }),
+    mk('KDV beyannamesi', at(4)),
+    mk('Haftalık stok sayımı', at(6, '09:30'), { durationMin: 90 }),
+    mk('Fatura kesimi · Demir Studio', at(-2, '11:00'), { chatId: ayse?.id }),
+  ];
+  return calEvents;
+}
+
 function demoIcs(ev: CalendarDraft): string {
   const [d, t] = ev.start.split('T');
   const ymd = d.replace(/-/g, '');
@@ -449,6 +475,20 @@ export const staticApi = {
   },
   // demo: cihaz takvimi taklidi (gerçek uygulamada Mac Takvim / Outlook'a doğrudan eklenir; indirme yok)
   calendar: async (ev: CalendarDraft & { mode?: 'device' | 'file'; calendar?: string }): Promise<CalendarResult> => ({ ics: demoIcs(ev), opened: false, added: true, calendar: ev.calendar || 'Kişisel' }),
+  events: async (from?: string, to?: string): Promise<CalEvent[]> => demoEvents().filter((e) => !from || !to || (e.start >= from && e.start < to)).sort((a, b) => a.start.localeCompare(b.start)),
+  saveEvent: async (ev: Partial<CalEvent> & { title: string; start: string; device?: boolean; calendar?: string }): Promise<{ event: CalEvent; device?: { added?: boolean; calendar?: string; denied?: boolean; error?: string } }> => {
+    const list = demoEvents();
+    const prev = ev.id ? list.find((e) => e.id === ev.id) : undefined;
+    const next: CalEvent = { ...(prev ?? { id: `ev-${Date.now().toString(36)}`, createdAt: Date.now() }), title: ev.title, start: ev.start, allDay: !ev.start.includes('T'), durationMin: ev.durationMin ?? 60, notes: ev.notes, location: ev.location, remindMin: ev.remindMin, chatId: prev?.chatId ?? ev.chatId, messageId: prev?.messageId ?? ev.messageId, deviceCalendar: ev.device ? ev.calendar || 'Kişisel' : prev?.deviceCalendar };
+    calEvents = [...list.filter((e) => e.id !== next.id), next];
+    setTimeout(() => emit({ type: 'events.update' }), 0);
+    return { event: next, device: ev.device ? { added: true, calendar: next.deviceCalendar } : undefined };
+  },
+  deleteEvent: async (id: string) => {
+    calEvents = demoEvents().filter((e) => e.id !== id);
+    setTimeout(() => emit({ type: 'events.update' }), 0);
+    return { ok: true };
+  },
   calendars: async (probe = false): Promise<DeviceCalendars> => ({ supported: true, app: 'Takvim', calendars: probe ? ['Kişisel', 'İş', 'Aile'] : undefined }),
   calendarPermission: async () => ({ ok: true }),
   style: async () => ({ lines: DEMO_STYLE }),

@@ -107,6 +107,8 @@ export type CoreEvent =
   | { type: 'messages.read'; chatId: string; before: number }
   | { type: 'chat.followup'; chat: Chat }
   | { type: 'scheduled.update' }
+  | { type: 'events.update' }
+  | { type: 'event.reminder'; event: CalEvent }
   | { type: 'scheduled.missed'; item: { id: string; chatId: string; text: string; at: number; missed?: { reason: string; at: number } }; chatName: string }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; text: string };
 
@@ -130,6 +132,26 @@ export interface CalendarDraft {
   start: string;
   durationMin?: number;
   notes?: string;
+  /** mesajdan açıldıysa: Takvim'den sohbete dönmek için */
+  chatId?: string;
+  messageId?: string;
+}
+
+/** Mivelo takvimindeki etkinlik (çekirdek events tablosu) */
+export interface CalEvent {
+  id: string;
+  title: string;
+  /** yerel saat "YYYY-MM-DDTHH:mm" ya da tüm gün "YYYY-MM-DD" */
+  start: string;
+  durationMin?: number;
+  allDay?: boolean;
+  notes?: string;
+  location?: string;
+  chatId?: string;
+  messageId?: string;
+  remindMin?: number;
+  deviceCalendar?: string;
+  createdAt: number;
 }
 
 export const PLATFORMS: Record<Platform, { name: string; code: string; color: string; method: string; available: boolean; mode: 'native' | 'browser' | 'token' | 'mail' | 'demo'; experimental?: boolean; category?: Category }> = {

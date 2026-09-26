@@ -59,3 +59,23 @@ test('arama: ek (dosya) adlarında da bulur, sonuçlar yeniden eskiye', () => {
   assert.deepEqual(hits.map((h) => h.message.remoteId), ['2', '1']);
   assert.equal(store.search('fatura', 1).length, 1, 'sınır uygulanır');
 });
+
+test('takvim: etkinlik kaydet/güncelle/sil, aralıkla listele; hatırlatma bir kez ve yalnız zamanında', () => {
+  const store = new Store(path.join(tmp, 'e.db'));
+  const base = { title: 'Görüşme', durationMin: 30, createdAt: 1 };
+  store.saveEvent({ ...base, id: 'e1', start: '2026-10-02T14:00', remindMin: 10 });
+  store.saveEvent({ ...base, id: 'e2', title: 'KDV', start: '2026-10-05', allDay: true });
+  store.saveEvent({ ...base, id: 'e3', title: 'Eski', start: '2026-09-01T09:00', remindMin: 5 });
+  assert.deepEqual(store.listEvents('2026-10-01', '2026-10-03').map((e) => e.id), ['e1']);
+  assert.equal(store.listEvents().length, 3);
+  // hatırlatma: 13:49'da yok, 13:50'de bir kez; geçmişte kalan (çekirdek kapalıydı) etkinlik geç bildirilmez
+  assert.deepEqual(store.dueEventReminders(new Date(2026, 9, 2, 13, 49)).map((e) => e.id), []);
+  assert.deepEqual(store.dueEventReminders(new Date(2026, 9, 2, 13, 50)).map((e) => e.id), ['e1']);
+  assert.deepEqual(store.dueEventReminders(new Date(2026, 9, 2, 13, 55)).map((e) => e.id), [], 'tekrar bildirilmez');
+  // saat değişince hatırlatma yeniden kurulur
+  store.saveEvent({ ...base, id: 'e1', start: '2026-10-02T16:00', remindMin: 10 });
+  assert.deepEqual(store.dueEventReminders(new Date(2026, 9, 2, 15, 50)).map((e) => e.id), ['e1']);
+  assert.equal(store.getEvent('e1')?.start, '2026-10-02T16:00');
+  assert.equal(store.deleteEvent('e2'), true);
+  assert.equal(store.getEvent('e2'), undefined);
+});
