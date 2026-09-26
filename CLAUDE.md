@@ -167,6 +167,9 @@ Dil: arayüz ve yorumlar Türkçe.
 - Amazon Seller Central / Etsy Mesajları / Shopify Inbox tarayıcı köprüleri varsayılan KAPALI (yapılandırmada messaging/inbox:true ile açılır).
 - "PIN'i gir" hızlı yol: `registry.restart` eski connector'da `attention` varsa `start({window:true})` → köprü görünmez denetim turunu
   (headless aç + needsWindow + kapat, 10-20 sn) atlar, görünür pencereyi hemen açar; çerezler varsa doğrudan `afterLogin` (`visibleLogin`).
+- Bildirimler (desktop.ts): Ayarlar → Bildirimler: `kavsak.soundsOn` (tüm sesler), `kavsak.volume` 0–100 (varsayılan 60, kazanç 0,5·v²),
+  `kavsak.bannersOn` (sistem kartı). Uygulama ayarları kartı: zil sesi, `kavsak.vol.<platform>` (genelin yüzdesi), Açık/Kapalı ('off' = ne ses
+  ne kart). Tek giriş `playNotifySound(platform)`; `unlockAudio()` ilk tıklamada AudioContext'i açar (yoksa etkileşimsiz açılışta ses çıkmıyordu).
 - Gönderim hızı: arayüz iyimser (`outbox`, Conversation.tsx) — Enter'da "Gönderiliyor" balonu hemen, gerçek kayıt gelince kopya gizlenir,
   hata olursa metin kutuya döner; ardışık gönderimler `sendChain` ile sıralı. Köprü: send/react/sendFile `urgent()` — yoklama turu sürüyorsa
   turu beklemez, `runUrgent()` güvenli noktada (liste sonrası, mesaj istekleri arası) araya alır (test: send-priority.test.ts).

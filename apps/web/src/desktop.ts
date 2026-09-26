@@ -221,6 +221,92 @@ export function setSound(id: string): void {
   }
 }
 
+/** Genel ses düzeyi 0–100 (varsayılan 60 = eski sabit seviye) */
+export function getVolume(): number {
+  try {
+    const v = Number(localStorage.getItem('kavsak.volume'));
+    return localStorage.getItem('kavsak.volume') === null || !Number.isFinite(v) ? 60 : Math.max(0, Math.min(100, v));
+  } catch {
+    return 60;
+  }
+}
+export function setVolume(v: number): void {
+  try {
+    localStorage.setItem('kavsak.volume', String(Math.round(Math.max(0, Math.min(100, v)))));
+  } catch {
+    /* yok */
+  }
+}
+/** Uygulama başına ses düzeyi 0–100 (genel düzeyin yüzdesi; varsayılan 100) */
+export function getPlatformVolume(platform: string): number {
+  try {
+    const raw = localStorage.getItem(`kavsak.vol.${platform}`);
+    const v = Number(raw);
+    return raw === null || !Number.isFinite(v) ? 100 : Math.max(0, Math.min(100, v));
+  } catch {
+    return 100;
+  }
+}
+export function setPlatformVolume(platform: string, v: number): void {
+  try {
+    localStorage.setItem(`kavsak.vol.${platform}`, String(Math.round(Math.max(0, Math.min(100, v)))));
+  } catch {
+    /* yok */
+  }
+}
+/** Genel anahtarlar: tüm bildirim sesleri / masaüstü (sistem) bildirim kartları */
+function flag(key: string, def: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key);
+    return v === null ? def : v === '1';
+  } catch {
+    return def;
+  }
+}
+function setFlag(key: string, on: boolean): void {
+  try {
+    localStorage.setItem(key, on ? '1' : '0');
+  } catch {
+    /* yok */
+  }
+}
+export const soundsEnabled = (): boolean => flag('kavsak.soundsOn', true);
+export const setSoundsEnabled = (on: boolean): void => setFlag('kavsak.soundsOn', on);
+export const bannersEnabled = (): boolean => flag('kavsak.bannersOn', true);
+export const setBannersEnabled = (on: boolean): void => setFlag('kavsak.bannersOn', on);
+/** Uygulamanın bildirimi açık mı ('off' = o uygulamadan ne ses ne kart) */
+export const platformNotifyOn = (platform: string): boolean => getPlatformSound(platform) !== 'off';
+
+/** Gelen mesaj sesi: genel anahtar, uygulama tercihi, zil sesi ve iki ses düzeyi birlikte uygulanır */
+export function playNotifySound(platform: string): void {
+  if (!soundsEnabled() || !platformNotifyOn(platform)) return;
+  const vol = (getVolume() / 100) * (getPlatformVolume(platform) / 100);
+  if (vol <= 0) return;
+  playPing(getPlatformTone(platform), true, vol);
+}
+
+/**
+ * Tarayıcı/WKWebView otomatik oynatma kuralı: kullanıcı hareketi olmadan açılan AudioContext "suspended" kalır ve
+ * resume() reddedilir → uygulama açılıp hiç tıklanmadan gelen bildirimler sessiz kalıyordu. İlk tıklama/tuşta bağlam
+ * açılır ve kilidi kaldırılır; sonraki sesler arka planda da çalar.
+ */
+export function unlockAudio(): void {
+  const go = () => {
+    try {
+      audioCtx ??= new AudioContext();
+      if (audioCtx.state === 'suspended') void audioCtx.resume();
+    } catch {
+      /* ses yok */
+    }
+    if (audioCtx?.state === 'running') {
+      window.removeEventListener('pointerdown', go, true);
+      window.removeEventListener('keydown', go, true);
+    }
+  };
+  window.addEventListener('pointerdown', go, true);
+  window.addEventListener('keydown', go, true);
+}
+
 type Note = [freq: number, at: number, dur: number, type?: OscillatorType, gain?: number];
 const PATTERNS: Record<string, Note[]> = {
   cinlama: [[880, 0, 0.18, 'sine'], [1174.66, 0.11, 0.26, 'sine']],
@@ -231,17 +317,19 @@ const PATTERNS: Record<string, Note[]> = {
 };
 
 /** Kısa bildirim sesi (dosya gerekmez; Web Audio ile üretilir). force=true ayar "kapalı" olsa da çalar (deneme). */
-export function playPing(id?: string, force = false): void {
+export function playPing(id?: string, force = false, volume = getVolume() / 100): void {
   try {
     const chosen = id ?? getSound();
     if (chosen === 'off' && !force) return;
+    if (volume <= 0) return;
     const notes = PATTERNS[chosen === 'off' ? 'cinlama' : chosen] ?? PATTERNS.cinlama;
     audioCtx ??= new AudioContext();
     const ctx = audioCtx;
     if (ctx.state === 'suspended') void ctx.resume();
     const t = ctx.currentTime;
     const master = ctx.createGain();
-    master.gain.value = 0.18;
+    // 60 → eski sabit 0,18; algı logaritmik olduğundan kare eğri (düşük düzeyler gerçekten kısık)
+    master.gain.value = 0.5 * volume * volume;
     master.connect(ctx.destination);
     for (const [freq, at, dur, type = 'sine', vol = 1] of notes) {
       const o = ctx.createOscillator();

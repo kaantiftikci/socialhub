@@ -1093,3 +1093,16 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 
 /* Bağlan: resmi olmayan kanallar için şeffaflık notu */
 .grid-note { grid-column: 1 / -1; margin: -4px 2px 4px; font-size: 12.5px; line-height: 1.5; color: var(--text3); }
+
+/* Bildirim ses düzeyi kaydırıcıları (Ayarlar → Bildirimler, Uygulama ayarları kartı) */
+.vol { display: inline-flex; align-items: center; gap: 8px; color: var(--text3); min-width: 0; }
+.vol input[type=range] { width: 120px; accent-color: var(--v); height: 16px; margin: 0; cursor: pointer; }
+.vol em { font-style: normal; font-size: 11.5px; font-variant-numeric: tabular-nums; min-width: 22px; text-align: right; color: var(--text2); }
+.app-set-card .vol input[type=range] { flex: 1; width: auto; max-width: 260px; }
+.row-toggle.dim, .pref-block.dim { opacity: .5; }
+.row-toggle.dim input, .pref-block.dim input { cursor: not-allowed; }
+.pref-block .set-hint { display: inline; font-weight: 500; font-size: 11.5px; color: var(--text3); }
+.settings .row-toggle:hover .vol, .settings .row-toggle:hover .vol em { color: #fff; }
+.settings .vol-row { gap: 10px; }
+.settings .vol-row > span:first-child { white-space: nowrap; }
+.settings .vol input[type=range] { width: 96px; }

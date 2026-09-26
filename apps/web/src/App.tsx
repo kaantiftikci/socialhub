@@ -5,7 +5,7 @@ import { Avatar, Chip, Icon, Logo, Resizer, SyncBar, Tag, ago, fmtTime, loadPane
 import { Conversation, REACT_TEXT, startScheduledSends } from './Conversation';
 import { ConnectModal } from './Connect';
 import { Focus } from './Focus';
-import { MOD_KEY, isTauri, notify as desktopNotify, onDesktopEvent, playPing, SOUNDS, getPlatformSound, getPlatformTone, setPlatformSound, setPlatformTone, setBadge, windowFocused, coreInfo } from './desktop';
+import { MOD_KEY, isTauri, notify as desktopNotify, onDesktopEvent, playPing, SOUNDS, getPlatformSound, getPlatformTone, setPlatformSound, setPlatformTone, setBadge, windowFocused, coreInfo, playNotifySound, platformNotifyOn, soundsEnabled, setSoundsEnabled, bannersEnabled, setBannersEnabled, getVolume, setVolume, getPlatformVolume, setPlatformVolume, unlockAudio } from './desktop';
 import { DEMO_OFFLINE, PROFILE_NAME, STATIC_DEMO } from './profile';
 import { leaveDemoPanel } from './demo-session';
 import { setAiPrefs, useAiPrefs } from './ai-prefs';
@@ -108,6 +108,12 @@ export default function App() {
     }
     playPing(id, true);
   };
+  // genel bildirim ayarları (localStorage; değişince yeniden çizilsin)
+  const [sndOn, setSndOn] = useState(soundsEnabled);
+  const [bnrOn, setBnrOn] = useState(bannersEnabled);
+  const [vol, setVol] = useState(getVolume);
+  const [pVols, setPVols] = useState<Record<string, number>>({});
+  useEffect(() => unlockAudio(), []);
   const changePlatformNotify = (platform: string, on: boolean) => {
     const tone = getPlatformTone(platform);
     const id = on ? tone : 'off';
@@ -388,9 +394,10 @@ export default function App() {
           queueChat(ev.chat);
           const body = 'Yanıt gelmedi. Takip etmek ister misin?';
           void windowFocused().then((focused) => {
+            if (!platformNotifyOn(ev.chat.platform)) return;
             if (focused) pushInToast(ev.chat, `⏰ ${body}`);
-            else desktopNotify(`Takip: ${ev.chat.name}`, body);
-            playPing(getPlatformSound(ev.chat.platform) || undefined);
+            else if (bannersEnabled()) desktopNotify(`Takip: ${ev.chat.name}`, body);
+            playNotifySound(ev.chat.platform);
           });
           break;
         }
@@ -402,14 +409,14 @@ export default function App() {
           // yalnızca canlı gelen (eşitleme/geçmiş değil) ve yeni mesajlar bildirim çalsın
           if (ev.live && !ev.message.fromMe && !ev.chat.muted && !ev.chat.hidden && !ev.chat.archived && Date.now() - bootTs > 60_000 && Date.now() - ev.message.ts < 120_000) {
             void windowFocused().then((focused) => {
-              if (!focused || ev.message.chatId !== selectedRef.current) {
+              // uygulamanın bildirimi kapalıysa ne kart ne ses
+              if ((!focused || ev.message.chatId !== selectedRef.current) && platformNotifyOn(ev.chat.platform)) {
                 const body = (ev.message.text || ev.message.attachments?.[0]?.name || 'Yeni mesaj').slice(0, 140);
                 // pencere öndeyse sistem bildirimi yerine uygulama içi kart (hangi platformdan geldiği belli olsun)
                 if (focused) pushInToast(ev.chat, body);
-                else desktopNotify(ev.chat.name, body);
-                // uygulama başına ses ('' → genel ayar, 'off' → sessiz)
-                const ps = getPlatformSound(ev.chat.platform);
-                playPing(ps || undefined);
+                else if (bannersEnabled()) desktopNotify(ev.chat.name, body);
+                // genel anahtar + uygulama zil sesi + ses düzeyleri
+                playNotifySound(ev.chat.platform);
               }
             });
           }
@@ -972,6 +979,23 @@ export default function App() {
                 <input type="checkbox" checked={aiPrefs[k]} onChange={(e) => setAiPrefs({ [k]: e.target.checked })} />
               </label>
             ))}
+            <span className="set-sub">Bildirimler</span>
+            <label className="row-toggle">
+              <span>Bildirim sesleri</span>
+              <input type="checkbox" checked={sndOn} onChange={(e) => (setSoundsEnabled(e.target.checked), setSndOn(e.target.checked), e.target.checked && playPing(undefined, true, vol / 100))} />
+            </label>
+            <label className={`row-toggle vol-row ${sndOn ? '' : 'dim'}`}>
+              <span>Ses düzeyi</span>
+              <span className="vol">
+                <Icon name={vol === 0 ? 'mute' : 'volume'} size={14} />
+                <input type="range" min={0} max={100} step={5} value={vol} disabled={!sndOn} aria-label="Genel ses düzeyi" onChange={(e) => (setVolume(+e.target.value), setVol(+e.target.value))} onPointerUp={() => playPing(undefined, true, vol / 100)} onKeyUp={() => playPing(undefined, true, vol / 100)} />
+                <em>{vol}</em>
+              </span>
+            </label>
+            <label className="row-toggle">
+              <span>Masaüstü bildirimleri{<em className="set-hint">Uygulama arka plandayken sistem kartı</em>}</span>
+              <input type="checkbox" checked={bnrOn} onChange={(e) => (setBannersEnabled(e.target.checked), setBnrOn(e.target.checked))} />
+            </label>
             <span className="set-sub">Genel</span>
             <label className="row-toggle">
               <span>Aynı Wi‑Fi'daki telefondan aç{STATIC_DEMO && <em className="set-hint">Masaüstü uygulamasında</em>}</span>
@@ -1327,6 +1351,25 @@ export default function App() {
                             </button>
                           ))}
                         </div>
+                      </div>
+                      <div className={`pref-block ${notifyOn && sndOn ? '' : 'dim'}`}>
+                        <span className="k">Ses düzeyi{!sndOn && <em className="set-hint"> · bildirim sesleri genel ayardan kapalı</em>}</span>
+                        <span className="vol">
+                          <Icon name={(pVols[a.platform] ?? getPlatformVolume(a.platform)) === 0 ? 'mute' : 'volume'} size={14} />
+                          <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            step={5}
+                            value={pVols[a.platform] ?? getPlatformVolume(a.platform)}
+                            disabled={!notifyOn || !sndOn}
+                            aria-label={`${PLATFORMS[a.platform].name} ses düzeyi`}
+                            onChange={(e) => (setPlatformVolume(a.platform, +e.target.value), setPVols((p) => ({ ...p, [a.platform]: +e.target.value })))}
+                            onPointerUp={() => playNotifySound(a.platform)}
+                            onKeyUp={() => playNotifySound(a.platform)}
+                          />
+                          <em>{pVols[a.platform] ?? getPlatformVolume(a.platform)}</em>
+                        </span>
                       </div>
                       <div className="pref-block">
                         <span className="k">Bildirim tercihi</span>
