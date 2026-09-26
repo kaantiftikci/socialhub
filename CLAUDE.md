@@ -115,7 +115,8 @@ Dil: arayüz ve yorumlar Türkçe.
 - `send-guard.ts` (server /send ve /send-file): aynı metin (≥16 kr.) 30 dk'da >5 farklı sohbete → 429; günlük sınır kanal başına
   (LinkedIn/X 100, Instagram/Messenger 150, WhatsApp/Telegram 500…); e-posta/pazaryeri muaf.
 - WhatsApp geçmiş boşluğu doldurma tur başına ≤60 istek (1,5–4 sn aralık; kalanı 30–45 dk sonra). "unavailable" presence yalnız
-  bağlanınca ve gönderim/okundu sonrası tek sefer (`offlineSoon`); 4 dk'lık düzenli zamanlayıcı kaldırıldı.
+  bağlanınca ve gönderim/okundu sonrası tek sefer (`offlineSoon`); 4 dk'lık düzenli zamanlayıcı kaldırıldı (Baileys README: bildirim
+  için yalnız `markOnlineOnConnect: false` yeterli).
 - Uyarlamalı yoklama: arayüz `POST /api/activity {active}` (App.tsx, odak/görünürlük + dakikada bir) → `activity.ts`. Köprü seçeneği
   `idlePollMs` (Instagram: odakta 30 sn, boşta 2 dk); boştan etkine geçişte bekleyen tur öne çekilir (`pollSoon`).
 - LinkedIn anlık akış: `Strategy.watch` → sayfaya init betiği, istemcinin kendi `/realtime/connect` akışının kopyası okunur (fetch/XHR/

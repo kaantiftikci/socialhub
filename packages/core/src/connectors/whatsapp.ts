@@ -231,6 +231,8 @@ export class WhatsAppConnector extends BaseConnector {
         // Telefon bildirimleri: bağlı cihaz "aktif" görünürse WhatsApp telefona bildirim göndermez. Bağlantıda açıkça çevrimdışı
         // (unavailable) bildir. Ban önleme: eskiden her 4 dk'da bir yineleniyordu (gerçek istemcide olmayan düzenli sinyal);
         // artık yalnız bağlanınca ve cihazı etkin gösterebilecek işlerden (gönderim, okundu) sonra, tek sefer (offlineSoon).
+        // Dayanak: Baileys README "Receive Notifications in Whatsapp App" — telefon bildirimleri için yalnız
+        // markOnlineOnConnect: false öneriliyor (yukarıda ayarlı); düzenli presence gönderimi önerilmiyor.
         // Baileys, creds.me.name yoksa presence isteğini sessizce ATLIYOR ("no name present"): cihaz hiç "çevrimdışı"
         // diyemediği için WhatsApp onu "Aktif" gösteriyor ve telefon bildirimlerini bastırıyordu. Adı yoksa ver ve kaydet.
         const creds = sock.authState.creds;
