@@ -121,7 +121,7 @@ section{position:relative}
 .win{border-radius:14px;background:#fff;box-shadow:0 0 0 1px rgba(20,18,40,.08),0 50px 100px -40px rgba(40,24,120,.45),0 24px 50px -30px rgba(0,0,0,.25);overflow:hidden}
 .win-bar{height:28px;display:flex;align-items:center;gap:7px;padding:0 12px;background:#F6F5F9;border-bottom:1px solid #ECEAF1}
 .win-bar i{width:10px;height:10px;border-radius:50%}
-.screen{position:relative;container-type:inline-size;aspect-ratio:1440/900;background:#F7F6FA;overflow:hidden}
+.screen{position:relative;container-type:inline-size;font-family:'Inter',system-ui,sans-serif;font-feature-settings:'cv11','ss01';aspect-ratio:1440/900;background:#F7F6FA;overflow:hidden}
 .screen>img.base{width:100%;height:100%}
 .ov{position:absolute}
 .stream{left:calc(610/1440*100%);top:calc(79/900*100%);width:calc(499/1440*100%);height:calc(681/900*100%);overflow:hidden}
@@ -1028,12 +1028,22 @@ var AV = {"kerem": "data:image/webp;base64,UklGRsIHAABXRUJQVlA4ILYHAAAQHgCdASpgA
     }
   ];
   function cursorAt(k){ cursorEl.style.transition='none'; cursorEl.style.left=(P[k][0]/1440*100)+'%'; cursorEl.style.top=(P[k][1]/900*100)+'%'; void cursorEl.offsetWidth; cursorEl.style.transition=''; }
+  /* pencere görünmüyorken döngü bekler (boşuna çalışmasın) */
+  var devVisible=true;
+  new IntersectionObserver(function(es){ devVisible=es[0].isIntersecting; },{threshold:.2}).observe(device);
+  async function whenVisible(id){ while(!devVisible || document.hidden) await tsleep(400,id); }
+  /* görevleri oynat; bitince kısa bir duraklamadan sonra başa sarar (başka sekme seçilene dek) */
   async function runTasks(list){
     var id=++tourId;
     try{
-      if(!cursorEl.classList.contains('show')){ cursorAt('rest'); cursorEl.classList.add('show'); await tsleep(400,id); }
-      for(var k=0;k<list.length;k++){ resetHero(); await TASKS[list[k]](id); }
-      await tsleep(300,id); cursorEl.classList.remove('show');
+      for(var round=0;;round++){
+        await whenVisible(id);
+        if(round>0){ cursorEl.classList.remove('show'); await tsleep(350,id); resetHero(); showFrame(null); setTab(list[0]); cursorAt('rest'); await tsleep(350,id); }
+        if(!cursorEl.classList.contains('show')){ cursorAt('rest'); cursorEl.classList.add('show'); await tsleep(400,id); }
+        for(var k=0;k<list.length;k++){ resetHero(); await TASKS[list[k]](id); }
+        await tsleep(1200,id);
+        if(reduce){ cursorEl.classList.remove('show'); return; }
+      }
     }catch(e){ if(e!==STOP) throw e; }
   }
   /* sahne sona gelince tüm görünümleri sırayla gez */
@@ -1085,6 +1095,11 @@ var AV = {"kerem": "data:image/webp;base64,UklGRsIHAABXRUJQVlA4ILYHAAAQHgCdASpgA
   var groups=[document.getElementById('seg'),dockSeg].map(function(g){ return {seg:g,pill:g.querySelector('.pill'),btns:[].slice.call(g.querySelectorAll('button[role=tab]'))}; });
   var notes=["Tüm kanallar tek listede. Yanıtın mesajın geldiği uygulamadan gider.","Güne yanıt bekleyenlerle başla. Gruplar ve bildirimler sessizde.","Grup sohbetleri, dosyalar ve AI özeti tek ekranda.","Trendyol, Hepsiburada ve n11 soruları siparişiyle birlikte."];
   var tabIdx=1;
+  function fixNoteH(){
+    var cur=note.textContent, h=0; note.style.minHeight='';
+    notes.forEach(function(t){ note.textContent=t; h=Math.max(h,note.offsetHeight); });
+    note.textContent=cur; note.style.minHeight=h+'px';
+  }
   function placePill(g,i){
     var b=g.btns[i]; if(!b.offsetWidth) return;
     var nx='translateX('+(b.offsetLeft-5)+'px)'; if(g.pill.style.transform&&g.pill.style.transform!==nx){ g.pill.classList.remove('mv'); void g.pill.offsetWidth; g.pill.classList.add('mv'); }
@@ -1108,8 +1123,8 @@ var AV = {"kerem": "data:image/webp;base64,UklGRsIHAABXRUJQVlA4ILYHAAAQHgCdASpgA
   }
   groups.forEach(function(g){ g.btns.forEach(function(b,i){ b.addEventListener('click',function(){ selectTab(i); }); }); });
   var to=document.getElementById('tryOdak'); if(to) to.addEventListener('click',function(e){ e.preventDefault(); selectTab(1); });
-  setTab(1); addEventListener('resize',function(){ setTab(tabIdx); });
-  if(document.fonts) document.fonts.ready.then(function(){ setTab(tabIdx); });
+  setTab(1); fixNoteH(); addEventListener('resize',function(){ setTab(tabIdx); fixNoteH(); });
+  if(document.fonts) document.fonts.ready.then(function(){ setTab(tabIdx); fixNoteH(); });
   /* ---------- yukarı çık (mobil/tablet) ---------- */
   var toTop=document.getElementById('toTop');
   function tt(){ toTop.classList.toggle('show', scrollY>innerHeight*.9); }
