@@ -31,7 +31,9 @@ Dil: arayüz ve yorumlar Türkçe.
   (Resources/core). Günlükler: `~/.kavsak/desktop.log`, `~/.kavsak/core.log`. Release'te devtools açık.
 - Komutlar: `npm run dev` (çekirdek+Vite), `npm run demo`, `npm run desktop` (Tauri dev), `npm run app` (paketle + aç; `scripts/open-app.mjs`).
 - **Herkese açık demo** (`VITE_STATIC_DEMO=1`, `static-demo.ts`): main'e push → `.github/workflows/deploy-demo.yml` FTP ile
-  `mivelo.app/` klasörüne (cPanel hesabı kaantiftikci.com; eski mivelo.kaantiftikci.com alt alanı kaldırıldı; demo hesapları `~/mivelo-data`, `public/api/index.php`).
+  `demo.mivelo.app/` klasörüne (cPanel hesabı kaantiftikci.com; demo hesapları `~/mivelo-data`, `public/api/index.php`). Aynı iş akışı
+  `apps/landing/` (bekleme listesi sayfası, tek dosya `index.html`; iletişim hello@mivelo.app) → `mivelo.app/`; kayıtlar
+  `api/waitlist.php` → `~/mivelo-data/waitlist.json` (e-posta tekil, davet kodu `?ref=`, `refs` sayacı).
   Demoda örnek AI açık (`demo-ai.ts`: sohbete özel taslak/özet/aksiyon/olay, model çağrısı yok); pazaryeri sipariş kartı `Script.order`.
   Tek dosya demo (`npm run demo:html`) profil adı "Mivelo".
 - **Windows**: `tauri.windows.conf.json` (NSIS, currentUser, yerel başlık çubuğu) Tauri'nin platform yapılandırma birleştirmesiyle

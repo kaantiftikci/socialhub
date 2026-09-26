@@ -404,7 +404,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     const origin = req.headers.origin;
     // Yerel arayüzler: Vite (localhost:5173), Tauri (tauri://localhost / http://tauri.localhost) ve WKWebView'ın
     // özel şema sayfaları için gönderdiği "null" kaynağı (yalnızca belirteçle). Sunucu yalnızca 127.0.0.1'e bağlıdır.
-    // Uzak arayüz (ör. demo sitesi https://mivelo.app, tünel üzerinden): CORS başlıkları her kaynağa verilir,
+    // Uzak arayüz (ör. demo sitesi https://demo.mivelo.app, tünel üzerinden): CORS başlıkları her kaynağa verilir,
     // yetki yine belirteçle (authorized: yerel olmayan kaynak x-kavsak-token/?token= vermek zorunda)
     if (origin) {
       res.setHeader('Access-Control-Allow-Origin', origin);

@@ -1,14 +1,30 @@
-# Herkese açık demoyu (apps/web, VITE_STATIC_DEMO=1) cPanel FTP'sine yükler: mivelo.app.
+# cPanel FTP'sine (TLS) yükler — aynı hesap (sunucu kaantiftikci.com), alan adı klasörleri ana dizinde:
+#   apps/landing  → ~/mivelo.app/       (bekleme listesi sayfası; kayıtlar api/waitlist.php → ~/mivelo-data/waitlist.json)
+#   apps/web demo → ~/demo.mivelo.app/  (VITE_STATIC_DEMO=1; demo hesapları ~/mivelo-data/users.json)
 # Gizli: FTP_PASSWORD (GitHub → Settings → Secrets and variables → Actions). Sunucuda SSH/SFTP kapalı, FTP+TLS açık.
 name: deploy-demo
 on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['apps/web/**', '.github/workflows/deploy-demo.yml']
+    paths: ['apps/web/**', 'apps/landing/**', '.github/workflows/deploy-demo.yml']
 concurrency: deploy-demo
 jobs:
-  deploy:
+  landing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: FTP (TLS) ile yükle — mivelo.app
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: kaantiftikci.com
+          username: kaa300ftikcicom
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftps
+          local-dir: apps/landing/
+          server-dir: mivelo.app/
+          exclude: '**/.git*'
+  demo:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,8 +38,7 @@ jobs:
           # Sentry yalnızca demoda (secret yoksa SDK hiç başlamaz); release = commit
           VITE_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           VITE_COMMIT: ${{ github.sha }}
-      # cPanel hesabı kaantiftikci.com; alan adı klasörü ~/mivelo.app (demo hesapları: ~/mivelo-data)
-      - name: FTP (TLS) ile yükle — mivelo.app
+      - name: FTP (TLS) ile yükle — demo.mivelo.app
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: kaantiftikci.com
@@ -31,6 +46,5 @@ jobs:
           password: ${{ secrets.FTP_PASSWORD }}
           protocol: ftps
           local-dir: apps/web/dist/
-          server-dir: mivelo.app/
+          server-dir: demo.mivelo.app/
           exclude: '**/.git*'
-# tetik: 2026-09-24T17:42:30Z
