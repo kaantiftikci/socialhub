@@ -562,10 +562,6 @@ footer .legal{margin-top:18px;font-size:12px;line-height:1.5;color:var(--ink-4);
 .ntf em{display:block;font-style:normal;color:#6B6878}
 .cursor{width:max(calc(22/1440*100cqw),11px)}
 
-/* ---------- sahnede yüzen görünüm çubuğu (masaüstü; alttaki sekmelerle eşzamanlı) ---------- */
-.dock-seg{position:absolute;left:50%;bottom:18px;z-index:6;margin:0;opacity:0;transform:translate(-50%,24px) scale(.96);pointer-events:none;transition:opacity .5s var(--ease),transform .7s cubic-bezier(.3,1.3,.4,1)}
-.dock-seg.show{opacity:1;transform:translate(-50%,0);pointer-events:auto}
-@media (max-width:900px),(max-aspect-ratio:1/1){.dock-seg{display:none}}
 
 /* ---------- mobil: yukarı çık ---------- */
 .to-top{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom));z-index:80;width:46px;height:46px;border-radius:50%;border:0;display:none;align-items:center;justify-content:center;color:var(--ink);cursor:pointer;opacity:0;transform:translateY(12px) scale(.9);transition:opacity .3s,transform .4s cubic-bezier(.3,1.3,.4,1)}
@@ -609,7 +605,6 @@ footer .legal{margin-top:18px;font-size:12px;line-height:1.5;color:var(--ink-4);
 .sw-float{background:radial-gradient(120% 90% at 20% 0%,rgba(255,255,255,.85),rgba(255,255,255,0) 60%),linear-gradient(180deg,rgba(255,255,255,.66),rgba(245,243,255,.4))}
 .scroll-cue:hover,.intro .scroll-cue:hover,.to-top:hover{background:linear-gradient(180deg,rgba(255,255,255,.85),rgba(255,255,255,.55))}
 /* yüzen çubuk: renkli sahnenin üstünde daha saydam cam */
-.dock-seg.seg{background:radial-gradient(120% 100% at 15% 0%,rgba(255,255,255,.6),rgba(255,255,255,0) 55%),linear-gradient(180deg,rgba(255,255,255,.38),rgba(240,236,255,.2))}
 @media (prefers-reduced-motion:reduce){.seg .pill.mv{animation:none}}
 .hp{position:absolute!important;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none}
 </style>
@@ -685,7 +680,6 @@ footer .legal{margin-top:18px;font-size:12px;line-height:1.5;color:var(--ink-4);
         </div>
       </div>
     </div>
-    <div class="seg dock-seg" role="tablist" id="dockSeg" aria-label="Görünüm (ekran)"><span class="pill"></span><button role="tab" aria-selected="false" data-i="0">Gelen kutusu</button><button role="tab" aria-selected="true" data-i="1">Odak</button><button role="tab" aria-selected="false" data-i="2">Ekip sohbetleri</button><button role="tab" aria-selected="false" data-i="3">Pazaryeri</button></div>
   </div>
 </section>
 
@@ -932,14 +926,14 @@ var AV = {"kerem": "data:image/webp;base64,UklGRsIHAABXRUJQVlA4ILYHAAAQHgCdASpgA
 
   /* ---------- scroll-driven hero ---------- */
   var wrap=document.getElementById('stageWrap'), intro=document.getElementById('intro'), device=document.getElementById('device'),
-      mesh=document.getElementById('mesh'), screen=document.getElementById('screen'), dockSeg=document.getElementById('dockSeg');
+      mesh=document.getElementById('mesh'), screen=document.getElementById('screen');
   var cards=[].slice.call(document.querySelectorAll('.wc'));
   var mqStatic=matchMedia('(min-width:701px) and (max-width:900px), (min-width:701px) and (max-aspect-ratio:1/1)'), mqPhone=matchMedia('(max-width:700px)');
   var desktop=function(){ return !mqStatic.matches && !mqPhone.matches; };
   var heroStarted=false;
   function layout(){
     var vw=innerWidth, vh=innerHeight;
-    var DOCK=66; /* altta yüzen görünüm çubuğu için boşluk */
+    var DOCK=0; /* (eskiden altta yüzen görünüm çubuğu için boşluktu; çubuk kaldırıldı) */
     var w=Math.min(1280, vw-64, (vh-120-DOCK)/(900/1440));
     var h=w*900/1440+28;
     device.style.width=w+'px'; device.style.marginLeft=(-w/2)+'px';
@@ -977,7 +971,6 @@ var AV = {"kerem": "data:image/webp;base64,UklGRsIHAABXRUJQVlA4ILYHAAAQHgCdASpgA
       c.style.opacity=1-ease((t3-0.82)/0.18);
       c.classList.toggle('live', t3<0.02);
     });
-    dockSeg.classList.toggle('show', p>0.66);
     if(p>0.72 && !heroStarted){ heroStarted=true; playDesktop(); }
   }
   var ticking=false;
@@ -1121,7 +1114,7 @@ var AV = {"kerem": "data:image/webp;base64,UklGRsIHAABXRUJQVlA4ILYHAAAQHgCdASpgA
 
   /* ---------- görünüm sekmeleri (alttaki bölüm + sahnede yüzen cam çubuk, eşzamanlı) ---------- */
   var note=document.getElementById('viewsNote');
-  var groups=[document.getElementById('seg'),dockSeg].map(function(g){ return {seg:g,pill:g.querySelector('.pill'),btns:[].slice.call(g.querySelectorAll('button[role=tab]'))}; });
+  var groups=[document.getElementById('seg')].map(function(g){ return {seg:g,pill:g.querySelector('.pill'),btns:[].slice.call(g.querySelectorAll('button[role=tab]'))}; });
   var notes=["Tüm kanallar tek listede. Yanıtın mesajın geldiği uygulamadan gider.","Güne yanıt bekleyenlerle başla. Gruplar ve bildirimler sessizde.","Grup sohbetleri, dosyalar ve AI özeti tek ekranda.","Trendyol, Hepsiburada ve n11 soruları siparişiyle birlikte."];
   var tabIdx=1;
   function fixNoteH(){
