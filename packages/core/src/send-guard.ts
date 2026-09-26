@@ -16,24 +16,24 @@ import type { Platform } from './model.js';
  *   olağandışı hacmi durdurur.
  */
 export const DAILY_LIMIT: Partial<Record<Platform, number>> = {
-  linkedin: 250,
-  x: 300,
-  instagram: 400,
-  messenger: 400,
-  imessage: 1000,
-  whatsapp: 1500,
-  telegram: 1500,
-  slack: 3000,
+  linkedin: 350,
+  x: 450, // X'in kendi günlük DM tavanı 500: onun altında kalınır
+  instagram: 600,
+  messenger: 600,
+  imessage: 1500,
+  whatsapp: 2500,
+  telegram: 2500,
+  slack: 5000,
 };
 export const NEW_LIMIT: Partial<Record<Platform, number>> = {
-  linkedin: 30,
-  telegram: 30, // kişi olmayanlara ilk mesaj Telegram'da "spam kısıtı"nın başlıca nedeni
-  x: 50,
-  instagram: 50,
-  messenger: 50,
-  whatsapp: 50,
-  imessage: 100,
-  slack: 200,
+  linkedin: 50, // araştırmadaki güvenli aralığın (30–50 yeni konuşma/gün) üst ucu — daha fazlası önerilmiyor
+  telegram: 50, // kişi olmayanlara ilk mesaj Telegram'da "spam kısıtı"nın başlıca nedeni
+  x: 80,
+  instagram: 80,
+  messenger: 80,
+  whatsapp: 100,
+  imessage: 150,
+  slack: 300,
 };
 /** Aynı metin bu süre içinde en çok bu kadar farklı sohbete gidebilir */
 export const DUP_WINDOW_MS = 30 * 60_000;

@@ -114,9 +114,9 @@ Dil: arayüz ve yorumlar Türkçe.
   yükleme liste değişince ya da 6–9 dk'da bir. LinkedIn: tüm Voyager istekleri `pace()` ile sıralı, aralarında 400–1500 ms; eski sayfa önbelleği 3 sa.
 - WhatsApp: `cachedGroupMetadata` + `getMessage` (gönderilen son 500) + `gateSend` (0,8–2 sn aralık, dakikada ≤20).
 - `send-guard.ts` (server /send ve /send-file): aynı metin (≥16 kr.) 30 dk'da >5 farklı sohbete → 429. İki günlük sınır: `NEW_LIMIT`
-  ilk temas (karşı taraf sohbette hiç yazmamış; server `isNew`) — LinkedIn/Telegram 30, X/Instagram/Messenger/WhatsApp 50, iMessage 100,
-  Slack 200 farklı sohbet; `DAILY_LIMIT` tüm gönderimler için güvenlik ağı — LinkedIn 250, X 300, Instagram/Messenger 400, iMessage 1000,
-  WhatsApp/Telegram 1500, Slack 3000. Gün yerel gece yarısında döner; sayaçlar `~/.kavsak/send-guard.json`'da kalıcı. E-posta/pazaryeri muaf.
+  ilk temas (karşı taraf sohbette hiç yazmamış; server `isNew`) — LinkedIn/Telegram 50, X/Instagram/Messenger 80, WhatsApp 100,
+  iMessage 150, Slack 300 farklı sohbet; `DAILY_LIMIT` tüm gönderimler için güvenlik ağı — LinkedIn 350, X 450 (X'in tavanı 500),
+  Instagram/Messenger 600, iMessage 1500, WhatsApp/Telegram 2500, Slack 5000. Gün yerel gece yarısında döner; sayaçlar `~/.kavsak/send-guard.json`'da kalıcı. E-posta/pazaryeri muaf.
 - WhatsApp geçmiş boşluğu doldurma tur başına ≤25 istek × 50 mesaj (1,5–4 sn aralık; kalanı 30–45 dk sonra). "unavailable" presence yalnız
   bağlanınca ve gönderim/okundu sonrası tek sefer (`offlineSoon`); 4 dk'lık düzenli zamanlayıcı kaldırıldı (Baileys README: bildirim
   için yalnız `markOnlineOnConnect: false` yeterli).
