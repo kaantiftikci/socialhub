@@ -13,11 +13,18 @@ import { FFMPEG_HINT } from '../platform.js';
 import { sessionDir } from '../config.js';
 import { chatId as chatIdOf, messageId as messageIdOf, type Attachment, type Message, type Participant } from '../model.js';
 import { macContacts } from '../contacts-mac.js';
+import { newerVersion, TtlCache, useAtomicAuthState } from './wa-auth.js';
+
+// Yeniden bağlanmalar arasında korunan Baileys önbellekleri (WAHA/Evolution): her sokette sıfırlanırsa yeniden deneme
+// sayaçları kaybolur → şifre çözme/yeniden deneme döngüleri
+const msgRetryCounterCache = new TtlCache(60 * 60_000);
+const placeholderResendCache = new TtlCache(60 * 60_000);
+const userDevicesCache = new TtlCache(5 * 60_000);
 
 // Baileys CJS olarak yayınlanıyor; ESM'den yüklenince default export iç içe gelebilir.
 const B = Baileys as unknown as Record<string, unknown>;
 const makeWASocket = ((B.default as { default?: unknown })?.default ?? B.default ?? B.makeWASocket) as typeof Baileys.default;
-const { useMultiFileAuthState, fetchLatestBaileysVersion, DisconnectReason, jidNormalizedUser, downloadMediaMessage, BufferJSON, generateMessageID } = Baileys;
+const { fetchLatestBaileysVersion, fetchLatestWaWebVersion, makeCacheableSignalKeyStore, DisconnectReason, jidNormalizedUser, downloadMediaMessage, BufferJSON, generateMessageID } = Baileys;
 const WAProto = (B.proto ?? (B.default as { proto?: unknown })?.proto) as typeof Baileys.proto;
 /** Baileys günlüğünden yakalanan, elimizde olmayan uygulama durumu anahtarları (telefondan istenecek) */
 const missingSyncKeys = new Set<string>();
@@ -116,12 +123,54 @@ export class WhatsAppConnector extends BaseConnector {
   }
 
   /** Baileys soketi (start ve logout aynı kimlik/tarayıcı ayarlarıyla açar; history=false: telefondan geçmiş istenmez) */
-  private async makeSocket(history: boolean): Promise<{ sock: WASocket; state: Awaited<ReturnType<typeof useMultiFileAuthState>>['state'] }> {
-    const { state, saveCreds } = await useMultiFileAuthState(this.authDir());
-    const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: undefined as number[] | undefined }));
+  private versionRetried = false;
+  /** Hesap "yeni sohbet başlatma" kilidinde mi (WhatsApp kısıtı; bu sürede yeni kişilere mesaj riskli) */
+  private reachoutUntil = 0;
+
+  /** Bağlanınca hesabın yeni sohbet kısıtını sor (WAHA); etkinse kullanıcıyı uyar, gönderimde yeni sohbetleri engelle */
+  private checkReachout(sock: WASocket): void {
+    const f = (sock as unknown as { fetchAccountReachoutTimelock?: () => Promise<{ isActive?: boolean; timeEnforcementEnds?: Date }> }).fetchAccountReachoutTimelock;
+    if (!f) return;
+    void f
+      .call(sock)
+      .then((t) => {
+        this.reachoutUntil = t?.isActive ? (t.timeEnforcementEnds ? new Date(t.timeEnforcementEnds).getTime() : Date.now() + 24 * 3_600_000) : 0;
+        if (this.reachoutUntil) bus.log('warn', `WhatsApp: hesap yeni sohbet başlatma kısıtında (${new Date(this.reachoutUntil).toLocaleString('tr-TR')} tarihine dek). Bu sürede yalnız mevcut sohbetlere yanıt ver.`);
+      })
+      .catch(() => undefined);
+  }
+
+  private versionFile(): string {
+    return path.join(sessionDir(this.account.id), 'waver.json');
+  }
+
+  /** Son başarılı bağlantının sürümü; yenisi web.whatsapp.com → Baileys deposu sırasıyla, saklanandan eskisi asla */
+  private async pickVersion(): Promise<number[] | undefined> {
+    let saved: number[] | undefined;
+    try {
+      saved = JSON.parse(fs.readFileSync(this.versionFile(), 'utf8')) as number[];
+    } catch {
+      /* yok */
+    }
+    const timeout = <T>(p: Promise<T>) => Promise.race([p, new Promise<undefined>((r) => setTimeout(() => r(undefined), 8000).unref?.())]);
+    const web = await timeout(fetchLatestWaWebVersion({}).catch(() => undefined));
+    const repo = web?.isLatest ? undefined : await timeout(fetchLatestBaileysVersion().catch(() => undefined));
+    return newerVersion(newerVersion(saved, web?.isLatest ? web.version : undefined), repo?.isLatest ? repo.version : undefined) ?? web?.version ?? repo?.version;
+  }
+
+  private usedVersion?: number[];
+
+  private async makeSocket(history: boolean): Promise<{ sock: WASocket; state: Awaited<ReturnType<typeof useAtomicAuthState>>['state'] }> {
+    const { state, saveCreds } = await useAtomicAuthState(this.authDir());
+    const version = await this.pickVersion();
+    this.usedVersion = version;
     const sock = makeWASocket({
       version: version as [number, number, number] | undefined,
-      auth: state,
+      // anahtar okumalarını bellekte önbellekle (Baileys örneği, WAHA, Evolution)
+      auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, baileysLogger()) },
+      msgRetryCounterCache,
+      placeholderResendCache,
+      userDevicesCache,
       logger: baileysLogger(),
       // DİKKAT: browser[0] 'Mac OS'/'Windows' + syncFullHistory birleşimi Baileys'i yerel masaüstü uygulaması
       // (DARWIN/WIN32) gibi tanıtır; WhatsApp bunu web sürüm numarasıyla kabul etmeyip bağlantıyı hemen kapatır (428).
@@ -218,6 +267,8 @@ export class WhatsAppConnector extends BaseConnector {
       }
       if (u.connection === 'open') {
         this.opened = true;
+        if (this.usedVersion) fs.promises.writeFile(this.versionFile(), JSON.stringify(this.usedVersion)).catch(() => undefined);
+        this.checkReachout(sock);
         // geçmiş paketi gelmezse (zaten eşleşik açılış) boşluk denetimi 2 dk sonra; paket gelirse yeniden zamanlanır
         this.scheduleGapFill(120_000);
         this.failedBeforeOpen = 0;
@@ -311,11 +362,23 @@ export class WhatsAppConnector extends BaseConnector {
         // 402/403/406: WhatsApp hesabı geçici kısıtlamış/kilitlemiş olabilir. Oturumu silip yeniden eşleşmeye zorlamak ya da
         // ısrarla yeniden bağlanmak durumu kalıcı yasağa çevirebilir → dur, kimliği koru, kullanıcıya bırak.
         if (code === 402 || code === 403 || code === 406) {
-          this.setStatus('error', `WhatsApp bağlantıyı reddetti (${code}); hesap geçici kısıtlanmış olabilir. Telefonda WhatsApp'ı açıp uyarı olup olmadığına bak, sonra "Yeniden bağlan" de. Otomatik deneme durduruldu.`);
+          // 402 geçici yasak: sunucu bitiş süresini (sn) failure düğümünde verir (whatsmeow TemporaryBan)
+          const exp = Number((err as { data?: { expire?: unknown; attrs?: { expire?: unknown } } } | undefined)?.data?.expire ?? (err as { data?: { attrs?: { expire?: unknown } } } | undefined)?.data?.attrs?.expire);
+          const until = code === 402 && exp > 0 ? ` Kısıtlama yaklaşık ${new Date(Date.now() + exp * 1000).toLocaleString('tr-TR')} tarihine dek sürüyor.` : '';
+          this.setStatus('error', `WhatsApp bağlantıyı reddetti (${code}); hesap geçici kısıtlanmış olabilir.${until} Telefonda WhatsApp'ı açıp uyarı olup olmadığına bak, sonra "Yeniden bağlan" de. Otomatik deneme durduruldu.`);
           return;
         }
-        if (code === DisconnectReason.loggedOut || code === DisconnectReason.badSession || code === DisconnectReason.multideviceMismatch) {
-          resetAuth(code === DisconnectReason.loggedOut ? 'telefondan çıkış yapılmış' : `oturum geçersiz (${code})`);
+        // 405: istemci sürümü eski → saklanan sürüm atılır, bir kez güncel sürümle denenir
+        if (code === 405 && !this.versionRetried) {
+          this.versionRetried = true;
+          fs.rmSync(this.versionFile(), { force: true });
+          this.retry(2000);
+          return;
+        }
+        // 500 (badSession) Baileys'te KODSUZ her akış hatasına da veriliyor (ack, xml-not-well-formed…): whatsmeow gibi geçici
+        // say, oturumu silme — gereksiz yeniden eşleşme hem kullanıcıyı yorar hem risk sinyali. Kimlik yalnız 401/411'de silinir.
+        if (code === DisconnectReason.loggedOut || code === DisconnectReason.multideviceMismatch) {
+          resetAuth(code === DisconnectReason.loggedOut ? 'telefondan çıkış yapılmış' : `çoklu cihaz uyuşmazlığı (${code})`);
           return;
         }
         if (code === DisconnectReason.restartRequired) {
@@ -696,7 +759,8 @@ export class WhatsAppConnector extends BaseConnector {
     const cutoff = Date.now() - 14 * DAY;
     // Ban önleme: tek turda telefondan en çok GAP_BUDGET geçmiş isteği (eskiden 30 sohbet × 40 dilim = ~1.200'e çıkabiliyordu);
     // bütçe biterse kalan boşluklar 30-45 dk sonra devam eder. İstekler arası 1,5-4 sn sapmalı bekleme.
-    const GAP_BUDGET = 60;
+    // mautrix-whatsapp ölçüsü: istek başına 50 mesaj (WA Web kaydırmada da böyle ister), tur başına en çok 25 istek
+    const GAP_BUDGET = 25;
     let requests = 0;
     let total = 0;
     let fails = 0;
@@ -730,7 +794,7 @@ export class WhatsAppConnector extends BaseConnector {
           }
           if (round === 0) touched++;
           requests++;
-          const ok = await this.requestHistory(chat.remoteId, 200, anchor);
+          const ok = await this.requestHistory(chat.remoteId, 50, anchor);
           if (!ok) {
             if (++fails >= 2) {
               bus.log('warn', `WhatsApp: boşluk doldurma duraklatıldı (telefon yanıt vermiyor; ${total} mesaj alındı) — 30 dk sonra yeniden denenir`);
@@ -810,8 +874,16 @@ export class WhatsAppConnector extends BaseConnector {
     this.presenceTimer.unref?.();
   }
 
+  /** Yeni sohbet kısıtı etkinken karşı taraftan hiç mesaj gelmemiş sohbete gönderme (kısıtı yasağa çevirebilir) */
+  private guardReachout(remoteChatId: string): void {
+    if (this.reachoutUntil <= Date.now()) return;
+    const hasIncoming = this.store.listMessages(chatIdOf(this.account.id, this.canon(remoteChatId)), 200).some((m) => !m.fromMe);
+    if (!hasIncoming) throw new Error(`WhatsApp hesabın yeni sohbet başlatma kısıtında (${new Date(this.reachoutUntil).toLocaleString('tr-TR')} tarihine dek); bu kişiye şimdilik ilk mesaj gönderilemez`);
+  }
+
   async sendText(remoteChatId: string, text: string): Promise<{ remoteId: string }> {
     if (!this.sock) throw new Error('WhatsApp bağlı değil');
+    this.guardReachout(remoteChatId);
     await this.gateSend();
     const sent = await this.sock.sendMessage(remoteChatId, { text });
     this.rememberSent(sent);
@@ -834,6 +906,7 @@ export class WhatsAppConnector extends BaseConnector {
       const ogg = await transcodeToOpus(file.path);
       if (ogg) file = { ...file, path: ogg, mime: 'audio/ogg; codecs=opus', size: fs.statSync(ogg).size };
     }
+    this.guardReachout(remoteChatId);
     const content = waMediaContent(file, caption);
     await this.gateSend();
     const sent = await this.sock.sendMessage(remoteChatId, content);

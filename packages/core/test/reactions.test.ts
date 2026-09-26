@@ -12,7 +12,7 @@ const { Store } = await import('../src/store.js');
 const tg = await import('../src/connectors/telegram.js');
 const slack = await import('../src/connectors/browser/slack.js');
 const { parsePreview } = await import('../src/link-preview.js');
-const { Api } = await import('telegram');
+const { Api } = await import('teleproto');
 const bigInt = (await import('big-integer')).default;
 
 test('store: setReaction kişi başına tek tepki, kaldırma; setFlags yalnız verilen alanları değiştirir', () => {

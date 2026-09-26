@@ -67,7 +67,7 @@ Dil: arayüz ve yorumlar Türkçe.
   önce facebook.com/messages, olmazsa messenger.com — Nisan 2026'da kapandı; seçilen adres günlüğe yazılır, `verify-strategy.mjs messenger`
   hangisinin çalıştığını basar; facebook.com düzeni gerçek hesapla henüz doğrulanmadı).
   Çerezli medya `fetchMedia` ile vekilden geçer, `~/.kavsak/sessions/<hesap>/media` önbelleği.
-- **Telegram** (GramJS): api_id/api_hash Bağlan formundan (token dosyası JSON); giriş QR ile (`tg://login?token`), 2FA parolası prompt.
+- **Telegram** (teleproto — bakımı süren GramJS fork'u; GramJS Temmuz 2026'da arşivlendi): api_id/api_hash Bağlan formundan (token dosyası JSON); giriş QR ile (`tg://login?token`), 2FA parolası prompt.
 - **iMessage**: `~/Library/Messages/chat.db` salt okunur + AppleScript gönderim; Tam Disk Erişimi yoksa Sistem Ayarları bölmesini açar.
 - **E-posta** (`connectors/mail.ts`): imapflow + nodemailer + mailparser; thread = sohbet. Gmail: uygulama şifresi ya da
   Google OAuth (Desktop client id+secret, `/oauth/callback`); Outlook: Azure client id + cihaz kodu (pencere otomatik açılır/kapanır).
@@ -115,7 +115,7 @@ Dil: arayüz ve yorumlar Türkçe.
 - WhatsApp: `cachedGroupMetadata` + `getMessage` (gönderilen son 500) + `gateSend` (0,8–2 sn aralık, dakikada ≤20).
 - `send-guard.ts` (server /send ve /send-file): aynı metin (≥16 kr.) 30 dk'da >5 farklı sohbete → 429; günlük sınır kanal başına
   (LinkedIn/X 100, Instagram/Messenger 150, WhatsApp/Telegram 500…); e-posta/pazaryeri muaf.
-- WhatsApp geçmiş boşluğu doldurma tur başına ≤60 istek (1,5–4 sn aralık; kalanı 30–45 dk sonra). "unavailable" presence yalnız
+- WhatsApp geçmiş boşluğu doldurma tur başına ≤25 istek × 50 mesaj (1,5–4 sn aralık; kalanı 30–45 dk sonra). "unavailable" presence yalnız
   bağlanınca ve gönderim/okundu sonrası tek sefer (`offlineSoon`); 4 dk'lık düzenli zamanlayıcı kaldırıldı (Baileys README: bildirim
   için yalnız `markOnlineOnConnect: false` yeterli).
 - Uyarlamalı yoklama: arayüz `POST /api/activity {active}` (App.tsx, odak/görünürlük + dakikada bir) → `activity.ts`. Köprü seçeneği
@@ -126,7 +126,7 @@ Dil: arayüz ve yorumlar Türkçe.
   dahili uygulaması, xoxp + isteğe bağlı xapp (Socket Mode: olay gelen sohbet hemen çekilir, yoklama ~5 dk). Belirteç dosyası düz xoxp
   ya da JSON {token, appToken} (`parseSlackToken`). Tarayıcı girişi formdaki "yedek" bağlantısıyla.
 - E-posta (IMAP): ikinci uzun ömürlü oturum INBOX'ta IMAP IDLE (imapflow auto-IDLE, `maxIdleTime` 20 dk); 'exists' → 1 sn içinde
-  yoklama. IDLE açıkken yoklama ~5 dk yedek, yoksa ~60 sn (±%30); kopmada üstel yeniden bağlanma 5 sn → ≤5 dk.
+  yoklama; kopmada üstel yeniden bağlanma 5 sn → ≤5 dk.
 - E-posta tarayıcı yolları canlı liste izler (`Strategy.watchSelector` → `bridge.watchDom`: ilk 6 satırın metni 2 sn'de bir, zaman
   ifadeleri hariç; değişince yoklama). Köprü `keepOpen`: Outlook 'always' (IMAP yok; sürekli açık, ~200-300 MB, yoklama 90 sn → izleyici
   canlıyken 270 sn), Gmail/iCloud tarayıcı 'whileActive' (odakta açık + 30 sn, boşta kapalı + 90 sn).
@@ -141,6 +141,20 @@ Dil: arayüz ve yorumlar Türkçe.
 - 429'da `PollTimer.backoff(retryAfterSec(Retry-After|X-RateLimit-Reset))`: sunucunun istediği süre, art arda gelirse katlanarak ≤30 dk.
   Açık tutulan sayfalar `softReloadHours` (varsayılan 6–10 sa, Instagram 12–20) aralığında bir kez yenilenir (SPA bellek sızıntısı).
   LinkedIn: akışın ClientConnection kimliği değişince (yeniden bağlandı) eşitleme olayı.
+- WhatsApp (Baileys araştırması): kimlik deposu `wa-auth.ts` `useAtomicAuthState` (Baileys dosya biçimi, tmp+fsync+rename) +
+  `makeCacheableSignalKeyStore`; modül düzeyi `msgRetryCounterCache`/`placeholderResendCache`/`userDevicesCache` (TtlCache). Sürüm
+  `waver.json` (son başarılı; web.whatsapp.com → Baileys deposu, asla daha eskisi). 500 artık oturum SİLMEZ (Baileys kodsuz akış hatalarına
+  da 500 veriyor; whatsmeow geçici sayar) — yalnız 401/411; 405 → sürüm atılıp bir kez; 402'de bitiş zamanı gösterilir.
+  `fetchAccountReachoutTimelock` etkinse karşıdan mesaj gelmemiş sohbete gönderim engellenir. Boşluk doldurma istek başına 50, tur ≤25.
+- Telegram: bekçi 60 sn — koptuysa bağlan + `client.catchUp()` (getDifference; kaçanlar olay olarak gelir); tam sohbet taraması 10 dk'da bir
+  (eskiden 30 sn'de getDialogs+getHistory). `floodSleepThreshold` 60, `connectionRetries` 10. Çevrimdışı durumu 4 dk'da bir DEĞİL, gönderim/
+  okundu sonrası tek sefer. `installMessageBehaviour()` modül yüklenirken (m.sender getter'ları istemcisiz testte de).
+- iMessage: `fs.watch(~/Library/Messages)` (chat.db*, 150 ms) + 15 sn yedek; okunmamış ≥5 sn, geri alınan ≥60 sn aralıkla. Gönderim:
+  chat id → (-1728'de 1 sn sonra) chat id of hizmet → birebirde participant; zaman aşımında Mesajlar yeniden başlatılıp bir kez. Ekler
+  `~/Library/Messages/Attachments/Mivelo`e kopyalanıp gönderilir (5 dk sonra silinir), betikte `delay 1`.
+- E-posta: IDLE bağlantısı açıkken yoklama AYNI bağlantıda (getMailboxLock; yeni oturum yok) — yedek 10 dk, IDLE yoksa 2 dk.
+  `uidValidity` durum dosyasında; değişince imleç sıfırlanır. `classify`: authenticationFailed → dur (otomatik deneme yok), ETHROTTLE →
+  throttleReset, [ALERT]/[LIMIT]/çok bağlantı → 15 dk. `missingIdleCommand: 'STATUS'`.
 - Amazon Seller Central / Etsy Mesajları / Shopify Inbox tarayıcı köprüleri varsayılan KAPALI (yapılandırmada messaging/inbox:true ile açılır).
 - Bağlan: resmi olmayan kanallarda "resmi değil" etiketi + Sosyal Medya altında açıklama (`UNOFFICIAL`, Connect.tsx).
 

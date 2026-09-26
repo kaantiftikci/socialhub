@@ -5,10 +5,10 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import bigInt from 'big-integer';
 import QRCode from 'qrcode';
-import { TelegramClient, Api } from 'telegram';
-import { StringSession } from 'telegram/sessions/index.js';
-import { NewMessage, Raw, type NewMessageEvent } from 'telegram/events/index.js';
-import { getPeerId } from 'telegram/Utils.js';
+import { TelegramClient, Api } from 'teleproto';
+import { StringSession } from 'teleproto/sessions/index.js';
+import { NewMessage, Raw, type NewMessageEvent } from 'teleproto/events/index.js';
+import { getPeerId } from 'teleproto/Utils.js';
 import { BaseConnector, type OutFile } from './base.js';
 import type { Reaction } from '../model.js';
 import { bus } from '../bus.js';
@@ -19,8 +19,12 @@ import { sessionDir, TELEGRAM_API_ID, TELEGRAM_API_HASH } from '../config.js';
 const MIVELO_VERSION = '0.1.0';
 import type { Attachment, ChatKind } from '../model.js';
 
-import type { Entity } from 'telegram/define.js';
-import type { Dialog } from 'telegram/tl/custom/dialog.js';
+import type { Entity } from 'teleproto/define.js';
+import type { Dialog } from 'teleproto/tl/custom/dialog.js';
+import { installMessageBehaviour } from 'teleproto/tl/custom/message.js';
+
+// teleproto mesaj yardımcılarını (m.sender, m.out…) ilk istemci oluşturulunca kurar; ingest istemciden bağımsız da çalışsın
+installMessageBehaviour();
 
 const execFileP = promisify(execFile);
 
@@ -60,8 +64,13 @@ export class TelegramConnector extends BaseConnector {
       return;
     }
     const saved = fs.existsSync(this.sessionFile) ? fs.readFileSync(this.sessionFile, 'utf8').trim() : '';
+    // teleproto (bakımı süren GramJS fork'u; GramJS Temmuz 2026'da arşivlendi): gerçek pts/qts boşluk yönetimi, UpdatesTooLong,
+    // 15 dk sessizlikte getDifference. floodSleepThreshold 60: ≤60 sn FLOOD_WAIT kütüphanece beklenir, büyüğü hata olarak döner.
     const client = new TelegramClient(new StringSession(saved), apiId, apiHash, {
-      connectionRetries: 5,
+      connectionRetries: 10,
+      retryDelay: 2000,
+      autoReconnect: true,
+      floodSleepThreshold: 60,
       // dürüst ve tutarlı cihaz bilgisi (Telegram'da Ayarlar → Cihazlar'da "Mivelo · macOS 15.x" gibi görünür)
       deviceModel: 'Mivelo',
       systemVersion: `${os.type() === 'Darwin' ? 'macOS' : os.type() === 'Windows_NT' ? 'Windows' : os.type()} ${os.release()}`,
@@ -111,15 +120,30 @@ export class TelegramConnector extends BaseConnector {
     // Telefonda/başka istemcide okununca okunmamış sayacı burada da düşsün
     client.addEventHandler((u: Api.TypeUpdate) => this.onRead(u), new Raw({ types: [Api.UpdateReadHistoryInbox, Api.UpdateReadChannelInbox, Api.UpdateFolderPeers, Api.UpdateReadHistoryOutbox, Api.UpdateReadChannelOutbox, Api.UpdateUserTyping, Api.UpdateChatUserTyping, Api.UpdateChannelUserTyping, Api.UpdateMessageReactions] }));
     await this.backfill(client);
-    // GramJS'in güncelleme akışı bağlantı kopunca ya da uzun boşlukta sessizce kesilebiliyor (bilinen sorun): 30 sn'de bir
-    // bağlantıyı denetle ve son sohbetlerde kaçan mesaj varsa çek. Kaçan mesajlar canlı sayılır (bildirim + sayaç).
+    // güncelleme durumunu (pts/qts) başlat: bundan sonra kopmada kaçanlar getDifference ile olay olarak gelir
+    await client.catchUp().catch(() => undefined);
+    this.lastDialogScan = Date.now();
+    // Bekçi (60 sn): bağlantı koptuysa bağlan + catchUp (kaçan güncellemeler olay akışından gelir). Eskiden 30 sn'de bir
+    // getDialogs + getHistory yapılıyordu (saatte 120+ çağrı; yeni api_id'ler için FLOOD_WAIT ve anomali riski). Artık tam
+    // sohbet taraması yalnız 10 dk'da bir yedek olarak.
     if (this.watchTimer) clearInterval(this.watchTimer);
-    this.watchTimer = setInterval(() => void this.poll(), 30_000);
+    this.watchTimer = setInterval(() => void this.poll(), 60_000);
     this.watchTimer.unref?.();
   }
 
+  private lastDialogScan = 0;
+  private presenceTimer?: NodeJS.Timeout;
+  /** Gönderim/okundu sonrası "çevrimdışı" durumunu tek sefer tazele (telefon bildirimleri kesilmesin); düzenli zamanlayıcı yok */
+  private offlineSoon(): void {
+    if (this.presenceTimer) clearTimeout(this.presenceTimer);
+    const client = this.client;
+    this.presenceTimer = setTimeout(() => {
+      if (client && client === this.client && client.connected) void client.invoke(new Api.account.UpdateStatus({ offline: true })).catch(() => undefined);
+    }, 20_000 + Math.random() * 20_000);
+    this.presenceTimer.unref?.();
+  }
+
   /** Bağlantı bekçisi + kaçan mesaj yoklaması */
-  private pollTick = 0;
   private async poll(): Promise<void> {
     const client = this.client;
     if (!client || this.polling) return;
@@ -129,9 +153,10 @@ export class TelegramConnector extends BaseConnector {
         bus.log('warn', 'Telegram: bağlantı kopmuş, yeniden bağlanılıyor');
         await client.connect();
         if (!client.connected) return;
+        await client.catchUp().catch(() => undefined); // arada kaçan güncellemeler
       }
-      // her 4 dk'da bir çevrimdışı durumunu tazele (okuma/gönderme çevrimiçi sayabiliyor)
-      if (++this.pollTick % 8 === 0) await client.invoke(new Api.account.UpdateStatus({ offline: true })).catch(() => undefined);
+      if (Date.now() - this.lastDialogScan < 10 * 60_000) return;
+      this.lastDialogScan = Date.now();
       const dialogs = await client.getDialogs({ limit: 25 });
       for (const d of dialogs) {
         if (!d.id || !d.entity || !d.message) continue;
@@ -157,6 +182,7 @@ export class TelegramConnector extends BaseConnector {
   }
 
   async stop(): Promise<void> {
+    if (this.presenceTimer) clearTimeout(this.presenceTimer);
     if (this.watchTimer) clearInterval(this.watchTimer);
     this.watchTimer = undefined;
     await this.client?.disconnect();
@@ -198,6 +224,7 @@ export class TelegramConnector extends BaseConnector {
     const entity = await this.entityOf(remoteChatId);
     const sent = await this.client.sendMessage(entity, { message: text });
     const id = String(sent.id);
+    this.offlineSoon();
     this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent' });
     return { remoteId: id };
   }
@@ -255,6 +282,7 @@ export class TelegramConnector extends BaseConnector {
     if (!this.client) return;
     const entity = await this.entityOf(remoteChatId);
     await this.client.markAsRead(entity);
+    this.offlineSoon();
   }
 
   /** before: arayüzde yüklü en eski mesajın ms zaman damgası → bundan eski mesajlar; yoksa en yeni `limit` mesaj */

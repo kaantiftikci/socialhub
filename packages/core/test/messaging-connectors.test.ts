@@ -13,7 +13,7 @@ const { Store } = await import('../src/store.js');
 const im = await import('../src/connectors/imessage.js');
 const tg = await import('../src/connectors/telegram.js');
 const wa = await import('../src/connectors/whatsapp.js');
-const { Api } = await import('telegram');
+const { Api } = await import('teleproto');
 const bigInt = (await import('big-integer')).default;
 
 let n = 0;

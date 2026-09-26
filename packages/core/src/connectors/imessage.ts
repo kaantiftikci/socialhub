@@ -95,7 +95,8 @@ export class IMessageConnector extends BaseConnector {
   private retractedCol = 'NULL';
   private filteredCol = 'NULL';
   private assocCol = 'NULL';
-  private ticks = 0;
+  private retractAt = Date.now();
+  private unreadAt = 0;
   /** message.date nanosaniye mi (macOS 10.13+; eski sürümlerde saniye) */
   private dateNs = true;
   /** Tarih sıralama/filtre sütunu: chat_message_join.message_date (indeksli); eski macOS'ta sütun yoksa m.date */
@@ -157,10 +158,39 @@ export class IMessageConnector extends BaseConnector {
     this.backfill();
     this.syncUnread();
     this.scanRecoverable();
-    this.timer = setInterval(() => this.poll(), 3000);
+    this.watchDb();
+    // yedek yoklama: FSEvents olay kaçırabilir (uyku, kopya disk) — izleyici varken 15 sn, yoksa eskisi gibi 3 sn
+    this.timer = setInterval(() => this.poll(), this.watcher ? 15_000 : 3000);
+  }
+
+  private watcher?: fs.FSWatcher;
+  private watchDebounce?: NodeJS.Timeout;
+  /**
+   * Anlık algılama (BlueBubbles, mautrix-imessage): Messages klasörü izlenir; chat.db / chat.db-wal değişince 150 ms sonra
+   * yalnız yeni satırlar okunur. Dosya değil klasör izlenir: WAL denetim noktasında kısaltılıp yeniden oluşturulunca dosya
+   * izleyicisi kopabiliyor. Mac boştayken hiç SQLite sorgusu yapılmaz.
+   */
+  private watchDb(): void {
+    try {
+      this.watcher?.close();
+      this.watcher = fs.watch(path.dirname(DB), { persistent: false }, (_ev, name) => {
+        if (name && !String(name).startsWith('chat.db')) return;
+        if (this.watchDebounce) clearTimeout(this.watchDebounce);
+        this.watchDebounce = setTimeout(() => this.poll(), 150);
+      });
+      this.watcher.on('error', () => {
+        this.watcher?.close();
+        this.watcher = undefined;
+      });
+    } catch {
+      this.watcher = undefined; // izlenemiyor: 3 sn'lik yoklama
+    }
   }
 
   async stop(): Promise<void> {
+    this.watcher?.close();
+    this.watcher = undefined;
+    if (this.watchDebounce) clearTimeout(this.watchDebounce);
     if (this.timer) clearInterval(this.timer);
     this.db?.close();
     this.db = undefined;
@@ -218,18 +248,52 @@ export class IMessageConnector extends BaseConnector {
     } catch {
       /* eski şema */
     }
-    const { byChat, byBuddy } = imessageScripts(remoteChatId, payload, service);
+    // Mesajlar korumalı alanda: macOS 12+ rastgele yoldaki dosyayı sessizce göndermeyebilir → ~/Library/Messages/Attachments/Mivelo
+    // altına kopyalanır (BlueBubbles), 5 dk sonra silinir (Mesajlar kendi kopyasını almış olur)
+    let staged: string | undefined;
+    if ('file' in payload && process.platform === 'darwin') {
+      try {
+        const dir = path.join(os.homedir(), 'Library', 'Messages', 'Attachments', 'Mivelo');
+        fs.mkdirSync(dir, { recursive: true });
+        staged = path.join(dir, `${Date.now()}-${path.basename(payload.file)}`);
+        fs.copyFileSync(payload.file, staged);
+        payload = { file: staged };
+      } catch {
+        staged = undefined; // kopyalanamadı: özgün yol denenir
+      }
+    }
+    const { byChat, byChatSvc, byBuddy } = imessageScripts(remoteChatId, payload, service);
     const run = (script: string) =>
       new Promise<void>((resolve, reject) => {
-        execFile('osascript', ['-e', script], (err, _out, stderr) => (err ? reject(new Error(stderr || err.message)) : resolve()));
+        execFile('osascript', ['-e', script], { timeout: 45_000 }, (err, _out, stderr) => (err ? reject(new Error(stderr || err.message)) : resolve()));
       });
-    // Önce mevcut sohbete (chat id = guid) gönder: SMS/RCS/iMessage hizmetini Mesajlar kendisi seçer. Birebir sohbette
-    // chat id tanınmazsa (eski macOS) kişi + hizmet yoluna düş.
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     try {
-      await run(byChat);
-    } catch (e) {
-      if (isGroup) throw e;
-      await run(byBuddy);
+      // Sıra (mautrix-imessage + BlueBubbles): 1) sohbet kimliği (guid) — hizmeti Mesajlar seçer; 2) -1728'de 1 sn bekleyip
+      // sohbet kimliği hizmet üzerinden; 3) birebirde kişi + hizmet. Zaman aşımı/-1002'de Mesajlar yeniden başlatılıp bir kez daha.
+      try {
+        await run(byChat);
+      } catch (e) {
+        const msg = (e as Error).message;
+        if (/timed out|-1712|1002|ETIMEDOUT|killed/i.test(msg)) {
+          bus.log('warn', 'iMessage: Mesajlar yanıt vermedi, yeniden başlatılıp tekrar deneniyor');
+          await run('tell application "Messages" to quit').catch(() => undefined);
+          await sleep(3000);
+          await run('tell application "Messages" to launch').catch(() => undefined);
+          await sleep(2000);
+          await run(byChat);
+          return;
+        }
+        await sleep(1000);
+        try {
+          await run(byChatSvc);
+        } catch (e2) {
+          if (isGroup) throw e2;
+          await run(byBuddy);
+        }
+      }
+    } finally {
+      if (staged) setTimeout(() => fs.rm(staged!, { force: true }, () => undefined), 5 * 60_000).unref?.();
     }
   }
 
@@ -514,8 +578,16 @@ export class IMessageConnector extends BaseConnector {
         this.ingest(r, live);
         this.lastRowId = Math.max(this.lastRowId, r.rowid);
       }
-      if (++this.ticks % 20 === 0) this.rescanRetracted(); // ~1 dk'da bir
-      if (this.ticks % 4 === 0) this.syncUnread(); // ~12 sn'de bir: telefonda okununca burada da düşer
+      // zamana bağlı işler (yoklama artık olayla da tetikleniyor, tur sayısı süre ölçmez)
+      const now = Date.now();
+      if (now - this.retractAt >= 60_000) {
+        this.retractAt = now;
+        this.rescanRetracted();
+      }
+      if (now - this.unreadAt >= 5_000) {
+        this.unreadAt = now; // telefonda okununca burada da düşer
+        this.syncUnread();
+      }
     } catch (e) {
       bus.log('warn', `iMessage yoklama: ${(e as Error).message}`);
     }
@@ -564,12 +636,16 @@ export class IMessageConnector extends BaseConnector {
  * Mesajlar AppleScript'leri: byChat mevcut sohbete (chat id = guid), byBuddy kişi + hizmet yoluyla (eski macOS yedeği).
  * Metin ya da POSIX dosya yolu gönderilir; tırnak ve ters bölü kaçırılır.
  */
-export function imessageScripts(remoteChatId: string, payload: { text: string } | { file: string }, service: 'SMS' | 'iMessage'): { byChat: string; byBuddy: string } {
+export function imessageScripts(remoteChatId: string, payload: { text: string } | { file: string }, service: 'SMS' | 'iMessage'): { byChat: string; byChatSvc: string; byBuddy: string } {
   const esc = (s: string) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   const what = 'file' in payload ? `POSIX file "${esc(payload.file)}"` : `"${esc(payload.text)}"`;
-  const byChat = `tell application "Messages"\n send ${what} to chat id "${esc(remoteChatId)}"\nend tell`;
-  const byBuddy = `tell application "Messages"\n set svc to 1st account whose service type = ${service}\n set tgt to participant "${esc(remoteChatId.split(';').pop() ?? '')}" of svc\n send ${what} to tgt\nend tell`;
-  return { byChat, byBuddy };
+  // dosya: Mesajlar gönderimi eşzamansız başlatır; betik hemen biterse dosya kopyalanmadan temizlenebilir (BlueBubbles "delay 1")
+  const after = 'file' in payload ? '\n delay 1' : '';
+  const byChat = `tell application "Messages"\n send ${what} to chat id "${esc(remoteChatId)}"${after}\nend tell`;
+  // mautrix-imessage: -1728 ("Can't get chat id") sonrası sohbet hizmet üzerinden de aranır
+  const byChatSvc = `tell application "Messages"\n set svc to 1st account whose service type = ${service}\n send ${what} to chat id "${esc(remoteChatId)}" of svc${after}\nend tell`;
+  const byBuddy = `tell application "Messages"\n set svc to 1st account whose service type = ${service}\n set tgt to participant "${esc(remoteChatId.split(';').pop() ?? '')}" of svc\n send ${what} to tgt${after}\nend tell`;
+  return { byChat, byChatSvc, byBuddy };
 }
 
 function expandHome(p: string | null): string | undefined {

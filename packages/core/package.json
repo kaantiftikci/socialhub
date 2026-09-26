@@ -25,7 +25,7 @@
     "pino": "^9.7.0",
     "playwright": "^1.52.0",
     "qrcode": "^1.5.4",
-    "telegram": "^2.26.22",
+    "teleproto": "^1.229.0",
     "ws": "^8.18.2"
   },
   "devDependencies": {

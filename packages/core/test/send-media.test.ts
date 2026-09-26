@@ -15,7 +15,7 @@ const wa = await import('../src/connectors/whatsapp.js');
 const tg = await import('../src/connectors/telegram.js');
 const im = await import('../src/connectors/imessage.js');
 const mail = await import('../src/connectors/mail.js');
-const { Api } = await import('telegram');
+const { Api } = await import('teleproto');
 const bigInt = (await import('big-integer')).default;
 
 let n = 0;
@@ -183,6 +183,8 @@ test('iMessage imessageScripts: metin ve POSIX dosya; chat id / participant hede
   assert.ok(f.byBuddy.includes('send POSIX file "/tmp/a \\"b\\".jpg" to tgt'));
   const g = im.imessageScripts('iMessage;+;chat123', { file: '/tmp/x.pdf' }, 'iMessage');
   assert.ok(g.byBuddy.includes('participant "chat123"'));
+  assert.ok(t.byChatSvc.includes('to chat id "any;-;+905321234567" of svc'), 'hizmet üzerinden sohbet yedeği');
+  assert.ok(f.byChat.includes('delay 1') && !t.byChat.includes('delay 1'), 'dosyada gönderim sonrası bekleme');
 });
 
 test('iMessage sendMedia: dosya oturum klasörüne kopyalanır, yerel ek kaydı metinsiz (kopya temizliği için), altyazı ayrı metin; im-out vekili', async () => {
@@ -386,4 +388,65 @@ test('Mail IMAP IDLE: yeni e-posta bildirimi (exists) 1 sn içinde yoklatır; a�
   assert.equal(priv.idleUp, false);
   assert.ok(priv.idleRetry, 'yeniden bağlanma planlandı');
   await c.stop();
+});
+
+test('Mail: kimlik reddinde otomatik deneme durur; sağlayıcı sınırında 15 dk; UIDVALIDITY değişince imleç sıfırlanır', async () => {
+  const { store, account } = setup('imap');
+  const c = new mail.MailConnector(account, store, { user: 'me@example.com', pass: 'p', host: 'h', smtpHost: 's' });
+  const priv = c as unknown as { classify(e: unknown): void; authFailed: boolean; pauseUntil: number; withInbox: unknown; pollFolders: unknown; poll(first: boolean): Promise<void>; lastUid: number; uidValidity: string };
+  priv.classify(Object.assign(new Error('Command failed'), { response: 'NO [ALERT] Too many simultaneous connections' }));
+  assert.ok(priv.pauseUntil - Date.now() > 14 * 60_000);
+  priv.classify(Object.assign(new Error('Authentication failed'), { authenticationFailed: true }));
+  assert.equal(priv.authFailed, true);
+  assert.equal(account.status, 'error');
+  // UIDVALIDITY
+  let validity = 1n;
+  const box = [5, 6];
+  const fake = {
+    get mailbox() {
+      return { uidValidity: validity };
+    },
+    search: async (q: Record<string, unknown>) => (q.since ? box : box.filter((u) => u >= Number(/^(\d+):/.exec(String(q.uid))![1]))),
+    async *fetch(uids: number[]) {
+      for (const uid of uids) yield { uid, source: rawMail(uid), flags: new Set<string>() };
+    },
+  };
+  priv.withInbox = async (fn: (client: unknown) => Promise<unknown>) => fn(fake);
+  priv.pollFolders = async () => undefined;
+  await priv.poll(true);
+  assert.equal(priv.uidValidity, '1');
+  assert.equal(priv.lastUid, 6);
+  validity = 2n;
+  box.splice(0, 2, 1, 2); // yeni kutu: UID'ler baştan
+  await priv.poll(false);
+  assert.equal(priv.uidValidity, '2');
+  assert.equal(priv.lastUid, 2, 'imleç sıfırlanıp yeni kutu okundu');
+});
+
+test('WhatsApp kimlik deposu: atomik yazım, aynı dosya biçimi, geçici dosya kalmaz; TTL önbellek; sürüm seçimi', async () => {
+  const { useAtomicAuthState, TtlCache, newerVersion } = await import('../src/connectors/wa-auth.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-auth-'));
+  const a = await useAtomicAuthState(dir);
+  a.state.creds.registrationId = 4242;
+  await a.saveCreds();
+  await a.state.keys.set({ session: { 'x:1': Buffer.from('abc') as never }, 'pre-key': { '5': { public: Buffer.alloc(2), private: Buffer.alloc(2) } as never } });
+  assert.deepEqual(fs.readdirSync(dir).filter((f) => f.endsWith('.tmp')), []);
+  assert.ok(fs.existsSync(path.join(dir, 'session-x-1.json')), 'Baileys dosya adı biçimi');
+  const b = await useAtomicAuthState(dir);
+  assert.equal(b.state.creds.registrationId, 4242);
+  const got = await b.state.keys.get('session', ['x:1']);
+  assert.equal(Buffer.from(got['x:1'] as unknown as Buffer).toString(), 'abc');
+  await b.state.keys.set({ 'pre-key': { '5': null as never } });
+  assert.ok(!fs.existsSync(path.join(dir, 'pre-key-5.json')));
+  const c = new TtlCache(20, 2);
+  c.set('a', 1);
+  c.set('b', 2);
+  c.set('c', 3);
+  assert.equal(c.get('a'), undefined, 'en eski atıldı');
+  assert.equal(c.get('c'), 3);
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(c.get('c'), undefined, 'süresi doldu');
+  assert.deepEqual(newerVersion([2, 3000, 10], [2, 3000, 9]), [2, 3000, 10]);
+  assert.deepEqual(newerVersion(undefined, [2, 1, 1]), [2, 1, 1]);
+  fs.rmSync(dir, { recursive: true, force: true });
 });

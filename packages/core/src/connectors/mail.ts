@@ -110,14 +110,21 @@ export class MailConnector extends BaseConnector {
   private oldestUid = 0;
   private threadOf = new Map<string, string>(); // message-id → thread key
   private stateFile: string;
+  /** INBOX UIDVALIDITY: değişirse (kutu yeniden oluşturuldu/taşındı) UID imleçleri geçersiz → baştan eşitle */
+  private uidValidity = '';
+  /** Sağlayıcı kısıtı (ETHROTTLE, [LIMIT], çok fazla bağlantı): bu zamana dek yoklama/IDLE yok */
+  private pauseUntil = 0;
+  /** Kimlik reddedildi: otomatik deneme yok (tekrarlı başarısız giriş "Too many login failures" kilidine götürür) */
+  private authFailed = false;
 
   constructor(account: BaseConnector['account'], store: BaseConnector['store'], cfg: MailConfig) {
     super(account, store);
     this.cfg = { ...PRESETS[account.platform], ...cfg };
     this.stateFile = path.join(sessionDir(account.id), 'mail-state.json');
     try {
-      const st = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) as { lastUid?: number; oldestUid?: number; threads?: Record<string, string> };
+      const st = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) as { lastUid?: number; oldestUid?: number; uidValidity?: string; threads?: Record<string, string> };
       this.lastUid = st.lastUid ?? 0;
+      this.uidValidity = st.uidValidity ?? '';
       this.oldestUid = st.oldestUid ?? 0;
       for (const [k, v] of Object.entries(st.threads ?? {})) this.threadOf.set(k, v);
     } catch {
@@ -133,7 +140,7 @@ export class MailConnector extends BaseConnector {
       i++;
     }
     void i;
-    fs.writeFileSync(this.stateFile, JSON.stringify({ lastUid: this.lastUid, oldestUid: this.oldestUid, threads }));
+    fs.writeFileSync(this.stateFile, JSON.stringify({ lastUid: this.lastUid, oldestUid: this.oldestUid, uidValidity: this.uidValidity, threads }));
   }
 
   private saveCfg(): void {
@@ -142,6 +149,8 @@ export class MailConnector extends BaseConnector {
 
   async start(_opts: StartOptions = {}): Promise<void> {
     this.stopping = false;
+    this.authFailed = false; // kullanıcı yeniden bağladı
+    this.pauseUntil = 0;
     this.account.label = this.cfg.user || this.account.platform;
     if (!this.cfg.user) return this.setStatus('error', 'E-posta adresi girilmedi');
     this.setStatus('connecting');
@@ -182,11 +191,15 @@ export class MailConnector extends BaseConnector {
   private schedule(): void {
     if (this.stopping) return;
     if (this.timer) clearTimeout(this.timer);
-    const base = this.idleUp ? 300_000 : 60_000;
+    if (this.authFailed) return;
+    // IDLE açıkken yoklama aynı bağlantıda, yalnız yedek (10 dk). IDLE yoksa her tur yeni oturum = yeni giriş: 2 dk
+    // (Yahoo 3-5 eşzamanlı oturum, Gmail 15; dakikalık giriş sağlayıcı kilidine yaklaştırır — EmailEngine/imapflow önerisi)
+    const base = this.idleUp ? 600_000 : 120_000;
+    const wait = Math.max(base * (0.7 + Math.random() * 0.6), this.pauseUntil - Date.now());
     this.timer = setTimeout(async () => {
       await this.poll(false);
       this.schedule();
-    }, Math.round(base * (0.7 + Math.random() * 0.6)));
+    }, Math.round(wait));
     this.timer.unref?.();
   }
 
@@ -199,8 +212,9 @@ export class MailConnector extends BaseConnector {
 
   /** IDLE için ayrı, uzun ömürlü IMAP oturumu açar (testler ezer: gerçek sunucuya bağlanılmasın) */
   protected createIdleClient(): ImapFlow {
-    // maxIdleTime: IDLE 20 dk'da bir yenilenir (sunucular ~30 dk'da boştaki IDLE'ı düşürür; RFC 2177 29 dk önerir)
-    return new ImapFlow({ host: this.cfg.host!, port: this.cfg.port!, secure: this.cfg.secure ?? true, auth: this.auth(), logger: false, maxIdleTime: 20 * 60_000 });
+    // maxIdleTime: IDLE 20 dk'da bir yenilenir (sunucular ~30 dk'da boştaki IDLE'ı düşürür; RFC 2177 29 dk önerir).
+    // missingIdleCommand STATUS: IDLE bildirmeyen sunucuda varsayılan NOOP bazılarında yeni postayı hiç bildirmiyor
+    return new ImapFlow({ host: this.cfg.host!, port: this.cfg.port!, secure: this.cfg.secure ?? true, auth: this.auth(), logger: false, maxIdleTime: 20 * 60_000, missingIdleCommand: 'STATUS' });
   }
 
   /**
@@ -209,7 +223,7 @@ export class MailConnector extends BaseConnector {
    * NOOP ile yoklar, 'exists' yine gelir. Kopmada üstel yeniden bağlanma (5 sn → ≤5 dk, sapmalı); OAuth belirteci yenilenir.
    */
   private async startIdle(): Promise<void> {
-    if (this.stopping || this.idleClient) return;
+    if (this.stopping || this.idleClient || this.authFailed) return;
     let client: ImapFlow | undefined;
     try {
       if (this.cfg.accessToken) await this.ensureOAuth();
@@ -243,15 +257,37 @@ export class MailConnector extends BaseConnector {
         client.close();
       }
       this.idleUp = false;
+      this.classify(e);
       if (this.idleFails === 0) bus.log('warn', `${this.account.platform}: IMAP IDLE açılamadı (${(e as Error).message.split('\n')[0]}); dakikalık yoklamayla devam`);
       this.retryIdle();
     }
   }
 
+  /**
+   * imapflow hata sınıfları (postalsys/imapflow errors.ts): authenticationFailed → dur, kullanıcı yeniden bağlasın;
+   * ETHROTTLE → throttleReset kadar bekle; [ALERT]/[LIMIT]/çok fazla eşzamanlı bağlantı → 15 dk bekle.
+   */
+  private classify(e: unknown): void {
+    const err = e as { authenticationFailed?: boolean; code?: string; throttleReset?: number; message?: string; response?: string };
+    const text = `${err.message ?? ''} ${err.response ?? ''}`;
+    if (err.authenticationFailed || /AUTHENTICATIONFAILED|Invalid credentials|Web login required/i.test(text)) {
+      this.authFailed = true;
+      if (this.timer) clearTimeout(this.timer);
+      if (this.idleRetry) clearTimeout(this.idleRetry);
+      this.setStatus('error', 'Giriş reddedildi: uygulama şifresini kontrol edip "Yeniden bağlan" de (tekrarlı deneme hesabı kilitleyebileceği için otomatik denenmiyor)');
+      return;
+    }
+    if (err.code === 'ETHROTTLE') this.pauseUntil = Date.now() + Math.max(err.throttleReset ?? 60_000, 30_000);
+    else if (/\[ALERT\]|\[LIMIT\]|Too many simultaneous|too many connections|bandwidth limits/i.test(text)) {
+      this.pauseUntil = Date.now() + 15 * 60_000;
+      bus.log('warn', `${this.account.platform}: sağlayıcı sınırı bildirdi, 15 dk bekleniyor`);
+    }
+  }
+
   private retryIdle(): void {
-    if (this.stopping) return;
+    if (this.stopping || this.authFailed) return;
     this.schedule(); // IDLE yokken yoklama sıklaşsın
-    const ms = Math.min(300_000, 5_000 * 2 ** this.idleFails++) * (0.7 + Math.random() * 0.6);
+    const ms = Math.max(Math.min(300_000, 5_000 * 2 ** this.idleFails++) * (0.7 + Math.random() * 0.6), this.pauseUntil - Date.now());
     if (this.idleRetry) clearTimeout(this.idleRetry);
     this.idleRetry = setTimeout(() => void this.startIdle(), ms);
     this.idleRetry.unref?.();
@@ -351,6 +387,17 @@ export class MailConnector extends BaseConnector {
   // ---------- IMAP ----------
   /** IMAP bağlantısı aç, INBOX kilidiyle `fn`i çalıştır, kapat. Testler sahte istemci için bu metodu ezer. */
   protected async withInbox<T>(fn: (client: ImapFlow) => Promise<T>): Promise<T> {
+    // IDLE bağlantısı açıksa onu kullan: imapflow kilit alınınca IDLE'dan çıkar, bırakınca yeniden girer (connectionBusy/autoidle).
+    // Her turda yeni oturum açılmaz → sağlayıcının eşzamanlı oturum/giriş sınırlarından uzak durulur.
+    const idle = this.idleClient;
+    if (idle && this.idleUp && idle.usable) {
+      const lock = await idle.getMailboxLock('INBOX');
+      try {
+        return await fn(idle);
+      } finally {
+        lock.release();
+      }
+    }
     const client = new ImapFlow({ host: this.cfg.host!, port: this.cfg.port!, secure: this.cfg.secure ?? true, auth: this.auth(), logger: false });
     try {
       if (this.cfg.accessToken) await this.ensureOAuth();
@@ -400,6 +447,13 @@ export class MailConnector extends BaseConnector {
     this.polling = true;
     try {
       await this.withInbox(async (client) => {
+        const v = String((client as { mailbox?: { uidValidity?: bigint | number } | false }).mailbox ? ((client as { mailbox: { uidValidity?: bigint | number } }).mailbox.uidValidity ?? '') : '');
+        if (v && this.uidValidity && v !== this.uidValidity) {
+          bus.log('warn', `${this.account.platform}: gelen kutusunun UIDVALIDITY değeri değişti; UID imleçleri sıfırlanıp son 30 gün yeniden eşitleniyor`);
+          this.lastUid = 0;
+          this.oldestUid = 0;
+        }
+        if (v) this.uidValidity = v;
         let uids: number[];
         if (this.lastUid > 0) uids = (await client.search({ uid: `${this.lastUid + 1}:*` }, { uid: true })) || [];
         else {
@@ -416,7 +470,7 @@ export class MailConnector extends BaseConnector {
     } catch (e) {
       bus.log('warn', `${this.account.platform} IMAP: ${(e as Error).message}`);
       if (first) throw e;
-      if (/auth|login|credential/i.test((e as Error).message)) this.setStatus('error', 'Giriş reddedildi: uygulama şifresini kontrol et');
+      this.classify(e);
     } finally {
       this.polling = false;
       if (this.pollAgain && !this.stopping) {
