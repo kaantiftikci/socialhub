@@ -20,7 +20,7 @@ import { openExternal } from './platform.js';
 import { ALL_PLATFORMS } from './model.js';
 import { MEDIA_HOSTS, PLATFORM_MEDIA_HOSTS, MEDIA_MAX } from './media-hosts.js';
 import { fetchPreview } from './link-preview.js';
-import { checkSend, SendBlocked } from './send-guard.js';
+import { checkSend, persistSendGuard, SendBlocked } from './send-guard.js';
 import type { Platform } from './model.js';
 
 /**
@@ -79,6 +79,7 @@ function lanAddresses(): string[] {
 const isLoopback = (addr: string | undefined) => !addr || addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
 
 export function createServer(store: Store, registry: Registry, port: number): http.Server {
+  persistSendGuard(path.join(DATA_DIR, 'send-guard.json'));
   const token = loadToken();
   let lanEnabled = !!readSettings().lan;
   LOCAL_ORIGIN = localOriginRe(port);
@@ -212,7 +213,9 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   /** Ban önleme: toplu/aşırı gönderim desenini gönderimden önce durdur (send-guard.ts) */
   const guardSend = (chat: { id: string; accountId: string; platform: Platform }, text?: string) => {
     try {
-      checkSend({ accountId: chat.accountId, platform: chat.platform, chatId: chat.id, text });
+      // ilk temas: karşı taraf bu sohbette hiç yazmamış (soğuk mesaj) → daha sıkı günlük sınır
+      const isNew = !store.listMessages(chat.id, 300).some((m) => !m.fromMe);
+      checkSend({ accountId: chat.accountId, platform: chat.platform, chatId: chat.id, text, isNew });
     } catch (e) {
       if (e instanceof SendBlocked) {
         bus.log('warn', `${chat.platform}: gönderim güvenlik sınırı: ${e.message}`);
