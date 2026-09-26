@@ -479,7 +479,15 @@ export function CalendarView({
           </div>
           <div className="cv-up">
             <span className="cv-up-h">Yaklaşan</span>
-            {upcoming.length === 0 && <span className="cv-muted">Yaklaşan etkinlik yok. Bir mesajın üstüne gelip 📅 ile ekleyebilirsin.</span>}
+            {upcoming.length === 0 && (
+              <span className="cv-muted">
+                Yaklaşan etkinlik yok. Bir mesajın üstüne gelip{' '}
+                <span className="cv-inline-ic" aria-label="takvim">
+                  <Icon name="calendar" size={12} />
+                </span>{' '}
+                ile ekleyebilirsin.
+              </span>
+            )}
             {upcoming.map((e) => {
               const d = parseYmd(e.start);
               const c = e.chatId ? chats.get(e.chatId) : undefined;

@@ -1365,3 +1365,5 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .app.mobile .cv-side { width: auto; overflow: visible; }
 .app.mobile .cv-chip { background: var(--v); opacity: .75; }
 .app.mobile .cv-chip.all { opacity: 1; }
+/* metin içindeki küçük ikon (mesaj üstündeki takvim düğmesinin aynısı) */
+.cv-inline-ic { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--line); background: var(--card); color: var(--text2); vertical-align: -5px; }
