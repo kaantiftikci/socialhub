@@ -161,6 +161,10 @@ Dil: arayüz ve yorumlar Türkçe.
 - (açıksa) WhatsApp geçmiş boşluğu doldurma tur başına ≤25 istek × 50 mesaj (1,5–4 sn aralık; kalanı 30–45 dk sonra). "unavailable" presence yalnız
   bağlanınca ve gönderim/okundu sonrası tek sefer (`offlineSoon`); 4 dk'lık düzenli zamanlayıcı kaldırıldı (Baileys README: bildirim
   için yalnız `markOnlineOnConnect: false` yeterli).
+- Gecikme tanısı (terminal): köprü her turda karşıdan gelen yeni mesaj varsa `<platform>: gecikme X sn — tetik: anlık sinyal|odak|zamanlayıcı
+  (mesajdan Y sn sonra), tur Z sn · akış durumu` yazar; iMessage `tetik: izleyici|yedek 15 sn`. "zamanlayıcı" = anlık sinyal kaçırıldı,
+  "izleyici"+yüksek gecikme = mesaj Mac'e geç yazıldı. Tur sürerken gelen sinyal artık sabit 10–15 sn değil `soonDelay` (1,5–4 sn, tur
+  başlangıçları arası ≥10 sn) bekler.
 - Uyarlamalı yoklama: arayüz `POST /api/activity {active}` (App.tsx, odak/görünürlük + dakikada bir) → `activity.ts`. Köprü seçeneği
   `idlePollMs` (Instagram: odakta 30 sn, boşta 2 dk); boştan etkine geçişte bekleyen tur öne çekilir (`pollSoon`).
 - LinkedIn anlık akış: `Strategy.watch` → sayfaya init betiği, istemcinin kendi `/realtime/connect` akışının kopyası okunur (fetch/XHR/

@@ -161,7 +161,7 @@ export class IMessageConnector extends BaseConnector {
     this.scanRecoverable();
     this.watchDb();
     // yedek yoklama: FSEvents olay kaçırabilir (uyku, kopya disk) — izleyici varken 15 sn, yoksa eskisi gibi 3 sn
-    this.timer = setInterval(() => this.poll(), this.watcher ? 15_000 : 3000);
+    this.timer = setInterval(() => this.poll(this.watcher ? 'yedek 15 sn' : 'yoklama 3 sn'), this.watcher ? 15_000 : 3000);
   }
 
   private watcher?: fs.FSWatcher;
@@ -177,7 +177,7 @@ export class IMessageConnector extends BaseConnector {
       this.watcher = fs.watch(path.dirname(DB), { persistent: false }, (_ev, name) => {
         if (name && !String(name).startsWith('chat.db')) return;
         if (this.watchDebounce) clearTimeout(this.watchDebounce);
-        this.watchDebounce = setTimeout(() => this.poll(), 150);
+        this.watchDebounce = setTimeout(() => this.poll('izleyici'), 150);
       });
       this.watcher.on('error', () => {
         this.watcher?.close();
@@ -570,17 +570,24 @@ export class IMessageConnector extends BaseConnector {
     }
   }
 
-  private poll(): void {
+  private poll(trigger = 'ilk'): void {
     if (!this.db) return;
     try {
       const rows = this.query(this.lastRowId, 200);
+      let fresh = 0;
+      let oldest = Infinity;
       for (const r of rows) {
         // iCloud eşitlemesi eski mesajları da yeni ROWID'lerle düşürür: yalnızca gerçekten yeni (son 10 dk) olanlar canlı
         // sayılsın; eskiler bildirim çalmadan, okunmamış sayacını oynatmadan yazılsın (sayaç syncUnread ile is_read'den gelir).
-        const live = Date.now() - this.appleToMs(r.date) < 10 * 60_000;
+        const sentMs = this.appleToMs(r.date);
+        const live = Date.now() - sentMs < 10 * 60_000;
+        if (live && !r.is_from_me) (fresh++, (oldest = Math.min(oldest, sentMs)));
         this.ingest(r, live);
         this.lastRowId = Math.max(this.lastRowId, r.rowid);
       }
+      // Tanı: gönderenin zamanından Mivelo'da görünene kadar. "yedek" tetik → klasör izleyicisi olayı kaçırdı;
+      // "izleyici" tetikle yüksek gecikme → mesaj bu Mac'in chat.db'sine geç yazıldı (Apple teslimi / iCloud eşitlemesi)
+      if (fresh) bus.log('info', `imessage: gecikme ${((Date.now() - oldest) / 1000).toFixed(1)} sn (${fresh} yeni mesaj) — tetik: ${trigger}`);
       // zamana bağlı işler (yoklama artık olayla da tetikleniyor, tur sayısı süre ölçmez)
       const now = Date.now();
       if (now - this.retractAt >= 60_000) {

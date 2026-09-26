@@ -288,7 +288,7 @@ export class BrowserConnector extends BaseConnector {
       this.rtLogged = true;
       bus.log('info', `${this.account.platform}: sayfanın anlık bildirim akışı dinleniyor; yoklama seyrekleşti, yeni mesajda hemen okunur`);
     }
-    if (kind === 'event') this.pollSoon();
+    if (kind === 'event') this.pollSoon('anlık sinyal');
   }
 
   /**
@@ -319,17 +319,30 @@ export class BrowserConnector extends BaseConnector {
   }
 
   /** Bekleyen turu öne çek. Yoklama durmuşsa (doğrulama sayfası, kapalı) canlandırmaz. */
-  private pollSoon(): void {
+  /** Sıradaki turu öne çek; `reason` tanı günlüğü içindir (yeni mesajın hangi yoldan ve ne kadar gecikmeyle geldiği) */
+  private pollSoon(reason = 'odak'): void {
     if (!this.timer || this.stopping || this.account.status !== 'connected' || Date.now() < this.backoffUntil) return;
     if (this.polling) {
       this.pendingPoll = true;
+      this.pendingReason ??= { kind: reason, at: Date.now() };
       return;
     }
     if (this.soonAt > Date.now()) return; // zaten öne çekildi
-    const delay = Math.max(1500 + Math.random() * 2500, 10_000 - (Date.now() - this.lastPollAt));
+    this.nextReason ??= { kind: reason, at: Date.now() };
+    const delay = this.soonDelay();
     this.soonAt = Date.now() + delay;
     this.schedule(delay);
   }
+
+  /** Öne çekilen turun gecikmesi: 1,5–4 sn, ama iki turun BAŞLANGIÇLARI arasında en az 10 sn (istek patlaması olmasın) */
+  private soonDelay(): number {
+    return Math.max(1500 + Math.random() * 2500, 10_000 - (Date.now() - this.lastPollAt));
+  }
+  /** Tanı: sıradaki turu ne tetikledi (anlık sinyal / odak / zamanlayıcı) ve ne zaman; turda gelen yeni mesajların gecikmesi */
+  private nextReason?: { kind: string; at: number };
+  private pendingReason?: { kind: string; at: number };
+  private turnReason?: { kind: string; at: number };
+  private freshIn: number[] = [];
 
   /** Tarayıcı sayfası şimdi açık tutulmalı mı (keepOpen) */
   private wantPage(): boolean {
@@ -437,7 +450,7 @@ export class BrowserConnector extends BaseConnector {
     this.schedule();
     // uyarlamalı yoklama: arayüz boştan etkine geçince uzun bekleyen turu öne çek
     this.offActive?.();
-    if (this.opts.idlePollMs) this.offActive = onUiActive(() => this.pollSoon());
+    if (this.opts.idlePollMs) this.offActive = onUiActive(() => this.pollSoon('odak'));
   }
 
   private get stateFile(): string {
@@ -866,8 +879,13 @@ export class BrowserConnector extends BaseConnector {
       await this.poll(false).catch(() => undefined);
       if (this.timer !== t || this.stopping) return;
       if (this.pendingPoll) {
+        // tur sürerken anlık sinyal geldi: eskiden sabit 10–15 sn bekleniyordu (sinyal→mesaj gecikmesine 10+ sn ekliyordu);
+        // artık öne çekilmiş tur kuralı: 1,5–4 sn, turların başlangıçları arası ≥10 sn
         this.pendingPoll = false;
-        this.schedule(10_000 + Math.random() * 5000);
+        this.nextReason = this.pendingReason ?? this.nextReason;
+        this.pendingReason = undefined;
+        this.soonAt = Date.now() + this.soonDelay();
+        this.schedule(this.soonDelay());
       } else this.schedule();
     }, Math.round(delay ?? this.nextDelay()));
     this.timer = t;
@@ -897,11 +915,16 @@ export class BrowserConnector extends BaseConnector {
     if ((!this.page || this.page.isClosed()) && !this.pageless && !(await this.ensureOpen())) return;
     this.polling = true;
     this.lastPollAt = Date.now();
+    this.turnReason = this.nextReason ?? { kind: 'zamanlayıcı', at: Date.now() };
+    this.nextReason = undefined;
+    this.freshIn = [];
+    const turnStart = Date.now();
     try {
       await this.serial(async () => {
         this.inPoll = true;
         try {
           await this.pollInner(first);
+          this.logFresh(turnStart);
         } finally {
           // turun sonunda bekleyen kullanıcı işlemi kalmasın (boşaltma ile bayrak arasında await yok)
           await this.runUrgent().catch(() => undefined);
@@ -1032,8 +1055,27 @@ export class BrowserConnector extends BaseConnector {
     }
   }
 
+  /**
+   * Tanı satırı: bu turda karşı taraftan gelen yeni mesaj(lar) varsa, mesajın platform zamanından Mivelo'da görünene kadar
+   * geçen süre ve bunun parçaları (tetik ne zaman geldi, tur ne kadar sürdü). "anlık sinyal yok" → sinyal kaçırılıyor.
+   */
+  private logFresh(turnStart: number): void {
+    if (!this.freshIn.length) return;
+    const now = Date.now();
+    const oldest = Math.min(...this.freshIn);
+    const r = this.turnReason;
+    const s = (ms: number) => `${Math.max(0, ms / 1000).toFixed(1)} sn`;
+    const rt = this.rtAliveAt ? (this.rtEventAt ? `akış canlı, son olay ${s(now - this.rtEventAt)} önce` : 'akış canlı ama mesaj olayı hiç görülmedi') : 'anlık akış yok';
+    bus.log(
+      'info',
+      `${this.account.platform}: gecikme ${s(now - oldest)} (${this.freshIn.length} yeni mesaj) — tetik: ${r?.kind ?? '?'}${r ? ` (mesajdan ${s(r.at - oldest)} sonra)` : ''}, tur ${s(now - turnStart)} · ${rt}`,
+    );
+  }
+
   private ingest(threadId: string, m: Msg, live: boolean): void {
     if (!m.text && !m.attachments?.length) return;
+    // tanı: canlı ve yeni, karşı taraftan (son 10 dk içinde gönderilmiş) mesaj
+    if (live && !m.fromMe && m.ts && Date.now() - m.ts < 10 * 60_000) this.freshIn.push(m.ts);
     // Platformun okunmamış sayısı yetkili (threads() ile yazılır); canlı mesaj burada ayrıca +1 yapmasın (çift sayım)
     this.upsertMessage(
       {
