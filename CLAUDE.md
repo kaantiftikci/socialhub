@@ -36,6 +36,10 @@ Dil: arayüz ve yorumlar Türkçe.
   `api/waitlist.php` → `~/mivelo-data/waitlist.json` (e-posta tekil, davet kodu `?ref=`, `refs` sayacı).
   Landing hero'su: sahne sonunda yüzen cam görünüm çubuğu (`#dockSeg`, alttaki `#seg` ile eşzamanlı); her sekme imleçle ufak bir görev
   oynatır (`TASKS` dizisi, kaplamalar 1440×900 kare koordinatlarında). Telefon/tablette de masaüstü penceresi gösterilir.
+- **Yönetim paneli** `mivelo.app/admin` (`apps/landing/admin/`: `index.html` tek sayfa + `api.php`): bekleme listesi (durum
+  Bekliyor/Davet edildi/Katıldı/Spam, not, toplu işlem, CSV), trafik (`api/track.php` çerezsiz sayaç → `~/mivelo-data/stats/`),
+  demo hesapları (demo `index.php` girişte `logins`/`lastLogin` yazar), görevler, şifre değiştirme, JSON yedek. Varsayılan şifre
+  karması `api.php` `DEFAULT_HASH`; panelden değişince `~/mivelo-data/admin.json`. 5 hatalı girişte IP 15 dk kilitlenir.
   Demoda örnek AI açık (`demo-ai.ts`: sohbete özel taslak/özet/aksiyon/olay, model çağrısı yok); pazaryeri sipariş kartı `Script.order`.
   Tek dosya demo (`npm run demo:html`) profil adı "Mivelo".
 - **Windows**: `tauri.windows.conf.json` (NSIS, currentUser, yerel başlık çubuğu) Tauri'nin platform yapılandırma birleştirmesiyle

@@ -215,11 +215,15 @@ if ($action === 'login' && $method === 'POST') {
     $password = (string) ($body['password'] ?? '');
     usleep(250000); // kaba kuvvete karşı küçük gecikme
     $user = with_users(function (array &$data) use ($username, $password) {
-        foreach ($data['users'] as $u) {
+        foreach ($data['users'] as &$u) {
             if (strtolower((string) ($u['username'] ?? $u['email'] ?? '')) === $username && password_verify($password, (string) ($u['pass'] ?? ''))) {
-                return ['write' => false, 'out' => $u];
+                // admin paneli (mivelo.app/admin → Demo) için giriş sayısı ve son giriş
+                $u['logins'] = (int) ($u['logins'] ?? 0) + 1;
+                $u['lastLogin'] = time();
+                return ['write' => true, 'out' => $u];
             }
         }
+        unset($u);
         return ['write' => false, 'out' => null];
     });
     if ($user === null) {

@@ -29,6 +29,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
 $body = json_decode((string) file_get_contents('php://input', false, null, 0, 4096), true);
 $email = strtolower(trim((string) ($body['email'] ?? '')));
 $ref = preg_replace('/[^a-z0-9]/', '', strtolower((string) ($body['ref'] ?? '')));
+// nereden geldi: utm_source ya da yönlendiren alan adı (landing gönderir); admin panelinde kaynak kırılımı için
+$src = substr(preg_replace('/[^a-z0-9._-]/', '', strtolower((string) ($body['src'] ?? ''))), 0, 40);
 if (strlen($email) > 254 || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
     fail(400, 'Geçerli bir e-posta adresi yaz.');
 }
@@ -95,7 +97,7 @@ if ($out === null) {
         }
         unset($e);
     }
-    $data['entries'][] = ['email' => $email, 'code' => $code, 'ref' => $ref, 'refs' => 0, 'at' => time(), 'ip' => $ip];
+    $data['entries'][] = ['email' => $email, 'code' => $code, 'ref' => $ref, 'refs' => 0, 'at' => time(), 'ip' => $ip, 'src' => $src !== '' ? $src : ($ref !== '' ? 'davet' : 'doğrudan'), 'status' => 'waiting'];
     $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
     ftruncate($fh, 0);
     rewind($fh);
