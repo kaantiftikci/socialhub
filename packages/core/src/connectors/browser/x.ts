@@ -408,6 +408,8 @@ async function ensureSnapshot(page: Page): Promise<boolean> {
  * Aradaki turlarda yalnız yerel yedek okunur (ağ isteği yok).
  */
 let nextReloadAt = 0;
+/** XChat PIN uyarısı bir kez */
+let pinWarned = false;
 let lastListSig = '';
 async function listSignature(page: Page): Promise<string> {
   if (!page.url().startsWith(CHAT)) return '';
@@ -425,6 +427,8 @@ async function listSignature(page: Page): Promise<string> {
     .catch(() => '');
 }
 async function freshSnapshot(page: Page): Promise<boolean> {
+  // XChat PIN sayfasında liste hiç çizilmez (imza boş): "liste değişti" sanılıp her yoklamada tam yükleme yapılmasın
+  if (/\/i\/chat\/pin/.test(page.url()) && Date.now() < nextReloadAt) return readSnapshot(page);
   const sig = await listSignature(page);
   const due = !snap || snap.me !== meId || !sig || sig !== lastListSig || Date.now() >= nextReloadAt;
   if (!due) {
@@ -1020,7 +1024,31 @@ export const x: Strategy & { fetchMedia(page: Page, cookies: Record<string, stri
   // yalnız çerçeve büyüklüğü; 30 sn'lik ping'ler küçük) + sohbet listesi (DOM). Olayda freshSnapshot sayfayı yeniden yüklemez.
   watchSockets: [{ url: /chat-ws\.x\.com/, minBytes: 96 }],
   watchSelector: '[data-testid^="dm-conversation-item-"]',
-  loginHint: 'Açılan pencerede X hesabına giriş yap',
+  loginHint: 'Açılan pencerede X hesabına giriş yap; "Şifreli sohbetleri kurtar" (XChat PIN) çıkarsa 4 haneli PIN\'ini gir',
+
+  /**
+   * XChat PIN (uçtan uca şifreli sohbet anahtarı): yeni cihazda /i/chat, /i/chat/pin/recovery'ye gider; PIN girilmeden şifreli
+   * sohbet listesi açılmaz ve sayfanın canlı soketi mesaj getirmez (canlı testte izlenen satır 0). "Yeniden bağlan"da görünür
+   * pencere açılır, kullanıcı PIN'i girer (Messenger PIN adımıyla aynı akış).
+   */
+  async needsWindow(page) {
+    if (!page.url().startsWith(CHAT)) await page.goto(CHAT, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+    for (let i = 0; i < 16 && !/\/i\/chat\/pin/.test(page.url()); i++) await page.waitForTimeout(500);
+    return /\/i\/chat\/pin/.test(page.url());
+  },
+  async afterLogin(page) {
+    if (!(await this.needsWindow!(page).catch(() => false))) return;
+    bus.log('info', 'X: açık pencerede XChat PIN adımı bekleniyor (şifreli sohbetler için). 3 dk içinde girilmezse atlanır.');
+    for (const t0 = Date.now(); Date.now() - t0 < 180_000 && !page.isClosed(); ) {
+      await page.waitForTimeout(2000).catch(() => undefined);
+      if (page.isClosed()) return;
+      if (!/\/i\/chat\/pin/.test(page.url())) {
+        bus.log('info', 'X: XChat PIN adımı tamamlandı');
+        pinWarned = false;
+        return;
+      }
+    }
+  },
 
   async loggedIn(_page, cookies) {
     return Boolean(cookies.ct0 && cookies.auth_token);
@@ -1043,6 +1071,10 @@ export const x: Strategy & { fetchMedia(page: Page, cookies: Record<string, stri
 
   async threads(page, cookies): Promise<Thread[]> {
     meId = meFromCookies(cookies) || meId;
+    if (!pinWarned && /\/i\/chat\/pin/.test(page.url())) {
+      pinWarned = true;
+      bus.log('warn', 'X: şifreli sohbetler (XChat) bu cihazda PIN bekliyor; PIN girilene dek yeni şifreli mesajlar ve anlık bildirim gelmez. Kenar çubuğunda X\'e sağ tık → Yeniden bağlan → açılan pencerede 4 haneli XChat PIN\'ini gir.');
+    }
     if (legacyThreads && legacyMe !== meId) legacyThreads = undefined;
     legacyMe = meId;
     const byId = new Map<string, Thread>();

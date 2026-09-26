@@ -742,7 +742,14 @@ export class WhatsAppConnector extends BaseConnector {
     return arrived;
   }
 
+  /**
+   * Arka planda otomatik boşluk doldurma varsayılan KAPALI: her fetchMessageHistory telefonda "… üzerinde WhatsApp ile senkronize
+   * ediliyor" / "senkronizasyon durduruldu" bildirimi çıkarıyor (canlı testte arka arkaya 3-4 kez). mautrix-whatsapp da
+   * backwards_on_demand:false ile gelir; WA Web yalnız kullanıcı yukarı kaydırınca ister. Eski mesajlar kullanıcı sohbette
+   * yukarı kaydırınca (loadHistory) istenir. Açmak için MIVELO_WA_GAPFILL=1.
+   */
   private scheduleGapFill(ms: number): void {
+    if (process.env.MIVELO_WA_GAPFILL !== '1') return;
     if (this.gapTimer) clearTimeout(this.gapTimer);
     this.gapTimer = setTimeout(() => void this.fillGaps(), ms);
     this.gapTimer.unref?.();
@@ -1507,10 +1514,31 @@ export class WhatsAppConnector extends BaseConnector {
    * Telefondan (fromMe) gelenlerin sürekli çözülememesi telefon↔cihaz oturumunun bozulduğunu gösterir (aynı kimlikle iki
    * çekirdek çalışınca olur); tek kalıcı çare cihazı Bağlı cihazlar'dan kaldırıp yeniden eşleştirmek.
    */
+  private resendIds?: Set<string>;
+  private resendTried(): Set<string> {
+    if (!this.resendIds) {
+      try {
+        this.resendIds = new Set(JSON.parse(fs.readFileSync(path.join(sessionDir(this.account.id), 'resend.json'), 'utf8')) as string[]);
+      } catch {
+        this.resendIds = new Set();
+      }
+    }
+    return this.resendIds;
+  }
+  private saveResendTried(): void {
+    const ids = [...this.resendTried()].slice(-1000);
+    fs.promises.writeFile(path.join(sessionDir(this.account.id), 'resend.json'), JSON.stringify(ids)).catch(() => undefined);
+  }
+
   /** İçeriği gelmeyen mesaj için telefondan yeniden gönderim iste (Baileys'in eş cihaz PDO isteği); sonuç günlüğe */
   private tryPlaceholderResend(m: WAMessage): void {
     const f = (this.sock as unknown as { requestPlaceholderResend?: (k: WAMessage['key']) => Promise<string | undefined> } | undefined)?.requestPlaceholderResend;
     if (typeof f !== 'function' || !m.key.id) return;
+    // Aynı içeriksiz mesaj her geçmiş paketinde yeniden gelir: telefona her seferinde istek (ve bildirim) gitmesin —
+    // mesaj başına bir kez, oturumlar arasında kalıcı (sessions/<hesap>/resend.json)
+    if (this.resendTried().has(m.key.id)) return;
+    this.resendTried().add(m.key.id);
+    this.saveResendTried();
     f(m.key)
       .then((id) => bus.log('info', `WhatsApp: içeriksiz mesaj için telefondan yeniden gönderim istendi (${m.key.id?.slice(0, 8)}… → ${id ?? 'istek yok'})`))
       .catch((e) => bus.log('info', `WhatsApp: yeniden gönderim istenemedi: ${(e as Error).message}`));

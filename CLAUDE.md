@@ -117,7 +117,10 @@ Dil: arayüz ve yorumlar Türkçe.
   ilk temas (karşı taraf sohbette hiç yazmamış; server `isNew`) — LinkedIn/Telegram 50, X/Instagram/Messenger 80, WhatsApp 100,
   iMessage 150, Slack 300 farklı sohbet; `DAILY_LIMIT` tüm gönderimler için güvenlik ağı — LinkedIn 350, X 450 (X'in tavanı 500),
   Instagram/Messenger 600, iMessage 1500, WhatsApp/Telegram 2500, Slack 5000. Gün yerel gece yarısında döner; sayaçlar `~/.kavsak/send-guard.json`'da kalıcı. E-posta/pazaryeri muaf.
-- WhatsApp geçmiş boşluğu doldurma tur başına ≤25 istek × 50 mesaj (1,5–4 sn aralık; kalanı 30–45 dk sonra). "unavailable" presence yalnız
+- WhatsApp arka plan boşluk doldurma varsayılan KAPALI (`MIVELO_WA_GAPFILL=1` ile açılır): her fetchMessageHistory telefonda "… senkronize ediliyor / durduruldu"
+  bildirimi çıkarıyor (canlı testte arka arkaya). Eski mesajlar yalnız kullanıcı yukarı kaydırınca (loadHistory). İçeriksiz mesaj için yeniden gönderim
+  isteği mesaj başına bir kez (`resend.json`). X: `/i/chat/pin/recovery` = XChat PIN bekleniyor → uyarı, needsWindow/afterLogin ile Yeniden bağlan'da PIN.
+- (açıksa) WhatsApp geçmiş boşluğu doldurma tur başına ≤25 istek × 50 mesaj (1,5–4 sn aralık; kalanı 30–45 dk sonra). "unavailable" presence yalnız
   bağlanınca ve gönderim/okundu sonrası tek sefer (`offlineSoon`); 4 dk'lık düzenli zamanlayıcı kaldırıldı (Baileys README: bildirim
   için yalnız `markOnlineOnConnect: false` yeterli).
 - Uyarlamalı yoklama: arayüz `POST /api/activity {active}` (App.tsx, odak/görünürlük + dakikada bir) → `activity.ts`. Köprü seçeneği
