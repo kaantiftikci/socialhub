@@ -91,6 +91,18 @@ Dil: arayüz ve yorumlar Türkçe.
 - **Takip hatırlatıcısı**: `chats.followup` {at, since, due}; `POST /api/chats/:id/followup {at|null}`. Sunucu dakikada bir
   `store.checkFollowUps()`: `since` sonrası karşı taraftan mesaj gelirse kendiliğinden kapanır, süre dolunca bir kez
   `chat.followup` olayı (bildirim). Arayüz: sağ panel "Takip hatırlatıcısı", sohbet üstü şerit, listede "Takip" sekmesi.
+- **Genel arama** (⌘K / Ctrl+K, `SearchPalette.tsx`): görünüm/filtreden bağımsız; sohbet adları + FTS5 mesaj metni + ek adları
+  (`store.search` LIKE yedeği; `/api/search?limit=` ≤200). "N uygulamada M sonuç", uygulama çipleriyle süzme; mesaja tıklayınca sohbet açılır,
+  gerekirse eski mesajlar yüklenir (`focusMsg`), `data-mid` balon ortalanıp `.flash` ile vurgulanır. Liste başındaki arama kutusu ayrıca duruyor.
+- **Birleşik görünümler** (kenar çubuğu): Ekip (`isTeamChat`: grup/kanal + "ekip" etiketi), Pazaryeri (tüm pazaryerleri; Tümü·Siparişler·Sorular),
+  `scope` durumu. Gelen kutusu sekmeleri Tümü · Okunmamış · Bekleyen (`isWaiting`; birebirler önde, gruplar arkada) · Takip.
+- **Odak**: "Yanıtla" satır içi yanıt kutusu (Enter gönderir; kart listeden çıkar, "X ile gönderildi"). Taslak yalnız "Taslak yaz" ile
+  (SSS sözü: içerik ancak istenince Anthropic'e gider); `aiPrefs.focusAuto` (Ayarlar, varsayılan kapalı) ilk 3'ü önceden hazırlar.
+  Söz onayları `mivelo.promisesDone`.
+- **Zamanlanmış gönderim çekirdekte** (`scheduled.ts`, `~/.kavsak/scheduled.json`, 15 sn'de bir; `/api/scheduled` GET/POST/DELETE;
+  olaylar `scheduled.update`/`scheduled.missed`). Çekirdek kapalıyken 15 dk'dan fazla geçen gönderilmez (kaçırıldı, 7 gün listede,
+  Düzenle/Kaldır). Geçici hata 1 dk sonra yeniden (≤3), 400/404/429 kalıcı. Statik demoda tarayıcı kuyruğu (eski localStorage yolu).
+- Mesaj üstü düğmeler (`.rpos.p0/p1/p2`): tepki · takvim · takip (2 gün; `.act` açıkken). Bildirim: "Grup ve kanal bildirimleri" anahtarı.
 - **Görünümler**: ⌘1 Tümü, ⌘2… etiketler (Windows'ta Ctrl; `MOD_KEY`); ayrı çip satırı yok (sol kenar çubuğundaki Etiketler aynı işi görür,
   düğme ipucunda kısayol yazar); sıra `DEFAULT_TAGS` + kullanılanlar.
 - **Takvime ekle**: `POST /api/calendar` → `calendar.ts` .ics (kayan yerel saat); yerelde `openExternal` ile takvim uygulamasında

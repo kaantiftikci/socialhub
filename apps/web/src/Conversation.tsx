@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { EmojiPicker } from './emoji';
-import { api } from './api';
+import { api, USE_STATIC } from './api';
 import { API_BASE, mediaUrl, openExternal } from './desktop';
 import { DEFAULT_TAGS, PLATFORMS, isOrderPage, shopKind, QUICK_REACTIONS, REACT_PLATFORMS, TAG_COLORS, openInAppLink, type Attachment, type CalendarDraft, type Chat, type ChatFlags, type DraftResult, type LinkPreview, type Message, type Reaction } from './types';
 import { guessWhen } from './when';
@@ -14,6 +14,8 @@ interface ScheduledSend {
   chatId: string;
   text: string;
   at: number;
+  /** çekirdek gönderemedi / zamanı kaçtı (neden) */
+  missed?: string;
 }
 
 const SCHED_KEY = 'kavsak.scheduled';
@@ -21,7 +23,25 @@ const MISSED_KEY = 'kavsak.scheduled.missed';
 let schedTimer = 0;
 const schedListeners = new Set<() => void>();
 
+/**
+ * Zamanlanmış gönderim: gerçek uygulamada çekirdekte tutulur ve gönderilir (arayüz kapalıyken de; /api/scheduled).
+ * Arayüz yalnız listeyi önbellekler (scheduled.update olayıyla tazelenir). Statik demoda çekirdek yok → tarayıcı kuyruğu.
+ */
+const CORE_SCHED = !USE_STATIC;
+let coreSched: ScheduledSend[] = [];
+export function refreshScheduled(): void {
+  if (!CORE_SCHED) return;
+  api
+    .scheduled()
+    .then((list) => {
+      coreSched = list.map((s) => ({ id: s.id, chatId: s.chatId, text: s.text, at: s.at, missed: s.missed?.reason }));
+      emitScheduled();
+    })
+    .catch(() => undefined);
+}
+
 function readScheduled(): ScheduledSend[] {
+  if (CORE_SCHED) return coreSched;
   try {
     const raw = JSON.parse(localStorage.getItem(SCHED_KEY) || '[]') as ScheduledSend[];
     return Array.isArray(raw) ? raw.filter((x) => x && typeof x.at === 'number' && typeof x.text === 'string' && typeof x.chatId === 'string') : [];
@@ -36,6 +56,18 @@ function emitScheduled(): void {
 
 /** Bekleyen zamanlanmış gönderileri kurar. Uygulama açıkken süresi gelenin mesajını yollar. */
 export function startScheduledSends(): void {
+  if (CORE_SCHED) {
+    // eski sürümden tarayıcıda kalan bekleyenler çekirdeğe taşınır (bir kez)
+    let local: ScheduledSend[] = [];
+    try {
+      local = (JSON.parse(localStorage.getItem(SCHED_KEY) || '[]') as ScheduledSend[]).filter((x) => x && typeof x.at === 'number' && x.at > Date.now());
+      localStorage.removeItem(SCHED_KEY);
+    } catch {
+      /* yok */
+    }
+    void Promise.all(local.map((x) => api.schedule(x.chatId, x.text, x.at).catch(() => undefined))).then(refreshScheduled);
+    return;
+  }
   window.clearTimeout(schedTimer);
   const next = readScheduled().sort((a, b) => a.at - b.at)[0];
   if (!next) return;
@@ -76,7 +108,12 @@ async function flushScheduled(): Promise<void> {
   startScheduledSends();
 }
 
-function queueScheduled(item: ScheduledSend): void {
+async function queueScheduled(item: ScheduledSend): Promise<void> {
+  if (CORE_SCHED) {
+    await api.schedule(item.chatId, item.text, item.at);
+    refreshScheduled();
+    return;
+  }
   try {
     localStorage.setItem(SCHED_KEY, JSON.stringify([...readScheduled(), item]));
   } catch {
@@ -86,7 +123,12 @@ function queueScheduled(item: ScheduledSend): void {
   startScheduledSends();
 }
 
-function cancelScheduled(id: string): void {
+async function cancelScheduled(id: string): Promise<void> {
+  if (CORE_SCHED) {
+    await api.unschedule(id);
+    refreshScheduled();
+    return;
+  }
   try {
     localStorage.setItem(SCHED_KEY, JSON.stringify(readScheduled().filter((s) => s.id !== id)));
   } catch {
@@ -113,6 +155,8 @@ export function Conversation({
   onToggleDetails,
   onOpenChat,
   onLoadOlder,
+  focusMessageId,
+  onFocusDone,
   hasOlder = false,
   olderBusy = false,
   onBack,
@@ -131,6 +175,9 @@ export function Conversation({
   onToggleDetails?: () => void;
   onOpenChat?: (c: Chat) => void;
   /** Depodaki daha eski mesajları (100'er) yükle */
+  /** Genel aramadan gelindi: bu mesaja kaydır ve kısa süre vurgula */
+  focusMessageId?: string;
+  onFocusDone?: () => void;
   onLoadOlder?: () => void | Promise<void>;
   hasOlder?: boolean;
   olderBusy?: boolean;
@@ -154,6 +201,23 @@ export function Conversation({
     return mine.length ? [...stored, ...mine] : stored;
   }, [stored, outbox, chat.id]);
   const sendChain = useRef<Promise<unknown>>(Promise.resolve());
+  // aramadan gelinen mesaj: yüklenince ortala ve 2,4 sn vurgula (otomatik "en alta kaydır"dan sonra)
+  const focusDoneRef = useRef(onFocusDone);
+  focusDoneRef.current = onFocusDone;
+  useEffect(() => {
+    if (!focusMessageId || !stored.some((m) => m.id === focusMessageId)) return;
+    const t = window.setTimeout(() => {
+      const el = document.querySelector<HTMLElement>(`[data-mid="${CSS.escape(focusMessageId)}"]`);
+      if (!el) return;
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      el.classList.remove('flash');
+      void el.offsetWidth;
+      el.classList.add('flash');
+      window.setTimeout(() => el.classList.remove('flash'), 2400);
+      focusDoneRef.current?.();
+    }, 80);
+    return () => clearTimeout(t);
+  }, [focusMessageId, stored]);
   const openChatRef = useRef(chat.id);
   openChatRef.current = chat.id;
   const [search, setSearch] = useState<string | null>(null);
@@ -211,6 +275,8 @@ export function Conversation({
   }, [barFor]);
   useEffect(() => (setThreadFocus(null), setEmojiOpen(false), setReactPick(null), setBarFor(null)), [chat.id]);
   const canReact = REACT_PLATFORMS.has(chat.platform);
+  // takip hatırlatıcısı pazaryeri dışında her sohbette (sağ paneldeki ile aynı)
+  const canFollow = PLATFORMS[chat.platform].category !== 'shop';
   const byRemote = useMemo(() => new Map(messages.map((m) => [m.remoteId, m])), [messages]);
   /** Gönderen → profil fotoğrafı: bazı mesajlarda fotoğraf yoksa aynı kişinin başka mesajından ya da üye listesinden */
   const avatarOf = useMemo(() => {
@@ -407,11 +473,14 @@ export function Conversation({
       notify('Gelecek bir saat seç', true);
       return;
     }
-    queueScheduled({ id: crypto.randomUUID(), chatId: chat.id, text: body, at });
-    setText('');
-    setDraft(null);
-    setSchedOpen(false);
-    notify(`${fmtStamp(at)} tarihinde gönderilecek`);
+    queueScheduled({ id: crypto.randomUUID(), chatId: chat.id, text: body, at })
+      .then(() => {
+        setText('');
+        setDraft(null);
+        setSchedOpen(false);
+        notify(`${fmtStamp(at)} tarihinde gönderilecek${CORE_SCHED ? ' · Mivelo açık kaldıkça (pencere kapalı olsa da) gider' : ''}`);
+      })
+      .catch((e) => notify((e as Error).message, true));
   }
   async function sendFile(file: File, voice = false) {
     if (file.size > 50 * 1024 * 1024) return notify('Dosya 50 MB\'tan büyük', true);
@@ -743,7 +812,7 @@ export function Conversation({
                     const parent = m.threadId ? byRemote.get(m.threadId) : undefined;
                     const url = !isReact && !m.attachments?.length ? firstUrl(m.text) : undefined;
                     return (
-                      <div key={m.id} className={`bwrap ${g.fromMe ? 'me' : ''}`}>
+                      <div key={m.id} data-mid={m.id} className={`bwrap ${g.fromMe ? 'me' : ''}`}>
                         {m.threadId && !threadFocus && (
                           <button type="button" className="tq b" onClick={() => setThreadFocus(m.threadId!)} title="İş parçacığını aç">
                             <Icon name="reply" size={12} sw={2} />
@@ -793,16 +862,30 @@ export function Conversation({
                             })()}
                           </button>
                         )}
-                        {!isReact && (canReact || chat.platform === 'slack') && (
-                          <button type="button" className={`rtrig ${barFor === m.id ? 'on' : ''}`} aria-label={canReact ? 'Tepki ver' : 'Hızlı işlemler'} title={canReact ? 'Tepki ver' : 'Hızlı işlemler'} onClick={() => (setBarFor(barFor === m.id ? null : m.id), setReactPick(null))}>
-                            <Icon name={canReact ? 'smile' : 'thread'} size={15} />
-                          </button>
-                        )}
-                        {!isReact && !!m.text && (
-                          <button type="button" className={`rtrig cal ${canReact || chat.platform === 'slack' ? 'second' : ''}`} aria-label="Takvime ekle" title="Takvime ekle" onClick={() => (setCalFor(calFromText(m.text, `${m.fromMe ? 'Ben' : m.senderName}: ${m.text}`)), setBarFor(null))}>
-                            <Icon name="calendar" size={14} />
-                          </button>
-                        )}
+                        {!isReact &&
+                          [
+                            (canReact || chat.platform === 'slack') && (
+                              <button key="r" type="button" className={`rtrig ${barFor === m.id ? 'on' : ''}`} aria-label={canReact ? 'Tepki ver' : 'Hızlı işlemler'} title={canReact ? 'Tepki ver' : 'Hızlı işlemler'} onClick={() => (setBarFor(barFor === m.id ? null : m.id), setReactPick(null))}>
+                                <Icon name={canReact ? 'smile' : 'thread'} size={15} />
+                              </button>
+                            ),
+                            !!m.text && (
+                              <button key="c" type="button" className="rtrig cal" aria-label="Takvime ekle" title="Takvime ekle" onClick={() => (setCalFor(calFromText(m.text, `${m.fromMe ? 'Ben' : m.senderName}: ${m.text}`)), setBarFor(null))}>
+                                <Icon name="calendar" size={14} />
+                              </button>
+                            ),
+                            canFollow && (
+                              <button key="f" type="button" className={`rtrig ${chat.followUp ? 'act' : ''}`} aria-label={chat.followUp ? 'Takip hatırlatıcısını kaldır' : '2 gün yanıt gelmezse hatırlat'} title={chat.followUp ? 'Takip hatırlatıcısını kaldır' : 'Takip: 2 gün yanıt gelmezse hatırlat'} onClick={() => void setFollowUp(chat.followUp ? null : 2)}>
+                                <Icon name="bell" size={14} />
+                              </button>
+                            ),
+                          ]
+                            .filter(Boolean)
+                            .map((b, i) => (
+                              <span key={i} className={`rpos p${i}`}>
+                                {b}
+                              </span>
+                            ))}
                         {!isReact && barFor === m.id && (canReact || chat.platform === 'slack') && (
                           <span className="rbar" role="toolbar" aria-label="Hızlı işlemler">
                             {canReact &&
@@ -996,8 +1079,16 @@ export function Conversation({
               {queued.map((s) => (
                 <div key={s.id} className="sched-row">
                   <Icon name="calendar" size={14} />
-                  <span>{fmtStamp(s.at)} · {s.text}</span>
-                  <button className="btn ghost xs b" onClick={() => (cancelScheduled(s.id), notify('Zamanlama iptal edildi'))}>Vazgeç</button>
+                  <span title={s.missed}>
+                    {s.missed ? <b style={{ color: 'var(--danger)', fontWeight: 600 }}>Gönderilmedi · </b> : null}
+                    {fmtStamp(s.at)} · {s.text}
+                  </span>
+                  {s.missed && (
+                    <button className="btn ghost xs b" onClick={() => (setText(s.text), cancelScheduled(s.id).catch(() => undefined))}>
+                      Düzenle
+                    </button>
+                  )}
+                  <button className="btn ghost xs b" onClick={() => cancelScheduled(s.id).then(() => notify(s.missed ? 'Kaldırıldı' : 'Zamanlama iptal edildi')).catch((e) => notify((e as Error).message, true))}>{s.missed ? 'Kaldır' : 'Vazgeç'}</button>
                 </div>
               ))}
             </div>

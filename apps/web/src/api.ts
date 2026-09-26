@@ -63,8 +63,21 @@ const liveApi = {
   setFollowUp: (chatId: string, at: number | null) => call<Chat>('POST', `/chats/${enc(chatId)}/followup`, { at }),
   calendar: (ev: CalendarDraft) => call<{ ics: string; opened: boolean }>('POST', '/calendar', ev),
   style: (platform?: string) => call<{ lines: string[] }>('GET', `/style${platform ? `?platform=${enc(platform)}` : ''}`),
-  search: (q: string) => call<Array<{ message: Message; chat: Chat }>>('GET', `/search?q=${enc(q)}`),
+  search: (q: string, limit = 50) => call<Array<{ message: Message; chat: Chat }>>('GET', `/search?q=${enc(q)}&limit=${limit}`),
+  // zamanlanmış gönderim (çekirdekte; arayüz kapalıyken de gider)
+  scheduled: () => call<ScheduledItem[]>('GET', '/scheduled'),
+  schedule: (chatId: string, text: string, at: number, threadId?: string) => call<ScheduledItem>('POST', '/scheduled', { chatId, text, at, threadId }),
+  unschedule: (id: string) => call<{ ok: boolean }>('DELETE', `/scheduled/${enc(id)}`),
 };
+
+export interface ScheduledItem {
+  id: string;
+  chatId: string;
+  text: string;
+  at: number;
+  threadId?: string;
+  missed?: { reason: string; at: number };
+}
 
 /** Statik sitede uzak çekirdek ayarlıysa (#core=…) gerçek API, yoksa örnek veri */
 export const USE_STATIC = STATIC_DEMO && !REMOTE_CORE;

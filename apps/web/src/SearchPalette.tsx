@@ -1,0 +1,234 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { api } from './api';
+import { PLATFORMS, type Chat, type Message, type Platform } from './types';
+import { Avatar, Chip, Icon, fmtTime } from './ui';
+
+type Hit = { message: Message; chat: Chat };
+type Item = { kind: 'chat'; chat: Chat } | { kind: 'msg'; hit: Hit };
+
+const norm = (s: string) => s.toLocaleLowerCase('tr-TR');
+
+/** Aranan kelimeleri vurgula (büyük/küçük harf ve Türkçe İ/ı duyarsız) */
+function Marked({ text, q }: { text: string; q: string }) {
+  const words = q.trim().split(/\s+/).filter((w) => w.length >= 2);
+  if (!words.length) return <>{text}</>;
+  const lower = norm(text);
+  const marks: Array<[number, number]> = [];
+  for (const w of words) {
+    const lw = norm(w);
+    for (let i = lower.indexOf(lw); i >= 0; i = lower.indexOf(lw, i + lw.length)) marks.push([i, i + lw.length]);
+  }
+  if (!marks.length) return <>{text}</>;
+  marks.sort((a, b) => a[0] - b[0]);
+  const out: React.ReactNode[] = [];
+  let at = 0;
+  for (const [a, b] of marks) {
+    if (a < at) continue;
+    out.push(text.slice(at, a), <mark key={a}>{text.slice(a, b)}</mark>);
+    at = b;
+  }
+  out.push(text.slice(at));
+  return <>{out}</>;
+}
+
+/** Uzun mesajda eşleşmenin çevresini göster (eşleşme satır sonunda kalmasın) */
+function snippet(text: string, q: string): string {
+  const w = q.trim().split(/\s+/)[0] ?? '';
+  const i = w ? norm(text).indexOf(norm(w)) : -1;
+  const flat = text.replace(/\s+/g, ' ');
+  if (i < 60) return flat.slice(0, 180);
+  return '…' + flat.slice(i - 40, i + 140);
+}
+
+/**
+ * Genel arama (⌘K / Ctrl+K): tüm uygulamalarda sohbet adları + mesaj içerikleri + ek adları. Açık görünüm/filtre
+ * sonuçları daraltmaz. Sonuçlar uygulamaya göre gruplanır; mesaja tıklayınca sohbet açılır ve o mesaja gidilip vurgulanır.
+ */
+export function SearchPalette({ chats, onClose, onOpenChat, onOpenMessage }: { chats: Chat[]; onClose: () => void; onOpenChat: (id: string) => void; onOpenMessage: (chatId: string, messageId: string, ts: number) => void }) {
+  const [q, setQ] = useState('');
+  const [hits, setHits] = useState<Hit[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [active, setActive] = useState(0);
+  const [only, setOnly] = useState<Platform | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => inputRef.current?.focus(), []);
+
+  const LIMIT = 200;
+  useEffect(() => {
+    const term = q.trim();
+    if (term.length < 2) {
+      setHits([]);
+      setBusy(false);
+      return;
+    }
+    setBusy(true);
+    let alive = true;
+    const t = window.setTimeout(() => {
+      api
+        .search(term, LIMIT)
+        .then((h) => alive && setHits(h))
+        .catch(() => alive && setHits([]))
+        .finally(() => alive && setBusy(false));
+    }, 180);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [q]);
+
+  const chatHits = useMemo(() => {
+    const term = norm(q.trim());
+    if (term.length < 1) return [];
+    return chats
+      .filter((c) => norm(c.name).includes(term) || (c.handle && norm(c.handle).includes(term)) || c.participants?.some((p) => norm(p.name).includes(term)))
+      .sort((a, b) => Number(norm(b.name).startsWith(term)) - Number(norm(a.name).startsWith(term)) || b.lastMessageAt - a.lastMessageAt)
+      .slice(0, 8);
+  }, [chats, q]);
+
+  // uygulamaya göre gruplar (en çok sonuç veren üstte) + sayaç
+  const groups = useMemo(() => {
+    const m = new Map<Platform, Hit[]>();
+    for (const h of hits) m.set(h.chat.platform, [...(m.get(h.chat.platform) ?? []), h]);
+    return [...m.entries()].sort((a, b) => b[1].length - a[1].length);
+  }, [hits]);
+  const shownGroups = only ? groups.filter(([p]) => p === only) : groups;
+  useEffect(() => {
+    if (only && !groups.some(([p]) => p === only)) setOnly(null);
+  }, [groups, only]);
+
+  const items: Item[] = useMemo(
+    () => [...(only ? [] : chatHits.map((chat) => ({ kind: 'chat' as const, chat }))), ...shownGroups.flatMap(([, hs]) => hs.map((hit) => ({ kind: 'msg' as const, hit })))],
+    [chatHits, shownGroups, only],
+  );
+  useEffect(() => setActive(0), [q, only]);
+  useEffect(() => {
+    listRef.current?.querySelector<HTMLElement>(`[data-i="${active}"]`)?.scrollIntoView({ block: 'nearest' });
+  }, [active]);
+
+  const choose = (it: Item | undefined) => {
+    if (!it) return;
+    if (it.kind === 'chat') onOpenChat(it.chat.id);
+    else onOpenMessage(it.hit.chat.id, it.hit.message.id, it.hit.message.ts);
+    onClose();
+  };
+
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown') (e.preventDefault(), setActive((a) => Math.min(items.length - 1, a + 1)));
+    else if (e.key === 'ArrowUp') (e.preventDefault(), setActive((a) => Math.max(0, a - 1)));
+    else if (e.key === 'Enter') (e.preventDefault(), choose(items[active]));
+    else if (e.key === 'Escape') (e.preventDefault(), onClose());
+  };
+
+  const term = q.trim();
+  const total = hits.length;
+  let idx = only ? 0 : chatHits.length;
+  return (
+    <div className="overlay palette-wrap" onMouseDown={onClose}>
+      <div className="palette" role="dialog" aria-label="Her yerde ara" onMouseDown={(e) => e.stopPropagation()} onKeyDown={onKey}>
+        <div className="pal-in">
+          <Icon name="search" size={17} />
+          <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Tüm uygulamalarda ara — kişi, mesaj, dosya adı…" aria-label="Arama" spellCheck={false} />
+          {busy && <span className="spin" />}
+          <span className="kbd">Esc</span>
+        </div>
+        {term.length >= 2 && (
+          <div className="pal-sum">
+            {total > 0 ? (
+              <>
+                <b>
+                  {groups.length} uygulamada {total >= LIMIT ? `${LIMIT}+` : total} sonuç
+                </b>
+                <span className="pal-chips">
+                  <button type="button" className={!only ? 'on' : ''} onClick={() => setOnly(null)}>
+                    Tümü
+                  </button>
+                  {groups.map(([p, hs]) => (
+                    <button key={p} type="button" className={only === p ? 'on' : ''} onClick={() => setOnly(only === p ? null : p)}>
+                      <Chip platform={p} size={14} /> {hs.length}
+                    </button>
+                  ))}
+                </span>
+              </>
+            ) : busy ? (
+              <span>Aranıyor…</span>
+            ) : (
+              <span>Mesajlarda sonuç yok{chatHits.length ? '' : ' — farklı bir kelime dene'}.</span>
+            )}
+          </div>
+        )}
+        <div className="pal-list" ref={listRef}>
+          {!term && (
+            <div className="pal-empty">
+              <Icon name="search" size={22} />
+              <b>Her yerde ara</b>
+              <span>WhatsApp, Instagram, Gmail, Slack… bağlı tüm uygulamaların mesajlarında ve dosya adlarında. Aç/kapat: ⌘K / Ctrl+K</span>
+            </div>
+          )}
+          {!only && chatHits.length > 0 && (
+            <>
+              <div className="pal-h">Sohbetler</div>
+              {chatHits.map((c, i) => (
+                <button key={c.id} type="button" data-i={i} className={`pal-row ${active === i ? 'on' : ''}`} onMouseMove={() => setActive(i)} onClick={() => choose({ kind: 'chat', chat: c })}>
+                  <span className="avwrap">
+                    <Avatar name={c.name} size={30} url={c.avatarUrl} />
+                    <Chip platform={c.platform} size={13} ring="var(--card)" />
+                  </span>
+                  <span className="pal-t">
+                    <b>
+                      <Marked text={c.name} q={term} />
+                    </b>
+                    <span>{PLATFORMS[c.platform].name}{c.handle ? ` · ${c.handle}` : ''}</span>
+                  </span>
+                  <Icon name="chev" size={13} />
+                </button>
+              ))}
+            </>
+          )}
+          {shownGroups.map(([p, hs]) => (
+            <div key={p}>
+              <div className="pal-h">
+                <Chip platform={p} size={14} /> {PLATFORMS[p].name} <em>{hs.length}</em>
+              </div>
+              {hs.map((h) => {
+                const i = idx++;
+                const att = h.message.attachments?.find((a) => a.name && norm(a.name).includes(norm(term.split(/\s+/)[0] ?? '')));
+                return (
+                  <button key={h.message.id} type="button" data-i={i} className={`pal-row ${active === i ? 'on' : ''}`} onMouseMove={() => setActive(i)} onClick={() => choose({ kind: 'msg', hit: h })}>
+                    <Avatar name={h.chat.name} size={30} url={h.chat.avatarUrl} />
+                    <span className="pal-t">
+                      <b>
+                        {h.chat.name}
+                        <time>{fmtTime(h.message.ts)}</time>
+                      </b>
+                      <span>
+                        {h.message.fromMe ? 'Sen: ' : h.chat.kind !== 'direct' && h.message.senderName ? `${h.message.senderName}: ` : ''}
+                        {att && !norm(h.message.text).includes(norm(term.split(/\s+/)[0] ?? '')) ? (
+                          <>
+                            📎 <Marked text={att.name ?? ''} q={term} />
+                          </>
+                        ) : (
+                          <Marked text={snippet(h.message.text, term)} q={term} />
+                        )}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+        <div className="pal-foot">
+          <span>
+            <span className="kbd">↑</span>
+            <span className="kbd">↓</span> seç
+          </span>
+          <span>
+            <span className="kbd">↵</span> aç
+          </span>
+          <span>Mesaja gidip vurgular</span>
+        </div>
+      </div>
+    </div>
+  );
+}

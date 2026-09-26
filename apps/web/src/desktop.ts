@@ -274,6 +274,9 @@ export const soundsEnabled = (): boolean => flag('kavsak.soundsOn', true);
 export const setSoundsEnabled = (on: boolean): void => setFlag('kavsak.soundsOn', on);
 export const bannersEnabled = (): boolean => flag('kavsak.bannersOn', true);
 export const setBannersEnabled = (on: boolean): void => setFlag('kavsak.bannersOn', on);
+/** Grup ve kanal sohbetlerinden bildirim (kapalıysa yalnız birebir sohbetler bildirir) */
+export const groupsNotify = (): boolean => flag('kavsak.groupsOn', true);
+export const setGroupsNotify = (on: boolean): void => setFlag('kavsak.groupsOn', on);
 /** Uygulamanın bildirimi açık mı ('off' = o uygulamadan ne ses ne kart) */
 export const platformNotifyOn = (platform: string): boolean => getPlatformSound(platform) !== 'off';
 

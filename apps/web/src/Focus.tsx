@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
 import { PLATFORMS, type Chat, type DraftResult } from './types';
 import { Avatar, Chip, Icon, ago, agoLong } from './ui';
@@ -43,9 +43,10 @@ export function Focus({
   const mutedGroups = muted.filter((c) => c.kind === 'group').length;
   const mutedChannels = muted.filter((c) => c.kind === 'channel').length;
 
-  // AI açıksa ilk 3 bekleyen için taslak üret (taslak ve aksiyon çıkarma ikisi de kapalıysa hiç çağırma)
+  // Taslaklar yalnız istenince ("Taslak yaz") üretilir: sohbet içeriği Anthropic'e ancak kullanıcı isteyince gider.
+  // Ayarlar → AI → "Odak'ta taslakları kendiliğinden hazırla" açıksa ilk 3 bekleyen için önceden hazırlanır.
   useEffect(() => {
-    if (!ai || (!aiP.drafts && !aiP.actions)) return;
+    if (!ai || !aiP.focusAuto || (!aiP.drafts && !aiP.actions)) return;
     for (const c of waiting.slice(0, 3)) {
       if (drafts[c.id]) continue;
       setDrafts((d) => ({ ...d, [c.id]: 'loading' }));
@@ -55,7 +56,7 @@ export function Focus({
         .catch(() => setDrafts((d) => ({ ...d, [c.id]: 'error' })));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ai, aiP.drafts, aiP.actions, waiting.map((c) => c.id).join(',')]);
+  }, [ai, aiP.focusAuto, aiP.drafts, aiP.actions, waiting.map((c) => c.id).join(',')]);
 
   const actions = useMemo(() => {
     const out: Array<{ chat: Chat; text: string }> = [];
@@ -66,6 +67,57 @@ export function Focus({
     return out.slice(0, 5);
   }, [drafts, waiting, aiP.actions]);
 
+  // Satır içi yanıt: sohbeti açmadan buradan yaz ve gönder (yanıt mesajın geldiği uygulamadan gider)
+  const [replyFor, setReplyFor] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState('');
+  const replyRef = useRef<HTMLTextAreaElement>(null);
+  const openReply = (c: Chat, text = '') => {
+    setReplyFor(c.id);
+    setReplyText(text);
+    requestAnimationFrame(() => {
+      const el = replyRef.current;
+      if (el) (el.focus(), el.setSelectionRange(el.value.length, el.value.length));
+    });
+  };
+  async function sendReply(c: Chat) {
+    const text = replyText.trim();
+    if (!text || sending) return;
+    setSending(c.id);
+    try {
+      await api.send(c.id, text);
+      await api.markRead(c.id).catch(() => undefined);
+      setDone((x) => ({ ...x, [c.id]: true }));
+      setReplyFor(null);
+      setReplyText('');
+      notify(`${PLATFORMS[c.platform].name} ile gönderildi · ${c.name} listeden çıktı`);
+    } catch (e) {
+      notify((e as Error).message, true);
+    } finally {
+      setSending(null);
+    }
+  }
+
+  // Verdiğin sözler: işaretlenenler cihazda hatırlanır
+  const [kept, setKept] = useState<Set<string>>(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem('mivelo.promisesDone') || '[]') as string[]);
+    } catch {
+      return new Set();
+    }
+  });
+  const toggleKept = (key: string) =>
+    setKept((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      try {
+        localStorage.setItem('mivelo.promisesDone', JSON.stringify([...next].slice(-300)));
+      } catch {
+        /* yok */
+      }
+      return next;
+    });
+
   async function sendDraft(c: Chat) {
     const d = drafts[c.id];
     if (!d || typeof d !== 'object' || !d.draft) return;
@@ -74,7 +126,7 @@ export function Focus({
       await api.send(c.id, d.draft);
       await api.markRead(c.id);
       setDone((x) => ({ ...x, [c.id]: true }));
-      notify(`${c.name} için taslak gönderildi`);
+      notify(`${PLATFORMS[c.platform].name} ile gönderildi · ${c.name} listeden çıktı`);
     } catch (e) {
       notify((e as Error).message, true);
     } finally {
@@ -194,18 +246,46 @@ export function Focus({
                   </div>
                 )}
 
+                {replyFor === c.id && (
+                  <div className="freply">
+                    <textarea
+                      ref={replyRef}
+                      rows={2}
+                      value={replyText}
+                      placeholder={`${c.name} için yanıt yaz… (Enter gönderir, Shift+Enter yeni satır)`}
+                      onChange={(e) => setReplyText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) (e.preventDefault(), void sendReply(c));
+                        if (e.key === 'Escape') (e.stopPropagation(), setReplyFor(null));
+                      }}
+                    />
+                    <div className="freply-bar">
+                      <button className="btn ghost sm b" onClick={() => onOpen(c.id, replyText.trim() ? { text: replyText } : undefined)}>
+                        Sohbette aç
+                      </button>
+                      <span style={{ flexGrow: 1 }} />
+                      <button className="btn ghost sm b" onClick={() => setReplyFor(null)}>
+                        Vazgeç
+                      </button>
+                      <button className="btn lime sm b" onClick={() => sendReply(c)} disabled={!replyText.trim() || sending === c.id}>
+                        {sending === c.id ? <span className="spin" /> : <Icon name="send" size={14} sw={1.9} />} Gönder
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  {draftOn && draft?.draft ? (
+                  {replyFor === c.id ? null : draftOn && draft?.draft ? (
                     <button className="btn lime b" onClick={() => sendDraft(c)} disabled={sending === c.id}>
                       {sending === c.id ? <span className="spin" /> : <Icon name="send" size={15} sw={1.9} />} Taslağı gönder
                     </button>
                   ) : (
-                    <button className="btn primary b" onClick={() => onOpen(c.id)}>
+                    <button className="btn primary b" onClick={() => openReply(c)}>
                       <Icon name="pen" size={14} sw={2} /> Yanıtla
                     </button>
                   )}
-                  {draftOn && draft?.draft && (
-                    <button className="btn b b2" onClick={() => onOpen(c.id, { text: draft.draft })}>
+                  {replyFor !== c.id && draftOn && draft?.draft && (
+                    <button className="btn b b2" onClick={() => openReply(c, draft.draft)}>
                       <Icon name="pen" size={14} /> Düzenle
                     </button>
                   )}
@@ -225,10 +305,10 @@ export function Focus({
               <h2 style={{ flexGrow: 1 }}>Verdiğin sözler</h2>
               <span style={{ fontSize: 12, color: 'var(--text3)' }}>{!ai ? 'AI kapalı' : aiP.actions ? 'mesajlardan çıkarıldı' : 'aksiyon çıkarma kapalı'}</span>
             </div>
-            {actions.length === 0 && <span style={{ fontSize: 13, color: 'var(--text3)' }}>{ai && !aiP.actions ? 'Ayarlar → AI özelliklerinden “Aksiyon çıkarma”yı açınca sözlerin burada listelenir.' : ai ? 'Henüz çıkarılan bir söz yok.' : 'ANTHROPIC_API_KEY ile sözlerin mesajlardan otomatik çıkarılır.'}</span>}
+            {actions.length === 0 && <span style={{ fontSize: 13, color: 'var(--text3)' }}>{ai && !aiP.actions ? 'Ayarlar → AI özelliklerinden “Aksiyon çıkarma”yı açınca sözlerin burada listelenir.' : ai ? 'Bir sohbet için “Taslak yaz” dediğinde o sohbetteki sözlerin burada listelenir.' : 'Ayarlar → AI özelliklerinden Anthropic anahtarını ekleyince sözlerin mesajlardan çıkarılır.'}</span>}
             {actions.map((a, i) => (
-              <label key={i} className="todo" style={{ background: 'var(--bg2)', border: 0 }}>
-                <input type="checkbox" />
+              <label key={i} className={`todo ${kept.has(`${a.chat.id}|${a.text}`) ? 'kept' : ''}`} style={{ background: 'var(--bg2)', border: 0 }}>
+                <input type="checkbox" checked={kept.has(`${a.chat.id}|${a.text}`)} onChange={() => toggleKept(`${a.chat.id}|${a.text}`)} />
                 <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   <span style={{ fontWeight: 500 }}>{a.text}</span>
                   <span style={{ fontSize: 12, color: 'var(--text3)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>

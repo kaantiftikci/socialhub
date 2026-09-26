@@ -136,6 +136,10 @@ export type CoreEvent =
   | { type: 'messages.read'; chatId: string; before: number }
   /** Takip hatırlatıcısının süresi doldu (yanıt gelmedi) */
   | { type: 'chat.followup'; chat: Chat }
+  /** Zamanlanmış gönderim listesi değişti (eklendi/iptal/gönderildi) */
+  | { type: 'scheduled.update' }
+  /** Zamanlanmış mesaj gönderilemedi / kaçırıldı */
+  | { type: 'scheduled.missed'; item: { id: string; chatId: string; text: string; at: number; missed?: { reason: string; at: number } }; chatName: string }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; text: string };
 
 export function chatId(accountId: string, remoteId: string): string {

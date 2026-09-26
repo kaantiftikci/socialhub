@@ -948,12 +948,15 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 /* Üstüne gelince yalnız 😊 düğmesi (balonun yanında); tıklayınca hızlı tepki çubuğu açılır */
 .rtrig { position: absolute; top: 50%; right: -32px; transform: translateY(-50%); width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line); background: var(--card); color: var(--text3); display: inline-flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: none; cursor: pointer; z-index: 2; }
 .bwrap.me .rtrig { right: auto; left: -32px; }
-/* İkinci düğme (takvim) tepki düğmesinin yanında */
-.rtrig.second { right: -60px; }
-.bwrap.me .rtrig.second { right: auto; left: -60px; }
+/* Balon yanındaki işlem düğmeleri sırayla dizilir (tepki · takvim · takip); sarmalayıcı konumu belirler */
+.rpos { position: absolute; top: 50%; right: -32px; width: 26px; height: 26px; transform: translateY(-50%); z-index: 2; }
+.rpos .rtrig { position: static; transform: none; }
+.rpos.p1 { right: -60px; } .rpos.p2 { right: -88px; }
+.bwrap.me .rpos { right: auto; left: -32px; } .bwrap.me .rpos.p1 { left: -60px; } .bwrap.me .rpos.p2 { left: -88px; }
+.rtrig.act { color: var(--v-txt); border-color: var(--v-hl); }
 /* Balon ile ikon arasındaki boşluk görünmez köprüyle sarmalayıcıya dahil: imleç geçerken hover düşmez */
-.bwrap::after { content: ""; position: absolute; top: -4px; bottom: -4px; right: -68px; width: 68px; }
-.bwrap.me::after { right: auto; left: -68px; }
+.bwrap::after { content: ""; position: absolute; top: -4px; bottom: -4px; right: -96px; width: 96px; }
+.bwrap.me::after { right: auto; left: -96px; }
 /* İkonun tıklama alanı büyütülür (görünen daireden 6 px taşar) */
 .rtrig::before { content: ""; position: absolute; inset: -6px -6px -6px -10px; border-radius: 999px; }
 .bwrap:hover .rtrig, .rtrig:hover, .rtrig.on { opacity: 1; pointer-events: auto; }
@@ -1236,3 +1239,43 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .settings .seg3 button.on { background: var(--raise); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(17,16,22,.1); }
 /* Pasif lime düğme koyu zeminde yarı saydam "zeytin" olmasın: nötr, net pasif görünüm */
 [data-theme="dark"] .btn.primary:disabled, [data-theme="dark"] .btn.primary[disabled] { opacity: 1; background: var(--bg2); color: var(--text3); border-color: var(--line3); box-shadow: none; }
+
+/* ───── Genel arama (⌘K) ───── */
+.palette-wrap { align-items: flex-start; padding-top: min(12vh, 110px); z-index: 60; }
+.palette { width: min(680px, 94vw); max-height: min(72vh, 640px); display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: 20px; box-shadow: 0 40px 80px -30px rgba(17,16,22,.45); overflow: hidden; animation: bubIn .14s ease-out both; }
+.pal-in { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line2); color: var(--text3); }
+.pal-in input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; font: inherit; font-size: 16px; color: var(--text); }
+.pal-in input::placeholder { color: var(--text3); }
+.pal-sum { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 9px 16px; font-size: 12.5px; color: var(--text2); border-bottom: 1px solid var(--line2); background: var(--bg); }
+.pal-sum b { font-weight: 600; color: var(--text); }
+.pal-chips { display: inline-flex; flex-wrap: wrap; gap: 5px; margin-left: auto; }
+.pal-chips button { height: 24px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); color: var(--text2); font: inherit; font-size: 11.5px; font-weight: 500; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.pal-chips button.on { background: var(--v-soft); border-color: var(--v-line); color: var(--v-txt); }
+.pal-list { overflow-y: auto; padding: 6px; min-height: 0; flex: 1; }
+.pal-h { display: flex; align-items: center; gap: 6px; padding: 10px 10px 5px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text3); }
+.pal-h em { font-style: normal; font-weight: 500; letter-spacing: 0; }
+.pal-row { width: 100%; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 0; border-radius: 12px; background: transparent; text-align: left; font: inherit; color: var(--text); cursor: pointer; }
+.pal-row.on { background: var(--v-soft); }
+.pal-row .avwrap { position: relative; display: inline-flex; flex: none; }
+.pal-row .avwrap .plat { position: absolute; right: -3px; bottom: -3px; }
+.pal-row > svg { color: var(--text3); transform: rotate(-90deg); flex: none; }
+.pal-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.pal-t b { display: flex; align-items: baseline; gap: 8px; font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pal-t b time { margin-left: auto; font-size: 11px; font-weight: 400; color: var(--text3); flex: none; }
+.pal-t > span { font-size: 12.5px; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pal-t mark { background: color-mix(in srgb, var(--lime) 70%, transparent); color: var(--lime-txt); border-radius: 3px; padding: 0 1px; }
+.pal-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 34px 20px; text-align: center; color: var(--text3); font-size: 12.5px; }
+.pal-empty b { color: var(--text); font-size: 14px; }
+.pal-empty span { max-width: 380px; line-height: 1.5; }
+.pal-foot { display: flex; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--line2); font-size: 11.5px; color: var(--text3); background: var(--bg); }
+.pal-foot > span { display: inline-flex; align-items: center; gap: 4px; }
+.pal-foot > span:last-child { margin-left: auto; }
+[data-theme="dark"] .palette { box-shadow: 0 40px 90px -30px rgba(0,0,0,.9); }
+/* aramadan gelinen mesaj: kısa vurgu */
+.bwrap.flash .bub { animation: msgFlash 2.4s ease-out; }
+@keyframes msgFlash { 0%, 35% { box-shadow: 0 0 0 3px var(--lime), 0 0 0 7px color-mix(in srgb, var(--lime) 35%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+/* Odak: satır içi yanıt */
+.freply { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 14px; background: var(--card); border: 1px solid var(--v-hl); box-shadow: 0 0 0 4px color-mix(in srgb, var(--v) 10%, transparent); animation: bubIn .14s ease-out both; }
+.freply textarea { border: 0; outline: none; resize: vertical; min-height: 44px; max-height: 200px; background: transparent; font: inherit; font-size: 14px; line-height: 1.5; color: var(--text); }
+.freply-bar { display: flex; align-items: center; gap: 6px; }
+.todo.kept > span > span:first-child { text-decoration: line-through; color: var(--text3); }

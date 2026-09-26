@@ -106,6 +106,8 @@ export type CoreEvent =
   | { type: 'account.sync'; accountId: string; progress: number; label?: string }
   | { type: 'messages.read'; chatId: string; before: number }
   | { type: 'chat.followup'; chat: Chat }
+  | { type: 'scheduled.update' }
+  | { type: 'scheduled.missed'; item: { id: string; chatId: string; text: string; at: number; missed?: { reason: string; at: number } }; chatName: string }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; text: string };
 
 /** Çekirdeğin çalıştığı işletim sistemi (Node process.platform); /api/health `os` alanı */

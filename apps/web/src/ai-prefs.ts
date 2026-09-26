@@ -8,10 +8,12 @@ export interface AiPrefs {
   summary: boolean;
   drafts: boolean;
   actions: boolean;
+  /** Odak açılınca bekleyen ilk 3 sohbet için taslağı kendiliğinden hazırla (sohbet Anthropic'e gider; varsayılan kapalı) */
+  focusAuto: boolean;
 }
 
 const KEY = 'mivelo.aiPrefs';
-const DEFAULTS: AiPrefs = { summary: true, drafts: true, actions: true };
+const DEFAULTS: AiPrefs = { summary: true, drafts: true, actions: true, focusAuto: false };
 const subs = new Set<() => void>();
 let cache: AiPrefs | null = null;
 

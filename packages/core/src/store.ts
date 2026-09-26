@@ -538,6 +538,19 @@ export class Store {
       )
       .all(ftsQuery(q), limit)
       .map(rowToMessage);
+    // Ek (dosya) adlarında da ara: "fatura" → fatura-1042.pdf (FTS yalnız metni indeksler)
+    const term = q.trim();
+    if (term.length >= 3 && rows.length < limit) {
+      const seen = new Set(rows.map((m) => m.id));
+      const like = `%"name":"%${term.replace(/[\\%_"]/g, (c) => '\\' + c)}%`;
+      const extra = this.db
+        .prepare(`SELECT * FROM messages WHERE attachments IS NOT NULL AND attachments LIKE ? ESCAPE '\\' ORDER BY ts DESC LIMIT ?`)
+        .all(like, limit - rows.length)
+        .map(rowToMessage)
+        .filter((m) => !seen.has(m.id) && (m.attachments ?? []).some((a) => (a.name ?? '').toLocaleLowerCase('tr-TR').includes(term.toLocaleLowerCase('tr-TR'))));
+      rows.push(...extra);
+      rows.sort((a, b) => b.ts - a.ts);
+    }
     return rows.flatMap((message) => {
       const chat = this.getChat(message.chatId);
       return chat ? [{ message, chat }] : [];

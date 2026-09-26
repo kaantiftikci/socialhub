@@ -479,11 +479,18 @@ export const staticApi = {
   lan: async () => ({ enabled: false, urls: [] as string[] }),
   setLan: async () => ({ enabled: false, urls: [] as string[] }),
   logs: async () => [{ ts: Date.now(), level: 'info' as const, text: 'Herkese açık demo. Gerçek hesap veya kişisel veri yok.' }],
-  search: async (q: string) => {
+  // demoda çekirdek yok: zamanlanmış gönderim tarayıcıda (Conversation.tsx yerel kuyruk) çalışır
+  scheduled: async (): Promise<Array<{ id: string; chatId: string; text: string; at: number; threadId?: string; missed?: { reason: string; at: number } }>> => [],
+  schedule: async (): Promise<never> => {
+    throw new Error('Demoda zamanlama tarayıcıda tutulur');
+  },
+  unschedule: async () => ({ ok: false }),
+  search: async (q: string, limit = 50) => {
     const query = q.toLocaleLowerCase('tr-TR');
-    return messages
-      .filter((m) => m.text.toLocaleLowerCase('tr-TR').includes(query))
-      .slice(0, 40)
+    return [...messages]
+      .filter((m) => m.text.toLocaleLowerCase('tr-TR').includes(query) || (m.attachments ?? []).some((a) => (a.name ?? '').toLocaleLowerCase('tr-TR').includes(query)))
+      .sort((a, b) => b.ts - a.ts)
+      .slice(0, limit)
       .map((message) => ({ message, chat: chatOf(message.chatId) }));
   },
 };

@@ -6,6 +6,7 @@ import { randomBytes } from 'node:crypto';
 import os from 'node:os';
 import QRCode from 'qrcode';
 import { DATA_DIR } from './config.js';
+import { ScheduledQueue } from './scheduled.js';
 import { WebSocketServer, WebSocket } from 'ws';
 import { markActive } from './activity.js';
 import type { Store } from './store.js';
@@ -83,6 +84,7 @@ const mediaFailures = new Map<string, { at: number; code: number }>();
 
 export function createServer(store: Store, registry: Registry, port: number): http.Server {
   persistSendGuard(path.join(DATA_DIR, 'send-guard.json'));
+  const scheduled = new ScheduledQueue(path.join(DATA_DIR, 'scheduled.json'));
   const token = loadToken();
   let lanEnabled = !!readSettings().lan;
   LOCAL_ORIGIN = localOriginRe(port);
@@ -261,23 +263,46 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     if (!c.loadMoreChats) return { added: 0, supported: false };
     return { added: await c.loadMoreChats(), supported: true };
   });
-  route('POST', '/api/chats/:id/send', async (_r, _s, p, body) => {
-    const id = dec(p.id);
+  /** Metin gönderimi (anlık /send ve zamanlanmış gönderim aynı yoldan: güvenlik sınırları, hata metni) */
+  const sendTextNow = async (id: string, text: string, threadId?: string) => {
     const chat = store.getChat(id);
     if (!chat) throw new HttpError(404, 'Sohbet yok');
-    const b = body as { text?: string; threadId?: string };
-    const text = String(b.text ?? '').trim();
     if (!text) throw new HttpError(400, 'Boş mesaj');
     const c = registry.get(chat.accountId);
     if (!c) throw new HttpError(409, 'Hesap bağlı değil');
     guardSend(chat, text);
     try {
-      return await c.sendText(chat.remoteId, text, b.threadId ? { threadId: String(b.threadId).slice(0, 64) } : undefined);
+      return await c.sendText(chat.remoteId, text, threadId ? { threadId: String(threadId).slice(0, 64) } : undefined);
     } catch (e) {
       // gönderim hatası kullanıcıya anlamlı dönsün (oturum düşmüş, alıcı yok…); ayrıntı yine günlükte
       bus.log('warn', `${chat.platform} gönderilemedi: ${(e as Error).message.split('\n')[0].slice(0, 300)}`);
       throw new HttpError(502, `Gönderilemedi: ${(e as Error).message.split('\n')[0].slice(0, 160)}`);
     }
+  };
+  route('POST', '/api/chats/:id/send', async (_r, _s, p, body) => {
+    const b = body as { text?: string; threadId?: string };
+    return sendTextNow(dec(p.id), String(b.text ?? '').trim(), b.threadId);
+  });
+  // Zamanlanmış gönderim: çekirdekte tutulur, arayüz kapalıyken de gider (bkz. scheduled.ts)
+  route('GET', '/api/scheduled', (req) => {
+    const chat = new URL(req.url ?? '/', 'http://x').searchParams.get('chat') ?? undefined;
+    return scheduled.list(chat);
+  });
+  route('POST', '/api/scheduled', (_r, _s, _p, body) => {
+    const b = (body ?? {}) as { chatId?: string; text?: string; at?: number; threadId?: string };
+    const text = String(b.text ?? '').trim();
+    const at = Number(b.at);
+    if (!b.chatId || !store.getChat(String(b.chatId))) throw new HttpError(404, 'Sohbet yok');
+    if (!text) throw new HttpError(400, 'Boş mesaj');
+    if (!Number.isFinite(at) || at < Date.now() - 60_000) throw new HttpError(400, 'Geçmiş bir zaman seçilemez');
+    const item = scheduled.add(String(b.chatId), text.slice(0, 20_000), at, b.threadId ? String(b.threadId).slice(0, 64) : undefined);
+    bus.emit({ type: 'scheduled.update' });
+    return item;
+  });
+  route('DELETE', '/api/scheduled/:sid', (_r, _s, p) => {
+    const ok = scheduled.remove(dec(p.sid));
+    if (ok) bus.emit({ type: 'scheduled.update' });
+    return { ok };
   });
   // Yeni e-posta (e-posta hesapları): Kime / Konu / Metin → dizi sohbeti
   route('POST', '/api/accounts/:id/compose', async (_r, _s, p, body) => {
@@ -438,8 +463,10 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     return lanInfo();
   });
   route('GET', '/api/search', (req) => {
-    const q = new URL(req.url ?? '/', 'http://x').searchParams.get('q') ?? '';
-    return q.trim() ? store.search(q) : [];
+    const sp = new URL(req.url ?? '/', 'http://x').searchParams;
+    const q = sp.get('q') ?? '';
+    const limit = Math.max(1, Math.min(200, Number(sp.get('limit')) || 50));
+    return q.trim() ? store.search(q, limit) : [];
   });
 
   // ---------- static (derlenmiş arayüz varsa) ----------
@@ -598,6 +625,25 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     }
   }, 30_000);
   pingTimer.unref();
+  // Zamanlanmış gönderimler: 15 sn'de bir zamanı gelenler (sıralı; güvenlik sınırları anlık gönderimle aynı)
+  let schedBusy = false;
+  const schedTimer = setInterval(() => {
+    if (schedBusy) return;
+    schedBusy = true;
+    void scheduled
+      .flush((it) => sendTextNow(it.chatId, it.text, it.threadId).then(() => undefined))
+      .then(({ sent, missed }) => {
+        for (const it of sent) bus.log('info', `Zamanlanmış mesaj gönderildi (${store.getChat(it.chatId)?.name ?? it.chatId})`);
+        for (const it of missed) {
+          bus.log('warn', `Zamanlanmış mesaj gönderilmedi (${store.getChat(it.chatId)?.name ?? it.chatId}): ${it.missed?.reason}`);
+          bus.emit({ type: 'scheduled.missed', item: it, chatName: store.getChat(it.chatId)?.name ?? '' });
+        }
+        if (sent.length || missed.length) bus.emit({ type: 'scheduled.update' });
+      })
+      .catch((e) => bus.log('warn', `Zamanlanmış gönderim: ${(e as Error).message}`))
+      .finally(() => (schedBusy = false));
+  }, 15_000);
+  schedTimer.unref();
   // Takip hatırlatıcıları: dakikada bir; yanıt gelenler kapanır, süresi dolanlar bir kez bildirilir
   const followTimer = setInterval(() => {
     try {
@@ -617,6 +663,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     unsub();
     clearInterval(pingTimer);
     clearInterval(followTimer);
+    clearInterval(schedTimer);
   });
 
   // Yerel dinleyici yalnız 127.0.0.1; LAN modu açıkken ayrı bir dinleyici 0.0.0.0'da (kapatınca port ağdan kaybolur)
