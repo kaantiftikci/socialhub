@@ -180,7 +180,7 @@ Dil: arayüz ve yorumlar Türkçe.
   dosya gönderme (getUploadURLExternal → completeUploadExternal), dosya indirme (url_private + Bearer, `fetchMedia`), eski mesajlar
   (history latest), iş parçacığı yanıtları (conversations.replies; tur başına ≤5, thread_ts ile gönderim), birebir aç (conversations.open).
   Yeni kapsamlar (reactions/files/*:write) eski kurulumda yoksa `missing_scope` → "uygulamayı güncelleyip yeniden kur" hatası; metin etkilenmez.
-- E-posta (IMAP) okundu: Mivelo'da açılan dizi sunucuda da `\\Seen` (`markRead`; UID'ler alımda tutulur, yoksa Gmail X-GM-THRID ile arama).
+- E-posta (IMAP) okundu: Mivelo'da açılan dizi sunucuda da `\Seen` (`markRead`; UID'ler alımda tutulur, yoksa Gmail X-GM-THRID ile arama).
 - E-posta (IMAP): ikinci uzun ömürlü oturum INBOX'ta IMAP IDLE (imapflow auto-IDLE, `maxIdleTime` 20 dk); 'exists' → 1 sn içinde
   yoklama; kopmada üstel yeniden bağlanma 5 sn → ≤5 dk.
 - E-posta tarayıcı yolları canlı liste izler (`Strategy.watchSelector` → `bridge.watchDom`: ilk 6 satırın metni 2 sn'de bir, zaman
