@@ -180,7 +180,7 @@ async function slack(page: Page, method: string, params: Record<string, string |
   return r.j;
 }
 
-interface UserInfo {
+export interface UserInfo {
   name: string;
   avatar?: string;
   handle?: string;
@@ -261,7 +261,7 @@ export function fileToAttachment(f: J): Attachment {
 }
 
 /** Sistem alt türleri (katılma/ayrılma/başlık) mesaj değildir; bot, dosya, düzenlenmiş vb. mesajlardır */
-const SKIP_SUBTYPES = new Set(['channel_join', 'channel_leave', 'group_join', 'group_leave', 'channel_topic', 'channel_purpose', 'channel_name', 'channel_archive', 'channel_unarchive', 'pinned_item', 'unpinned_item', 'tombstone', 'joiner_notification', 'reminder_add', 'bot_add', 'bot_remove', 'huddle_thread']);
+export const SKIP_SUBTYPES = new Set(['channel_join', 'channel_leave', 'group_join', 'group_leave', 'channel_topic', 'channel_purpose', 'channel_name', 'channel_archive', 'channel_unarchive', 'pinned_item', 'unpinned_item', 'tombstone', 'joiner_notification', 'reminder_add', 'bot_add', 'bot_remove', 'huddle_thread']);
 
 /** Slack emoji adı ↔ karakter (tepki çipleri ve reactions.add için; bilinmeyen adlar :ad: olarak gösterilir) */
 export const SLACK_EMOJI: Record<string, string> = {

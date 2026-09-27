@@ -176,6 +176,11 @@ Dil: arayüz ve yorumlar Türkçe.
 - Slack: Bağlan formu önce resmi yol — manifest bağlantısı (`SLACK_MANIFEST`, Connect.tsx'teki kopyayla aynı; test denetler) ile kendi
   dahili uygulaması, xoxp + isteğe bağlı xapp (Socket Mode: olay gelen sohbet hemen çekilir, yoklama ~5 dk). Belirteç dosyası düz xoxp
   ya da JSON {token, appToken} (`parseSlackToken`). Tarayıcı girişi formdaki "yedek" bağlantısıyla.
+  xoxp yolu tarayıcı yoluyla eşit: tepki (reactions.add/remove + Socket Mode reaction_added/removed olayı), okundu (conversations.mark),
+  dosya gönderme (getUploadURLExternal → completeUploadExternal), dosya indirme (url_private + Bearer, `fetchMedia`), eski mesajlar
+  (history latest), iş parçacığı yanıtları (conversations.replies; tur başına ≤5, thread_ts ile gönderim), birebir aç (conversations.open).
+  Yeni kapsamlar (reactions/files/*:write) eski kurulumda yoksa `missing_scope` → "uygulamayı güncelleyip yeniden kur" hatası; metin etkilenmez.
+- E-posta (IMAP) okundu: Mivelo'da açılan dizi sunucuda da `\\Seen` (`markRead`; UID'ler alımda tutulur, yoksa Gmail X-GM-THRID ile arama).
 - E-posta (IMAP): ikinci uzun ömürlü oturum INBOX'ta IMAP IDLE (imapflow auto-IDLE, `maxIdleTime` 20 dk); 'exists' → 1 sn içinde
   yoklama; kopmada üstel yeniden bağlanma 5 sn → ≤5 dk.
 - E-posta tarayıcı yolları canlı liste izler (`Strategy.watchSelector` → `bridge.watchDom`: ilk 6 satırın metni 2 sn'de bir, zaman

@@ -1,21 +1,28 @@
 import { WebClient } from '@slack/web-api';
 import WebSocket from 'ws';
-import { BaseConnector } from './base.js';
+import fs from 'node:fs';
+import { BaseConnector, type OutFile, type SendOptions } from './base.js';
 import { bus } from '../bus.js';
-import type { Account } from '../model.js';
+import type { Account, Participant, Reaction } from '../model.js';
 import type { Store } from '../store.js';
+import { SKIP_SUBTYPES, SLACK_EMOJI, completedShareTs, fileToAttachment, formatSlackText, slackEmojiName, type UserInfo } from './browser/slack.js';
 
 /**
  * Slack uygulama bildirimi (manifest): kullanıcı Bağlan ekranındaki bağlantıyla KENDİ çalışma alanında dahili bir uygulama
  * oluşturur (Marketplace dışı dahili uygulamalara Mayıs 2025 hız kısıtı uygulanmıyor), kurar ve User OAuth Token'ı (xoxp)
  * yapıştırır. İsteğe bağlı App-Level Token (xapp, connections:write) verilirse Socket Mode ile anlık olay alınır.
  */
-export const SLACK_USER_SCOPES = ['channels:history', 'groups:history', 'im:history', 'mpim:history', 'channels:read', 'groups:read', 'im:read', 'mpim:read', 'users:read', 'chat:write'];
+export const SLACK_USER_SCOPES = [
+  'channels:history', 'groups:history', 'im:history', 'mpim:history',
+  'channels:read', 'groups:read', 'im:read', 'mpim:read', 'users:read', 'chat:write',
+  // tepki ver/gör, dosya gönder/indir, okundu işaretle (conversations.mark) ve birebir aç (conversations.open)
+  'reactions:read', 'reactions:write', 'files:read', 'files:write', 'channels:write', 'groups:write', 'im:write', 'mpim:write',
+];
 export const SLACK_MANIFEST = {
   display_information: { name: 'Mivelo', description: 'Mivelo birleşik gelen kutusu — yalnız bu bilgisayarda, kişisel kullanım', background_color: '#6c47ff' },
   oauth_config: { scopes: { user: SLACK_USER_SCOPES } },
   settings: {
-    event_subscriptions: { user_events: ['message.channels', 'message.groups', 'message.im', 'message.mpim'] },
+    event_subscriptions: { user_events: ['message.channels', 'message.groups', 'message.im', 'message.mpim', 'reaction_added', 'reaction_removed'] },
     socket_mode_enabled: true,
     org_deploy_enabled: false,
     token_rotation_enabled: false,
@@ -44,13 +51,15 @@ export function parseSlackToken(raw: string): { token: string; appToken?: string
  * Hız sınırları: conversations.list 10 dk önbellekli; conversations.history (Tier 3, ~50/dk) tur başına en çok
  * HISTORY_PER_POLL kanal — DM'ler ve yakın zamanda etkin olanlar önce, kalanlar sırayla dönüşümlü. 429'da WebClient
  * Retry-After kadar bekler.
- * Gerekli scope'lar: channels:history, groups:history, im:history, mpim:history,
- * channels:read, groups:read, im:read, mpim:read, users:read, chat:write.
+ * Gerekli scope'lar SLACK_USER_SCOPES. Eski bildirimle kurulmuş uygulamada eksik kapsam (missing_scope) varsa ilgili özellik
+ * (tepki/dosya/okundu) anlaşılır bir hatayla durur; metin gönderme/alma etkilenmez — Bağlan ekranındaki bağlantıyla yeniden kurmak yeter.
  */
 export class SlackConnector extends BaseConnector {
   private web: WebClient;
   private timer?: NodeJS.Timeout;
-  private users = new Map<string, string>();
+  private users = new Map<string, UserInfo>();
+  /** iş parçacığı: `kanal/üst ts` → son görülen latest_reply (değişmediyse conversations.replies istenmez) */
+  private threadsSeen = new Map<string, string>();
   private meId = '';
   private lastTs = new Map<string, string>();
   private polling = false;
@@ -67,6 +76,7 @@ export class SlackConnector extends BaseConnector {
   /** olay gelen, geçmişi çekilecek sohbetler (1,5 sn'de toplanır) */
   private dirty = new Set<string>();
   private dirtyTimer?: NodeJS.Timeout;
+  private dirtyThreads = new Set<string>();
 
   constructor(account: Account, store: Store, private token: string, private appToken?: string) {
     super(account, store);
@@ -130,7 +140,7 @@ export class SlackConnector extends BaseConnector {
     const ws = new WebSocket(url);
     this.sock = ws;
     ws.on('message', (data) => {
-      let env: { type?: string; envelope_id?: string; payload?: { event?: { type?: string; channel?: string; subtype?: string } } };
+      let env: { type?: string; envelope_id?: string; payload?: { event?: SlackEvent } };
       try {
         env = JSON.parse(String(data));
       } catch {
@@ -148,7 +158,14 @@ export class SlackConnector extends BaseConnector {
         void this.openSocket();
       } else if (env.type === 'events_api') {
         const ev = env.payload?.event;
-        if (ev?.type === 'message' && ev.channel) this.markDirty(ev.channel);
+        if (ev?.type === 'message' && ev.channel) {
+          this.markDirty(ev.channel);
+          // iş parçacığı yanıtı history'de görünmez: üst mesajın yanıtları da çekilsin
+          const parent = ev.thread_ts ?? ev.message?.thread_ts;
+          if (parent) this.threadsSeen.delete(`${ev.channel}/${parent}`), this.dirtyThreads.add(`${ev.channel}/${parent}`);
+        } else if ((ev?.type === 'reaction_added' || ev?.type === 'reaction_removed') && ev.item?.channel && ev.item.ts && ev.reaction && ev.user) {
+          void this.onReaction(ev.item.channel, ev.item.ts, ev.reaction, ev.user, ev.type === 'reaction_removed');
+        }
       }
     });
     ws.on('close', () => {
@@ -195,6 +212,12 @@ export class SlackConnector extends BaseConnector {
         const c = this.convs.find((x) => x.id === id);
         if (c) await this.fetchHistory(c, false);
       }
+      const threads = [...this.dirtyThreads];
+      this.dirtyThreads.clear();
+      for (const key of threads) {
+        const [ch, ts] = key.split('/');
+        await this.fetchReplies(ch, ts);
+      }
     } catch (e) {
       bus.log('warn', `Slack olay işleme: ${(e as Error).message}`);
     } finally {
@@ -202,26 +225,120 @@ export class SlackConnector extends BaseConnector {
     }
   }
 
-  async sendText(remoteChatId: string, text: string): Promise<{ remoteId: string }> {
-    const res = await this.web.chat.postMessage({ channel: remoteChatId, text });
+  async sendText(remoteChatId: string, text: string, opts?: SendOptions): Promise<{ remoteId: string }> {
+    const res = await this.web.chat.postMessage({ channel: remoteChatId, text, ...(opts?.threadId ? { thread_ts: opts.threadId } : {}) });
     const id = String(res.ts ?? Date.now());
-    this.lastTs.set(remoteChatId, id);
-    this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent' });
+    if (!opts?.threadId) this.lastTs.set(remoteChatId, id);
+    this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent', threadId: opts?.threadId });
     return { remoteId: id };
   }
 
-  private async userName(id: string): Promise<string> {
-    if (!id) return '';
+  /** Tepki ver/kaldır (reactions:write). Zaten var/yok hataları sessiz: sonuç aynı */
+  async react(remoteChatId: string, remoteMsgId: string, emoji: string, remove: boolean): Promise<void> {
+    const name = slackEmojiName(emoji);
+    try {
+      if (remove) await this.web.reactions.remove({ channel: remoteChatId, timestamp: remoteMsgId, name });
+      else await this.web.reactions.add({ channel: remoteChatId, timestamp: remoteMsgId, name });
+    } catch (e) {
+      const code = slackError(e);
+      if (code !== 'already_reacted' && code !== 'no_reaction') throw scopeHint(e, 'tepki');
+    }
+    this.applyReaction(remoteChatId, remoteMsgId, { emoji: SLACK_EMOJI[name] ?? emoji, senderId: this.meId, senderName: 'Ben', fromMe: true }, remove);
+  }
+
+  /** Mivelo'da okununca Slack'te de okundu (conversations.mark; *:write kapsamları) */
+  async markRead(remoteChatId: string): Promise<void> {
+    const ts = this.lastTs.get(remoteChatId) ?? (await this.web.conversations.history({ channel: remoteChatId, limit: 1 })).messages?.[0]?.ts;
+    if (!ts) return;
+    try {
+      await this.web.conversations.mark({ channel: remoteChatId, ts: String(ts) });
+    } catch (e) {
+      throw scopeHint(e, 'okundu işaretleme');
+    }
+  }
+
+  /** Yukarı kaydırınca eski mesajlar: latest = yüklü en eski mesaj */
+  async loadHistory(remoteChatId: string, limit: number, before?: number): Promise<void> {
+    const c = this.convs.find((x) => x.id === remoteChatId) ?? { id: remoteChatId };
+    await this.fetchHistory(c, true, { limit: Math.min(200, limit), latest: before ? (before / 1000).toFixed(6) : undefined });
+  }
+
+  /** Dosya (files:write): getUploadURLExternal → baytlar → completeUploadExternal (files.upload emekli) */
+  async sendMedia(remoteChatId: string, file: OutFile, caption?: string): Promise<{ remoteId: string }> {
+    try {
+      const up = await this.web.files.getUploadURLExternal({ filename: file.name, length: file.size });
+      if (!up.upload_url || !up.file_id) throw new Error('Slack yükleme adresi vermedi');
+      const r = await fetch(up.upload_url, { method: 'POST', body: fs.readFileSync(file.path), headers: { 'content-type': file.mime || 'application/octet-stream' } });
+      if (!r.ok) throw new Error(`Slack dosya yükleme ${r.status}`);
+      const done = await this.web.files.completeUploadExternal({ files: [{ id: up.file_id, title: file.name }], channel_id: remoteChatId, ...(caption ? { initial_comment: caption } : {}) });
+      const ts = completedShareTs(done as never, remoteChatId);
+      // paylaşım mesajı birkaç sn içinde oluşur: sohbetin yenisi çekilsin
+      this.markDirty(remoteChatId);
+      return { remoteId: ts ?? `local-${Date.now()}` };
+    } catch (e) {
+      throw scopeHint(e, 'dosya gönderme');
+    }
+  }
+
+  /** Slack dosyaları (url_private) yalnız belirteçle iner (files:read); ana makine denetimi sunucuda (PLATFORM_MEDIA_HOSTS) */
+  async fetchMedia(u: string): Promise<{ body: Buffer; type: string } | undefined> {
+    let cur = u;
+    for (let hop = 0; hop < 5; hop++) {
+      const host = new URL(cur).hostname;
+      if (!/(^|\.)(slack\.com|slack-edge\.com|slack-files\.com)$/i.test(host)) throw new Error(`yönlendirme izinli değil: ${host}`);
+      const r = await fetch(cur, { redirect: 'manual', headers: /(^|\.)slack\.com$/i.test(host) ? { authorization: `Bearer ${this.token}` } : {} });
+      const loc = r.headers.get('location');
+      if (r.status >= 300 && r.status < 400 && loc) {
+        cur = new URL(loc, cur).toString();
+        continue;
+      }
+      if (!r.ok) throw new Error(`Slack medya ${r.status}`);
+      const type = r.headers.get('content-type') ?? 'application/octet-stream';
+      // kapsam yoksa Slack giriş sayfası (HTML) döndürür
+      if (/text\/html/i.test(type)) throw new Error('Slack medya 403 (files:read kapsamı yok — uygulamayı yeniden kur)');
+      return { body: Buffer.from(await r.arrayBuffer()), type };
+    }
+    throw new Error('Slack medya: çok fazla yönlendirme');
+  }
+
+  /** Grup üyesiyle birebir (conversations.open; im:write) */
+  async openDirect(p: Participant): Promise<string> {
+    try {
+      const r = await this.web.conversations.open({ users: p.id });
+      const id = String(r.channel?.id ?? '');
+      if (!id) throw new Error('Slack birebir sohbet açmadı');
+      this.ensureChat(id, p.name, 'direct');
+      if (!this.convs.some((c) => c.id === id)) this.convs.push({ id, name: p.name, kind: 'direct' });
+      return id;
+    } catch (e) {
+      throw scopeHint(e, 'birebir sohbet açma');
+    }
+  }
+
+  /** Socket Mode tepki olayı: eski mesajlarda da (history'nin oldest penceresi dışında) anında işlenir */
+  private async onReaction(channel: string, ts: string, name: string, user: string, remove: boolean): Promise<void> {
+    const base = name.split('::')[0];
+    const fromMe = user === this.meId;
+    this.applyReaction(channel, ts, { emoji: SLACK_EMOJI[base] ?? `:${base}:`, senderId: user, senderName: fromMe ? 'Ben' : (await this.user(user)).name, fromMe }, remove);
+  }
+
+  private async user(id: string): Promise<UserInfo> {
+    if (!id) return { name: 'Slack' };
     const cached = this.users.get(id);
     if (cached) return cached;
     try {
-      const r = await this.web.users.info({ user: id });
-      const name = r.user?.real_name || r.user?.name || id;
-      this.users.set(id, name);
-      return name;
+      const r = id.startsWith('B') ? await this.web.bots.info({ bot: id }) : await this.web.users.info({ user: id });
+      const u = ((r as { user?: Record<string, any> }).user ?? (r as { bot?: Record<string, any> }).bot ?? {}) as Record<string, any>;
+      const v: UserInfo = { name: u.real_name || u.profile?.display_name || u.name || id, avatar: u.profile?.image_72 ?? u.icons?.image_72, handle: u.name && !id.startsWith('B') ? '@' + u.name : undefined };
+      this.users.set(id, v);
+      return v;
     } catch {
-      return id;
+      return { name: id };
     }
+  }
+
+  private async userName(id: string): Promise<string> {
+    return id ? (await this.user(id)).name : '';
   }
 
   /** Bu turda geçmişi çekilecek sohbetler: yarısı en son etkin olanlar (DM öncelikli), yarısı dönüşümlü sıradakiler */
@@ -271,33 +388,117 @@ export class SlackConnector extends BaseConnector {
     this.convsAt = Date.now();
   }
 
-  private async fetchHistory(c: { id: string }, first: boolean): Promise<void> {
+  private async fetchHistory(c: { id: string }, first: boolean, older?: { limit: number; latest?: string }): Promise<void> {
     const hist = await this.web.conversations.history({
       channel: c.id,
-      limit: first ? 30 : 20,
-      oldest: first ? undefined : this.lastTs.get(c.id),
+      limit: older?.limit ?? (first ? 30 : 20),
+      ...(older ? (older.latest ? { latest: older.latest } : {}) : { oldest: first ? undefined : this.lastTs.get(c.id) }),
       inclusive: false,
     });
-    const msgs = (hist.messages ?? []).filter((m) => m.ts && (m.text || m.files?.length));
-    for (const m of msgs.reverse()) {
-      const uid = String(m.user ?? m.bot_id ?? '');
-      const fromMe = uid === this.meId;
-      this.upsertMessage(
-        {
-          remoteChatId: c.id,
-          remoteId: String(m.ts),
-          senderId: fromMe ? 'me' : uid,
-          senderName: fromMe ? 'Ben' : await this.userName(uid),
-          fromMe,
-          text: m.text ?? '',
-          ts: Math.floor(Number(m.ts) * 1000),
-          status: fromMe ? 'sent' : 'delivered',
-          attachments: m.files?.length ? m.files.map((f) => ({ kind: 'file' as const, name: f.name, mime: f.mimetype, size: f.size })) : undefined,
-        },
-        { live: !first },
-      );
+    const msgs = (hist.messages ?? []) as SlackMsg[];
+    for (const m of [...msgs].reverse()) {
+      await this.ingest(c.id, m, !first && !older);
       const prev = this.lastTs.get(c.id);
-      if (!prev || Number(m.ts) > Number(prev)) this.lastTs.set(c.id, String(m.ts));
+      if (!older && m.ts && (!prev || Number(m.ts) > Number(prev))) this.lastTs.set(c.id, String(m.ts));
+    }
+    // iş parçacığı yanıtları history'de yok: yanıtı olan (ve yeni yanıt gelmiş) üst mesajlarınki ayrıca, tur başına en çok 5
+    let n = 0;
+    for (const m of msgs) {
+      if (!m.reply_count || !m.ts || n >= 5) continue;
+      const key = `${c.id}/${m.ts}`;
+      const latest = String(m.latest_reply ?? m.reply_count);
+      if (this.threadsSeen.get(key) === latest) continue;
+      n++;
+      await this.fetchReplies(c.id, String(m.ts), latest);
     }
   }
+
+  private async fetchReplies(channel: string, parentTs: string, latest?: string): Promise<void> {
+    try {
+      const rep = await this.web.conversations.replies({ channel, ts: parentTs, limit: 40 });
+      const list = (rep.messages ?? []) as SlackMsg[];
+      for (const x of list) if (String(x.ts) !== parentTs) await this.ingest(channel, { ...x, thread_ts: parentTs }, true);
+      this.threadsSeen.set(`${channel}/${parentTs}`, latest ?? String(list[0]?.latest_reply ?? list.length));
+    } catch {
+      /* yanıtlar alınamadı; sonraki olay/yoklamada yeniden */
+    }
+  }
+
+  /** Slack mesajı → ortak model (tarayıcı yoluyla aynı biçimlendirme: bahsetmeler, bağlantılar, dosyalar, tepkiler) */
+  private async ingest(channel: string, m: SlackMsg, live: boolean): Promise<void> {
+    if (!m.ts || (m.subtype && SKIP_SUBTYPES.has(m.subtype))) return;
+    const files = (m.files ?? []).filter((f) => f.mode !== 'tombstone' && f.mode !== 'hidden_by_limit');
+    const uid = String(m.user ?? m.bot_id ?? '');
+    // bahsetmelerdeki adlar önbellekte olsun
+    for (const id of new Set([...(m.text ?? '').matchAll(/<@([A-Z0-9_]+)>/g)].map((x) => x[1]))) await this.user(id);
+    const text = formatSlackText(m.text ?? '', this.users);
+    if (!text && !files.length) return;
+    const fromMe = uid === this.meId;
+    const u = m.subtype === 'bot_message' && m.username ? { name: m.username, avatar: m.icons?.image_64 } : fromMe ? { name: 'Ben' } : await this.user(uid);
+    const reactions: Reaction[] = [];
+    for (const r of m.reactions ?? []) {
+      const name = String(r.name ?? '').split('::')[0];
+      const emoji = SLACK_EMOJI[name] ?? `:${name}:`;
+      const ids = (r.users ?? []).slice(0, 50);
+      for (const id of ids) reactions.push({ emoji, senderId: id, senderName: id === this.meId ? 'Ben' : (this.users.get(id)?.name ?? id), fromMe: id === this.meId });
+      for (let i = ids.length; i < Number(r.count ?? ids.length); i++) reactions.push({ emoji, senderId: `${name}#${i}`, senderName: '', fromMe: false });
+    }
+    const proxied = (x?: string) => (x ? `/api/media/${encodeURIComponent(this.account.id)}?u=${encodeURIComponent(x)}` : undefined);
+    this.upsertMessage(
+      {
+        remoteChatId: channel,
+        remoteId: String(m.ts),
+        senderId: fromMe ? 'me' : uid || 'bot',
+        senderName: u.name,
+        senderAvatarUrl: u.avatar,
+        fromMe,
+        text,
+        ts: Math.floor(Number(m.ts) * 1000),
+        status: fromMe ? 'sent' : 'delivered',
+        attachments: files.length ? files.map((f) => fileToAttachment(f)).map((a) => ({ ...a, url: proxied(a.url), link: proxied(a.link) })) : undefined,
+        reactions: reactions.length ? reactions : [],
+        threadId: m.thread_ts && String(m.thread_ts) !== String(m.ts) ? String(m.thread_ts) : undefined,
+        replyCount: m.reply_count ? Number(m.reply_count) : undefined,
+      },
+      { live },
+    );
+  }
+}
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+type SlackMsg = {
+  ts?: string;
+  user?: string;
+  bot_id?: string;
+  username?: string;
+  icons?: { image_64?: string };
+  text?: string;
+  subtype?: string;
+  thread_ts?: string;
+  reply_count?: number;
+  latest_reply?: string;
+  files?: Array<Record<string, any>>;
+  reactions?: Array<{ name?: string; users?: string[]; count?: number }>;
+};
+type SlackEvent = {
+  type?: string;
+  channel?: string;
+  subtype?: string;
+  thread_ts?: string;
+  message?: { thread_ts?: string };
+  user?: string;
+  reaction?: string;
+  item?: { channel?: string; ts?: string };
+};
+
+function slackError(e: unknown): string {
+  return String((e as { data?: { error?: string } })?.data?.error ?? '');
+}
+/** Eski bildirimle kurulmuş uygulama: yeni kapsam eksikse ne yapılacağını söyle */
+function scopeHint(e: unknown, what: string): Error {
+  const code = slackError(e);
+  if (code === 'missing_scope' || code === 'not_allowed_token_type') {
+    return new Error(`Slack ${what} için yeni izin gerekiyor: Bağlan → Slack'teki bağlantıyla uygulamayı güncelleyip yeniden kur ve yeni xoxp belirtecini gir`);
+  }
+  return e instanceof Error ? e : new Error(String(e));
 }

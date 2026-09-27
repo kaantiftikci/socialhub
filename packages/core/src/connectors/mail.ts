@@ -109,6 +109,8 @@ export class MailConnector extends BaseConnector {
   /** Şimdiye dek alınan en küçük UID (daha eski sayfa buradan geriye gider); 0 = bilinmiyor, 1 = kutunun başı */
   private oldestUid = 0;
   private threadOf = new Map<string, string>(); // message-id → thread key
+  /** Dizi → gelen kutusundaki okunmamış UID'ler (Mivelo'da okununca sunucuda da \\Seen) */
+  private unseen = new Map<string, Set<number>>();
   private stateFile: string;
   /** INBOX UIDVALIDITY: değişirse (kutu yeniden oluşturuldu/taşındı) UID imleçleri geçersiz → baştan eşitle */
   private uidValidity = '';
@@ -569,6 +571,7 @@ export class MailConnector extends BaseConnector {
     const chatKey = `${this.account.id}/${remoteId}`;
     const existing = this.store.getChat(chatKey);
     const unreadDelta = !seen && !fromMe ? 1 : 0;
+    if (unreadDelta && folder === 'inbox') this.unseen.set(remoteId, (this.unseen.get(remoteId) ?? new Set()).add(uid));
     this.upsertChat({
       remoteId,
       name: subject,
@@ -654,6 +657,20 @@ export class MailConnector extends BaseConnector {
   }
 
   /** Yeni e-posta: SMTP ile gönder, Message-ID'den yeni dizi sohbeti aç (gelen yanıtlar References ile aynı diziye düşer) */
+  /**
+   * Mivelo'da açılan dizi sunucuda da okundu (\\Seen): telefon/web posta istemcisinde okunmamış kalmasın. UID'ler alımda
+   * tutulur; bilinmiyorsa (yeniden başlatma sonrası) Gmail'de dizi kimliğiyle (X-GM-THRID) okunmamışlar aranır.
+   */
+  async markRead(remoteChatId: string): Promise<void> {
+    await this.withInbox(async (client) => {
+      let uids = [...(this.unseen.get(remoteChatId) ?? [])];
+      if (!uids.length && remoteChatId.startsWith('gm:')) uids = ((await client.search({ threadId: remoteChatId.slice(3), seen: false }, { uid: true })) || []) as number[];
+      if (!uids.length) return;
+      await client.messageFlagsAdd(uids, ['\\Seen'], { uid: true });
+      this.unseen.delete(remoteChatId);
+    });
+  }
+
   async compose(d: ComposeDraft): Promise<Chat> {
     const to = d.to.trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) throw new Error('Geçerli bir e-posta adresi yaz');

@@ -14,9 +14,17 @@ const MAIL_ORDER: Platform[] = ['gmail', 'outlook', 'yahoo', 'icloud', 'imap'];
  */
 const SLACK_MANIFEST = {
   display_information: { name: 'Mivelo', description: 'Mivelo birleşik gelen kutusu — yalnız bu bilgisayarda, kişisel kullanım', background_color: '#6c47ff' },
-  oauth_config: { scopes: { user: ['channels:history', 'groups:history', 'im:history', 'mpim:history', 'channels:read', 'groups:read', 'im:read', 'mpim:read', 'users:read', 'chat:write'] } },
+  oauth_config: {
+    scopes: {
+      user: [
+        'channels:history', 'groups:history', 'im:history', 'mpim:history',
+        'channels:read', 'groups:read', 'im:read', 'mpim:read', 'users:read', 'chat:write',
+        'reactions:read', 'reactions:write', 'files:read', 'files:write', 'channels:write', 'groups:write', 'im:write', 'mpim:write',
+      ],
+    },
+  },
   settings: {
-    event_subscriptions: { user_events: ['message.channels', 'message.groups', 'message.im', 'message.mpim'] },
+    event_subscriptions: { user_events: ['message.channels', 'message.groups', 'message.im', 'message.mpim', 'reaction_added', 'reaction_removed'] },
     socket_mode_enabled: true,
     org_deploy_enabled: false,
     token_rotation_enabled: false,
