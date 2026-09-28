@@ -23,6 +23,12 @@ if (!function_exists('mv_smtp_config')) {
             return null;
         }
         $d = json_decode((string) @file_get_contents($p), true);
+        // önceki sürümün kaydettiği yerel sunucu yolu (127.0.0.1:25 kimliksiz; posta iletilmiyordu) → Türkticaret varsayılanına dön
+        if (is_array($d) && (isset($d['auth']) || in_array(strtolower((string) ($d['host'] ?? '')), ['localhost', '127.0.0.1', '::1'], true))) {
+            unset($d['auth']);
+            $d = array_merge($d, ['host' => 'smtp.turkticaret.net', 'port' => 465, 'secure' => 'ssl']);
+            @file_put_contents($p, json_encode($d, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        }
         return is_array($d) && !empty($d['host']) && !empty($d['user']) ? $d : null;
     }
 
@@ -44,37 +50,27 @@ if (!function_exists('mv_smtp_config')) {
             if ($res['ok'] || empty($res['connectFailed'])) {
                 return $res;
             }
-            // son çare: barındırmanın yerel posta sunucusu (cPanel "SMTP Restrictions" açıkken betikler yalnız localhost'a bağlanabilir;
-            // posta kutusu aynı sunucudaysa çalışır)
-            $alts = [['port' => 587, 'secure' => 'tls'], ['port' => 465, 'secure' => 'ssl'], ['host' => 'localhost', 'port' => 587, 'secure' => 'tls'], ['host' => 'localhost', 'port' => 25, 'secure' => 'none'],
-                // yerel sunucu posta kutusunu tanımıyorsa (535: kutu başka sunucuda): cPanel Exim yerelden gelen postayı kimliksiz iletir
-                ['host' => '127.0.0.1', 'port' => 25, 'secure' => 'none', 'auth' => false], ['host' => 'localhost', 'port' => 25, 'secure' => 'none', 'auth' => false]];
+            $alts = [['port' => 587, 'secure' => 'tls'], ['port' => 465, 'secure' => 'ssl']];
             $log = array_merge(['— ' . ($res['error'] ?? '')], $res['log'] ?? []);
             foreach ($alts as $alt) {
-                if (!isset($alt['host']) && (int) ($cfg['port'] ?? 0) === $alt['port']) {
+                if ((int) ($cfg['port'] ?? 0) === $alt['port']) {
                     continue;
                 }
                 $try = mv_smtp_send(array_merge($cfg, $alt), $to, $subject, $body, $replyTo);
-                $log[] = '— ' . ($alt['host'] ?? $cfg['host']) . ':' . $alt['port'] . ' (' . $alt['secure'] . (($alt['auth'] ?? true) ? '' : ', kimliksiz') . '): ' . ($try['ok'] ? 'başarılı' : ($try['error'] ?? ''));
+                $log[] = '— ' . $alt['port'] . ' (' . $alt['secure'] . '): ' . ($try['ok'] ? 'başarılı' : ($try['error'] ?? ''));
                 $log = array_merge($log, $try['log'] ?? []);
                 if ($try['ok']) {
                     // çalışan portu kaydet (sonraki gönderimler doğrudan onu kullansın)
-                    $saved = array_merge($cfg, $alt);
-                    @file_put_contents(mv_smtp_path(), json_encode($saved, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-                    return ['ok' => true, 'via' => 'smtp', 'log' => $log, 'note' => ($alt['host'] ?? $cfg['host']) . ':' . $alt['port'] . ' kullanıldı ve kaydedildi'];
-                }
-                // yerel yollarda kimlik reddi de sonraki yolu engellemez
-                if (empty($try['connectFailed']) && !isset($alt['host'])) {
-                    return ['ok' => false, 'via' => 'smtp', 'error' => $try['error'] ?? '', 'log' => $log];
+                    @file_put_contents(mv_smtp_path(), json_encode(array_merge($cfg, $alt), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+                    return ['ok' => true, 'via' => 'smtp', 'log' => $log, 'note' => $alt['port'] . ' portuna geçildi ve kaydedildi'];
                 }
                 if (empty($try['connectFailed'])) {
-                    $localErr = $try['error'] ?? '';
+                    return ['ok' => false, 'via' => 'smtp', 'error' => $try['error'] ?? '', 'log' => $log];
                 }
             }
-            if (!empty($localErr)) {
-                return ['ok' => false, 'via' => 'smtp', 'error' => 'Dış SMTP portları (465/587) barındırmada kapalı; sunucunun kendi posta sunucusu da postayı kabul etmedi (' . $localErr . '). Barındırma desteğinden giden SMTP erişimi iste ya da gönderen adresi için bu barındırmada (cPanel → E-posta Hesapları) bir posta kutusu açıp bilgilerini buraya yaz.', 'log' => $log];
-            }
-            return ['ok' => false, 'via' => 'smtp', 'error' => 'SMTP sunucusuna hiçbir yoldan bağlanılamadı (465, 587 ve sunucunun yerel posta sunucusu): barındırma, betiklerin dışarıya e-posta bağlantısını engelliyor (cPanel "SMTP Restrictions"). Barındırma sağlayıcısından giden SMTP (465/587) erişimini açmasını iste.', 'log' => $log];
+            // Barındırmanın yerel posta sunucusu (localhost) bilerek denenmez: Türkticaret paylaşımlı barındırmada postayı kimliksiz
+            // kabul edip "gönderildi" diyor ama iletmiyor (mail() ile aynı); kurumsal posta kutusu da orada değil (535).
+            return ['ok' => false, 'via' => 'smtp', 'error' => 'Barındırma sunucusu dışarıya e-posta bağlantısını (465 ve 587) engelliyor. Türkticaret desteğinden bu hosting hesabı için smtp.turkticaret.net\'e giden SMTP erişimini açmalarını iste.', 'log' => $log];
         }
         $headers = implode("\r\n", [
             'From: Mivelo <hello@mivelo.app>',
@@ -106,9 +102,7 @@ if (!function_exists('mv_smtp_config')) {
         $from = (string) ($cfg['from'] ?? $user);
         $fromName = (string) ($cfg['fromName'] ?? 'Mivelo');
         $log = [];
-        $local = in_array(strtolower($host), ['localhost', '127.0.0.1', '::1'], true);
-        // yerel posta sunucusunun sertifikası "localhost" adına olmaz; trafik makineden çıkmadığı için yalnız orada ad/zincir denetimi yok
-        $ctx = stream_context_create(['ssl' => $local ? ['verify_peer' => false, 'verify_peer_name' => false, 'allow_self_signed' => true] : ['verify_peer' => true, 'verify_peer_name' => true, 'SNI_enabled' => true, 'peer_name' => $host]]);
+        $ctx = stream_context_create(['ssl' => ['verify_peer' => true, 'verify_peer_name' => true, 'SNI_enabled' => true, 'peer_name' => $host]]);
         $remote = ($secure === 'ssl' ? 'ssl://' : 'tcp://') . $host . ':' . $port;
         $fp = @stream_socket_client($remote, $errno, $errstr, 15, STREAM_CLIENT_CONNECT, $ctx);
         if (!$fp) {
@@ -149,11 +143,9 @@ if (!function_exists('mv_smtp_config')) {
                 }
                 $cmd($ehlo, [250]);
             }
-            if (($cfg['auth'] ?? true) !== false) {
-                $cmd('AUTH LOGIN', [334]);
-                $cmd(base64_encode($user), [334], '(kullanıcı adı)');
-                $cmd(base64_encode($pass), [235], '(şifre)');
-            }
+            $cmd('AUTH LOGIN', [334]);
+            $cmd(base64_encode($user), [334], '(kullanıcı adı)');
+            $cmd(base64_encode($pass), [235], '(şifre)');
             $cmd('MAIL FROM:<' . $from . '>', [250]);
             $cmd('RCPT TO:<' . $to . '>', [250, 251]);
             $cmd('DATA', [354]);
