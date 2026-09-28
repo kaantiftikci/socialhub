@@ -73,9 +73,9 @@ Dil: arayüz ve yorumlar Türkçe.
   Şifre e-postada YOK; sonuç `mailed`/`mailError` rozetinde. Her kullanıcının bağladığı uygulamalar kendi kaydında (bağımsız); reddedilenin oturumu düşer.
   Kayıtla gelen kullanıcı (`requestedAt`) `user_public.fresh` → demo BOŞ panelle açılır (`loadDemoAccounts(list, {fresh})`: varsayılan
   DEMO_APPS, örnek sohbet ve takvim etkinliği yok; bağladığı uygulamanın örnekleri gelir). admin örnek veriyle açılır.
-  **Geri bildirim** (`Feedback.tsx`, sağ alt mor düğme; ✕ yalnız o oturumda gizler, yenilemede geri gelir): Hata/Öneri/Talep/Diğer, metin,
-  e-posta (isteğe bağlı), ekran görüntüsü (getDisplayMedia tek kare) / ekran kaydı (MediaRecorder ≤60 sn) / dosya (görsel-video; ≤5, 40 MB,
-  toplam 60 MB; yapıştırma da) → `https://mivelo.app/api/feedback.php` (`VITE_FEEDBACK_URL`; CORS yalnız demo/localhost/tauri; multipart;
+  **Geri bildirim** (`Feedback.tsx`, sağ alt 54 px mor düğme + solunda "Hata / öneri bildir" balonu (telefonda balon yok); ✕ yalnız o oturumda
+  gizler, yenilemede geri gelir): Hata/Öneri/Talep/Diğer, metin, e-posta (isteğe bağlı), YALNIZ "Fotoğraf / video ekle" (ekran görüntüsü/kaydı
+  düğmeleri kullanıcı isteğiyle KALDIRILDI; ≤5 dosya, 40 MB/dosya, toplam 60 MB; yapıştırma da) → `https://mivelo.app/api/feedback.php` (`VITE_FEEDBACK_URL`; CORS yalnız demo/localhost/tauri; multipart;
   tür finfo ile içerikten; IP başına saatte 10; `~/mivelo-data/feedback/index.json` + `<id>/<n>.<ext>`; `.user.ini` yükleme sınırları;
   SMTP ayarlıysa sahibine e-posta). Başarı yalnız `{ok:true}` (yanlış adres 200+HTML döndürebilir). Admin → Geri bildirim (Açık/Tümü/Çözülen,
   durum Yeni/İnceleniyor/Çözüldü/Yapılmayacak, not, Yanıtla=mailto, ekler `fb_file` yalnız oturumla, CSP sandbox).

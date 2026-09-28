@@ -3,7 +3,7 @@ import { PROFILE_NAME, PROFILE_USER, STATIC_DEMO } from './profile';
 import { Icon } from './ui';
 
 /**
- * Geri bildirim düğmesi (sağ alt): hata / öneri / talep + ekran görüntüsü, ekran kaydı ya da görsel/video dosyası →
+ * Geri bildirim düğmesi (sağ alt): hata / öneri / talep + fotoğraf/video dosyası (ekran görüntüsü dahil; yapıştırılabilir) →
  * mivelo.app/api/feedback.php → yönetim paneli "Geri bildirim". Kapatılınca yalnız bu oturumda gizlenir (sayfa yenilenince
  * geri gelir; durum bilerek kalıcı değil).
  */
@@ -17,14 +17,12 @@ const TYPES = [
 const MAX_FILES = 5;
 const MAX_FILE = 40 * 1024 * 1024;
 const MAX_TOTAL = 60 * 1024 * 1024;
-const REC_LIMIT = 60; // sn
 
 interface Att {
   file: File;
   url: string;
 }
 
-const canCapture = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getDisplayMedia;
 
 export function FeedbackButton() {
   const [hidden, setHidden] = useState(false);
@@ -36,7 +34,6 @@ export function FeedbackButton() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [sent, setSent] = useState(false);
-  const [rec, setRec] = useState<{ stop: () => void; secs: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const website = useRef('');
 
@@ -69,59 +66,6 @@ export function FeedbackButton() {
   const remove = (i: number) => {
     URL.revokeObjectURL(atts[i].url);
     setAtts(atts.filter((_, j) => j !== i));
-  };
-
-  /** Ekran görüntüsü: tarayıcının ekran paylaşım penceresinden seçilen ekran/pencere/sekmeden tek kare */
-  const screenshot = async () => {
-    setErr('');
-    try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
-      const video = document.createElement('video');
-      video.srcObject = stream;
-      video.muted = true;
-      await video.play();
-      await new Promise((r) => setTimeout(r, 350)); // paylaşım çerçevesi otursun
-      const c = document.createElement('canvas');
-      c.width = video.videoWidth;
-      c.height = video.videoHeight;
-      c.getContext('2d')!.drawImage(video, 0, 0);
-      stream.getTracks().forEach((t) => t.stop());
-      const blob = await new Promise<Blob | null>((r) => c.toBlob(r, 'image/png'));
-      if (blob) add([new File([blob], `ekran-${Date.now()}.png`, { type: 'image/png' })]);
-    } catch (e) {
-      if ((e as Error).name !== 'NotAllowedError') setErr('Ekran görüntüsü alınamadı: ' + (e as Error).message);
-    }
-  };
-
-  /** Ekran kaydı (en çok 60 sn, webm): "Kaydı bitir" ya da paylaşımı durdurunca eklenir */
-  const record = async () => {
-    setErr('');
-    try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 15 }, audio: false });
-      const mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'].find((m) => MediaRecorder.isTypeSupported(m)) ?? '';
-      const mr = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 1_500_000 } : undefined);
-      const chunks: Blob[] = [];
-      let secs = 0;
-      const tick = window.setInterval(() => {
-        secs++;
-        setRec((r) => (r ? { ...r, secs } : r));
-        if (secs >= REC_LIMIT) mr.stop();
-      }, 1000);
-      mr.ondataavailable = (e) => e.data.size && chunks.push(e.data);
-      mr.onstop = () => {
-        clearInterval(tick);
-        stream.getTracks().forEach((t) => t.stop());
-        setRec(null);
-        const type = (mr.mimeType || 'video/webm').split(';')[0];
-        const blob = new Blob(chunks, { type });
-        if (blob.size) add([new File([blob], `kayit-${Date.now()}.${type === 'video/mp4' ? 'mp4' : 'webm'}`, { type })]);
-      };
-      stream.getVideoTracks()[0]?.addEventListener('ended', () => mr.state !== 'inactive' && mr.stop());
-      mr.start(1000);
-      setRec({ stop: () => mr.state !== 'inactive' && mr.stop(), secs: 0 });
-    } catch (e) {
-      if ((e as Error).name !== 'NotAllowedError') setErr('Ekran kaydı başlatılamadı: ' + (e as Error).message);
-    }
   };
 
   const submit = async () => {
@@ -164,8 +108,11 @@ export function FeedbackButton() {
     <>
       {!open && (
         <div className="fb-fab">
-          <button className="fb-open" onClick={() => (setOpen(true), setSent(false))} aria-label="Geri bildirim gönder" title="Hata bildir / öneri gönder">
-            <Icon name="thread" size={20} sw={2} />
+          <button className="fb-bubble" onClick={() => (setOpen(true), setSent(false))} tabIndex={-1} aria-hidden="true">
+            Hata / öneri bildir
+          </button>
+          <button className="fb-open" onClick={() => (setOpen(true), setSent(false))} aria-label="Hata bildir ya da öneri gönder" title="Hata bildir / öneri gönder">
+            <Icon name="thread" size={24} sw={2} />
           </button>
           <button className="fb-hide" onClick={() => setHidden(true)} aria-label="Geri bildirim düğmesini gizle" title="Gizle (sayfa yenilenince geri gelir)">
             <Icon name="x" size={11} sw={2.6} />
@@ -229,28 +176,14 @@ export function FeedbackButton() {
                 </div>
               )}
               <div className="fb-tools">
-                {canCapture && (
-                  <button className="btn xs b b2" onClick={() => void screenshot()} disabled={!!rec || atts.length >= MAX_FILES} title="Ekran görüntüsü al">
-                    <Icon name="camera" size={13} /> Ekran görüntüsü
-                  </button>
-                )}
-                {canCapture && typeof MediaRecorder !== 'undefined' &&
-                  (rec ? (
-                    <button className="btn xs b fb-rec" onClick={rec.stop}>
-                      <span className="fb-dot" /> Kaydı bitir · {rec.secs} sn
-                    </button>
-                  ) : (
-                    <button className="btn xs b b2" onClick={() => void record()} disabled={atts.length >= MAX_FILES} title={`Ekran kaydı (en çok ${REC_LIMIT} sn)`}>
-                      <Icon name="play" size={13} /> Ekran kaydı
-                    </button>
-                  ))}
-                <button className="btn xs b b2" onClick={() => fileRef.current?.click()} disabled={atts.length >= MAX_FILES} title="Görsel ya da video ekle">
-                  <Icon name="clip" size={13} /> Dosya
+                <button className="btn xs b b2" onClick={() => fileRef.current?.click()} disabled={atts.length >= MAX_FILES} title="Fotoğraf ya da video ekle">
+                  <Icon name="image" size={13} /> Fotoğraf / video ekle
                 </button>
+                <span className="fb-limit">en çok {MAX_FILES} dosya · dosya başına 40 MB</span>
                 <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/webm,video/quicktime" multiple hidden onChange={(e) => (add(Array.from(e.target.files ?? [])), (e.target.value = ''))} />
               </div>
               {err && <div className="fb-err">{err}</div>}
-              <button className="btn primary b fb-send" onClick={() => void submit()} disabled={busy || !!rec || message.trim().length < 3}>
+              <button className="btn primary b fb-send" onClick={() => void submit()} disabled={busy || message.trim().length < 3}>
                 {busy ? <span className="spin" /> : <Icon name="send" size={14} sw={2} />} Gönder
               </button>
             </div>
