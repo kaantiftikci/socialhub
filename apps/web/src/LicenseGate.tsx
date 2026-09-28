@@ -10,21 +10,21 @@ import { Icon, Logo } from './ui';
  */
 export function LicenseGate({ children }: { children: ReactNode }) {
   const [st, setSt] = useState<LicenseStatus | null>(isTauri ? null : { required: false, valid: true });
-  const refresh = useCallback(() => {
+  const refresh = useCallback((check = false) => {
     api
-      .license()
+      .license(check)
       .then(setSt)
       // çekirdek henüz kalkmadıysa ya da eski çekirdekte uç yoksa uygulamayı engelleme (App kendi "başlatılıyor" ekranını gösterir)
       .catch(() => setSt((s) => s ?? { required: false, valid: true }));
   }, []);
   useEffect(() => {
     if (!isTauri) return;
-    refresh();
+    refresh(true);
     // çekirdek açılırken ilk istek düşebilir: birkaç kez dene
     const t1 = window.setTimeout(refresh, 2500);
     const t2 = window.setTimeout(refresh, 8000);
-    const iv = window.setInterval(refresh, 10 * 60_000);
-    const onFocus = () => refresh();
+    const iv = window.setInterval(() => refresh(true), 10 * 60_000);
+    const onFocus = () => refresh(true);
     window.addEventListener('focus', onFocus);
     return () => (window.clearTimeout(t1), window.clearTimeout(t2), window.clearInterval(iv), window.removeEventListener('focus', onFocus));
   }, [refresh]);

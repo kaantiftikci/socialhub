@@ -43,7 +43,7 @@ export interface LicenseStatus {
 const liveApi = {
   health: () => call<{ ok: boolean; ai: boolean; stats: { unread: number; chats: number }; os?: CoreOs }>('GET', '/health'),
   /** Pencere açık ve odakta mı (uyarlamalı yoklama için; ağ hatası sessizce yutulur) */
-  license: () => call<LicenseStatus>('GET', '/license'),
+  license: (check = false) => call<LicenseStatus>('GET', check ? '/license?check=1' : '/license'),
   activateLicense: (key: string) => call<LicenseStatus>('POST', '/license', { key }),
   releaseLicense: () => call<LicenseStatus>('DELETE', '/license'),
   activity: (active: boolean) => call('POST', '/activity', { active }).catch(() => undefined),

@@ -9,8 +9,8 @@ import { bus } from './bus.js';
  * Masaüstü paketi lisansı (Kaan'ın yönetim panelinde ürettiği anahtarlar; doğrulama mivelo.app/api/license.php).
  * Yalnız paketli uygulamada zorunlu: masaüstü kabuğu çekirdeği MIVELO_REQUIRE_LICENSE=1 ile başlatır (yerel geliştirme,
  * `npm run dev`, demo etkilenmez). Lisans yokken çekirdek hiçbir kanalı başlatmaz ve /api uçları 402 döner (yalnız sağlık ve
- * lisans uçları açık). ~/.mivelo/license.json: anahtar + etkinleştirme kimliği + cihaz + son başarılı denetim; 12 saatte bir
- * sunucuya sorulur. Sunucu "geçersiz" derse (iptal, süre sonu, cihaz kaldırıldı) hemen kilitlenir; ağ hatasında son başarılı
+ * lisans uçları açık). ~/.mivelo/license.json: anahtar + etkinleştirme kimliği + cihaz + son başarılı denetim;
+ * sunucuya sorulur (30 dk'da bir + arayüz öne gelince, en çok dakikada bir). Sunucu "geçersiz" derse (iptal, süre sonu, cihaz kaldırıldı) hemen kilitlenir; ağ hatasında son başarılı
  * denetimden sonra 14 gün çevrimdışı çalışır. İstemci tarafı denetimdir: kararlı biri paketi değiştirip aşabilir, amaç
  * anahtarsız dağıtımı engellemek.
  */
@@ -18,7 +18,7 @@ export const LICENSE_REQUIRED = process.env.MIVELO_REQUIRE_LICENSE === '1';
 const API = process.env.MIVELO_LICENSE_API || 'https://mivelo.app/api/license.php';
 const FILE = path.join(DATA_DIR, 'license.json');
 const GRACE_MS = 14 * 86_400_000;
-const CHECK_MS = 12 * 3_600_000;
+const CHECK_MS = 30 * 60_000;
 
 interface Saved {
   key: string;
@@ -134,7 +134,15 @@ export async function releaseLicense(): Promise<void> {
 }
 
 /** Sunucuya sor: geçersizse kaydı sil (kilitlenir); ağ hatası çevrimdışı payına bırakılır */
+let lastCheck = 0;
+/** Arayüz öne gelince / açılınca: en çok dakikada bir sunucuya sor (iptal hızlı yansısın) */
+export async function checkLicenseSoon(): Promise<void> {
+  if (Date.now() - lastCheck < 60_000) return;
+  await checkLicense();
+}
+
 export async function checkLicense(): Promise<void> {
+  lastCheck = Date.now();
   const s = read();
   if (!LICENSE_REQUIRED || !s) return;
   try {

@@ -20,7 +20,7 @@ import { AiError, aiEnabled, aiKey, aiKeySource, draftReply, isAiTone, setAiKey 
 import { analyzeStyle, describeStyle } from './style.js';
 import { buildIcs, formatStart, parseStart } from './calendar.js';
 import { openExternal } from './platform.js';
-import { activateLicense, LicenseError, licenseStatus, releaseLicense } from './license.js';
+import { activateLicense, checkLicenseSoon, LicenseError, licenseStatus, releaseLicense } from './license.js';
 import { ALL_PLATFORMS } from './model.js';
 import { MEDIA_HOSTS, PLATFORM_MEDIA_HOSTS, MEDIA_MAX } from './media-hosts.js';
 import { fetchPreview } from './link-preview.js';
@@ -198,7 +198,11 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     return { ok: true, ai: aiEnabled(), stats: store.stats(), os: process.platform, pid: process.pid, uptimeSec: Math.round(process.uptime()), memoryMb: { rss: Math.round(m.rss / 1048576), heapUsed: Math.round(m.heapUsed / 1048576), heapTotal: Math.round(m.heapTotal / 1048576), external: Math.round(m.external / 1048576) } };
   });
 
-  route('GET', '/api/license', () => licenseStatus());
+  route('GET', '/api/license', async (r) => {
+    // ?check=1: arayüz öne geldi → sunucuya sor (iptal edilen lisans hemen kilitlensin)
+    if (new URL(r.url ?? '/', 'http://x').searchParams.get('check') === '1') await checkLicenseSoon();
+    return licenseStatus();
+  });
   route('POST', '/api/license', async (r, _s, _p, body) => {
     localOnly(r);
     try {

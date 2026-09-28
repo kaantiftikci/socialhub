@@ -699,7 +699,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
         '<button class="btn sm" data-ldel="'+esc(k.id)+'">'+I.trash+' Sil</button>';
       var devs=k.activations.length?k.activations.map(function(a){ return '<div class="lic-dev"><span>'+esc(a.name||'Cihaz')+' · '+esc(a.os||'?')+(a.version?' · v'+esc(a.version):'')+' · son '+ago(tsOf(a.lastAt))+'</span><button class="btn sm" data-lrel="'+esc(k.id)+'" data-act="'+esc(a.id)+'">Kaldır</button></div>'; }).join(''):'<span class="muted">Henüz kullanılmadı</span>';
       return '<div class="acc'+(open?' open':'')+'"><button type="button" class="acc-head" data-acc="l:'+esc(k.id)+'" aria-expanded="'+open+'">'+
-        '<span class="acc-main"><b class="lic-key">'+esc(k.key)+'</b><span class="muted">'+esc(k.note||k.email||'not yok')+' · '+k.activations.length+'/'+k.maxDevices+' cihaz</span></span>'+
+        '<span class="acc-main"><b class="lic-key">'+esc(k.key)+'</b><span class="muted">'+esc(k.note||k.email||'not yok')+' · '+k.activations.length+'/'+k.maxDevices+' cihaz'+(k.activations.length?' · son kullanım '+ago(Math.max.apply(null,k.activations.map(function(a){ return tsOf(a.lastAt); }))):' · henüz kullanılmadı')+'</span></span>'+
         '<span class="chip '+st[1]+'"><i></i>'+st[0]+'</span><span class="acc-chev">'+I.chev+'</span></button>'+
         (open?'<div class="acc-body"><dl class="acc-dl">'+(k.email?'<dt>E-posta</dt><dd>'+esc(k.email)+'</dd>':'')+(k.note?'<dt>Not</dt><dd>'+esc(k.note)+'</dd>':'')+
           '<dt>Oluşturma</dt><dd>'+ago(tsOf(k.createdAt))+'</dd><dt>Geçerlilik</dt><dd>'+(k.expiresAt?new Date(k.expiresAt).toLocaleDateString('tr-TR'):'Süresiz')+'</dd>'+
@@ -720,7 +720,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   document.addEventListener('click',function(e){
     var b=e.target.closest('[data-lcopy],[data-lst],[data-lreset],[data-lrel],[data-ldel]'); if(!b) return;
     if(b.dataset.lcopy) return copyText(b.dataset.lcopy);
-    if(b.dataset.lst) return licUpdate({id:b.dataset.lst,status:b.dataset.to},b.dataset.to==='revoked'?'İptal edildi: uygulama en geç 12 saat içinde kilitlenir':'Etkinleştirildi');
+    if(b.dataset.lst) return licUpdate({id:b.dataset.lst,status:b.dataset.to},b.dataset.to==='revoked'?'İptal edildi: kullanıcı uygulamaya dönünce (en geç 30 dk içinde) kilitlenir':'Etkinleştirildi');
     if(b.dataset.lrel) return licUpdate({id:b.dataset.lrel,release:b.dataset.act},'Cihaz kaldırıldı');
     if(b.dataset.armed!=='1'){ b.dataset.armed='1'; var t=b.innerHTML; b.textContent='Emin misin?'; setTimeout(function(){ b.dataset.armed=''; b.innerHTML=t; },3000); return; }
     if(b.dataset.lreset) return licUpdate({id:b.dataset.lreset,resetDevices:true},'Cihazlar sıfırlandı');
