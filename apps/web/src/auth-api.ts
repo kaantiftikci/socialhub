@@ -52,6 +52,11 @@ export function authSaveAccounts(accounts: Array<Record<string, unknown>>): Prom
   return call('accounts', 'PUT', { accounts });
 }
 
+/** Sunucu çekirdeği (gerçek bağlantılar): açıksa ağ geçidi adresi + imzalı belirteç, kapalıysa core=null */
+export async function authCoreToken(): Promise<{ core: string | null; token?: string }> {
+  return call('core_token', 'GET');
+}
+
 /** Yeni üyeler otomatik onaylanıyor mu (Admin → Demo). Okunamazsa onaylı üyelik varsayılır. */
 export async function authSignupConfig(): Promise<{ autoApprove: boolean }> {
   try {

@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import { DemoGate } from './Auth';
+import { LoginPopup } from './LoginView';
 import { DEMO_OFFLINE, STATIC_DEMO, setProfileName } from './profile';
 import { loadDemoAccounts } from './static-demo';
 import './styles.css';
@@ -46,8 +47,11 @@ if (DEMO_OFFLINE) {
   loadDemoAccounts([]); // tüm demo uygulamaları bağlı
 }
 
+// ayrı giriş penceresi (sunucu çekirdeği): yalnız giriş görüntüsü
+const loginView = new URLSearchParams(location.search).get('loginview');
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {STATIC_DEMO && !DEMO_OFFLINE ? <DemoGate /> : <App />}
+    {loginView ? <LoginPopup accountId={loginView} /> : STATIC_DEMO && !DEMO_OFFLINE ? <DemoGate /> : <App />}
   </StrictMode>,
 );

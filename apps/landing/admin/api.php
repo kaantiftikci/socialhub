@@ -460,6 +460,69 @@ if ($a === 'demo_settings' && $method === 'POST') {
     out(['autoApprove' => $on]);
 }
 
+/**
+ * Sunucu çekirdeği ayarları (demo API'si okur): açık/kapalı + ağ geçidi adresi; gizli anahtar ~/mivelo-data/core-secret (0600,
+ * ilk istekte üretilir). Anahtar yalnız bu oturumlu uçtan döner (kurulum komutuna yazılacak); "Yenile" eski belirteçleri geçersiz kılar.
+ */
+function core_secret(bool $rotate = false): string
+{
+    $f = data_dir() . '/core-secret';
+    $cur = is_file($f) ? trim((string) @file_get_contents($f)) : '';
+    if ($rotate || strlen($cur) < 32) {
+        $cur = bin2hex(random_bytes(32));
+        $tmp = $f . '.tmp';
+        if (@file_put_contents($tmp, $cur) === false || !@rename($tmp, $f)) {
+            fail(500, 'Anahtar yazılamadı');
+        }
+        @chmod($f, 0600);
+    }
+    return $cur;
+}
+
+/**
+ * Üye silinince / verileri silinince sunucu çekirdeğindeki verisi de silinsin (KVKK): ağ geçidine imzalı istek. Sunucu çekirdeği
+ * hiç kurulmadıysa sessizce geçer; ulaşılamazsa sonuç 'coreError' olarak döner (üye kaydı yine silinir).
+ */
+function core_delete_user(string $uid): array
+{
+    $ds = read_json('demo-settings.json', []);
+    $url = rtrim((string) ($ds['coreUrl'] ?? ''), '/');
+    $f = data_dir() . '/core-secret';
+    $secret = is_file($f) ? trim((string) @file_get_contents($f)) : '';
+    if ($url === '' || strlen($secret) < 32 || !preg_match('/^u-[a-z0-9-]{3,40}$/', $uid)) {
+        return ['core' => 'skip'];
+    }
+    $ts = time();
+    $sig = rtrim(strtr(base64_encode(hash_hmac('sha256', "delete:$uid:$ts", $secret, true)), '+/', '-_'), '=');
+    $ctx = stream_context_create(['http' => ['method' => 'POST', 'timeout' => 20, 'ignore_errors' => true,
+        'header' => "Content-Type: application/json\r\nx-gw-sig: $sig\r\n", 'content' => json_encode(['uid' => $uid, 'ts' => $ts])]]);
+    $res = @file_get_contents($url . '/gw/delete-user', false, $ctx);
+    $j = $res !== false ? json_decode($res, true) : null;
+    return is_array($j) && !empty($j['ok']) ? ['core' => 'deleted'] : ['core' => 'error', 'coreError' => $res === false ? 'Sunucu çekirdeğine ulaşılamadı' : 'Sunucu çekirdeği silmeyi reddetti'];
+}
+
+if ($a === 'core' && $method === 'GET') {
+    $ds = read_json('demo-settings.json', []);
+    out(['enabled' => !empty($ds['coreEnabled']), 'url' => (string) ($ds['coreUrl'] ?? 'https://core.mivelo.app'), 'secret' => core_secret()]);
+}
+
+if ($a === 'core_save' && $method === 'POST') {
+    $url = rtrim(trim((string) ($body['url'] ?? '')), '/');
+    if ($url !== '' && !preg_match('#^https://[a-z0-9.-]+(:\d+)?$#i', $url)) {
+        fail(400, 'Adres https://alan.adi biçiminde olmalı (ör. https://core.mivelo.app)');
+    }
+    $on = (bool) ($body['enabled'] ?? false);
+    if ($on && $url === '') {
+        fail(400, 'Önce ağ geçidi adresini yaz');
+    }
+    with_json('demo-settings.json', [], function (array &$d) use ($url, $on) {
+        $d['coreUrl'] = $url;
+        $d['coreEnabled'] = $on;
+        return null;
+    });
+    out(['enabled' => $on, 'url' => $url, 'secret' => core_secret(!empty($body['rotate']))]);
+}
+
 if ($a === 'demo') {
     // kayıtla gelen üyelerin eski demo verisi (varsayılan uygulamalar) bir kez silinir — demo API'si ile aynı kural
     $users = with_json('users.json', ['users' => []], function (array &$d) {
@@ -602,7 +665,7 @@ if ($a === 'demo_reset' && $method === 'POST') {
         unset($u);
         return 0;
     });
-    out(['reset' => $n]);
+    out(['reset' => $n] + core_delete_user((string) ($body['id'] ?? '')));
 }
 
 if ($a === 'demo_delete' && $method === 'POST') {
@@ -615,7 +678,7 @@ if ($a === 'demo_delete' && $method === 'POST') {
         $d['users'] = array_values(array_filter($d['users'], fn ($u) => ($u['id'] ?? '') !== $id));
         return $before - count($d['users']);
     });
-    out(['deleted' => $n]);
+    out(['deleted' => $n] + core_delete_user($id));
 }
 
 /* ---------------- geri bildirim (uygulamadaki sağ alt düğme → api/feedback.php) ---------------- */

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type InputHTMLAttributes } from 'react';
 import { clearOpening, markOpening } from './login-opening';
-import { api } from './api';
+import { api, USE_STATIC } from './api';
 import { DEMO_OFFLINE, STATIC_DEMO } from './profile';
 import { openDemoLoginWindow, staticApi } from './static-demo';
 import { MAC_ONLY, PLATFORMS, type Account, type CoreOs, type Platform } from './types';
@@ -157,7 +157,7 @@ export function ConnectModal({
         return;
       }
       // Demo sitesi: formlar gerçek uygulamadaki gibi açılır, doldurulunca hesap örnek veriyle bağlanır (girilenler saklanmaz)
-      if (STATIC_DEMO) {
+      if (USE_STATIC) {
         // form doldurulduysa (e-posta uygulama şifresi, pazaryeri, Slack belirteci) doğrudan bağlanır; yoksa QR / giriş formu gösterilir
         const filled = isMail || !!shopFields || platform === 'shopier' || (platform === 'slack' && !!opts.token);
         const a = await api.addAccount(platform, filled ? 'demo-form' : undefined);
@@ -574,7 +574,7 @@ export function ConnectModal({
                 </ol>
               )}
 
-              {STATIC_DEMO && (activeAccount.platform === 'whatsapp' || activeAccount.platform === 'telegram') && activeAccount.status === 'pairing' && (
+              {USE_STATIC && (activeAccount.platform === 'whatsapp' || activeAccount.platform === 'telegram') && activeAccount.status === 'pairing' && (
                 <DemoQrDone account={activeAccount} onDone={onChanged} />
               )}
 
@@ -601,7 +601,7 @@ export function ConnectModal({
                     style={{ alignSelf: 'flex-start', marginBottom: 10 }}
                     disabled={busy}
                     onClick={() => {
-                      if (STATIC_DEMO) {
+                      if (USE_STATIC) {
                         if (!openDemoLoginWindow(activeAccount)) notify('Giriş penceresi engellendi; tarayıcıda açılır pencerelere izin ver', true);
                         return;
                       }
@@ -714,6 +714,12 @@ export function ConnectModal({
                     <p className="grid-note">
                       Bu uygulamalara kendi hesabınla giriş yaparak bağlanırsın. Toplu ya da otomatik mesaj göndermek için kullanma.
                     </p>
+                    {STATIC_DEMO && !USE_STATIC && (
+                      <p className="grid-note">
+                        Demo sunucusu: bağladığın hesaplar ve mesajları Mivelo'nun sunucusunda yalnız sana ayrılmış alanda tutulur; başkası göremez.
+                        Hesabın silinince hepsi silinir.
+                      </p>
+                    )}
                   </>
                 )}
                 {p === 'gmail' && (

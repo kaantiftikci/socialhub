@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { api } from './api';
+import { api, connectEvents } from './api';
+import { REMOTE_CORE } from './desktop';
 import { PLATFORMS, type Account, type CoreEvent, type LoginInput } from './types';
 import { Chip, Icon } from './ui';
 
@@ -20,6 +21,46 @@ export function pushLoginEvent(ev: CoreEvent): boolean {
   return true;
 }
 
+/**
+ * Sunucu çekirdeği (demo üyeleri): giriş sayfası sunucudaki tarayıcıda açılır ve görüntüsü AYRI bir pencerede gösterilir
+ * (yereldeki gibi ayrı giriş penceresi hissi; Mivelo'nun içinde değil). Açılır pencere engellenirse Mivelo içinde gösterilir.
+ */
+const popups = new Map<string, Window>();
+export function openLoginPopup(accountId: string): boolean {
+  const old = popups.get(accountId);
+  if (old && !old.closed) {
+    old.focus();
+    return true;
+  }
+  const w = 900;
+  const h = 820;
+  const left = Math.max(0, Math.round((window.screenX || 0) + ((window.outerWidth || w) - w) / 2));
+  const top = Math.max(0, Math.round((window.screenY || 0) + ((window.outerHeight || h) - h) / 2));
+  const win = window.open(`${location.pathname}?loginview=${encodeURIComponent(accountId)}`, `mivelo-login-${accountId}`, `popup=yes,width=${w},height=${h},left=${left},top=${top}`);
+  if (!win) return false;
+  popups.set(accountId, win);
+  return true;
+}
+
+/** Ayrı giriş penceresinin sayfası (?loginview=<hesap>): yalnız giriş görüntüsü; giriş bitince pencere kapanır */
+export function LoginPopup({ accountId }: { accountId: string }) {
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  useEffect(() => {
+    document.title = 'Giriş';
+    pushLoginEvent({ type: 'login.start', accountId });
+    void api.accounts().then(setAccounts).catch(() => undefined);
+    // sonradan bağlanan izleyici: çekirdek görüntüyü yeniden göndersin
+    void api.loginInput(accountId, []).catch(() => undefined);
+    const off = connectEvents((ev) => {
+      if ('accountId' in ev && ev.accountId !== accountId) return;
+      if (ev.type === 'login.end') window.close();
+      pushLoginEvent(ev);
+    });
+    return off;
+  }, [accountId]);
+  return <LoginView accounts={accounts} popup />;
+}
+
 /** DOM tuş adı → Playwright tuş adı (yalnız yazı dışı tuşlar) */
 const KEYS = new Set(['Enter', 'Backspace', 'Tab', 'Escape', 'Delete', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
 
@@ -27,7 +68,7 @@ const KEYS = new Set(['Enter', 'Backspace', 'Tab', 'Escape', 'Delete', 'ArrowLef
  * Mivelo içi giriş: çekirdekteki görünmez tarayıcının giriş sayfası canlı görüntü olarak gösterilir; fare, tekerlek, klavye ve
  * yapıştırma o sayfaya aktarılır. Oturum Mivelo'nun kendi tarayıcı profilinde oluşur (site Mivelo'ya gömülemez: iframe engeli).
  */
-export function LoginView({ accounts }: { accounts: Account[] }) {
+export function LoginView({ accounts, popup = false }: { accounts: Account[]; popup?: boolean }) {
   const [frame, setFrame] = useState<Frame | null>(current);
   const [err, setErr] = useState('');
   const imgRef = useRef<HTMLImageElement>(null);
@@ -43,12 +84,25 @@ export function LoginView({ accounts }: { accounts: Account[] }) {
     return () => void subs.delete(on);
   }, []);
   const id = frame?.accountId;
+  // sunucu çekirdeği: ana pencerede gösterme, ayrı pencere aç (engellenirse burada göster)
+  const [popped, setPopped] = useState<string | null>(null);
   useEffect(() => {
     if (id) requestAnimationFrame(() => keyRef.current?.focus());
     setErr('');
-  }, [id]);
+    if (id && REMOTE_CORE && !popup) setPopped(openLoginPopup(id) ? id : null);
+  }, [id, popup]);
 
   if (!frame) return null;
+  if (popped && popped === frame.accountId && !popup) {
+    return (
+      <div className="login-opening" role="status">
+        <span className="spin" /> Giriş ayrı pencerede açık
+        <button className="btn xs b b2" onClick={() => openLoginPopup(frame.accountId)}>
+          Pencereye git
+        </button>
+      </div>
+    );
+  }
   const acc = accounts.find((a) => a.id === frame.accountId);
   const platform = acc?.platform;
 
@@ -77,7 +131,7 @@ export function LoginView({ accounts }: { accounts: Account[] }) {
   const btn = (b: number) => (b === 2 ? 'right' : b === 1 ? 'middle' : 'left') as 'left' | 'right' | 'middle';
 
   return (
-    <div className="overlay login-ov">
+    <div className={`overlay login-ov ${popup ? 'popup' : ''}`}>
       <div className="login-box" role="dialog" aria-label="Giriş">
         <div className="login-head">
           {platform && <Chip platform={platform} size={26} />}
@@ -88,9 +142,15 @@ export function LoginView({ accounts }: { accounts: Account[] }) {
             </span>
           </div>
           <span style={{ flexGrow: 1 }} />
-          <button className="btn sm b b2" onClick={() => void api.loginWindow(frame.accountId).catch((e) => setErr((e as Error).message))} title="Giriş sayfası burada çalışmazsa">
-            Ayrı pencerede aç
-          </button>
+          {!popup && (
+            <button
+              className="btn sm b b2"
+              onClick={() => (REMOTE_CORE ? setPopped(openLoginPopup(frame.accountId) ? frame.accountId : null) : void api.loginWindow(frame.accountId).catch((e) => setErr((e as Error).message)))}
+              title="Giriş sayfası burada çalışmazsa"
+            >
+              Ayrı pencerede aç
+            </button>
+          )}
           <button className="btn icon b b2" aria-label="Girişi iptal et" title="İptal" onClick={() => void api.loginCancel(frame.accountId)}>
             <Icon name="x" size={15} sw={2} />
           </button>
