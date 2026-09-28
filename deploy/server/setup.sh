@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Mivelo sunucu çekirdeği kurulumu — Ubuntu 24.04 (x86_64 ya da arm64/Ampere), root olarak. Tekrar çalıştırılabilir (güncel
 # sürüme getirir, ayarları korur). Kullanım:
-#   curl -fsSL https://raw.githubusercontent.com/kaantiftikci/socialhub/main/deploy/server/setup.sh | sudo bash -s -- --domain core.mivelo.app --secret <SIR>
+#   Depo GİZLİ: sunucuda salt okunur bir GitHub "deploy key" (README "Gizli depo") → ilk kez:
+#   GIT_SSH_COMMAND="ssh -i /root/mivelo-deploy -o StrictHostKeyChecking=accept-new" git clone --depth 1 git@github.com:kaantiftikci/socialhub.git /root/mivelo-src
+#   bash /root/mivelo-src/deploy/server/setup.sh --deploy-key /root/mivelo-deploy --domain core.mivelo.app --secret <SIR>
 # Seçenekler: --domain <alan adı>  --secret <CORE_SECRET, ≥32>  [--origins https://demo.mivelo.app]  [--max-cores N]
-#             [--idle-minutes 120]  [--branch main]  [--repo https://github.com/kaantiftikci/socialhub]
+#             [--idle-minutes 120]  [--branch main]  [--repo URL]  [--deploy-key <özel anahtar dosyası>]
 # Ortam değişkeni olarak da verilebilir: DOMAIN, CORE_SECRET, ALLOWED_ORIGINS, MAX_CORES, IDLE_MINUTES, BRANCH, REPO_URL.
 # Ayrıntı: deploy/server/README.md
 
@@ -11,13 +13,13 @@ main() {
   set -Eeuo pipefail
   trap 'echo "HATA: kurulum satır $LINENO civarında durdu (yukarıdaki çıktıya bak). Betik tekrar çalıştırılabilir." >&2' ERR
 
-  local REPO_URL=${REPO_URL:-https://github.com/kaantiftikci/socialhub}
+  local REPO_URL=${REPO_URL:-} DEPLOY_KEY=${DEPLOY_KEY:-}
   local BRANCH=${BRANCH:-main}
   local DOMAIN=${DOMAIN:-} SECRET=${CORE_SECRET:-} ORIGINS=${ALLOWED_ORIGINS:-} MAX=${MAX_CORES:-} IDLE=${IDLE_MINUTES:-}
   local APP_DIR=/opt/mivelo DATA_DIR=/var/lib/mivelo ENV_FILE=/etc/mivelo/gateway.env
   local USERS_DIR=$DATA_DIR/users PW_DIR=$APP_DIR/.pw
   while [ $# -gt 0 ]; do
-    case "$1" in --domain | --secret | --origins | --max-cores | --idle-minutes | --branch | --repo) [ $# -ge 2 ] || die "$1 bir değer ister" ;; esac
+    case "$1" in --domain | --secret | --origins | --max-cores | --idle-minutes | --branch | --repo | --deploy-key) [ $# -ge 2 ] || die "$1 bir değer ister" ;; esac
     case "$1" in
       --domain) DOMAIN=${2:-}; shift 2 ;;
       --secret) SECRET=${2:-}; shift 2 ;;
@@ -26,6 +28,7 @@ main() {
       --idle-minutes) IDLE=${2:-}; shift 2 ;;
       --branch) BRANCH=${2:-}; shift 2 ;;
       --repo) REPO_URL=${2:-}; shift 2 ;;
+      --deploy-key) DEPLOY_KEY=${2:-}; shift 2 ;;
       -h | --help) usage; return 0 ;;
       *) die "Bilinmeyen seçenek: $1" ;;
     esac
@@ -91,16 +94,35 @@ main() {
   install -d -o mivelo -g mivelo -m 0700 "$USERS_DIR"
   install -d -o root -g root -m 0755 /etc/mivelo
 
+  # Gizli depo: salt okunur deploy key mivelo kullanıcısının ~/.ssh'ine (update.sh'in git fetch'i de onu kullanır)
+  local SSH_DIR=$DATA_DIR/.ssh
+  if [ -n "$DEPLOY_KEY" ]; then
+    [ -s "$DEPLOY_KEY" ] || die "--deploy-key dosyası yok: $DEPLOY_KEY"
+    install -d -o mivelo -g mivelo -m 0700 "$SSH_DIR"
+    install -o mivelo -g mivelo -m 0600 "$DEPLOY_KEY" "$SSH_DIR/id_ed25519"
+  fi
+  if [ -s "$SSH_DIR/id_ed25519" ]; then
+    if ! grep -q '^github.com ' "$SSH_DIR/known_hosts" 2>/dev/null; then
+      ssh-keyscan -t ed25519,rsa,ecdsa github.com 2>/dev/null >>"$SSH_DIR/known_hosts" || die "github.com anahtarı alınamadı (ağ?)"
+      chown mivelo:mivelo "$SSH_DIR/known_hosts"
+      chmod 0644 "$SSH_DIR/known_hosts"
+    fi
+    REPO_URL=${REPO_URL:-git@github.com:kaantiftikci/socialhub.git}
+  fi
+  REPO_URL=${REPO_URL:-https://github.com/kaantiftikci/socialhub}
+
   step "Kod: $REPO_URL ($BRANCH) → $APP_DIR"
   if [ -d "$APP_DIR/.git" ]; then
     chown -R mivelo:mivelo "$APP_DIR"
+    as_mivelo git -C "$APP_DIR" remote set-url origin "$REPO_URL"
     as_mivelo git -C "$APP_DIR" fetch --quiet origin "$BRANCH"
     as_mivelo git -C "$APP_DIR" checkout --quiet "$BRANCH"
     as_mivelo git -C "$APP_DIR" merge --ff-only --quiet "origin/$BRANCH" || die "$APP_DIR ileri sarılamadı (yerel değişiklik?): git -C $APP_DIR status"
   else
     if [ -d "$APP_DIR" ] && [ -n "$(ls -A "$APP_DIR" 2>/dev/null)" ]; then die "$APP_DIR boş değil ve git deposu değil"; fi
     install -d -o mivelo -g mivelo -m 0755 "$APP_DIR"
-    as_mivelo git clone --quiet --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
+    as_mivelo git clone --quiet --branch "$BRANCH" "$REPO_URL" "$APP_DIR" ||
+      die "Depo indirilemedi. Depo gizliyse deploy key gerekir: --deploy-key <dosya> (README → Gizli depo)"
   fi
   install -d -o mivelo -g mivelo -m 0755 "$PW_DIR"
   grep -qxF '/.pw/' "$APP_DIR/.git/info/exclude" 2>/dev/null || echo '/.pw/' >>"$APP_DIR/.git/info/exclude"
@@ -206,8 +228,8 @@ CADDY
 usage() {
   cat <<'USAGE'
 Mivelo sunucu çekirdeği kurulumu (Ubuntu 24.04, root):
-  curl -fsSL https://raw.githubusercontent.com/kaantiftikci/socialhub/main/deploy/server/setup.sh | sudo bash -s -- --domain core.mivelo.app --secret <SIR>
-Seçenekler: --domain  --secret  [--origins https://demo.mivelo.app]  [--max-cores N]  [--idle-minutes 120]  [--branch main]  [--repo URL]
+  bash /root/mivelo-src/deploy/server/setup.sh --deploy-key /root/mivelo-deploy --domain core.mivelo.app --secret <SIR>
+Seçenekler: --domain  --secret  [--origins https://demo.mivelo.app]  [--max-cores N]  [--idle-minutes 120]  [--branch main]  [--repo URL]  [--deploy-key DOSYA]
 USAGE
 }
 

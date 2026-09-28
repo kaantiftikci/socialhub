@@ -136,7 +136,7 @@ Dil: arayüz ve yorumlar Türkçe.
   → çekirdek durur, klasör silinir, `{ok, deleted}`. Çekirdekte sunucu modu (`platform.ts IS_SERVER`): her istek belirteç ister (yerelden de), `localOnly` serbest
   (hesap ekle/sil/yeniden başlat/AI anahtarı ağ geçidinden), LAN/iMessage/cihaz takvimi/`openExternal` kapalı, `login-window`/`external` yok sayılır (hep
   Mivelo içi giriş), `DISPLAY` varsa Chromium Xvfb'de görünür (headful; `MIVELO_HEADFUL=0` kapatır), `/api/health` `server:true`. Kurulum `deploy/server/`
-  (`setup.sh` tek satır: Node 22, Caddy, Xvfb, Playwright Chromium `/opt/mivelo/.pw`, kullanıcı `mivelo`, `/etc/mivelo/gateway.env` 0600, systemd
+  (depo GİZLİ → salt okunur GitHub deploy key `/root/mivelo-deploy`, `setup.sh --deploy-key` onu `mivelo`'nun ~/.ssh'ine koyar, uzak adres git@github.com; Admin kartındaki komut önce klonlar sonra setup.sh; raw.githubusercontent 404 verir. `setup.sh` tek satır: Node 22, Caddy, Xvfb, Playwright Chromium `/opt/mivelo/.pw`, kullanıcı `mivelo`, `/etc/mivelo/gateway.env` 0600, systemd
   `mivelo-xvfb`/`mivelo-gateway`/`mivelo-update.timer` (5 dk: ff-only çekme; yalnız çekirdek/ağ geçidi/kilit değişince derleme + yeniden başlatma), Oracle
   iptables 80/443; README Türkçe). Testler: `node --test apps/gateway/token.test.mjs`, `test/server-mode.test.ts`. Gerçek VPS'te DENENMEDİ.
 

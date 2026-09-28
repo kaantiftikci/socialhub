@@ -653,7 +653,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   var CORE={};
   function coreRender(){ $('#coreUrl').value=CORE.url||''; $('#coreOn').checked=!!CORE.enabled; $('#coreOnTx').textContent=CORE.enabled?'Açık':'Kapalı';
     var dom=(CORE.url||'https://core.mivelo.app').replace(/^https:\/\//,'');
-    $('#coreCmd').value='curl -fsSL https://raw.githubusercontent.com/kaantiftikci/socialhub/main/deploy/server/setup.sh | sudo bash -s -- --domain '+dom+' --secret '+(CORE.secret||''); }
+    $('#coreCmd').value='rm -rf /root/mivelo-src && GIT_SSH_COMMAND="ssh -i /root/mivelo-deploy -o StrictHostKeyChecking=accept-new" git clone -q --depth 1 git@github.com:kaantiftikci/socialhub.git /root/mivelo-src && bash /root/mivelo-src/deploy/server/setup.sh --deploy-key /root/mivelo-deploy --domain '+dom+' --secret '+(CORE.secret||''); }
   function loadCore(){ api('core').then(function(d){ CORE=d; coreRender(); }).catch(function(e){ toast(e.message,true); }); }
   function saveCore(rotate){ return api('core_save',{url:$('#coreUrl').value.trim(),enabled:$('#coreOn').checked,rotate:!!rotate}).then(function(d){ CORE=d; coreRender(); toast(rotate?'Yeni anahtar üretildi; sunucuda da güncelle':'Kaydedildi'); }).catch(function(x){ toast(x.message,true); loadCore(); }); }
   $('#coreSave').addEventListener('click',function(){ saveCore(false); });

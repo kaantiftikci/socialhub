@@ -69,9 +69,22 @@ Kontrol (birkaç dakika sürebilir): `ping core.mivelo.app` sunucunun IP'sini g�
 Sırrı **Mivelo Admin → Demo → Sunucu çekirdeği** kartından kopyala (demo sitesi bu sırla üyelere belirteç imzalar;
 ikisi aynı olmalı). Sunucuda:
 
+**Gizli depo → deploy key (bir kez):** sunucuda salt okunur bir anahtar üret ve GitHub'a ekle:
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kaantiftikci/socialhub/main/deploy/server/setup.sh \
-  | sudo bash -s -- --domain core.mivelo.app --secret 'BURAYA_SIR'
+ssh-keygen -t ed25519 -N "" -C mivelo-core -f /root/mivelo-deploy && cat /root/mivelo-deploy.pub
+```
+
+Çıkan `ssh-ed25519 …` satırını GitHub → depo → Settings → Deploy keys → **Add deploy key** (başlık `mivelo-core`,
+"Allow write access" İŞARETSİZ) olarak ekle. Anahtar yalnız bu depoyu okuyabilir; `setup.sh --deploy-key` onu
+`mivelo` kullanıcısına kopyalar, 5 dk'lık güncellemeler de onunla çeker.
+
+**Kurulum** (Admin kartındaki komut bunun aynısı):
+
+```bash
+rm -rf /root/mivelo-src && GIT_SSH_COMMAND="ssh -i /root/mivelo-deploy -o StrictHostKeyChecking=accept-new" \
+  git clone -q --depth 1 git@github.com:kaantiftikci/socialhub.git /root/mivelo-src && \
+  bash /root/mivelo-src/deploy/server/setup.sh --deploy-key /root/mivelo-deploy --domain core.mivelo.app --secret 'BURAYA_SIR'
 ```
 
 10–15 dakika sürer (Node 22, Caddy, Chromium, bağımlılıklar). Betik tekrar çalıştırılabilir: güncel sürüme getirir,
