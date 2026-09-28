@@ -116,8 +116,19 @@ Dil: arayüz ve yorumlar Türkçe.
   bulanıklıktan açılan başlıklar; logolar yalnız ilk iki sahnede), `render.mjs` (--scale 2, --stills), `audio.mjs` (kodla üretilen 120 BPM
   müzik + tık/tuş/gönder/bildirim efektleri, -14 LUFS). Başlık fontu -apple-system/SF Pro (Mac'te), yoksa Inter Display. Demo kancası
   `window.__miveloDemo.incoming(ad, metin)` (static-demo.ts). Ayrıntı `scripts/promo/README.md`; MP4 depoya konmaz.
+- **Masaüstü paketleri (DMG + EXE, gerçek kullanım yolu — demo sunucusu değil; ban/gizlilik: kullanıcının kendi IP'si ve cihazı)**:
+  `.github/workflows/build-desktop.yml` (eski build-windows.yml'in yerine): elle / v* etiketi / main'de core·web·desktop değişince. Sürüm 0.1.<run> (etikette
+  etiketinki), `--config {"version"}` ile. Matris: mac-arm64 (macos-14), mac-intel (macos-14 + x64 Node/Rosetta + x86_64-apple-darwin), windows-x64 (NSIS).
+  Node gömülü (`KAVSAK_BUNDLE_NODE=1`), macOS ad-hoc imza (`signingIdentity "-"`; Apple Developer hesabı YOK → ilk açılışta sağ tık → Aç / "Yine de aç"),
+  Windows imzasız (SmartScreen). Hepsi başarılıysa `publish`: `mivelo.app/indir/files/` (FTP; Mivelo-mac-arm64.dmg, Mivelo-mac-intel.dmg,
+  Mivelo-windows-x64-setup.exe, latest.json {version,date,files}; `deploy/indir/.htaccess`: json'da CORS *, indirme başlığı, liste kapalı). İndirme sayfası
+  `apps/landing/indir/index.html` (latest.json'dan boyut/sürüm, işletim sistemine göre önerilen kart, ilk açılış adımları). Chromium pakette YOK:
+  `packages/core/src/browser-install.ts` `ensureChromium` — köprü `launch` öncesi yoksa `playwright install --no-shell chromium` (gömülü node ile,
+  tek uçuş, ilerleme hesap durumunda "Tarayıcı bileşeni indiriliyor… %N"); indirilemezse hata + "Yeniden bağlan". Uygulama içi yeni sürüm kartı
+  `UpdateBanner.tsx` (yalnız Tauri + `VITE_APP_VERSION`; 6 sa'de bir latest.json; "İndir" → mivelo.app/indir, "Sonra" o sürümü atlar). Gerçek
+  cihazda DENENMEDİ; ffmpeg pakette yok (sesli mesaj ogg).
 - **Windows**: `tauri.windows.conf.json` (NSIS, currentUser, yerel başlık çubuğu) Tauri'nin platform yapılandırma birleştirmesiyle
-  uygulanır; paket yalnız CI'da üretilir (`.github/workflows/build-windows.yml`: workflow_dispatch + `v*` etiketi, windows-latest,
+  uygulanır; paket yalnız CI'da üretilir (`.github/workflows/build-desktop.yml` windows-x64 işi, windows-latest,
   `KAVSAK_BUNDLE_NODE=1` ile node.exe `core-bundle/bin/`e gömülür, kabuk önce onu dener). `lib.rs`: kısayol Ctrl+Shift+K,
   rozet yok (okunmamış sayısı tepsi ipucunda), tepside renkli simge, node `CREATE_NO_WINDOW`. Çekirdekte OS farkları
   `packages/core/src/platform.ts` (`openExternal`, `killProcessesMatching`, `IS_WINDOWS`…). DB anahtarı Windows'ta DPAPI

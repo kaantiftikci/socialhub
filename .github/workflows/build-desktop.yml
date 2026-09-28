@@ -1,0 +1,131 @@
+# Masaüstü paketleri: macOS DMG (Apple Silicon + Intel) ve Windows kurulum dosyası (NSIS .exe), sonra mivelo.app/indir/files/'a yüklenir.
+# Tetik: elle (Actions → build-desktop → Run workflow), v* etiketi ya da main'e çekirdek/arayüz/kabuk değişikliği.
+# Sürüm: tauri.conf.json'daki ana sürüm + çalıştırma numarası (0.1.<n>); etiketle çalışınca etiketin sürümü (v0.2.0 → 0.2.0).
+# Node çalışma zamanı pakete gömülür (KAVSAK_BUNDLE_NODE=1): kullanıcının Node kurmasına gerek yok. Chromium pakete KONMAZ,
+# tarayıcıyla bağlanan ilk kanalda uygulama kendisi indirir (packages/core/src/browser-install.ts).
+# İmza: macOS ad-hoc ("-"; Apple Developer hesabı yok → ilk açılışta "Yine de aç"), Windows imzasız (SmartScreen "Yine de çalıştır").
+name: build-desktop
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+    branches: [main]
+    paths: ['packages/core/**', 'apps/web/**', 'apps/desktop/**', 'scripts/bundle-core.mjs', 'package-lock.json', '.github/workflows/build-desktop.yml']
+concurrency:
+  group: build-desktop-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      v: ${{ steps.v.outputs.v }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF#refs/tags/v}"; else
+            base=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version.split('.').slice(0,2).join('.')")
+            v="$base.$GITHUB_RUN_NUMBER"; fi
+          echo "v=$v" >>"$GITHUB_OUTPUT"; echo "sürüm: $v"
+
+  build:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: mac-arm64, os: macos-14, arch: arm64, target: aarch64-apple-darwin, bundle: dmg }
+          # Intel: Apple Silicon makinesinde x64 Node (Rosetta) + x86_64 Rust hedefi → yerel modüller x64 kurulur
+          - { name: mac-intel, os: macos-14, arch: x64, target: x86_64-apple-darwin, bundle: dmg }
+          - { name: windows-x64, os: windows-latest, arch: x64, target: x86_64-pc-windows-msvc, bundle: nsis }
+    runs-on: ${{ matrix.os }}
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      VITE_APP_VERSION: ${{ needs.version.outputs.v }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rosetta (Intel paketi için x64 Node)
+        if: matrix.name == 'mac-intel'
+        run: softwareupdate --install-rosetta --agree-to-license || true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          architecture: ${{ matrix.arch }}
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+          key: ${{ matrix.target }}
+      - run: node -p "process.version + ' ' + process.arch"
+      - run: npm ci
+      - run: npm run build -w packages/core
+      - run: npm run build -w apps/web
+      - name: Çekirdek birim testleri
+        run: npm test -w packages/core
+        continue-on-error: true
+      - name: Çekirdeği paketle (bundle-core + gömülü node)
+        run: node scripts/bundle-core.mjs
+        env:
+          KAVSAK_BUNDLE_NODE: '1'
+      - name: Gömülü node ve yerel modül mimarisi
+        if: runner.os == 'macOS'
+        run: |
+          file apps/desktop/src-tauri/core-bundle/bin/node
+          find apps/desktop/src-tauri/core-bundle/node_modules -name '*.node' -exec file {} \; | head
+      - name: Tauri build
+        shell: bash
+        working-directory: apps/desktop
+        run: |
+          cfg='{"version":"${{ needs.version.outputs.v }}","build":{"beforeBuildCommand":null}}'
+          npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundle }} --config "$cfg"
+      - name: Çıktıyı adlandır
+        shell: bash
+        run: |
+          mkdir -p out
+          b=apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle
+          if [ "${{ matrix.bundle }}" = dmg ]; then cp "$b"/dmg/*.dmg "out/Mivelo-${{ matrix.name }}.dmg"; else cp "$b"/nsis/*.exe "out/Mivelo-${{ matrix.name }}-setup.exe"; fi
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mivelo-${{ matrix.name }}
+          path: out/*
+          if-no-files-found: error
+
+  publish:
+    needs: [version, build]
+    # yalnız üç paket de başarılıysa: eşitleme, yerelde olmayan (başarısız) paketin eski sürümünü sunucudan silerdi
+    if: needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dl
+          merge-multiple: true
+      - name: Dosyalar + latest.json
+        run: |
+          mkdir -p files
+          cp dl/* files/ 2>/dev/null || true
+          ls -la files
+          [ -n "$(ls files)" ] || { echo "yüklenecek paket yok"; exit 1; }
+          node -e '
+            const fs=require("fs"); const v=process.argv[1];
+            const files={}; for (const f of fs.readdirSync("files")) files[f]={size:fs.statSync("files/"+f).size};
+            fs.writeFileSync("files/latest.json", JSON.stringify({version:v, date:new Date().toISOString(), files}, null, 2));
+          ' "${{ needs.version.outputs.v }}"
+          cp deploy/indir/.htaccess files/.htaccess
+          cat files/latest.json
+      - name: FTP (TLS) ile yükle — mivelo.app/indir/files
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: kaantiftikci.com
+          username: kaa300ftikcicom
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftps
+          local-dir: files/
+          server-dir: mivelo.app/indir/files/
+          state-name: .ftp-deploy-sync-state.json
+          timeout: 600000

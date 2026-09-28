@@ -1582,3 +1582,10 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .login-ov.popup { background: var(--bg); backdrop-filter: none; }
 .login-ov.popup .login-box { width: 100%; height: 100%; max-width: none; max-height: none; border-radius: 0; box-shadow: none; }
 .login-opening .btn { margin-left: 6px; }
+
+/* Paketli uygulama: yeni sürüm kartı (UpdateBanner.tsx) */
+.update-card { position: fixed; left: 18px; bottom: 18px; z-index: 70; display: flex; align-items: center; gap: 12px; max-width: min(520px, calc(100vw - 36px)); background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px; box-shadow: var(--shadow-3); animation: bubIn .2s ease-out both; }
+.update-card > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.update-card b { font-size: 13.5px; }
+.update-card span { font-size: 12.5px; color: var(--text2); }
+.update-card > svg { color: var(--v); flex: none; }

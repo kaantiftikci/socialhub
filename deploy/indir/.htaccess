@@ -1,0 +1,18 @@
+# mivelo.app/indir/files — masaüstü paketleri (build-desktop.yml yükler)
+Options -Indexes
+AddType application/x-apple-diskimage .dmg
+AddType application/octet-stream .exe
+<Files ".ftp-deploy-sync-state.json">
+  Require all denied
+</Files>
+<IfModule mod_headers.c>
+  # uygulama içi "yeni sürüm var" denetimi (tauri://localhost kaynağından) okuyabilsin
+  <FilesMatch "\.json$">
+    Header set Access-Control-Allow-Origin "*"
+    Header set Cache-Control "no-cache, max-age=0"
+  </FilesMatch>
+  <FilesMatch "\.(dmg|exe)$">
+    Header set Content-Disposition "attachment"
+    Header set Cache-Control "no-cache, max-age=0"
+  </FilesMatch>
+</IfModule>

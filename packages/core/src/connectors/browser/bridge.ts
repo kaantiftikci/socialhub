@@ -8,6 +8,7 @@ import { persistSessionCookies } from './outlook.js';
 import { bus } from '../../bus.js';
 import { sessionDir } from '../../config.js';
 import { IS_SERVER, killProcessesMatching } from '../../platform.js';
+import { ensureChromium } from '../../browser-install.js';
 import { mediaHostAllowed, MEDIA_MAX } from '../../media-hosts.js';
 import { isUiActive, onUiActive } from '../../activity.js';
 import type { Account, Attachment, Chat, ChatKind, Participant, Reaction } from '../../model.js';
@@ -553,6 +554,14 @@ export class BrowserConnector extends BaseConnector {
   /** Kalıcı profille Chromium aç. headless=true: arka planda çalışan görünmez pencere. */
   private async launch(headless: boolean, retried = false, navigate = true): Promise<boolean> {
     const profile = path.join(sessionDir(this.account.id), 'profile');
+    // Paketli uygulama (DMG/EXE): Chromium ilk tarayıcılı kanalda bir kez indirilir
+    if (!retried) {
+      const ready = await ensureChromium((pct) => this.setStatus('connecting', pct == null ? 'Tarayıcı bileşeni indiriliyor (ilk sefere özel)…' : `Tarayıcı bileşeni indiriliyor… %${pct}`));
+      if (!ready) {
+        this.setStatus('error', 'Tarayıcı bileşeni indirilemedi; internet bağlantını kontrol edip "Yeniden bağlan"a bas');
+        return false;
+      }
+    }
     try {
       const hidden = headless || process.env.KAVSAK_HEADLESS === '1';
       this.ctx = await this.chromium!.launchPersistentContext(profile, {
@@ -620,7 +629,7 @@ export class BrowserConnector extends BaseConnector {
         for (const f of ['SingletonLock', 'SingletonSocket', 'SingletonCookie', 'lockfile']) fs.rmSync(path.join(profile, f), { force: true });
         return this.launch(headless, true, navigate);
       }
-      this.setStatus('error', `Chromium açılamadı: ${msg.split('\n')[0]}. Çözüm: npx playwright install chromium`);
+      this.setStatus('error', `Chromium açılamadı: ${msg.split('\n')[0]}`);
       return false;
     }
     const ctx = this.ctx;

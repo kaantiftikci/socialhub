@@ -1,5 +1,6 @@
 import { FeedbackButton } from './Feedback';
 import { LoginView, preopenLogin, pushLoginEvent } from './LoginView';
+import { UpdateBanner } from './UpdateBanner';
 import { clearOpening as clearOpeningFor, markOpening, useLoginOpening } from './login-opening';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, connectEvents } from './api';
@@ -1423,6 +1424,7 @@ export default function App() {
       </div>
 
       <LoginView accounts={accounts} />
+      <UpdateBanner />
       <FeedbackButton />
 
       {settingsP.value && (
