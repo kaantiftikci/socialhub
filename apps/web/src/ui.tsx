@@ -184,7 +184,7 @@ const SHOP_ICON: Partial<Record<Platform, { src: string; fit: 'cover' | 'contain
   shopier: { src: '/brands/shopier.png', fit: 'cover' },
   trendyol: { src: '/brands/trendyol.png', fit: 'cover' },
   hepsiburada: { src: '/brands/hepsiburada.png', fit: 'cover' },
-  n11: { src: '/brands/n11.png', fit: 'contain' },
+  n11: { src: '/brands/n11.png', fit: 'cover' },
   etsy: { src: '/brands/etsy.png', fit: 'cover' },
   amazon: { src: '/brands/amazon.png', fit: 'cover' },
 };
