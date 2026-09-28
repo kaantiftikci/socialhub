@@ -68,6 +68,7 @@ if (!function_exists('mv_smtp_config')) {
                     return ['ok' => false, 'via' => 'smtp', 'error' => $try['error'] ?? '', 'log' => $log];
                 }
             }
+            $log = array_merge($log, mv_smtp_diag((string) $cfg['host']));
             // Barındırmanın yerel posta sunucusu (localhost) bilerek denenmez: Türkticaret paylaşımlı barındırmada postayı kimliksiz
             // kabul edip "gönderildi" diyor ama iletmiyor (mail() ile aynı); kurumsal posta kutusu da orada değil (535).
             return ['ok' => false, 'via' => 'smtp', 'error' => 'Barındırma sunucusu dışarıya e-posta bağlantısını (465 ve 587) engelliyor. Türkticaret desteğinden bu hosting hesabı için smtp.turkticaret.net\'e giden SMTP erişimini açmalarını iste.', 'log' => $log];
@@ -81,6 +82,38 @@ if (!function_exists('mv_smtp_config')) {
         ]);
         $ok = @mail($to, mv_mime_header($subject), chunk_split(base64_encode($body)), $headers, '-fhello@mivelo.app');
         return ['ok' => $ok, 'via' => 'mail()', 'error' => $ok ? 'SMTP ayarlı değil: sunucunun mail() işlevi kullanıldı; teslim edilmeyebilir (Ayarlar → E-posta gönderimi)' : 'mail() başarısız'];
+    }
+
+    /**
+     * Bağlantı tanısı (destek ekibine gösterilecek): ad hangi IP'lere çözülüyor, her IP'de 587/465/25/2525 açık mı.
+     * @return string[]
+     */
+    function mv_smtp_diag(string $host): array
+    {
+        $out = ['— Tanı (barındırma sunucusundan ' . $host . '):'];
+        $ips = @gethostbynamel($host) ?: [];
+        foreach ((@dns_get_record($host, DNS_AAAA) ?: []) as $r) {
+            if (!empty($r['ipv6'])) {
+                $ips[] = $r['ipv6'];
+            }
+        }
+        if (!$ips) {
+            return array_merge($out, ['  ad çözülemedi (DNS)']);
+        }
+        $out[] = '  IP: ' . implode(', ', $ips) . ' · sunucu: ' . (gethostname() ?: '?');
+        foreach (array_slice($ips, 0, 3) as $ip) {
+            $res = [];
+            foreach ([587, 465, 25, 2525] as $port) {
+                $t = microtime(true);
+                $fp = @stream_socket_client('tcp://' . (str_contains($ip, ':') ? "[$ip]" : $ip) . ':' . $port, $en, $es, 5);
+                $res[] = $port . ' ' . ($fp ? 'açık' : 'kapalı (' . ($es ?: 'zaman aşımı') . ', ' . round((microtime(true) - $t) * 1000) . ' ms)');
+                if ($fp) {
+                    fclose($fp);
+                }
+            }
+            $out[] = '  ' . $ip . ': ' . implode(' · ', $res);
+        }
+        return $out;
     }
 
     function mv_mime_header(string $s): string
