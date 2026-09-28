@@ -25,6 +25,8 @@ export interface Chat {
   lastMessageAt: number;
   lastPreview: string;
   lastFromMe?: boolean;
+  /** Önizleme bir tepkiyi anlatıyor ("❤️ Ayşe mesajına tepki verdi"): mesaj değil, tik yok */
+  lastReaction?: boolean;
   /** Son mesajın durumu: kendi mesajımsa listede tik (gönderildi / iletildi / görüldü) */
   lastStatus?: Message['status'];
   avatarUrl?: string;

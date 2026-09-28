@@ -208,6 +208,17 @@ export abstract class BaseConnector implements Connector {
     return chat;
   }
 
+  /**
+   * Karşı taraf bir mesaja tepki verdi: sohbet önizlemesi "❤️ Ayşe mesajına tepki verdi" olur — mesaj gelmiş gibi görünmez
+   * (sohbet sırası, okunmamış sayacı ve "son mesaj benden" değişmez). Sonra gelen gerçek mesaj önizlemeyi olağan şekilde ezer.
+   */
+  protected reactionPreview(remoteChatId: string, text: string): void {
+    const cid = chatId(this.account.id, remoteChatId);
+    if (!this.store.setReactionPreview(cid, text.slice(0, 200))) return;
+    const chat = this.store.getChat(cid);
+    if (chat) bus.emit({ type: 'chat.upsert', chat });
+  }
+
   /** Platformdan gelen tepkiyi depoya işle ve yayınla (mesaj henüz yoksa sessizce atlanır) */
   protected applyReaction(remoteChatId: string, remoteMsgId: string, r: Reaction, remove = false): void {
     const cid = chatId(this.account.id, remoteChatId);

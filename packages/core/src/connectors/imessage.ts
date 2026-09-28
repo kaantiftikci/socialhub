@@ -46,6 +46,10 @@ interface Row {
   date_retracted: number | null;
   /** 0 normal mesaj; 2000-2007 tapback (beğendi/güldü…), 3000+ tapback geri alma, 1000 çıkartma/uygulama eki */
   associated_message_type: number | null;
+  /** Tapback'in hedef mesajı: "p:0/<guid>" ya da "bp:<guid>" (eski şemada yok) */
+  associated_message_guid?: string | null;
+  /** macOS 14+: özel emoji tapback'i (tür 2006) */
+  associated_message_emoji?: string | null;
 }
 
 interface AttRow {
@@ -60,10 +64,11 @@ interface AttRow {
 }
 
 /** SELECT + JOIN gövdesi: mesaj + sohbet + gönderen (WHERE/ORDER dışarıdan eklenir) */
-const SELECT_ROWS = (retractedCol: string, filteredCol: string, assocCol: string) =>
+const SELECT_ROWS = (retractedCol: string, filteredCol: string, assocCol: string, assocGuidCol = 'NULL', assocEmojiCol = 'NULL') =>
   `SELECT m.ROWID AS rowid, m.guid, m.text, m.attributedBody, m.date, m.is_from_me, m.cache_has_attachments, m.item_type,
           m.is_delivered, m.is_read, m.date_read, m.error,
           ${retractedCol} AS date_retracted, ${assocCol} AS associated_message_type,
+          ${assocGuidCol} AS associated_message_guid, ${assocEmojiCol} AS associated_message_emoji,
           h.id AS handle, c.chat_identifier, c.guid AS chat_guid, c.display_name, ${filteredCol} AS is_filtered
      FROM message m
      JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
@@ -91,6 +96,25 @@ export function isAssociatedReaction(t: number | null | undefined): boolean {
   return !!t && t >= 2000 && t < 4000;
 }
 
+/** Tapback türü → emoji (2000 sevdi, 2001 beğendi, 2002 beğenmedi, 2003 güldü, 2004 vurguladı, 2005 soru, 2006 özel emoji, 2007 çıkartma) */
+const TAPBACK_EMOJI = ['❤️', '👍', '👎', '😂', '‼️', '❓'];
+
+/**
+ * Tapback satırı → hedef mesaja tepki: {hedef guid, emoji, kaldırma mı}. 3000+ geri alma. Hedef "p:0/<guid>" (çok parçalı
+ * mesajın parçası) ya da "bp:<guid>". Çözülemezse undefined (satır yine mesaj olarak gösterilmez).
+ */
+export function tapbackOf(r: Pick<Row, 'associated_message_type' | 'associated_message_guid' | 'associated_message_emoji'>): { target: string; emoji: string; remove: boolean } | undefined {
+  const t = r.associated_message_type ?? 0;
+  if (!isAssociatedReaction(t)) return undefined;
+  const target = String(r.associated_message_guid ?? '').replace(/^(p:\d+\/|bp:)/, '');
+  if (!target) return undefined;
+  const kind = t % 1000;
+  const emoji = kind === 6 ? String(r.associated_message_emoji ?? '').trim() : kind === 7 ? '🎨' : (TAPBACK_EMOJI[kind] ?? '');
+  // geri almada emoji yoksa da kişinin tepkisi kaldırılır (kişi başına tek tapback)
+  if (!emoji && t < 3000) return undefined;
+  return { target, emoji: emoji || '❤️', remove: t >= 3000 };
+}
+
 /** Rehber eşlemesi için anahtarlar: +90… biçimi ve son 10 hane (rehberde "0532…", "532…", "+90 532…" farklı yazılabiliyor) */
 export function phoneKeys(p: string): string[] {
   if (p.includes('@')) return [p.trim().toLowerCase()];
@@ -109,6 +133,8 @@ export class IMessageConnector extends BaseConnector {
   private retractedCol = 'NULL';
   private filteredCol = 'NULL';
   private assocCol = 'NULL';
+  private assocGuidCol = 'NULL';
+  private assocEmojiCol = 'NULL';
   private retractAt = Date.now();
   private unreadAt = 0;
   private retractedLogged = -1;
@@ -143,6 +169,8 @@ export class IMessageConnector extends BaseConnector {
       this.retractedCol = mcols.has('date_retracted') ? 'm.date_retracted' : 'NULL';
       this.filteredCol = ccols.has('is_filtered') ? 'c.is_filtered' : 'NULL';
       this.assocCol = mcols.has('associated_message_type') ? 'm.associated_message_type' : 'NULL';
+      this.assocGuidCol = mcols.has('associated_message_guid') ? 'm.associated_message_guid' : 'NULL';
+      this.assocEmojiCol = mcols.has('associated_message_emoji') ? 'm.associated_message_emoji' : 'NULL';
       const jcols = new Set((this.db.prepare('PRAGMA table_info(chat_message_join)').all() as Array<{ name: string }>).map((c) => c.name));
       this.dateCol = jcols.has('message_date') ? 'cmj.message_date' : 'm.date';
       this.attStmt = this.db.prepare(
@@ -377,7 +405,7 @@ export class IMessageConnector extends BaseConnector {
   }
 
   private get selectSql(): string {
-    return SELECT_ROWS(this.retractedCol, this.filteredCol, this.assocCol);
+    return SELECT_ROWS(this.retractedCol, this.filteredCol, this.assocCol, this.assocGuidCol, this.assocEmojiCol);
   }
 
   private appleToMs(d: number): number {
@@ -565,7 +593,8 @@ export class IMessageConnector extends BaseConnector {
       const rows = this.db
         .prepare(
           `SELECT m.ROWID AS rowid, m.guid, m.text, m.attributedBody, m.date, m.is_from_me, m.cache_has_attachments, m.item_type,
-                  m.is_delivered, m.is_read, m.date_read, m.error, 1 AS date_retracted, ${this.assocCol} AS associated_message_type, h.id AS handle, c.chat_identifier, c.guid AS chat_guid, c.display_name,
+                  m.is_delivered, m.is_read, m.date_read, m.error, 1 AS date_retracted, ${this.assocCol} AS associated_message_type,
+                  ${this.assocGuidCol} AS associated_message_guid, ${this.assocEmojiCol} AS associated_message_emoji, h.id AS handle, c.chat_identifier, c.guid AS chat_guid, c.display_name,
                   ${this.filteredCol} AS is_filtered
              FROM chat_recoverable_message_join j JOIN message m ON m.ROWID = j.message_id JOIN chat c ON c.ROWID = j.chat_id
              LEFT JOIN handle h ON h.ROWID = m.handle_id`,
@@ -617,7 +646,9 @@ export class IMessageConnector extends BaseConnector {
     // yükleniyordu → sohbetlerde eski mesajlar eksik görünüyordu. Çok büyük arşivde en yeni FULL_LIMIT, kalan sohbetler son 20'yle.
     // Yeniden eskiye yazılır: kullanıcının bakacağı son sohbetler ilk dilimlerde gelir.
     const rows = this.db.prepare(`${this.selectSql} ORDER BY ${this.dateCol} DESC LIMIT ?`).all(IMessageConnector.FULL_LIMIT) as Row[];
-    await this.ingestChunked(rows);
+    // tapback'ler hedef mesajları yazıldıktan SONRA (eskiden yeniye: ekle → geri al sırası korunur)
+    await this.ingestChunked(rows.filter((r) => !isAssociatedReaction(r.associated_message_type)));
+    await this.ingestChunked(rows.filter((r) => isAssociatedReaction(r.associated_message_type)).reverse());
     const oldest = rows[rows.length - 1]?.date ?? 0;
     // FULL_LIMIT'in dışında kalan sohbetler (eski, filtrelenmiş SMS'ler, bilinmeyen gönderenler…) de son 20 mesajıyla gelsin —
     // klasör bilgisi (is_filtered) ancak mesajla birlikte öğreniliyor
@@ -796,7 +827,16 @@ export class IMessageConnector extends BaseConnector {
 
   private ingest(r: Row, live: boolean): void {
     if (r.item_type !== 0) return; // grup olayları, isim değişiklikleri vb.
-    if (isAssociatedReaction(r.associated_message_type)) return; // tapback: ayrı mesaj değil
+    if (isAssociatedReaction(r.associated_message_type)) {
+      // tapback: ayrı mesaj değil — hedef mesaja tepki (❤️ 👍 😂 …); canlı gelen karşı taraf tepkisinde önizleme "… tepki verdi"
+      const tb = tapbackOf(r);
+      if (!tb) return;
+      const fromMe = r.is_from_me === 1;
+      const senderName = fromMe ? 'Ben' : this.nameOf(r.handle, null, r.chat_identifier);
+      this.applyReaction(r.chat_guid, tb.target, { emoji: tb.emoji, senderId: fromMe ? 'me' : (r.handle ?? 'unknown'), senderName, fromMe }, tb.remove);
+      if (live && !fromMe && !tb.remove) this.reactionPreview(r.chat_guid, `${tb.emoji} ${senderName.split(/\s+/)[0]} mesajına tepki verdi`);
+      return;
+    }
     // U+FFFC: ekin metindeki yer tutucusu
     let text = (r.text ?? '').replace(/\uFFFC/g, '').trim() || decodeAttributedBody(r.attributedBody);
     // Mesajlar satırı ek dosyası inmeden yazar: canlı mesajın eki henüz yoksa ROWID beklemeye alınır, poll yeniden bakar

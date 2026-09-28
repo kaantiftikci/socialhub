@@ -310,6 +310,18 @@ Dil: arayüz ve yorumlar Türkçe.
   Yahoo hesabının token'ını silip tarayıcı yoluna geçirir (kopya yok). Uyarı `panelOnly` (aynı şifreyle yeniden denemez → kilit riski).
 - **Sayaçlar** (App.tsx `baseList`): başlıktaki "N yeni" ve Okunmamış/Bekleyen sayıları listelenen kümeden (arşiv/iMessage klasörü/
   e-posta klasörü/pazaryeri sekmesi dahil); eskiden hep gelen kutusundan hesaplanıyordu.
+- **Tepkiler mesaj gibi görünmez (29.09)**: karşı taraf bir mesaja tepki verince önizleme "❤️ Ayşe mesajına tepki verdi" (`base.reactionPreview`
+  → `store.setReactionPreview`, sohbette `last_reaction` = 1: sıra/okunmamış/lastFromMe değişmez, listede tik yok, italik `.prev.rx`, "Bekleyen"e
+  düşmez); sonraki gerçek mesaj ezer. Köprü (tüm tarayıcı kanalları): turda yeni gelen mesaj yokken var olan mesaja yeni tepki geldiyse ya da
+  platform önizlemesi tepkiyi anlatıyorsa (`REACTION_PREVIEW_RE`) okunmamış tur başındaki değerine döner ve yeni etkinliğe dek platformun
+  "okunmamış"ı yok sayılır (`reactionOnly`; IG read_state, LinkedIn read:false, Messenger kalın satır). Strateji bilirse `Thread.reactionPreview`.
+  Instagram: `igReactionPreview` TÜM öğelerdeki tepkilere bakar (eskiden yalnız son mesaja → eski mesaj beğenilince sohbet "1 okunmamış" +
+  son mesaj metniyle üste çıkıyordu), action_log "…beğendi" satırı; zaman birimi `anyMs`. iMessage tapback (2000-2007, 3000+ geri alma) hedef
+  mesaja tepki (`tapbackOf`, associated_message_guid "p:0/…"/"bp:…", 2006 özel emoji); açılışta tapback'ler normal mesajlardan SONRA yazılır.
+  Messenger satırındaki sayılı tepki rozeti ("1 tepki; …") çip; X yerel DB okunmamış yalnız `entry_type='message'`, en yeni kayıt tepkiyse
+  önizleme. WhatsApp/Telegram canlı tepkide de aynı önizleme. Test: reaction-preview.test.ts.
+- **Listede tik (29.09)**: `Chat.lastStatus` (store alt sorgusu) → son mesaj benimse satırda balondaki tik (`statusIcon`; e-posta/pazaryeri ve
+  tepki önizlemesinde yok); alındı gelince connector sohbeti de yayınlar (`outgoingRead`, Telegram `emitRead`; arayüz `messages.read`'de yerelde).
 - Sistem mesajı baş emojileri (🔒 🚫 ⏳ 🗑 ⚠; `SYSTEM_LEAD`) balonda da ikon (`bubbleText`). Kendi (mor) balonumda seçim beyaz zemin
   (`.grp.me .bub ::selection`). SyncBar yüzdesi çubukla aynı hizada, dolan ucun üstünde.
 - **Web bildirimleri**: tarayıcı izni yalnız kullanıcı tıklamasıyla istenebilir (açılışta istenen sessizce engelleniyordu → sağ üstte

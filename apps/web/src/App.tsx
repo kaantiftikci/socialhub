@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, connectEvents } from './api';
 import { PLATFORMS, ORDER_Q_PLATFORMS, isOrderPage, questionOrderRef, shopKind, shopPending, shopTabOf, type Account, type Chat, type ChatFlags, type CoreEvent, type Message, type Platform, type ShopTab, DEFAULT_TAGS } from './types';
 import { Avatar, Chip, Icon, IconText, stripLeadIcon, Logo, Resizer, SyncBar, Tag, ago, fmtTime, loadPaneSizes, useClosing } from './ui';
-import { Conversation, REACT_TEXT, refreshScheduled, startScheduledSends } from './Conversation';
+import { Conversation, REACT_TEXT, refreshScheduled, startScheduledSends, statusIcon } from './Conversation';
 import { ConnectModal } from './Connect';
 import { Focus } from './Focus';
 import { onThemeChange, resolvedTheme, setThemePref } from './theme';
@@ -1910,7 +1910,7 @@ const ARCHIVE_TABS = new Set<Platform>(['telegram', 'whatsapp']);
 export function isWaiting(c: Chat): boolean {
   // son olay yalnızca bir tepkiyse ("😂 Mert bir mesajı beğendi") yanıt beklemiyor
   // sipariş sayfaları (Trendyol/HB/n11/Shopier) yanıtlanamaz: yanıt bekleyen sayılmaz
-  return c.unread > 0 && Date.now() - c.lastMessageAt > 20 * 60_000 && !REACT_TEXT.test(c.lastPreview ?? '') && !isOrderPage(c);
+  return c.unread > 0 && Date.now() - c.lastMessageAt > 20 * 60_000 && !c.lastReaction && !REACT_TEXT.test(c.lastPreview ?? '') && !isOrderPage(c);
 }
 
 /** Akıllı sıralama: yanıt bekleyenler ve etiketli müşteriler önce. */
@@ -2004,7 +2004,11 @@ function ChatRow({
               <span className="tdots"><i /><i /><i /></span>
             </span>
           ) : (
-            <span className="prev">{(isMail ? mailPreview : chat.lastPreview) ? <IconText text={(isMail ? mailPreview : chat.lastPreview)!} size={12} /> : '…'}</span>
+            <span className={`prev ${chat.lastReaction ? 'rx' : ''}`}>
+              {/* son mesaj benimse balondaki gibi tik: gönderildi / iletildi / görüldü (tepki önizlemesinde, e-postada ve pazaryerinde yok) */}
+              {chat.lastFromMe && !chat.lastReaction && chat.lastStatus && !isMail && PLATFORMS[chat.platform].category !== 'shop' && statusIcon(chat.lastStatus)}
+              {(isMail ? mailPreview : chat.lastPreview) ? <IconText text={(isMail ? mailPreview : chat.lastPreview)!} size={12} /> : '…'}
+            </span>
           )}
           {chat.unread > 0 && <span className="badge" aria-label={`${chat.unread} okunmamış`}>{fmtBadge(chat)}</span>}
         </span>

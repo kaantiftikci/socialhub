@@ -78,10 +78,18 @@ function rememberCursor(threadId: string, cursor: string, oldestTs: number): voi
 }
 
 /** Okunma kaydı/tepki satırı ("Bir mesajı beğendi"): sohbette gizli (hide_in_thread), mesaj değildir */
-const isLogItem = (it: J) => it.item_type === 'action_log' || Number(it.hide_in_thread ?? 0) === 1;
+const isLogItem = (it: J) => it.item_type === 'action_log' || it.item_type === 'reaction' || it.item_type === 'reaction_log' || Number(it.hide_in_thread ?? 0) === 1;
 
 /** Instagram zaman damgaları µs; ms'ye çevir */
 const tsMs = (t: unknown) => Math.floor(Number(t ?? 0) / 1000);
+/** Birimi belirsiz zaman damgası (tepki kayıtlarında µs, ms ya da sn görülebiliyor) → ms */
+const anyMs = (t: unknown): number => {
+  const n = Number(t ?? 0);
+  if (!n) return 0;
+  if (n > 1e15) return Math.floor(n / 1000);
+  if (n > 1e12) return n;
+  return n * 1000;
+};
 
 /** Sohbet listesi/mesaj yanıtındaki kullanıcıları ad ve fotoğraf haritasına al */
 function rememberUsers(users: J[] | undefined) {
@@ -303,7 +311,7 @@ function igReactions(it: J): Reaction[] | undefined {
   }
   return out.length ? out : undefined;
 }
-/** Öğeye karşı taraftan gelen en yeni tepki (µs zaman damgası ile) — önizleme "X bir mesajı beğendi" için */
+/** Öğeye karşı taraftan gelen en yeni tepki (ms) — önizleme "Ayşe mesajına tepki verdi" için */
 function latestOtherReaction(it: J): { uid: string; ts: number; emoji: string } | undefined {
   const r: J | undefined = it?.reactions;
   if (!r) return undefined;
@@ -311,11 +319,34 @@ function latestOtherReaction(it: J): { uid: string; ts: number; emoji: string } 
   const all: J[] = [...((r.likes ?? []) as J[]).map((x) => ({ ...x, emoji: '❤️' }) as J), ...((r.emojis ?? []) as J[])];
   for (const l of all) {
     const uid = String(l.sender_id ?? '');
-    const ts = Number(l.timestamp ?? 0);
+    const ts = anyMs(l.timestamp);
     if (!uid || uid === viewerId || !ts) continue;
     if (!best || ts > best.ts) best = { uid, ts, emoji: String(l.emoji ?? '❤️') };
   }
   return best;
+}
+
+/**
+ * Sohbetin en yeni etkinliği bir TEPKİ mi (karşı taraf herhangi bir mesajı — yalnız sonuncuyu değil — beğendi)? Öyleyse
+ * önizleme metni. Eskiden yalnız son mesajın tepkisine bakılıyordu: eski bir mesaj beğenilince sohbet "1 okunmamış" ile
+ * üste çıkıp son mesajın metnini gösteriyor, karşıdan mesaj gelmiş gibi görünüyordu.
+ */
+export function igReactionPreview(items: J[], lastActivityMs: number): string | undefined {
+  const visible = items.filter((i) => !isLogItem(i));
+  const newestItemMs = Math.max(0, ...visible.map((i) => anyMs(i.timestamp)));
+  let rx: { uid: string; ts: number; emoji: string } | undefined;
+  for (const it of visible) {
+    const r = latestOtherReaction(it);
+    if (r && (!rx || r.ts > rx.ts)) rx = r;
+  }
+  if (rx && rx.ts > newestItemMs) return `${rx.emoji} ${(userNames.get(rx.uid) ?? 'Biri').split(' ')[0]} mesajına tepki verdi`;
+  // tepki kaydı satırı (action_log "… mesajınızı beğendi") en yeni öğe
+  const log = items.find((i) => isLogItem(i) && anyMs(i.timestamp) > newestItemMs);
+  const desc = String(log?.action_log?.description ?? '').trim();
+  if (log && desc && /beğen|tepki|like|react|❤/i.test(desc)) return desc;
+  // öğeler tepkiyi taşımıyor ama sohbet etkinliği son mesajdan belirgin yeni ve son mesaj bendense: büyük olasılıkla tepki
+  void lastActivityMs;
+  return undefined;
 }
 
 /** inbox yanıtı → sohbet listesi */
@@ -328,6 +359,7 @@ function inboxThreads(data: J): Thread[] {
     const items: J[] = Array.isArray(t.items) ? t.items : [];
     // önizleme: son GÖRÜNÜR mesaj (son öğe "Bir mesajı beğendi" tepki kaydıysa önizleme boş kalıyordu)
     const last = items.find((i) => !isLogItem(i)) ?? t.last_permanent_item ?? items[0];
+    const reactionPreview = igReactionPreview(items, anyMs(t.last_activity_at));
     const participants = (t.users ?? []).map((u: J) => ({ id: String(u.pk), name: u.full_name || u.username, handle: u.username ? '@' + u.username : undefined, avatarUrl: u.profile_pic_url }));
     const solo = !t.is_group && t.users?.[0];
     // Okunmamış: platformun sayısı varsa o; yoksa viewer'ın son gördüğü andan (last_seen_at) sonra gelen,
@@ -336,7 +368,8 @@ function inboxThreads(data: J): Thread[] {
     if (Number(t.read_state ?? 0) > 0) {
       const seenTs = Number(t.last_seen_at?.[viewerId]?.timestamp ?? 0);
       const counted = items.filter((i) => String(i.user_id) !== viewerId && !i.is_sent_by_viewer && i.item_type !== 'action_log' && (!seenTs || Number(i.timestamp ?? 0) > seenTs)).length;
-      unread = typeof t.unseen_count === 'number' && t.unseen_count > 0 ? t.unseen_count : Math.max(1, counted);
+      // en yeni etkinlik tepki ve karşıdan okunmamış mesaj yoksa sayaç 0 (IG tepkiyi de "görülmedi" sayıyor)
+      unread = typeof t.unseen_count === 'number' && t.unseen_count > 0 ? t.unseen_count : reactionPreview ? counted : Math.max(1, counted);
     }
     // karşı tarafların son gördüğü an (görüldü bilgisi): viewer dışındaki last_seen_at'lerin en büyüğü (µs → ms)
     const seenOthers = Math.max(0, ...Object.entries((t.last_seen_at ?? {}) as Record<string, { timestamp?: string | number }>).filter(([uid]) => uid !== viewerId).map(([, v]) => Number(v?.timestamp ?? 0)));
@@ -350,12 +383,9 @@ function inboxThreads(data: J): Thread[] {
       name: t.thread_title || (t.users ?? []).map((u: J) => u.full_name || u.username).join(', ') || 'Sohbet',
       kind: t.is_group ? 'group' : 'direct',
       lastTs: tsMs(t.last_activity_at ?? last?.timestamp),
-      // karşı taraf benim mesajımı beğendiyse: mesaj metni değil "X bir mesajı beğendi" (mesaj benden gelmiş gibi görünmesin)
-      preview: (() => {
-        const rx = last ? latestOtherReaction(last) : undefined;
-        if (last && rx && rx.ts > Number(last.timestamp ?? 0)) return `${rx.emoji} ${(userNames.get(rx.uid) ?? 'Biri').split(' ')[0]} bir mesajı beğendi`;
-        return last ? itemText(last) || (isLogItem(last) ? String(last.action_log?.description ?? '') : '') : '';
-      })(),
+      // karşı taraf bir mesajımı beğendiyse: önizleme "Ayşe mesajına tepki verdi" (mesaj metni değil; köprü tik/okunmamış göstermez)
+      reactionPreview,
+      preview: last ? itemText(last) || (isLogItem(last) ? String(last.action_log?.description ?? '') : '') : '',
       unread,
       // grup: özel grup fotoğrafı varsa o, yoksa ilk üyenin fotoğrafı
       avatarUrl: t.is_group ? (t.thread_image?.url ?? t.thread_image_url ?? t.users?.[0]?.profile_pic_url) : t.users?.[0]?.profile_pic_url,

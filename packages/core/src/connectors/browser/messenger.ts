@@ -209,6 +209,8 @@ interface RawRow {
   me: boolean | undefined;
   avatar?: string;
   attachments: Attachment[];
+  /** Balonun altındaki tepki rozetindeki emojiler ("1 tepki; …" / "1 reaction; …" etiketli öğe) */
+  reactions?: string[];
 }
 
 function readRows(page: Page): Promise<RawRow[]> {
@@ -276,11 +278,22 @@ function readRows(page: Page): Promise<RawRow[]> {
         const src = i.getAttribute('src') ?? '';
         return /^https?:\/\//.test(src) && !/emoji/.test(src) && r.width > 0 && r.width <= 40 && r.width >= 20 && i.getAttribute('alt') && !/gördü|seen/i.test(i.getAttribute('alt') ?? '');
       });
+      // tepki rozeti: sayılı etiket ("1 tepki; …", "2 reactions; …"); üzerine gelince çıkan "Tepki ver" düğmesi sayısızdır
+      const reactions: string[] = [];
+      for (const pill of Array.from(el.querySelectorAll<HTMLElement>('[aria-label]'))) {
+        if (!/^\s*\d+\s*(tepki|reaction)/i.test(pill.getAttribute('aria-label') ?? '')) continue;
+        for (const img of Array.from(pill.querySelectorAll('img[alt]'))) {
+          const alt = (img.getAttribute('alt') ?? '').trim();
+          if (alt && /\p{Extended_Pictographic}/u.test(alt) && alt.length <= 8 && !reactions.includes(alt)) reactions.push(alt);
+        }
+        const txt = (pill.textContent ?? '').match(/\p{Extended_Pictographic}(\uFE0F|\u200D\p{Extended_Pictographic})*/gu) ?? [];
+        for (const e of txt) if (!reactions.includes(e)) reactions.push(e);
+      }
       const r = el.getBoundingClientRect();
       const isDateBreak = !aria && !!el.querySelector('[data-scope="date_break"]');
       // geometri yedeği: sağa yaslı balon = ben
       const me = r.width > 0 ? r.left + r.width > mainRect.left + mainRect.width * 0.6 : undefined;
-      out.push({ aria, text, isDateBreak, me, avatar: avatar?.getAttribute('src') ?? undefined, attachments, seen: !!document.querySelector('[role="main"] [aria-label^="Görüldü"], [role="main"] [aria-label^="Seen"], [role="main"] img[alt^="Görüldü"], [role="main"] img[alt^="Seen"]') });
+      out.push({ aria, text, isDateBreak, me, reactions, avatar: avatar?.getAttribute('src') ?? undefined, attachments, seen: !!document.querySelector('[role="main"] [aria-label^="Görüldü"], [role="main"] [aria-label^="Seen"], [role="main"] img[alt^="Görüldü"], [role="main"] img[alt^="Seen"]') });
     }
     return out;
   }, ROW);
@@ -325,6 +338,10 @@ function toMessages(threadId: string, rows: RawRow[]): Msg[] {
       attachments: r.attachments.length ? r.attachments : undefined,
       // sohbetin altında "Görüldü" işareti varsa benim tüm mesajlarım görülmüş demektir
       status: fromMe ? (rows.some((x) => x.seen) ? 'read' : 'sent') : 'delivered',
+      // birebir sohbette rozetteki tepki karşı taraftandır (benim mesajım) ya da benden (onun mesajı); kim olduğu DOM'da yok
+      reactions: r.reactions?.length
+        ? r.reactions.map((emoji) => (fromMe ? { emoji, senderId: threadId, senderName: 'Karşı taraf', fromMe: false } : { emoji, senderId: 'me', senderName: 'Ben', fromMe: true }))
+        : undefined,
     });
   }
   if (unparsedSample && !dateWarned) {

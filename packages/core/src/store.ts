@@ -139,6 +139,8 @@ export class Store {
     // takip hatırlatıcısı {at, since, due}
     if (!ccols.has('followup')) this.db.exec('ALTER TABLE chats ADD COLUMN followup TEXT');
     if (!ccols.has('read_upto')) this.db.exec('ALTER TABLE chats ADD COLUMN read_upto INTEGER NOT NULL DEFAULT 0');
+    // önizleme bir tepkiyi anlatıyor ("❤️ Ayşe mesajına tepki verdi"): mesaj değil → listede tik yok, okunmamış sayılmaz
+    if (!ccols.has('last_reaction')) this.db.exec('ALTER TABLE chats ADD COLUMN last_reaction INTEGER NOT NULL DEFAULT 0');
     // gönderen bazlı güncellemeler (ad/fotoğraf/lid→numara) tam tablo taraması yapmasın
     this.db.exec('CREATE INDEX IF NOT EXISTS messages_sender ON messages(sender_id)');
     this.db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
@@ -299,6 +301,7 @@ export class Store {
            unread = CASE WHEN MAX(chats.last_message_at, excluded.last_message_at) <= chats.read_upto THEN 0 ELSE excluded.unread END,
            last_message_at = MAX(chats.last_message_at, excluded.last_message_at),
            last_preview = CASE WHEN excluded.last_message_at >= chats.last_message_at THEN excluded.last_preview ELSE chats.last_preview END,
+           last_reaction = CASE WHEN excluded.last_message_at >= chats.last_message_at AND excluded.last_preview <> chats.last_preview THEN 0 ELSE chats.last_reaction END,
            avatar_url = COALESCE(excluded.avatar_url, chats.avatar_url),
            handle = COALESCE(excluded.handle, chats.handle),
            link = COALESCE(excluded.link, chats.link),
@@ -376,9 +379,14 @@ export class Store {
    */
   getChatLite(id: string): Chat | undefined {
     const r = this.stmt(
-      `SELECT id, account_id, platform, remote_id, name, kind, unread, last_message_at, last_preview, last_from_me, read_upto, avatar_url, tags, handle, link, meta, flags, followup, ${LAST_STATUS} FROM chats WHERE id = ?`,
+      `SELECT id, account_id, platform, remote_id, name, kind, unread, last_message_at, last_preview, last_from_me, last_reaction, read_upto, avatar_url, tags, handle, link, meta, flags, followup, ${LAST_STATUS} FROM chats WHERE id = ?`,
     ).get(id);
     return r ? rowToChat(r) : undefined;
+  }
+
+  /** Önizleme bir tepkiyi anlatır (mesaj değil): sıra, okunmamış ve "son mesaj benden" değişmez; sonraki gerçek mesaj ezer */
+  setReactionPreview(id: string, text: string): boolean {
+    return this.stmt('UPDATE chats SET last_preview = ?, last_reaction = 1 WHERE id = ? AND (last_preview <> ? OR last_reaction = 0)').run(text, id, text).changes > 0;
   }
 
   /** Sohbet var mı (JSON sütunları çözülmeden; sık çağrılan yollar için) */
@@ -476,12 +484,13 @@ export class Store {
       const last = Number(chat.last_message_at);
       const isNewer = m.ts >= last;
       this
-        .stmt('UPDATE chats SET last_message_at = ?, last_preview = ?, unread = ?, last_from_me = ? WHERE id = ?')
+        .stmt('UPDATE chats SET last_message_at = ?, last_preview = ?, unread = ?, last_from_me = ?, last_reaction = CASE WHEN ? THEN 0 ELSE last_reaction END WHERE id = ?')
         .run(
           Math.max(last, m.ts),
           isNewer ? preview : chat.last_preview,
           opts.bumpUnread && inserted && !m.fromMe && m.ts > Number(chat.read_upto ?? 0) ? Number(chat.unread) + 1 : Number(chat.unread),
           isNewer ? (m.fromMe ? 1 : 0) : Number(chat.last_from_me ?? 0) === 1 ? 1 : 0,
+          isNewer ? 1 : 0,
           m.chatId,
         );
     }
@@ -896,6 +905,7 @@ function rowToChatBase(x: Record<string, unknown>): Chat {
     lastMessageAt: Number(x.last_message_at),
     lastPreview: String(x.last_preview),
     lastFromMe: Number(x.last_from_me ?? 0) === 1,
+    lastReaction: Number(x.last_reaction ?? 0) === 1 ? true : undefined,
     readUpto: Number(x.read_upto ?? 0) || undefined,
     avatarUrl: (x.avatar_url as string | null) ?? undefined,
     tags: safeJson<string[]>(x.tags as string, []),

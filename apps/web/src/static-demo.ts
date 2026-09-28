@@ -218,7 +218,7 @@ function seedAccount(acc: Account, now = Date.now()): void {
       if (REACT_PLATFORMS.has(acc.platform) && k % 2 === 0) {
         const who = s.kind === 'direct' ? s.name.split(' ')[0] : ([...members][0] ?? s.name);
         const emoji = REACT_EMOJI[k % REACT_EMOJI.length];
-        const text = `${emoji} ${who} bir mesajı beğendi`;
+        const text = `${emoji} ${who} mesajına tepki verdi`;
         // sohbette ayrı bir satır değil: benim son mesajıma (yoksa son mesaja) gerçek tepki; liste önizlemesi olay metnini gösterir
         const mine = [...messages].reverse().find((m) => m.chatId === id && m.fromMe) ?? [...messages].reverse().find((m) => m.chatId === id);
         if (mine) mine.reactions = [...(mine.reactions ?? []), { emoji, senderId: s.kind === 'direct' ? s.remoteId : slug(who), senderName: who, fromMe: false }];
@@ -236,6 +236,9 @@ function seedAccount(acc: Account, now = Date.now()): void {
         lastMessageAt: isReactionText(lastText) ? lastAt + 90_000 : lastAt,
         lastPreview: (s.kind === 'direct' || isReactionText(lastText) ? lastText : last?.[0] ? `Sen: ${lastText}` : lastText).replace(/\s+/g, ' ').trim(),
         lastFromMe: last?.[0] ?? false,
+        // son mesaj bendense listede tik: çoğu görüldü, bazıları iletildi/gönderildi (gerçek kanallardaki gibi)
+        lastStatus: last?.[0] ? (k % 5 === 3 ? 'delivered' : k % 7 === 5 ? 'sent' : 'read') : undefined,
+        lastReaction: isReactionText(lastText) || undefined,
         tags: s.tags,
         handle: s.handle,
         avatarUrl: demoAsset(`avatars/${s.avatar}`),
@@ -270,7 +273,7 @@ function chatOf(id: string): Chat {
 }
 
 function touch(chat: Chat, text: string, fromMe: boolean, ts: number): Chat {
-  const next = { ...chat, lastPreview: text, lastFromMe: fromMe, lastMessageAt: ts };
+  const next: Chat = { ...chat, lastPreview: text, lastFromMe: fromMe, lastMessageAt: ts, lastStatus: fromMe ? 'sent' : 'delivered', lastReaction: undefined };
   chats = chats.map((c) => (c.id === chat.id ? next : c));
   emit({ type: 'chat.upsert', chat: next });
   return next;
@@ -543,7 +546,11 @@ export const staticApi = {
     emit({ type: 'message.upsert', message, chat: next });
     window.setTimeout(() => {
       message.status = 'read';
-      emit({ type: 'message.upsert', message: { ...message }, chat: next });
+      // listedeki tik de görüldüye dönsün (son mesaj hâlâ buysa)
+      const cur = chats.find((c) => c.id === chatId);
+      const upd = cur && cur.lastMessageAt === ts ? { ...cur, lastStatus: 'read' as const } : cur ?? next;
+      if (cur && upd !== cur) chats = chats.map((c) => (c.id === chatId ? upd : c));
+      emit({ type: 'message.upsert', message: { ...message }, chat: upd });
     }, 1200);
     return { remoteId };
   },

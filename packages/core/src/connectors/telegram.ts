@@ -404,8 +404,15 @@ export class TelegramConnector extends BaseConnector {
     if (u instanceof Api.UpdateMessageReactions) {
       const rid = getPeerId(u.peer);
       const chat = this.store.getChat(`${this.account.id}/${rid}`);
+      const before = chat ? this.store.getMessage(`${chat.id}#${u.msgId}`)?.reactions ?? [] : [];
       const m = chat && this.store.setReactions(`${chat.id}#${u.msgId}`, tgReactions(u.reactions, chat.kind === 'direct' ? chat.name : ''));
-      if (m && chat) bus.emit({ type: 'message.upsert', message: m, chat });
+      if (m && chat) {
+        bus.emit({ type: 'message.upsert', message: m, chat });
+        // karşı taraf mesajıma yeni tepki verdi: önizleme "❤️ Ayşe mesajına tepki verdi" (mesaj gelmiş gibi görünmesin)
+        const had = new Set(before.map((r) => `${r.senderId}|${r.emoji}`));
+        const fresh = m.fromMe ? (m.reactions ?? []).find((r) => !r.fromMe && !had.has(`${r.senderId}|${r.emoji}`)) : undefined;
+        if (fresh) this.reactionPreview(rid, `${fresh.emoji} ${(fresh.senderName || chat.name || 'Biri').split(/\s+/)[0]} mesajına tepki verdi`);
+      }
       return;
     }
     // Karşı taraf yazıyor (birebir / grup / kanal)

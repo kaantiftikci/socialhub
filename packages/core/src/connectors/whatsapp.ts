@@ -1979,6 +1979,9 @@ export class WhatsAppConnector extends BaseConnector {
       const senderJid = m.key.fromMe ? 'me' : this.canon(part ?? jid);
       const name = m.key.fromMe ? 'Ben' : this.nameOf(senderJid) || m.pushName || senderJid.split('@')[0];
       this.applyReaction(jid, reaction.key.id, { emoji: reaction.text ?? '', senderId: senderJid, senderName: name, fromMe: !!m.key.fromMe }, !reaction.text);
+      // canlı: karşı taraf MESAJIMA tepki verdi → önizleme "❤️ Ayşe mesajına tepki verdi" (WhatsApp listesindeki gibi; mesaj değil)
+      if (live && !m.key.fromMe && reaction.text && this.store.getMessage(`${chatIdOf(this.account.id, jid)}#${reaction.key.id}`)?.fromMe)
+        this.reactionPreview(jid, `${reaction.text} ${name.split(/\s+/)[0]} mesajına tepki verdi`);
       return;
     }
     const content = unwrap(m.message);

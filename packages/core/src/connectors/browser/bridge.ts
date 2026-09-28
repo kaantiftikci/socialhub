@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import type { APIRequestContext, BrowserContext, CDPSession, Page } from 'playwright';
 import { BaseConnector, type ComposeDraft, type LoginInput, type SendOptions, type StartOptions } from '../base.js';
-import { chatId } from '../../model.js';
+import { chatId, messageId } from '../../model.js';
 import { persistSessionCookies } from './outlook.js';
 import { bus } from '../../bus.js';
 import { sessionDir } from '../../config.js';
@@ -39,7 +39,18 @@ export interface Thread {
   aliases?: string[];
   /** Platforma özel veri; e-postada folder: 'inbox' | 'sent' | 'junk' */
   meta?: Record<string, unknown>;
+  /**
+   * Sohbetteki en yeni etkinlik bir mesaj değil TEPKİ (karşı taraf bir mesajı beğendi): önizleme bu metin olur, mesaj
+   * gelmiş gibi görünmez (okunmamış sayılmaz, tik gösterilmez). Strateji platform verisinden bildiğinde doldurur.
+   */
+  reactionPreview?: string;
 }
+
+/**
+ * Platformun kendi önizlemesi tepkiyi anlatıyor (Messenger "Ayşe mesajına ❤ ile tepki verdi", LinkedIn "reacted", IG
+ * "bir mesajı beğendi"): o turda yeni gelen mesaj yoksa sohbet okunmamış sayılmaz.
+ */
+export const REACTION_PREVIEW_RE = /tepki verdi|tepki gösterdi|reacted\b|bir mesaj[ıi]n?[ıi]? beğendi|mesaj[ıi]n[ıi] beğendi|liked a message|loved a message|mesajınızı beğendi/i;
 
 export interface Msg {
   id: string;
@@ -260,6 +271,14 @@ export class BrowserConnector extends BaseConnector {
   /** unloadWhenIdle: yoklamalar arasında tarayıcı kapalı (bellek); bir sonraki yoklama/işlem yeniden açar */
   private idleClosed = false;
   private known = new Map<string, number>(); // threadId → son görülen ts
+  /** Bu turda mesajına yeni tepki gelen sohbetler (önizleme metni) ve yeni gelen mesajı olan sohbetler */
+  private turnReacted = new Map<string, string>();
+  private turnIncoming = new Set<string>();
+  /**
+   * Son etkinliği tepki olan sohbetler → o etkinliğin zamanı: platform bunu "okunmamış" saymaya devam etse de (IG read_state,
+   * LinkedIn read:false, Messenger kalın satır) yeni etkinlik gelene dek Mivelo'da okunmamış artmaz.
+   */
+  private reactionOnly = new Map<string, number>();
   /** Mesajları henüz alınmamış önemli sohbet sayısı (ilk eşitleme sürüyor): sıradaki tur backfillMs ile öne çekilir */
   private backlogLeft = 0;
 
@@ -1218,6 +1237,8 @@ export class BrowserConnector extends BaseConnector {
       if (first) this.syncProgress(70, `${threads.length} sohbet, mesajlar alınıyor`);
       const changed: Thread[] = [];
       const retryRead: string[] = [];
+      /** tur başındaki okunmamış (tepki yalnız etkinlikse geri dönülür) */
+      const prevUnread = new Map<string, number>();
       for (const t of threads) {
         // lastTs=0: strateji zaman bilgisi vermiyor (DOM okuyan Messenger) → depodaki değer korunur
         // Mivelo'da okunan sohbeti platformun eski 'okunmamış' değeri geri açmasın: yalnızca yeni etkinlikte aktar
@@ -1227,7 +1248,12 @@ export class BrowserConnector extends BaseConnector {
         const fresh = first || !ex || t.lastTs > ex.lastMessageAt || !ex.lastPreview;
         // okunmamış platformun değeri (telefonda okunan burada da okunur); Mivelo'da okunan sohbeti depo kalıcı olarak korur
         // (chats.read_upto: yeni mesaj gelmedikçe platform geri açamaz). Platform hâlâ 'okunmamış' diyorsa işaretleme 2 kez yinelenir.
-        const unread = t.unread;
+        // son etkinliği tepki olan sohbet: yeni etkinlik gelene dek platformun "okunmamış"ı yok sayılır
+        const rxAt = this.reactionOnly.get(t.id);
+        if (rxAt !== undefined && t.lastTs > rxAt) this.reactionOnly.delete(t.id);
+        const quiet = this.reactionOnly.has(t.id) || !!t.reactionPreview;
+        const unread = quiet ? Math.min(t.unread, ex?.unread ?? 0) : t.unread;
+        prevUnread.set(t.id, ex?.unread ?? 0);
         const lr = this.localRead.get(t.id);
         if (lr) {
           if (t.lastTs > lr.lastTs + 1000 || t.unread === 0) this.localRead.delete(t.id);
@@ -1236,7 +1262,11 @@ export class BrowserConnector extends BaseConnector {
             retryRead.push(t.id);
           }
         }
-        this.upsertChat({ remoteId: t.id, name: t.name, kind: t.kind, unread, lastMessageAt: t.lastTs || undefined, lastPreview: fresh ? t.preview || undefined : undefined, avatarUrl: t.avatarUrl, handle: t.handle, link: t.link, participants: t.participants, meta: this.folderMeta(t.id, t.meta) });
+        this.upsertChat({ remoteId: t.id, name: t.name, kind: t.kind, unread, lastMessageAt: t.lastTs || undefined, lastPreview: fresh && !t.reactionPreview ? t.preview || undefined : undefined, avatarUrl: t.avatarUrl, handle: t.handle, link: t.link, participants: t.participants, meta: this.folderMeta(t.id, t.meta) });
+        if (t.reactionPreview && fresh) {
+          this.reactionPreview(t.id, t.reactionPreview);
+          this.reactionOnly.set(t.id, t.lastTs);
+        }
         if (t.readByOthersUpTo) this.outgoingRead(t.id, t.readByOthersUpTo);
         // eski kimlikli kopya (hedef sohbet yukarıda yazıldı)
         for (const a of t.aliases ?? []) {
@@ -1274,8 +1304,11 @@ export class BrowserConnector extends BaseConnector {
           batch.slice(i, i + width).map(async (t) => {
             try {
               const msgs = await withTimeout(this.strategy.messages(page, cookies, t.id, first ? 25 : 15), 60_000, 'mesajlar');
+              this.turnReacted.delete(t.id);
+              this.turnIncoming.delete(t.id);
               for (const m of msgs) this.ingest(t.id, m, !first && !this.hasMessage(t.id, m.id));
               this.known.set(t.id, t.lastTs);
+              if (!first) this.settleReaction(t, prevUnread.get(t.id) ?? 0);
             } catch (e) {
               failed.push(t.id);
               const em = (e as Error).message;
@@ -1339,8 +1372,36 @@ export class BrowserConnector extends BaseConnector {
     );
   }
 
+  /**
+   * Turda yeni gelen mesaj yoksa ve bir mesaja yeni tepki geldiyse (ya da platform önizlemesi tepkiyi anlatıyorsa): önizleme
+   * "❤️ Ayşe mesajına tepki verdi", okunmamış tur başındaki değerine döner (platform tepkiyi "okunmamış" sayabiliyor).
+   */
+  private settleReaction(t: Thread, before: number): void {
+    let text = this.turnReacted.get(t.id);
+    // platform önizlemesi tepkiyi anlatıyor — ama son mesajın kendi metniyse ("I reacted…" diye yazılmış mesaj) tepki sayılmaz
+    if (!text && REACTION_PREVIEW_RE.test(t.preview) && this.store.listMessages(chatId(this.account.id, t.id), 1)[0]?.text.trim() !== t.preview.trim()) text = t.preview;
+    const incoming = this.turnIncoming.has(t.id);
+    this.turnReacted.delete(t.id);
+    this.turnIncoming.delete(t.id);
+    if (!text || incoming || t.reactionPreview) return;
+    this.reactionPreview(t.id, text);
+    this.reactionOnly.set(t.id, t.lastTs);
+    const cur = this.store.getChatLite(chatId(this.account.id, t.id));
+    if (cur && cur.unread > before) this.upsertChat({ remoteId: t.id, name: cur.name, unread: before });
+  }
+
   private ingest(threadId: string, m: Msg, live: boolean): void {
     if (!m.text && !m.attachments?.length) return;
+    // karşı taraftan var olan bir mesaja yeni tepki (ilk eşitlemede değil: o zaman her şey "yeni")
+    if (m.reactions?.length) {
+      const prev = this.store.getMessage(messageId(chatId(this.account.id, threadId), m.id));
+      if (prev) {
+        const had = new Set((prev.reactions ?? []).map((r) => `${r.senderId}|${r.emoji}`));
+        const fresh = m.reactions.find((r) => !r.fromMe && !had.has(`${r.senderId}|${r.emoji}`));
+        if (fresh) this.turnReacted.set(threadId, `${fresh.emoji} ${(fresh.senderName || 'Biri').split(/\s+/)[0]} mesajına tepki verdi`);
+      }
+    }
+    if (live && !m.fromMe) this.turnIncoming.add(threadId);
     // tanı: canlı ve yeni, karşı taraftan (son 10 dk içinde gönderilmiş) mesaj
     if (live && !m.fromMe && m.ts && Date.now() - m.ts < 10 * 60_000) this.freshIn.push(m.ts);
     // Platformun okunmamış sayısı yetkili (threads() ile yazılır); canlı mesaj burada ayrıca +1 yapmasın (çift sayım)

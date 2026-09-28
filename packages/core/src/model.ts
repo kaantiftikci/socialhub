@@ -35,6 +35,8 @@ export interface Chat {
   lastPreview: string;
   /** Son mesaj benden mi (Odak → "Senin beklediklerin") */
   lastFromMe?: boolean;
+  /** Önizleme bir tepkiyi anlatıyor ("❤️ Ayşe mesajına tepki verdi"): mesaj değil, listede tik yok */
+  lastReaction?: boolean;
   /** Son mesajın durumu (listede kendi mesajımın tiki: gönderildi / iletildi / görüldü) */
   lastStatus?: 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
   /** Mivelo'da okunan nokta (ms): bu zamana kadar olan mesajlar kalıcı olarak okundu */

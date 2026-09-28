@@ -2379,7 +2379,7 @@ function within(ts: number, limit?: number): boolean {
   return limit == null || Date.now() - ts < limit;
 }
 
-function statusIcon(s: Message['status']) {
+export function statusIcon(s: Message['status']) {
   if (s === 'read') return <span className="tick read" title="Görüldü"><Icon name="checks" size={14} sw={2.2} /></span>;
   if (s === 'delivered') return <span className="tick" title="İletildi"><Icon name="checks" size={14} sw={2.2} /></span>;
   if (s === 'sent') return <span className="tick" title="Gönderildi"><Icon name="check" size={13} sw={2.2} /></span>;

@@ -263,6 +263,11 @@ button:focus-visible, a:focus-visible, .sw:focus-visible { outline: 2px solid va
 .row.unread .time { color: var(--v); }
 .row .prev { flex-grow: 1; font-size: 13px; line-height: 1.4; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row.unread .prev { color: var(--text); font-weight: 400; }
+/* son mesaj benimse önizlemede tik (balondaki gibi); tepki önizlemesi italik */
+.row .prev .tick { display: inline-flex; vertical-align: -2px; margin-right: 3px; color: var(--text3); }
+.row .prev .tick.read { color: var(--tick-read); }
+.row .prev .tick.failed { color: var(--danger); }
+.row .prev.rx { font-style: italic; }
 .row.unread .name { font-weight: 650; }
 .badge { min-width: 19px; height: 19px; padding: 0 6px; border-radius: 999px; background: var(--v); color: #fff; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .row .tags { display: flex; gap: 6px; margin-top: 5px; }

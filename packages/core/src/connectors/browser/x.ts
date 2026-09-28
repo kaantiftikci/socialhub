@@ -555,6 +555,8 @@ interface ConvRow {
   lastTs: number | null;
   lastAt: number | null;
   lastIn: number | null;
+  /** en yeni sıralamayı etkileyen kayıt: "tür|benden mi|gönderen" (tepki kaydı mesaj sayılmaz) */
+  last_kind: string | null;
   unread: number;
   marked_unread_by_me: number;
   preview_text: string | null;
@@ -594,8 +596,9 @@ function dbThreads(db: Database.Database): Thread[] {
     .prepare(
       `select c.conversation_id id, c.custom_title, c.custom_avatar_url, c.marked_unread_by_me, c.last_received_message_at_msec lastAt,
          (select max(timestamp) from dm_entry e where e.conversation_id = c.conversation_id and e.affects_sort_order = 1) lastTs,
-         (select max(timestamp) from dm_entry e where e.conversation_id = c.conversation_id and e.affects_read_state = 1 and e.sender_is_owner = 0) lastIn,
-         (select count(*) from dm_entry e where e.conversation_id = c.conversation_id and e.affects_read_state = 1 and e.sender_is_owner = 0
+         (select max(timestamp) from dm_entry e where e.conversation_id = c.conversation_id and e.affects_read_state = 1 and e.sender_is_owner = 0 and e.entry_type = 'message') lastIn,
+         (select entry_type || '|' || sender_is_owner || '|' || cast(sender_id as text) from dm_entry e where e.conversation_id = c.conversation_id and e.affects_sort_order = 1 order by timestamp desc limit 1) last_kind,
+         (select count(*) from dm_entry e where e.conversation_id = c.conversation_id and e.affects_read_state = 1 and e.sender_is_owner = 0 and e.entry_type = 'message'
             and (c.last_read_sequence_number is null or e.sequence_number > c.last_read_sequence_number)) unread,
          (select plain_text from dm_entry e where e.conversation_id = c.conversation_id and e.entry_type = 'message' order by timestamp desc limit 1) preview_text,
          (select contents from dm_entry e where e.conversation_id = c.conversation_id and e.entry_type = 'message' order by timestamp desc limit 1) preview_contents,
@@ -625,6 +628,9 @@ function dbThreads(db: Database.Database): Thread[] {
       unread = applyReadMark(unread, c.lastIn === null ? null : Number(c.lastIn), readMarks.get(c.id));
       if (Number(c.unread) === 0) readMarks.delete(c.id); // yedek yetişti: işarete gerek yok
     }
+    // en yeni etkinlik karşı tarafın tepkisiyse (kayıt türü "reaction…"): önizleme "Ayşe mesajına tepki verdi", okunmamış değil
+    const [lastType, lastOwner, lastSender] = String(c.last_kind ?? '').split('|');
+    const reactionPreview = lastType && lastType !== 'message' && /react/i.test(lastType) && lastOwner === '0' ? `${(users.get(lastSender) ?? 'Karşı taraf').split(/\s+/)[0]} mesajına tepki verdi` : undefined;
     // özel grup avatarı ton.x.com'da (çerez ister, arayüz doğrudan açamaz) → verilmez
     const avatar = group ? (c.custom_avatar_url && !/ton\.(x|twitter)\.com/.test(c.custom_avatar_url) ? c.custom_avatar_url : undefined) : avatars.get(others[0]);
     // kendine mesaj (550911115:550911115): X "Sen"/kendi adını gösterir
@@ -635,6 +641,7 @@ function dbThreads(db: Database.Database): Thread[] {
       kind: group ? 'group' : 'direct',
       lastTs: Number(c.lastTs ?? c.lastAt ?? 0),
       preview,
+      reactionPreview,
       unread,
       avatarUrl: avatar,
       handle: group ? undefined : handles.get(others[0]),
