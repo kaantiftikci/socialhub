@@ -385,7 +385,14 @@ export class Store {
         `INSERT INTO messages (id, chat_id, remote_id, sender_id, sender_name, from_me, text, ts, status, attachments, sender_avatar, reactions, thread_id, reply_count)
          VALUES (@id, @chatId, @remoteId, @senderId, @senderName, @fromMe, @text, @ts, @status, @attachments, @senderAvatar, @reactions, @threadId, @replyCount)
          ON CONFLICT(id) DO UPDATE SET
-           status = excluded.status,
+           -- durum geri gitmez (tüm platformlar): yeniden eşitleme/yoklama "görüldü"yü "gönderildi"ye indirmesin; başarısız yalnız henüz
+           -- iletilmemiş mesajın yerini alır, başarısızdan sonra gelen gerçek durum ise yazılır
+           status = CASE
+             WHEN excluded.status = 'failed' THEN CASE WHEN messages.status IN ('pending', 'sent', 'failed') THEN 'failed' ELSE messages.status END
+             WHEN (CASE excluded.status WHEN 'read' THEN 3 WHEN 'delivered' THEN 2 WHEN 'sent' THEN 1 ELSE 0 END)
+                  >= (CASE messages.status WHEN 'read' THEN 3 WHEN 'delivered' THEN 2 WHEN 'sent' THEN 1 WHEN 'failed' THEN -1 ELSE 0 END)
+               THEN excluded.status
+             ELSE messages.status END,
            text = CASE WHEN excluded.text <> '' THEN excluded.text WHEN excluded.attachments IS NOT NULL THEN '' ELSE messages.text END,
            attachments = COALESCE(excluded.attachments, messages.attachments),
            sender_avatar = COALESCE(excluded.sender_avatar, messages.sender_avatar),

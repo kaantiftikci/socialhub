@@ -674,7 +674,7 @@ export class WhatsAppConnector extends BaseConnector {
         const st = u.update.status;
         if (st === undefined || st === null) continue;
         // proto.WebMessageInfo.Status: 0 ERROR, 1 PENDING, 2 SERVER_ACK, 3 DELIVERY_ACK, 4 READ, 5 PLAYED
-        const map: Record<number, 'failed' | 'pending' | 'sent' | 'delivered' | 'read'> = { 0: 'failed', 1: 'pending', 2: 'sent', 3: 'delivered', 4: 'read', 5: 'read' };
+        const map = WA_STATUS;
         const cj = this.canon(u.key.remoteJid);
         const mid = `${chatIdOf(this.account.id, cj)}#${u.key.id}`;
         const stored = this.store.getMessage(mid);
@@ -1790,7 +1790,7 @@ export class WhatsAppConnector extends BaseConnector {
             fromMe: !!m.key.fromMe,
             text: '🔒 Tek seferlik fotoğraf/video — WhatsApp içeriğini bağlı cihazlara göndermiyor; telefonda aç',
             ts: toMs(m.messageTimestamp) || Date.now(),
-            status: m.key.fromMe ? 'sent' : 'delivered',
+            status: m.key.fromMe ? waStatus(m.status) : 'delivered',
           },
           { live },
         );
@@ -1848,7 +1848,7 @@ export class WhatsAppConnector extends BaseConnector {
         fromMe: !!m.key.fromMe,
         text,
         ts: toMs(m.messageTimestamp) || Date.now(),
-        status: m.key.fromMe ? 'sent' : 'delivered',
+        status: m.key.fromMe ? waStatus(m.status) : 'delivered',
         attachments: attachments.length ? attachments : undefined,
       },
       { live },
@@ -1949,7 +1949,7 @@ export class WhatsAppConnector extends BaseConnector {
           fromMe: !!m.key.fromMe,
           text: '🔒 Tek seferlik fotoğraf/video — WhatsApp içeriğini bağlı cihazlara göndermiyor; telefonda aç',
           ts: toMs(m.messageTimestamp) || Date.now(),
-          status: m.key.fromMe ? 'sent' : 'delivered',
+          status: m.key.fromMe ? waStatus(m.status) : 'delivered',
         },
         { live: true },
       );
@@ -1966,7 +1966,7 @@ export class WhatsAppConnector extends BaseConnector {
         fromMe: !!m.key.fromMe,
         text: m.key.fromMe ? '⏳ Telefondan gönderilen bu mesaj bekleniyor (tek seferlik medya olabilir)…' : '⏳ Bu mesaj bekleniyor; telefondan yeniden isteniyor…',
         ts: toMs(m.messageTimestamp) || Date.now(),
-        status: m.key.fromMe ? 'sent' : 'delivered',
+        status: m.key.fromMe ? waStatus(m.status) : 'delivered',
       },
       { live: false }, // bildirim çalmasın, sayaç artmasın (Baileys de stub'lı mesajı okunmamış saymaz)
     );
@@ -2159,4 +2159,12 @@ function attachmentsOf(m: proto.IMessage | undefined): Attachment[] {
   // çıkartma (webp; animasyonlu/lottie de webp olarak iner) → arayüzde <img>
   if (m.stickerMessage) out.push({ kind: 'image', name: m.stickerMessage.isAnimated ? 'Hareketli çıkartma' : 'Çıkartma', mime: m.stickerMessage.mimetype ?? 'image/webp' });
   return out;
+}
+
+/** proto.WebMessageInfo.Status: 0 ERROR, 1 PENDING, 2 SERVER_ACK (tek tik), 3 DELIVERY_ACK (iletildi, çift tik), 4 READ, 5 PLAYED (görüldü) */
+const WA_STATUS: Record<number, 'failed' | 'pending' | 'sent' | 'delivered' | 'read'> = { 0: 'failed', 1: 'pending', 2: 'sent', 3: 'delivered', 4: 'read', 5: 'read' };
+/** Geçmişten/eşitlemeden gelen kendi mesajımın durumu: WhatsApp'ın verdiği alındı düzeyi (eskiden hep "gönderildi" → tek tik) */
+function waStatus(st: number | null | undefined): 'pending' | 'sent' | 'delivered' | 'read' {
+  const v = st == null ? undefined : WA_STATUS[st];
+  return v && v !== 'failed' && v !== 'pending' ? v : 'sent';
 }

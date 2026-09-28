@@ -893,7 +893,7 @@ export function Conversation({
                             const timeEl = !isReact ? (
                               <time className="bt" dateTime={new Date(m.ts).toISOString()} title={fmtStamp(m.ts)}>
                                 {fmtTime(m.ts)}
-                                {g.fromMe && i === g.items.length - 1 && statusIcon(m.status)}
+                                {g.fromMe && statusIcon(m.status)}
                               </time>
                             ) : null;
                             if (m.text && m.attachments?.length)
@@ -2010,10 +2010,14 @@ function linkify(text: string): React.ReactNode {
   return out;
 }
 
+/** Kendi mesajımın tiki (her balonda): görüldü = yeşil çift tik, iletildi (karşıda görüldü bilgisi kapalı ya da henüz açılmadı) = çift tik,
+ *  gönderildi (sunucuda; WhatsApp'ta alıcı çevrimdışı) = tek tik, gönderiliyor = saat, gönderilemedi = kırmızı uyarı */
 function statusIcon(s: Message['status']) {
-  if (s === 'read') return <Icon name="checks" size={13} sw={2.2} />;
-  if (s === 'delivered' || s === 'sent') return <Icon name="check" size={12} sw={2.2} />;
-  if (s === 'pending') return <span className="spin" style={{ width: 9, height: 9, borderWidth: 1.5 }} />;
+  if (s === 'read') return <span className="tick read" title="Görüldü"><Icon name="checks" size={14} sw={2.2} /></span>;
+  if (s === 'delivered') return <span className="tick" title="İletildi"><Icon name="checks" size={14} sw={2.2} /></span>;
+  if (s === 'sent') return <span className="tick" title="Gönderildi"><Icon name="check" size={13} sw={2.2} /></span>;
+  if (s === 'pending') return <span className="tick" title="Gönderiliyor"><Icon name="clock" size={11} sw={2.2} /></span>;
+  if (s === 'failed') return <span className="tick failed" title="Gönderilemedi"><Icon name="alert" size={12} sw={2.2} /></span>;
   return null;
 }
 

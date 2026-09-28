@@ -21,6 +21,7 @@
   --green-txt: #0b6b45;
   /* Gece modu için anlamlı renkler (açık temadaki değerler eski sabit renklerle aynı) */
   --card: #ffffff;
+  --tick-read: #5dffa1;
   --sw-knob: #ffffff;
   --field: #ffffff;
   --ctx-bg: #f3f2f7;
@@ -1121,6 +1122,7 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
   --bg2: #211f2b;
   --surface: #16151d;
   --card: #1c1a25;
+  --tick-read: #5dffa1;
   --sw-knob: #f4f2fa;
   --field: #211f2b;
   --ctx-bg: #121118;
@@ -1408,3 +1410,9 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 
 /* uzun sohbet listesi: sonraki parça yüklenirken */
 .list-more { display: flex; justify-content: center; padding: 14px 0 18px; }
+
+/* mesaj tiki: her kendi balonumda. Görüldü yeşil (mor balonda okunur açık yeşil), iletildi/gönderildi saat rengiyle, hata kırmızı */
+.bub .bt .tick { display: inline-flex; align-items: center; }
+.bub .bt .tick.read { color: var(--tick-read); }
+.bub .bt .tick.failed { color: var(--danger); }
+.grp.me .bub .bt .tick.failed { color: #ffd0d0; }

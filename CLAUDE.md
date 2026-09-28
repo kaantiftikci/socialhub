@@ -144,6 +144,12 @@ Dil: arayüz ve yorumlar Türkçe.
 - **iMessage**: poll birikmişi 500'lük parçalarla boşaltır (≤10/tur); `chat_message_join` henüz yazılmamış yeni satırlar `unjoined`da 2 dk
   yeniden denenir (eskiden atlanıyordu → "son gelenler görünmüyor"). Bilinmeyen klasörü: is_filtered 0 olsa da rehberde yok + hiç yanıtlanmamış
   birebir sohbet (`unknownSender`; rehber okunamazsa uygulanmaz).
+- **Mesaj tikleri** (her kendi balonunda, `statusIcon` Conversation.tsx): read = yeşil çift tik (`--tick-read`), delivered = çift tik,
+  sent = tek tik (WhatsApp SERVER_ACK: alıcı çevrimdışı), pending = saat, failed = kırmızı uyarı. `store.upsertMessage` durumu GERİ
+  GÖTÜRMEZ (yeniden eşitleme "görüldü"yü "gönderildi"ye indiriyordu → tik kayboluyordu); failed yalnız pending/sent'in yerine geçer.
+  Kaynaklar: WhatsApp geçmişi `waStatus(m.status)`, Telegram geçmişi diyalog `readOutboxMaxId` (`applyReadOutbox`), iMessage chat.db
+  `is_delivered/is_read/date_read/error` (`imessageStatus`) + son 3 günün alındıları 5 sn'de bir (`syncReceipts`), IG/X/Messenger görüldü
+  zamanı. Slack/e-posta/pazaryeri alındı vermez → tek tik.
 - **Kendi mesajının yankısı**: `store.isOwnEcho` (aynı sohbette ±3 dk, ≥12 kr. aynı metinli fromMe) → base.upsertMessage gelen saymaz (tüm
   platformlar); WhatsApp'ta katılımcı kimliği `meIds` ise fromMe. Uyarıdaki "QR'ı göster" Bağlan'ı o hesabın eşleştirme alanıyla açar (`focus`).
 

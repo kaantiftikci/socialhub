@@ -181,6 +181,7 @@ export class TelegramConnector extends BaseConnector {
             this.ingest(m, rid, name, true, senderName);
           }
         }
+        this.applyReadOutbox(d);
         // Sayaç kaçan mesajlar yazıldıktan SONRA platformunkine eşitlenir: önce yazılınca canlı ingest aynı mesajları bir kez daha sayıyordu
         const cur = this.store.getChat(`${this.account.id}/${rid}`);
         if (cur && (d.unreadCount ?? 0) !== cur.unread) this.upsertChat({ remoteId: rid, name: cur.name, unread: d.unreadCount ?? 0 });
@@ -491,8 +492,19 @@ export class TelegramConnector extends BaseConnector {
         for (const d of group) await recent(d).catch((e) => bus.log('warn', `Telegram geçmiş alınamadı (${d.id}): ${(e as Error).message}`));
       }
     }
+    // Geçmişten gelen kendi mesajlarım "gönderildi" yazılıyordu: sohbetin readOutboxMaxId'sine kadar olanlar görüldü (çift tik)
+    for (const d of dialogs) this.applyReadOutbox(d);
     const archivedCount = dialogs.filter((d) => d.archived || d.folderId === 1).length;
     bus.log('info', `Telegram geçmişi: ${dialogs.length} sohbet (${archivedCount} arşivde)`);
+  }
+
+  /** Diyalogdaki "karşı taraf şu mesaja kadar okudu" (readOutboxMaxId) → o id'ye kadarki mesajlarım görüldü */
+  private applyReadOutbox(d: Dialog): void {
+    const max = Number((d.dialog as { readOutboxMaxId?: number } | undefined)?.readOutboxMaxId ?? 0);
+    if (!d.id || !max) return;
+    const cid = `${this.account.id}/${String(d.id)}`;
+    const t = this.store.markOutgoingReadUpToId(cid, max);
+    if (t) bus.emit({ type: 'messages.read', chatId: cid, before: t });
   }
 
   private async onNew(ev: NewMessageEvent): Promise<void> {

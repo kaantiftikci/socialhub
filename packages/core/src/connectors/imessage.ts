@@ -29,6 +29,11 @@ interface Row {
   attributedBody: Buffer | null;
   date: number;
   is_from_me: number;
+  /** alındılar (yalnız benim mesajlarımda anlamlı): iletildi / okundu / okunma zamanı / gönderim hatası */
+  is_delivered?: number | null;
+  is_read?: number | null;
+  date_read?: number | null;
+  error?: number | null;
   handle: string | null;
   chat_identifier: string;
   chat_guid: string;
@@ -57,6 +62,7 @@ interface AttRow {
 /** SELECT + JOIN gövdesi: mesaj + sohbet + gönderen (WHERE/ORDER dışarıdan eklenir) */
 const SELECT_ROWS = (retractedCol: string, filteredCol: string, assocCol: string) =>
   `SELECT m.ROWID AS rowid, m.guid, m.text, m.attributedBody, m.date, m.is_from_me, m.cache_has_attachments, m.item_type,
+          m.is_delivered, m.is_read, m.date_read, m.error,
           ${retractedCol} AS date_retracted, ${assocCol} AS associated_message_type,
           h.id AS handle, c.chat_identifier, c.guid AS chat_guid, c.display_name, ${filteredCol} AS is_filtered
      FROM message m
@@ -70,6 +76,14 @@ export function imessageFolder(isFiltered: number | null | undefined): 'unknown'
   if (isFiltered === 1 || isFiltered === 4) return 'unknown';
   if (isFiltered === 2) return 'junk';
   return undefined;
+}
+
+/** Kendi mesajımın durumu chat.db alındılarından: okundu (karşı tarafta okundu bilgisi açıksa) > iletildi > gönderildi; hata → başarısız */
+export function imessageStatus(r: Pick<Row, 'is_delivered' | 'is_read' | 'date_read' | 'error'>): 'failed' | 'sent' | 'delivered' | 'read' {
+  if (r.error) return 'failed';
+  if ((r.date_read ?? 0) > 0 || r.is_read) return 'read';
+  if (r.is_delivered) return 'delivered';
+  return 'sent';
 }
 
 /** Tapback (❤️ 👍 😂 …), tapback geri alma ve benzeri "bir mesaja bağlı" satırlar sohbette ayrı mesaj olarak görünmez */
@@ -484,6 +498,37 @@ export class IMessageConnector extends BaseConnector {
   }
 
   /** Okunmamış sayıları Mesajlar'ın kendi bayrağından (is_read) al */
+  /** guid → son bilinen durum (değişmeyeni yeniden yazmamak için) */
+  private receipts = new Map<string, string>();
+  /** Son 3 günde gönderdiğim mesajların alındıları sonradan güncellenir (iletildi/okundu); yeni ROWID gelmediği için ayrıca bakılır */
+  private syncReceipts(): void {
+    if (!this.db) return;
+    try {
+      const since = this.msToApple(Date.now() - 3 * 86400e3);
+      const rows = this.db
+        .prepare(`SELECT m.guid, m.is_delivered, m.is_read, m.date_read, m.error, c.guid AS chat_guid FROM message m
+                    JOIN chat_message_join cmj ON cmj.message_id = m.ROWID JOIN chat c ON c.ROWID = cmj.chat_id
+                   WHERE m.is_from_me = 1 AND ${this.dateCol} > ?`)
+        .all(since) as Array<Pick<Row, 'guid' | 'is_delivered' | 'is_read' | 'date_read' | 'error' | 'chat_guid'>>;
+      for (const r of rows) {
+        const st = imessageStatus(r);
+        if (this.receipts.get(r.guid) === st) continue;
+        this.receipts.set(r.guid, st);
+        const id = `${chatIdOf(this.account.id, r.chat_guid)}#${r.guid}`;
+        const stored = this.store.getMessage(id);
+        if (!stored || stored.status === st) continue;
+        const RANK: Record<string, number> = { failed: -1, pending: 0, sent: 1, delivered: 2, read: 3 };
+        if (st !== 'failed' && (RANK[st] ?? 0) < (RANK[stored.status] ?? 0)) continue;
+        this.store.updateStatus(id, st);
+        const chat = this.store.getChat(stored.chatId);
+        if (chat) bus.emit({ type: 'message.upsert', message: { ...stored, status: st }, chat });
+      }
+      if (this.receipts.size > 5000) this.receipts.clear();
+    } catch {
+      /* eski şema: sütun yok */
+    }
+  }
+
   private syncUnread(): void {
     if (!this.db) return;
     try {
@@ -512,7 +557,7 @@ export class IMessageConnector extends BaseConnector {
       const rows = this.db
         .prepare(
           `SELECT m.ROWID AS rowid, m.guid, m.text, m.attributedBody, m.date, m.is_from_me, m.cache_has_attachments, m.item_type,
-                  1 AS date_retracted, ${this.assocCol} AS associated_message_type, h.id AS handle, c.chat_identifier, c.guid AS chat_guid, c.display_name,
+                  m.is_delivered, m.is_read, m.date_read, m.error, 1 AS date_retracted, ${this.assocCol} AS associated_message_type, h.id AS handle, c.chat_identifier, c.guid AS chat_guid, c.display_name,
                   ${this.filteredCol} AS is_filtered
              FROM chat_recoverable_message_join j JOIN message m ON m.ROWID = j.message_id JOIN chat c ON c.ROWID = j.chat_id
              LEFT JOIN handle h ON h.ROWID = m.handle_id`,
@@ -621,6 +666,7 @@ export class IMessageConnector extends BaseConnector {
       if (now - this.unreadAt >= 5_000) {
         this.unreadAt = now; // telefonda okununca burada da düşer
         this.syncUnread();
+        this.syncReceipts();
       }
     } catch (e) {
       bus.log('warn', `iMessage yoklama: ${(e as Error).message}`);
@@ -746,7 +792,7 @@ export class IMessageConnector extends BaseConnector {
         fromMe: r.is_from_me === 1,
         text,
         ts: ms,
-        status: r.is_from_me ? 'sent' : 'delivered',
+        status: r.is_from_me ? imessageStatus(r) : 'delivered',
         attachments,
       },
       { live },
