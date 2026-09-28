@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type InputHTMLAttributes } from 'react';
 import { clearOpening, markOpening } from './login-opening';
 import { api } from './api';
 import { STATIC_DEMO } from './profile';
+import { staticApi } from './static-demo';
 import { MAC_ONLY, PLATFORMS, type Account, type CoreOs, type Platform } from './types';
 import { Chip, Icon, PasswordInput, SyncBar } from './ui';
 
@@ -157,7 +158,9 @@ export function ConnectModal({
       }
       // Demo sitesi: formlar gerçek uygulamadaki gibi açılır, doldurulunca hesap örnek veriyle bağlanır (girilenler saklanmaz)
       if (STATIC_DEMO) {
-        const a = await api.addAccount(platform);
+        // form doldurulduysa (e-posta uygulama şifresi, pazaryeri, Slack belirteci) doğrudan bağlanır; yoksa QR / giriş formu gösterilir
+        const filled = isMail || !!shopFields || platform === 'shopier' || (platform === 'slack' && !opts.browser);
+        const a = await api.addAccount(platform, filled ? 'demo-form' : undefined);
         setActive(a.id);
         setShop({});
         setPat('');
@@ -579,7 +582,8 @@ export function ConnectModal({
                 </ol>
               )}
 
-              {PLATFORMS[activeAccount.platform].mode === 'browser' && activeAccount.status !== 'connected' && (
+              {STATIC_DEMO && PLATFORMS[activeAccount.platform].mode === 'browser' && activeAccount.status === 'pairing' && <DemoLogin account={activeAccount} onDone={onChanged} />}
+              {!STATIC_DEMO && PLATFORMS[activeAccount.platform].mode === 'browser' && activeAccount.status !== 'connected' && (
                 <>
                   {(activeAccount.detail ?? '').includes('Yeniden bağlan') ? (
                     <p style={{ margin: '6px 0 10px', fontSize: 13.5 }}>
@@ -791,4 +795,43 @@ function statusText(a: Account): string {
 /** Hesap istemi (telefon/kod/2FA): parola isteniyorsa göz düğmeli alan */
 function InputOrPassword({ password, ...rest }: { password: boolean } & Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>) {
   return password ? <PasswordInput {...rest} /> : <input {...rest} type="text" />;
+}
+
+/**
+ * Demo: tarayıcıyla girilen uygulamalarda gerçek uygulamanın açtığı giriş penceresinin yerine geçen form. Girilen bilgiler
+ * HİÇBİR YERE gönderilmez ve saklanmaz; "Giriş yap" hesabı örnek veriyle bağlar.
+ */
+function DemoLogin({ account, onDone }: { account: Account; onDone: () => Promise<void> | void }) {
+  const [user, setUser] = useState('');
+  const [pass, setPass] = useState('');
+  const [busy, setBusy] = useState(false);
+  const name = PLATFORMS[account.platform].name;
+  const mail = PLATFORMS[account.platform].category === 'mail';
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user.trim() || !pass) return;
+    setBusy(true);
+    try {
+      await (staticApi as { demoLogin: (id: string) => Promise<void> }).demoLogin(account.id);
+      setUser('');
+      setPass('');
+      await onDone();
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form className="demo-login" onSubmit={(e) => void submit(e)}>
+      <div className="demo-login-head">
+        <Chip platform={account.platform} size={22} />
+        <b>{name} girişi</b>
+      </div>
+      <input value={user} onChange={(e) => setUser(e.target.value)} placeholder={mail ? 'E-posta adresi' : 'Kullanıcı adı, e-posta ya da telefon'} autoComplete="off" autoFocus />
+      <PasswordInput value={pass} onChange={(e) => setPass(e.target.value)} placeholder="Şifre" autoComplete="off" />
+      <button className="btn primary sm b" type="submit" disabled={busy || !user.trim() || !pass}>
+        {busy ? <span className="spin" /> : 'Giriş yap'}
+      </button>
+      <p className="demo-login-note">Demo: girdiğin bilgiler hiçbir yere gönderilmez ve saklanmaz.</p>
+    </form>
+  );
 }

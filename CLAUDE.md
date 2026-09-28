@@ -102,6 +102,10 @@ Dil: arayüz ve yorumlar Türkçe.
   tür finfo ile içerikten; IP başına saatte 10; `~/mivelo-data/feedback/index.json` + `<id>/<n>.<ext>`; `.user.ini` yükleme sınırları;
   SMTP ayarlıysa sahibine e-posta). Başarı yalnız `{ok:true}` (yanlış adres 200+HTML döndürebilir). Admin → Geri bildirim (Açık/Tümü/Çözülen,
   durum Yeni/İnceleniyor/Çözüldü/Yapılmayacak, not, Yanıtla=mailto, ekler `fb_file` yalnız oturumla, CSP sandbox).
+  **Demoda bağlanma gerçek akışla**: WhatsApp/Telegram `addAccount` → 'pairing' + taranamaz örnek QR (`demoQr`), 6,5 sn sonra okutulmuş
+  sayılır (`completeDemoLogin`; yenilemede yarım QR yeniden başlar); tarayıcıyla girilenler (mode 'browser') 'pairing' → Connect.tsx `DemoLogin`
+  formu (bilgiler gönderilmez/saklanmaz) → `staticApi.demoLogin`. Form doldurulan yollar (e-posta şifresi, pazaryeri, Slack belirteci) `demo-form`
+  ile doğrudan bağlanır. Eskiden her şey anında "Bağlı" oluyordu.
   Demoda örnek AI açık (`demo-ai.ts`: sohbete özel taslak/özet/aksiyon/olay, model çağrısı yok); pazaryeri sipariş kartı `Script.order`.
   Tek dosya demo (`npm run demo:html`) profil adı "Mivelo".
 - **Tanıtım videosu (reels 1080×1920, ~68 sn; TM() zaman eşlemesi: 5,5 sn sonrası ×1,25 + GAPS araları: AI özeti, sağ panel, takip/zamanlama hareketli grafikleri)** `scripts/promo/`: videodaki arayüz GERÇEK tek dosya demo (iframe, Playwright sanal saati

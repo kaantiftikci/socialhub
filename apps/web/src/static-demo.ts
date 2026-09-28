@@ -61,6 +61,56 @@ function withDemoAttention(a: Account): Account {
   return a.platform === 'x' && a.status === 'connected' && !demoPinDone ? { ...a, attention: DEMO_X_ATTENTION } : { ...a };
 }
 
+/**
+ * Demoda bağlanma akışı gerçek uygulamadaki gibi: WhatsApp/Telegram önce QR gösterir (okutma birkaç sn sonra yapılmış sayılır),
+ * tarayıcıyla girilen uygulamalar giriş formu ister (Connect.tsx DemoLogin; girilen bilgiler hiçbir yere gönderilmez/saklanmaz).
+ * Eskiden "Bağlan" hesabı anında "bağlı" yapıyordu → QR / giriş adımı hiç görünmüyordu.
+ */
+const QR_PLATFORMS = new Set<Platform>(['whatsapp', 'telegram']);
+const QR_DELAY_MS = 6500;
+
+/** Taranamayan, gerçekçi görünümlü QR (köşe hedefleri + sözde rastgele modüller) */
+function demoQr(seedText: string): string {
+  const n = 29;
+  let h = 2166136261;
+  for (const ch of seedText) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+  const rnd = () => ((h = Math.imul(h ^ (h >>> 13), 1274126177)) >>> 0) / 4294967296;
+  const finder = (x: number, y: number) => {
+    const inBox = (cx: number, cy: number) => cx >= x && cx < x + 7 && cy >= y && cy < y + 7;
+    return { inBox, on: (cx: number, cy: number) => { const dx = cx - x, dy = cy - y; return dx === 0 || dy === 0 || dx === 6 || dy === 6 || (dx >= 2 && dx <= 4 && dy >= 2 && dy <= 4); } };
+  };
+  const fs = [finder(0, 0), finder(n - 7, 0), finder(0, n - 7)];
+  let rects = '';
+  for (let y = 0; y < n; y++)
+    for (let x = 0; x < n; x++) {
+      const f = fs.find((q) => q.inBox(x, y));
+      const nearFinder = fs.some((q) => q.inBox(x - 1, y) || q.inBox(x + 1, y) || q.inBox(x, y - 1) || q.inBox(x, y + 1));
+      const on = f ? f.on(x, y) : !nearFinder && rnd() < 0.48;
+      if (on) rects += `<rect x="${x + 2}" y="${y + 2}" width="1.02" height="1.02"/>`;
+    }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${n + 4} ${n + 4}" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/><g fill="#111">${rects}</g></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+/** Bekleyen demo girişini tamamla: bağlı yap, kaydet, (yeni üye değilse) örnek sohbetleri ekle */
+async function completeDemoLogin(id: string): Promise<void> {
+  const a = accounts.find((x) => x.id === id);
+  if (!a || a.status === 'connected') return;
+  const next: Account = { ...a, status: 'connected', detail: undefined, qrDataUrl: undefined };
+  accounts = accounts.map((x) => (x.id === id ? next : x));
+  await saveAccounts().catch(() => undefined);
+  emit({ type: 'account.status', account: withDemoAttention(next) });
+  if (!freshUser) seedAccount(next);
+  for (const c of chats.filter((x) => x.accountId === id)) emit({ type: 'chat.upsert', chat: c });
+}
+
+/** QR bekleyen hesap: kodu göster, birkaç sn sonra okutulmuş say */
+function startDemoQr(a: Account): Account {
+  const q: Account = { ...a, status: 'pairing', qrDataUrl: demoQr(a.id), detail: 'Demo: kod birkaç saniye içinde okutulmuş sayılır' };
+  setTimeout(() => void completeDemoLogin(a.id), QR_DELAY_MS);
+  return q;
+}
+
 function demoAccount(platform: Platform): Account {
   return { id: `demo:${platform}`, platform, label: PLATFORMS[platform].name, status: 'connected', createdAt: 1_750_000_000_000 };
 }
@@ -105,7 +155,7 @@ function seed(): void {
   seedK = 0;
   // yeni üye: ASLA örnek veri yok (bağladığı uygulamalar boş kanal olarak görünür)
   if (freshUser) return;
-  for (const acc of accounts) seedAccount(acc, now);
+  for (const acc of accounts) if (acc.status === 'connected') seedAccount(acc, now);
 }
 
 /** Tek hesabın örnek sohbetlerini EKLE (var olan sohbetlere, okundu/etiket/gönderilen mesajlara dokunmaz) */
@@ -236,6 +286,8 @@ export function loadDemoAccounts(list: Array<Record<string, unknown>>, opts: { f
   const changed = next.length !== accounts.length || next.some((a, i) => a.id !== accounts[i]?.id);
   accounts = next;
   if (changed) void saveAccounts().catch(() => undefined);
+  // yarım kalmış QR eşleştirmesi (sayfa yenilendi): kod yeniden gösterilir ve birkaç sn sonra okutulmuş sayılır
+  accounts = accounts.map((a) => (a.status === 'pairing' && QR_PLATFORMS.has(a.platform) ? startDemoQr(a) : a));
   seed();
 }
 
@@ -368,14 +420,18 @@ export const staticApi = {
   activity: async (_active: boolean) => undefined,
   health: async () => ({ ok: true, ai: true, stats: { unread: chats.reduce((n, c) => n + c.unread, 0), chats: chats.length }, os: undefined as CoreOs | undefined }),
   accounts: async () => accounts.map(withDemoAttention),
-  addAccount: async (platform: Platform, _token?: string): Promise<Account> => {
-    const account: Account = {
+  addAccount: async (platform: Platform, token?: string): Promise<Account> => {
+    let account: Account = {
       id: `${platform}:${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`,
       platform,
       label: PLATFORMS[platform].name,
       status: 'connected',
       createdAt: Date.now(),
     };
+    // QR'lı uygulamalar kod gösterir; tarayıcıyla girilenler (form doldurulmadıysa) giriş formunu bekler
+    const pending = QR_PLATFORMS.has(platform) || (PLATFORMS[platform].mode === 'browser' && token !== 'demo-form');
+    if (QR_PLATFORMS.has(platform)) account = startDemoQr(account);
+    else if (pending) account = { ...account, status: 'pairing', detail: 'Giriş bekleniyor' };
     const prev = accounts;
     accounts = [...accounts, account];
     try {
@@ -385,6 +441,8 @@ export const staticApi = {
       throw e;
     }
     emit({ type: 'account.status', account: withDemoAttention(account) });
+    if (account.qrDataUrl) emit({ type: 'account.qr', accountId: account.id, qrDataUrl: account.qrDataUrl });
+    if (pending) return account;
     // yalnız yeni hesabın sohbetleri eklenir: seed() tüm demoyu sıfırlıyordu (okunanlar yeniden okunmamış, gönderilenler/etiketler kayıp)
     if (!freshUser) seedAccount(account);
     for (const c of chats.filter((x) => x.accountId === account.id)) emit({ type: 'chat.upsert', chat: c });
@@ -403,6 +461,11 @@ export const staticApi = {
       throw e;
     }
     for (const chatId of gone) emit({ type: 'chat.delete', chatId });
+  },
+  /** Demo giriş formu gönderildi (Connect.tsx): bilgiler kullanılmaz, hesap bağlanır */
+  demoLogin: async (id: string) => {
+    await new Promise((r) => setTimeout(r, 900));
+    await completeDemoLogin(id);
   },
   restartAccount: async (id: string) => {
     // X'in PIN uyarısı: gerçek uygulamada görünür pencere açılır, kullanıcı PIN'i girer; demoda 2 sn sonra girilmiş sayılır
