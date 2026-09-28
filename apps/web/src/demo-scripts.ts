@@ -1062,7 +1062,7 @@ for (const platform of ['trendyol', 'hepsiburada', 'n11'] as Platform[]) {
     const o = s.order as { id: string; status: string; items: Array<{ title: string }>; totals?: { total?: string }; shipping?: { name?: string } } | undefined;
     if (!o) continue;
     s.order = undefined;
-    s.questionOrderNo = o.id;
+    if (platform !== 'trendyol') s.questionOrderNo = o.id;
     const buyer = o.shipping?.name ?? s.handle ?? 'Müşteri';
     out.push({
       remoteId: `siparis-${o.id}`,

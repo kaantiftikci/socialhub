@@ -266,6 +266,8 @@ export function shopKind(c: Pick<Chat, 'platform' | 'meta'>): ShopKind | null {
 /** Pazaryeri sorusunun bağlı olduğu sipariş (sipariş sorusu); yoksa ürün sorusu.
  *  Kaynaklar: meta.question.orderNumber (Trendyol/Hepsiburada), Amazon alıcı mesajında sipariş no (handle 123-1234567-1234567). */
 export function questionOrderRef(c: Pick<Chat, 'platform' | 'meta' | 'handle'>): string | undefined {
+  // Trendyol'un API'sinde sipariş sorusu yok (Kaan'ın isteğiyle bu kısım kaldırıldı): hep ürün sorusu
+  if (c.platform === 'trendyol') return undefined;
   const q = c.meta?.question as { orderNumber?: string | number } | undefined;
   if (q?.orderNumber) return String(q.orderNumber);
   if (c.platform === 'amazon' && c.handle && /^\d{3}-\d{7}-\d{7}$/.test(c.handle)) return c.handle;
@@ -280,7 +282,7 @@ export function shopTabOf(c: Pick<Chat, 'platform' | 'meta' | 'handle'>): ShopTa
   return questionOrderRef(c) ? 'orderQ' : 'productQ';
 }
 /** Sipariş soruları sekmesi olan pazaryerleri (sipariş sorusu yoksa da sekme görünür) */
-// Trendyol'da sipariş sorusu API'si YOK (qna yanıtında sipariş bağı yok; order-questions ucu 556 = yönlendirilmemiş yol): sekme yalnız içerik varsa
+// Trendyol'da sipariş sorusu API'si YOK → sekme hiç yok (questionOrderRef trendyol'da boş döner)
 export const ORDER_Q_PLATFORMS = new Set<Platform>(['hepsiburada', 'amazon']);
 /** Kapanmış sipariş durumları (gönderildi/teslim/iptal/iade): bunlar "bekleyen" sayılmaz */
 export const ORDER_CLOSED = /^(fulfilled|delivered|shipped|cancelled|canceled|returned|completed|closed)$/i;
