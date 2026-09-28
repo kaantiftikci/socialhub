@@ -133,7 +133,7 @@ Dil: arayüz ve yorumlar Türkçe.
   kaydırınca beliren kartlar; açılışta HER CİHAZDA AYNI tek koyu "Sürümleri gör" düğmesi (Apple + Windows logosu → #surumler) + "Sürüm X" + "Tüm sürümler ↓"
   (Kaan: mobil ve masaüstü aynı dursun; işletim sistemine göre "Mac/Windows için indir" YOK); "Senin için önerilen" çerçevesi KALDIRILDI.
   Başlık "Mivelo'yu indir." ana sayfa h1'iyle aynı (font/boyut/renk, 160 ms kelime açılışı, telefonda min(54px,13.2vw)); düğmeler ve Mac/Windows
-  sekmesi ana sayfanın LIQUID GLASS stilinde (cam + ::before kenar + esneyen beyaz mercek; sekmelerde Apple/Windows logosu, seçili Windows mavi) (telefonda en üstte), Mac/Windows kayan hap sekmeli
+  sekmesi ana sayfanın LIQUID GLASS stilinde (kartlardaki İndir düğmeleri İSTİSNA: düz siyah, Kaan isteği) (cam + ::before kenar + esneyen beyaz mercek; sekmelerde Apple/Windows logosu, seçili Windows mavi) (telefonda en üstte), Mac/Windows kayan hap sekmeli
   kurulum adımları, lisans bandı; latest.json'dan boyut/sürüm; `prefers-reduced-motion` uyar). `indir/.htaccess` HTML'e `no-cache` (tarayıcı eski
   tasarımı gösteriyordu; admin/ ile aynı kural). Kök `.htaccess` YAZILMAZ (sunucudaki cPanel PHP işleyicisini ezer). Chromium pakette YOK:
   `packages/core/src/browser-install.ts` `ensureChromium` — köprü `launch` öncesi yoksa `playwright install --no-shell chromium` (gömülü node ile,
