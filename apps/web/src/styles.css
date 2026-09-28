@@ -1586,3 +1586,9 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .update-card b { font-size: 13.5px; }
 .update-card span { font-size: 12.5px; color: var(--text2); }
 .update-card > svg { color: var(--v); flex: none; }
+
+/* Masaüstü lisans ekranı (LicenseGate.tsx) */
+.lic-input { height: 48px; border-radius: 14px; border: 1px solid var(--line); background: var(--field); color: var(--text); padding: 0 14px; font: 600 16px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 1px; text-align: center; }
+.lic-input:focus { outline: none; border-color: var(--v); box-shadow: 0 0 0 3px color-mix(in srgb, var(--v) 22%, transparent); }
+.lic-help { font-size: 12.5px !important; color: var(--text3) !important; margin-top: 4px !important; }
+.lic-help a { color: var(--v-txt, var(--v)); font-weight: 600; }

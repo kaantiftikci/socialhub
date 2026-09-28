@@ -315,6 +315,9 @@ fn spawn_core(app: &AppHandle) -> Option<Child> {
     let mut cmd = Command::new(&node);
     cmd.arg(&entry)
         .env("KAVSAK_PORT", CORE_PORT)
+        // paketli sürüm (DMG/EXE) lisans anahtarı ister; geliştirme (tauri dev) istemez
+        .env("MIVELO_REQUIRE_LICENSE", if cfg!(debug_assertions) { "0" } else { "1" })
+        .env("MIVELO_APP_VERSION", app.package_info().version.to_string())
         .env("PATH", core_path())
         .stdout(out)
         .stderr(err);

@@ -20,6 +20,7 @@ import { AiError, aiEnabled, aiKey, aiKeySource, draftReply, isAiTone, setAiKey 
 import { analyzeStyle, describeStyle } from './style.js';
 import { buildIcs, formatStart, parseStart } from './calendar.js';
 import { openExternal } from './platform.js';
+import { activateLicense, LicenseError, licenseStatus, releaseLicense } from './license.js';
 import { ALL_PLATFORMS } from './model.js';
 import { MEDIA_HOSTS, PLATFORM_MEDIA_HOSTS, MEDIA_MAX } from './media-hosts.js';
 import { fetchPreview } from './link-preview.js';
@@ -195,6 +196,22 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   route('GET', '/api/health', () => {
     const m = process.memoryUsage();
     return { ok: true, ai: aiEnabled(), stats: store.stats(), os: process.platform, pid: process.pid, uptimeSec: Math.round(process.uptime()), memoryMb: { rss: Math.round(m.rss / 1048576), heapUsed: Math.round(m.heapUsed / 1048576), heapTotal: Math.round(m.heapTotal / 1048576), external: Math.round(m.external / 1048576) } };
+  });
+
+  route('GET', '/api/license', () => licenseStatus());
+  route('POST', '/api/license', async (r, _s, _p, body) => {
+    localOnly(r);
+    try {
+      return await activateLicense(String((body as { key?: string }).key ?? ''));
+    } catch (e) {
+      if (e instanceof LicenseError) throw new HttpError(e.status === 409 || e.status === 429 ? e.status : 400, e.message);
+      throw e;
+    }
+  });
+  route('DELETE', '/api/license', async (r) => {
+    localOnly(r);
+    await releaseLicense();
+    return licenseStatus();
   });
 
   route('GET', '/api/accounts', () => registry.list().map((a) => ({ ...a, qrDataUrl: pendingQr.get(a.id) })));
@@ -700,6 +717,11 @@ export function createServer(store: Store, registry: Registry, port: number): ht
 
     const url = new URL(req.url ?? '/', 'http://x');
     try {
+      // Paketli uygulama lisanssızken yalnız sağlık ve lisans uçları açık (arayüz lisans ekranını gösterir)
+      if (url.pathname.startsWith('/api/') && url.pathname !== '/api/health' && url.pathname !== '/api/license' && !licenseStatus().valid) {
+        res.writeHead(402, { 'content-type': 'application/json' });
+        return void res.end(JSON.stringify({ error: 'Lisans gerekli', license: true }));
+      }
       if (req.method === 'GET' && url.pathname === '/oauth/callback') {
         const ok = resolveOAuth(url.searchParams.get('state') ?? '', { code: url.searchParams.get('code') ?? undefined, error: url.searchParams.get('error') ?? undefined });
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });

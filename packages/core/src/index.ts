@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DEMO_MODE, PORT, ensureDirs, DATA_DIR } from './config.js';
 import { getDbKey } from './dbkey.js';
+import { LICENSE_REQUIRED, licensed, onLicenseChange, startLicenseChecks, whenLicensed } from './license.js';
 
 // libsignal (WhatsApp şifre kütüphanesi) çözülemeyen eski/yinelenen paketleri doğrudan console.error ile basar;
 // zararsızdır (WhatsApp Web de aynı paketleri sessizce atar). Terminali kirletmesin.
@@ -90,7 +91,22 @@ async function main(): Promise<void> {
     if (existing) await registry.restart(existing.id);
     else await registry.add('demo', { label: 'Demo hesabı' });
   }
+  // Paketli uygulama: lisans etkinleşmeden hiçbir kanal başlamaz; lisans iptal edilirse kanallar durur
+  startLicenseChecks();
+  if (LICENSE_REQUIRED && !licensed()) bus.log('info', 'Lisans bekleniyor: kanallar lisans etkinleşince başlayacak');
+  await whenLicensed();
   await registry.bootAll();
+  let booted = true;
+  onLicenseChange((valid) => {
+    if (!valid && booted) {
+      booted = false;
+      bus.log('warn', 'Lisans geçersiz: kanallar durduruldu');
+      void registry.stopAll();
+    } else if (valid && !booted) {
+      booted = true;
+      void registry.bootAll();
+    }
+  });
 
   let closing = false;
   const shutdown = async () => {

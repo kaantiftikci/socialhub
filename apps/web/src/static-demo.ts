@@ -441,6 +441,9 @@ function demoIcs(ev: CalendarDraft): string {
 }
 
 export const staticApi = {
+  license: async () => ({ required: false, valid: true }),
+  activateLicense: async (_key: string) => ({ required: false, valid: true }),
+  releaseLicense: async () => ({ required: false, valid: true }),
   activity: async (_active: boolean) => undefined,
   health: async () => ({ ok: true, ai: true, stats: { unread: chats.reduce((n, c) => n + c.unread, 0), chats: chats.length }, os: undefined as CoreOs | undefined }),
   accounts: async () => accounts.map(withDemoAttention),

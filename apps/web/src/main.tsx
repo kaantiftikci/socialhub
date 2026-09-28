@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
+import { LicenseGate } from './LicenseGate';
 import { DemoGate } from './Auth';
 import { DEMO_OFFLINE, STATIC_DEMO, setProfileName } from './profile';
 import { loadDemoAccounts } from './static-demo';
@@ -48,6 +49,6 @@ if (DEMO_OFFLINE) {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {STATIC_DEMO && !DEMO_OFFLINE ? <DemoGate /> : <App />}
+    {STATIC_DEMO && !DEMO_OFFLINE ? <DemoGate /> : <LicenseGate><App /></LicenseGate>}
   </StrictMode>,
 );

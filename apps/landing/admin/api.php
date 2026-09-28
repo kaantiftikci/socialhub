@@ -618,6 +618,107 @@ if ($a === 'demo_delete' && $method === 'POST') {
     out(['deleted' => $n]);
 }
 
+/* ---------------- lisanslar (masaüstü uygulaması; doğrulama: api/license.php) ---------------- */
+
+/** MVL-XXXX-XXXX-XXXX-XXXX: karışan karakterler (0/O, 1/I/L) yok, 80 bit rastgele */
+function new_license_key(): string
+{
+    $abc = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+    $g = [];
+    for ($i = 0; $i < 4; $i++) {
+        $s = '';
+        for ($j = 0; $j < 4; $j++) {
+            $s .= $abc[random_int(0, strlen($abc) - 1)];
+        }
+        $g[] = $s;
+    }
+    return 'MVL-' . implode('-', $g);
+}
+function license_public(array $k): array
+{
+    $exp = $k['expiresAt'] ?? null;
+    $st = ($k['status'] ?? 'active') !== 'active' ? 'revoked' : ($exp && strtotime((string) $exp) < time() ? 'expired' : 'active');
+    return ['id' => $k['id'], 'key' => $k['key'], 'note' => $k['note'] ?? '', 'email' => $k['email'] ?? '', 'maxDevices' => (int) ($k['maxDevices'] ?? 2),
+        'expiresAt' => $exp, 'status' => $st, 'createdAt' => $k['createdAt'] ?? null, 'usedAt' => $k['usedAt'] ?? null,
+        'activations' => array_map(fn ($a) => ['id' => $a['id'], 'name' => $a['name'] ?? '', 'os' => $a['os'] ?? '', 'version' => $a['version'] ?? '',
+            'firstAt' => $a['firstAt'] ?? null, 'lastAt' => $a['lastAt'] ?? null], $k['activations'] ?? [])];
+}
+
+if ($a === 'licenses' && $method === 'GET') {
+    $d = read_json('licenses.json', ['keys' => []]);
+    out(['keys' => array_map('license_public', array_reverse($d['keys']))]);
+}
+
+if ($a === 'license_create' && $method === 'POST') {
+    $n = max(1, min(50, (int) ($body['count'] ?? 1)));
+    $note = mb_substr(trim((string) ($body['note'] ?? '')), 0, 120);
+    $email = strtolower(trim((string) ($body['email'] ?? '')));
+    if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        fail(400, 'E-posta geçersiz');
+    }
+    $max = max(1, min(10, (int) ($body['maxDevices'] ?? 2)));
+    $days = (int) ($body['days'] ?? 0);
+    $exp = $days > 0 ? gmdate('c', time() + min($days, 3650) * 86400) : null;
+    $made = with_json('licenses.json', ['keys' => []], function (array &$d) use ($n, $note, $email, $max, $exp) {
+        $out = [];
+        $have = array_flip(array_map(fn ($k) => $k['key'], $d['keys']));
+        for ($i = 0; $i < $n; $i++) {
+            do {
+                $key = new_license_key();
+            } while (isset($have[$key]));
+            $have[$key] = 1;
+            $k = ['id' => 'l-' . bin2hex(random_bytes(6)), 'key' => $key, 'note' => $note, 'email' => $n === 1 ? $email : '', 'maxDevices' => $max,
+                'expiresAt' => $exp, 'status' => 'active', 'createdAt' => gmdate('c'), 'activations' => []];
+            $d['keys'][] = $k;
+            $out[] = license_public($k);
+        }
+        return $out;
+    });
+    out(['created' => $made]);
+}
+
+if ($a === 'license_update' && $method === 'POST') {
+    $id = (string) ($body['id'] ?? '');
+    $r = with_json('licenses.json', ['keys' => []], function (array &$d) use ($id, $body) {
+        foreach ($d['keys'] as &$k) {
+            if ($k['id'] !== $id) {
+                continue;
+            }
+            if (isset($body['status'])) {
+                $k['status'] = $body['status'] === 'revoked' ? 'revoked' : 'active';
+            }
+            if (isset($body['note'])) {
+                $k['note'] = mb_substr(trim((string) $body['note']), 0, 120);
+            }
+            if (isset($body['maxDevices'])) {
+                $k['maxDevices'] = max(1, min(10, (int) $body['maxDevices']));
+            }
+            if (!empty($body['resetDevices'])) {
+                $k['activations'] = [];
+            }
+            if (isset($body['release'])) {
+                $k['activations'] = array_values(array_filter($k['activations'] ?? [], fn ($a) => $a['id'] !== (string) $body['release']));
+            }
+            return license_public($k);
+        }
+        return null;
+    });
+    if (!$r) {
+        fail(404, 'Lisans yok');
+    }
+    out($r);
+}
+
+if ($a === 'license_delete' && $method === 'POST') {
+    $id = (string) ($body['id'] ?? '');
+    $n = with_json('licenses.json', ['keys' => []], function (array &$d) use ($id) {
+        $b = count($d['keys']);
+        $d['keys'] = array_values(array_filter($d['keys'], fn ($k) => $k['id'] !== $id));
+        return $b - count($d['keys']);
+    });
+    out(['deleted' => $n]);
+}
+
 /* ---------------- geri bildirim (uygulamadaki sağ alt düğme → api/feedback.php) ---------------- */
 function fb_dir(): string
 {

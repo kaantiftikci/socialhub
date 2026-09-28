@@ -127,6 +127,16 @@ Dil: arayüz ve yorumlar Türkçe.
   tek uçuş, ilerleme hesap durumunda "Tarayıcı bileşeni indiriliyor… %N"); indirilemezse hata + "Yeniden bağlan". Uygulama içi yeni sürüm kartı
   `UpdateBanner.tsx` (yalnız Tauri + `VITE_APP_VERSION`; 6 sa'de bir latest.json; "İndir" → mivelo.app/indir, "Sonra" o sürümü atlar). Gerçek
   cihazda DENENMEDİ; ffmpeg pakette yok (sesli mesaj ogg).
+- **Lisans (yalnız paketli DMG/EXE)**: kabuk (lib.rs) çekirdeği release'te `MIVELO_REQUIRE_LICENSE=1` + `MIVELO_APP_VERSION` ile başlatır (tauri dev,
+  `npm run dev`, demo lisans istemez). Çekirdek `license.ts`: `~/.mivelo/license.json` {key, activation, device, lastOk, expiresAt} (0600); cihaz kimliği
+  sha256(hostname|kullanıcı|OS|mimari|MAC); lisanssızken kanallar başlamaz (`whenLicensed` → bootAll) ve /api 402 (yalnız /api/health + /api/license);
+  GET/POST/DELETE `/api/license`; açılışta + 12 sa'de bir `check`: sunucu `invalid` derse (iptal/süre/cihaz kaldırıldı) kilit + registry.stopAll,
+  ağ hatasında 14 gün çevrimdışı pay. Arayüz `LicenseGate.tsx` (main.tsx, yalnız Tauri): anahtar ekranı (MVL-XXXX-… biçimleme), 10 dk'da bir ve odakta
+  yeniden sorar. Sunucu `apps/landing/api/license.php` (mivelo.app/api/license.php; activate/check/release; `~/mivelo-data/licenses.json`, hatalı
+  anahtar IP başına saatte 20, `license-rate.json`). Admin → **Lisanslar** (`api.php` licenses/license_create/update/delete; anahtar `MVL-` + 4×4
+  karışmayan harf/rakam, 80 bit; not, e-posta (bekleme listesinden öneri), cihaz sınırı 1-10 (vars. 2), süre (süresiz/30/90/365 gün), adet ≤50;
+  Kopyala · E-postayla gönder (mailto şablonu: anahtar + indirme bağlantısı) · İptal et/Etkinleştir · Cihazları sıfırla · cihaz başına Kaldır · Sil).
+  İstemci tarafı denetimdir (paket değiştirilerek aşılabilir); amaç anahtarsız dağıtımı engellemek. Yerel uçtan uca sınandı (php -S + çekirdek).
 - **Windows**: `tauri.windows.conf.json` (NSIS, currentUser, yerel başlık çubuğu) Tauri'nin platform yapılandırma birleştirmesiyle
   uygulanır; paket yalnız CI'da üretilir (`.github/workflows/build-desktop.yml` windows-x64 işi, windows-latest,
   `KAVSAK_BUNDLE_NODE=1` ile node.exe `core-bundle/bin/`e gömülür, kabuk önce onu dener). `lib.rs`: kısayol Ctrl+Shift+K,

@@ -238,6 +238,13 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   .bulk{top:70px}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+.lic-form{display:grid;grid-template-columns:2fr 2fr 1fr 1fr 80px auto;gap:10px;align-items:end}
+.lic-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-3)}
+@media (max-width:900px){.lic-form{grid-template-columns:1fr 1fr}.lic-form .btn{grid-column:1/-1}}
+.lic-key{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px;letter-spacing:.3px}
+.lic-made{margin-top:14px;padding:12px;border-radius:12px;background:var(--brand-soft);display:flex;flex-direction:column;gap:8px}
+.lic-made .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.lic-dev{display:flex;align-items:center;gap:8px;padding:4px 0}
 .acc{border-bottom:1px solid var(--line-2)}.acc:last-child{border-bottom:0}
 .acc-head{display:flex;align-items:center;gap:10px;width:100%;padding:12px 2px;border:0;background:transparent;text-align:left;cursor:pointer;color:inherit;font:inherit}
 .acc-head:hover .acc-main b{color:var(--brand-ink)}
@@ -369,6 +376,25 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
       <div class="card" style="padding-bottom:6px"><h3>Demo hesapları <span class="sub">üyelik talepleri burada; onaylayınca kullanıcıya e-posta gider</span></h3><div id="demoBox"></div></div>
     </section>
 
+    <!-- lisanslar -->
+    <section class="page" id="p-lisans">
+      <div class="top"><h2>Lisanslar</h2><span class="sp"></span><a class="btn" href="/indir/" target="_blank" rel="noopener">mivelo.app/indir ↗</a></div>
+      <div class="card" style="margin-bottom:14px"><h3>Yeni lisans anahtarı <span class="sub">masaüstü uygulaması açılışta anahtar ister; yalnız burada ürettiklerinle açılır</span></h3>
+        <form id="licForm" class="lic-form">
+          <label><span>Kime / not</span><input class="input" id="licNote" maxlength="120" placeholder="ör. Ahmet — beta"></label>
+          <label><span>E-posta (isteğe bağlı)</span><input class="input" id="licEmail" type="email" list="licMails" placeholder="bekleme listesinden seç ya da yaz"></label>
+          <label><span>Cihaz sınırı</span><select class="input" id="licMax"><option value="1">1 cihaz</option><option value="2" selected>2 cihaz</option><option value="3">3 cihaz</option><option value="5">5 cihaz</option></select></label>
+          <label><span>Süre</span><select class="input" id="licDays"><option value="0" selected>Süresiz</option><option value="30">30 gün</option><option value="90">90 gün</option><option value="365">1 yıl</option></select></label>
+          <label><span>Adet</span><input class="input" id="licCount" type="number" min="1" max="50" value="1"></label>
+          <button class="btn dark" type="submit">Oluştur</button>
+          <datalist id="licMails"></datalist>
+        </form>
+        <div id="licMade"></div>
+      </div>
+      <div class="toolbar"><input class="input" id="licQ" type="search" placeholder="Anahtar, not ya da e-posta ara…" aria-label="Ara"><div class="seg" id="licSeg"><button data-f="all" class="on">Tümü</button><button data-f="active">Etkin</button><button data-f="used">Kullanılan</button><button data-f="revoked">İptal</button></div></div>
+      <div class="card" style="padding:4px 14px"><div id="licBox"></div></div>
+    </section>
+
     <!-- geri bildirim -->
     <section class="page" id="p-geri">
       <div class="top"><h2>Geri bildirim</h2><span class="sp"></span>
@@ -450,13 +476,14 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     demo:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="12.5" rx="2.5"/><path d="M8 20.5h8M12 17v3.5"/></svg>',
     gorev:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/></svg>',
     ayar:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>',
+    lisans:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M15 8l2 2"/></svg>',
     trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 13h9l1-13"/></svg>',
     next:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
     chev:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
     clip:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.5l-8.2 8.2a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></svg>',
     prev:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>'
   };
-  var PAGES=[['genel','Genel bakış','Genel'],['liste','Bekleme listesi','Liste'],['trafik','Trafik','Trafik'],['demo','Demo','Demo'],['geri','Geri bildirim','Geri'],['gorev','Görevler','Görevler'],['ayar','Ayarlar','Ayarlar']];
+  var PAGES=[['genel','Genel bakış','Genel'],['liste','Bekleme listesi','Liste'],['trafik','Trafik','Trafik'],['demo','Demo','Demo'],['lisans','Lisanslar','Lisans'],['geri','Geri bildirim','Geri'],['gorev','Görevler','Görevler'],['ayar','Ayarlar','Ayarlar']];
   var ST={waiting:'Bekliyor',invited:'Davet edildi',joined:'Katıldı',spam:'Spam'};
   var ST_COLOR={waiting:'#C9C6D6',invited:'#6C47FF',joined:'#16A34A',spam:'#C2261A'};
 
@@ -543,7 +570,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   }
   function load(id,force){
     if(loaded[id] && !force) return; loaded[id]=true;
-    ({genel:loadOverview,liste:loadList,trafik:loadOverview,demo:loadDemo,geri:loadFb,gorev:loadTasks,ayar:function(){ loadSystem(); loadSmtp(); }})[id]();
+    ({genel:loadOverview,liste:loadList,trafik:loadOverview,demo:loadDemo,lisans:loadLic,geri:loadFb,gorev:loadTasks,ayar:function(){ loadSystem(); loadSmtp(); }})[id]();
   }
   window.addEventListener('hashchange',route);
 
@@ -636,13 +663,69 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   /* ---------- demo ---------- */
   var OPEN_D={}, OPEN_F={}, LAST_DEMO=null;
   document.addEventListener('click',function(e){ var h=e.target.closest('[data-acc]'); if(!h) return;
-    var k=h.dataset.acc, id=k.slice(2), m=k[0]==='d'?OPEN_D:OPEN_F; if(m[id]) delete m[id]; else m[id]=1;
-    if(k[0]==='d') renderDemo(); else renderFb(); });
+    var k=h.dataset.acc, id=k.slice(2), m=k[0]==='d'?OPEN_D:k[0]==='l'?OPEN_L:OPEN_F; if(m[id]) delete m[id]; else m[id]=1;
+    if(k[0]==='d') renderDemo(); else if(k[0]==='l') renderLic(); else renderFb(); });
   var DEMO_ST={pending:['Onay bekliyor','st-invited'],active:['Etkin','st-joined'],rejected:['Reddedildi','st-spam']};
   /* ---------- demo ayarları ---------- */
   function setAuto(on){ $('#autoApprove').checked=on; $('#autoApproveTx').textContent=on?'Açık':'Kapalı'; }
   $('#autoApprove').addEventListener('change',function(e){ var on=e.target.checked; api('demo_settings',{autoApprove:on}).then(function(d){ setAuto(d.autoApprove); toast(d.autoApprove?'Otomatik onay açık: yeni üyeler hemen girer':'Otomatik onay kapalı: yeni talepler onay bekler'); }).catch(function(x){ setAuto(!on); toast(x.message,true); }); });
   function loadDemo(){ api('demo').then(function(d){ LAST_DEMO=d; renderDemo(); }).catch(function(e){ toast(e.message,true); }); }
+  /* ---------- lisanslar ---------- */
+  var LIC=[], LIC_F='all', OPEN_L={};
+  var LIC_ST={active:['Etkin','st-joined'],revoked:['İptal','st-spam'],expired:['Süresi doldu','st-spam']};
+  var tsOf=function(iso){ return iso?Math.round(Date.parse(iso)/1000):0; };
+  function licMail(k){
+    var body='Merhaba,\n\nMivelo masaüstü uygulaması için lisans anahtarın:\n\n'+k.key+'\n\nİndir: https://mivelo.app/indir/\nUygulamayı açınca bu anahtarı yapıştırman yeterli. Anahtar en fazla '+k.maxDevices+' cihazda kullanılabilir'+(k.expiresAt?' ve '+new Date(k.expiresAt).toLocaleDateString('tr-TR')+' tarihine kadar geçerli':'')+'.\n\nSorun olursa bu e-postayı yanıtlaman yeterli.\nMivelo';
+    return 'mailto:'+encodeURIComponent(k.email||'')+'?subject='+encodeURIComponent('Mivelo lisans anahtarın')+'&body='+encodeURIComponent(body);
+  }
+  function copyText(t){ (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(function(){ toast('Kopyalandı'); }).catch(function(){ var i=document.createElement('textarea'); i.value=t; document.body.appendChild(i); i.select(); document.execCommand('copy'); i.remove(); toast('Kopyalandı'); }); }
+  function loadLic(){
+    api('licenses').then(function(d){ LIC=d.keys; renderLic(); }).catch(function(e){ toast(e.message,true); });
+    api('waitlist').then(function(d){ $('#licMails').innerHTML=(d.entries||[]).slice(0,500).map(function(e){ return '<option value="'+esc(e.email)+'">'; }).join(''); }).catch(function(){});
+  }
+  function renderLic(){
+    var q=($('#licQ').value||'').toLowerCase();
+    var rows=LIC.filter(function(k){
+      if(LIC_F==='active'&&k.status!=='active') return false;
+      if(LIC_F==='used'&&!k.activations.length) return false;
+      if(LIC_F==='revoked'&&k.status==='active') return false;
+      return !q||(k.key+' '+k.note+' '+k.email).toLowerCase().indexOf(q)>=0; });
+    $('#nc-lisans').textContent=LIC.length?fmt(LIC.filter(function(k){ return k.status==='active'; }).length):'';
+    $('#licBox').innerHTML=rows.length?rows.map(function(k){
+      var st=LIC_ST[k.status]||LIC_ST.active, open=!!OPEN_L[k.id];
+      var acts='<button class="btn sm" data-lcopy="'+esc(k.key)+'">Kopyala</button><a class="btn sm" href="'+esc(licMail(k))+'">E-postayla gönder</a>'+
+        (k.status==='revoked'?'<button class="btn sm soft" data-lst="'+esc(k.id)+'" data-to="active">Etkinleştir</button>':'<button class="btn sm danger" data-lst="'+esc(k.id)+'" data-to="revoked">İptal et</button>')+
+        (k.activations.length?'<button class="btn sm" data-lreset="'+esc(k.id)+'">Cihazları sıfırla</button>':'')+
+        '<button class="btn sm" data-ldel="'+esc(k.id)+'">'+I.trash+' Sil</button>';
+      var devs=k.activations.length?k.activations.map(function(a){ return '<div class="lic-dev"><span>'+esc(a.name||'Cihaz')+' · '+esc(a.os||'?')+(a.version?' · v'+esc(a.version):'')+' · son '+ago(tsOf(a.lastAt))+'</span><button class="btn sm" data-lrel="'+esc(k.id)+'" data-act="'+esc(a.id)+'">Kaldır</button></div>'; }).join(''):'<span class="muted">Henüz kullanılmadı</span>';
+      return '<div class="acc'+(open?' open':'')+'"><button type="button" class="acc-head" data-acc="l:'+esc(k.id)+'" aria-expanded="'+open+'">'+
+        '<span class="acc-main"><b class="lic-key">'+esc(k.key)+'</b><span class="muted">'+esc(k.note||k.email||'not yok')+' · '+k.activations.length+'/'+k.maxDevices+' cihaz</span></span>'+
+        '<span class="chip '+st[1]+'"><i></i>'+st[0]+'</span><span class="acc-chev">'+I.chev+'</span></button>'+
+        (open?'<div class="acc-body"><dl class="acc-dl">'+(k.email?'<dt>E-posta</dt><dd>'+esc(k.email)+'</dd>':'')+(k.note?'<dt>Not</dt><dd>'+esc(k.note)+'</dd>':'')+
+          '<dt>Oluşturma</dt><dd>'+ago(tsOf(k.createdAt))+'</dd><dt>Geçerlilik</dt><dd>'+(k.expiresAt?new Date(k.expiresAt).toLocaleDateString('tr-TR'):'Süresiz')+'</dd>'+
+          '<dt>Cihaz sınırı</dt><dd><select class="input" data-lmax="'+esc(k.id)+'" style="width:auto;height:30px">'+[1,2,3,5,10].map(function(n){ return '<option'+(n===k.maxDevices?' selected':'')+'>'+n+'</option>'; }).join('')+'</select></dd>'+
+          '<dt>Cihazlar</dt><dd>'+devs+'</dd></dl><div class="acc-acts">'+acts+'</div></div>':'')+'</div>'; }).join(''):'<div class="empty">'+(LIC.length?'Eşleşen lisans yok.':'Henüz lisans oluşturulmadı.')+'</div>';
+  }
+  function licUpdate(body,msg){ return api('license_update',body).then(function(k){ LIC=LIC.map(function(x){ return x.id===k.id?k:x; }); renderLic(); if(msg) toast(msg); }).catch(function(e){ toast(e.message,true); }); }
+  $('#licForm').addEventListener('submit',function(e){ e.preventDefault();
+    api('license_create',{note:$('#licNote').value.trim(),email:$('#licEmail').value.trim(),maxDevices:+$('#licMax').value,days:+$('#licDays').value,count:+$('#licCount').value||1}).then(function(d){
+      LIC=d.created.slice().reverse().concat(LIC); renderLic(); $('#licNote').value=''; $('#licEmail').value=''; $('#licCount').value=1;
+      var keys=d.created.map(function(k){ return k.key; }).join('\n');
+      $('#licMade').innerHTML='<div class="lic-made"><b>'+d.created.length+' anahtar oluşturuldu</b>'+d.created.map(function(k){ return '<div class="row"><span class="lic-key">'+esc(k.key)+'</span><button class="btn sm" data-lcopy="'+esc(k.key)+'">Kopyala</button><a class="btn sm soft" href="'+esc(licMail(k))+'">E-postayla gönder</a></div>'; }).join('')+
+        (d.created.length>1?'<div class="row"><button class="btn sm" data-lcopy="'+esc(keys)+'">Hepsini kopyala</button></div>':'')+'</div>';
+    }).catch(function(x){ toast(x.message,true); }); });
+  $('#licQ').addEventListener('input',renderLic);
+  $('#licSeg').addEventListener('click',function(e){ var b=e.target.closest('button'); if(!b) return; LIC_F=b.dataset.f; $$('#licSeg button').forEach(function(x){ x.classList.toggle('on',x===b); }); renderLic(); });
+  document.addEventListener('change',function(e){ var s=e.target.closest('[data-lmax]'); if(s) licUpdate({id:s.dataset.lmax,maxDevices:+s.value},'Cihaz sınırı güncellendi'); });
+  document.addEventListener('click',function(e){
+    var b=e.target.closest('[data-lcopy],[data-lst],[data-lreset],[data-lrel],[data-ldel]'); if(!b) return;
+    if(b.dataset.lcopy) return copyText(b.dataset.lcopy);
+    if(b.dataset.lst) return licUpdate({id:b.dataset.lst,status:b.dataset.to},b.dataset.to==='revoked'?'İptal edildi: uygulama en geç 12 saat içinde kilitlenir':'Etkinleştirildi');
+    if(b.dataset.lrel) return licUpdate({id:b.dataset.lrel,release:b.dataset.act},'Cihaz kaldırıldı');
+    if(b.dataset.armed!=='1'){ b.dataset.armed='1'; var t=b.innerHTML; b.textContent='Emin misin?'; setTimeout(function(){ b.dataset.armed=''; b.innerHTML=t; },3000); return; }
+    if(b.dataset.lreset) return licUpdate({id:b.dataset.lreset,resetDevices:true},'Cihazlar sıfırlandı');
+    if(b.dataset.ldel) api('license_delete',{id:b.dataset.ldel}).then(function(){ LIC=LIC.filter(function(k){ return k.id!==b.dataset.ldel; }); renderLic(); toast('Silindi'); }).catch(function(x){ toast(x.message,true); });
+  });
   function renderDemo(){ var d=LAST_DEMO; if(!d) return;
     setAuto(d.autoApprove!==false);
     var pend=d.users.filter(function(u){ return u.status==='pending'; }).length;
