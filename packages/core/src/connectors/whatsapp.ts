@@ -406,6 +406,8 @@ export class WhatsAppConnector extends BaseConnector {
     } catch {
       /* yok say */
     }
+    // eski sürümlerin normal fotoğraf gibi yazdığı tek seferlik medya (hesap başına bir kez, arka planda)
+    void this.repairViewOnce().catch((e) => bus.log('warn', `WhatsApp: tek seferlik medya onarımı yapılamadı: ${(e as Error).message}`));
     this.stopping = false;
     this.historySeen = false;
     this.opened = false;
@@ -1212,7 +1214,9 @@ export class WhatsAppConnector extends BaseConnector {
     }
     if (!ctx?.stanzaId) return undefined;
     const stored = this.store.getMessage(`${chatIdOf(this.account.id, jid)}#${ctx.stanzaId}`);
-    const qText = textOf(unwrap(ctx.quotedMessage ?? undefined)) || attachmentsOf(unwrap(ctx.quotedMessage ?? undefined))[0]?.name || '';
+    const qText = isViewOnce(ctx.quotedMessage)
+      ? '🔒 Tek seferlik medya'
+      : textOf(unwrap(ctx.quotedMessage ?? undefined)) || attachmentsOf(unwrap(ctx.quotedMessage ?? undefined))[0]?.name || '';
     const who = ctx.participant ? this.canon(jidNormalizedUser(ctx.participant)) : undefined;
     const fromMe = stored?.fromMe ?? (who ? this.isMe(who) : false);
     return {
@@ -1879,6 +1883,11 @@ export class WhatsAppConnector extends BaseConnector {
     const pending = this.mediaPending.get(idx);
     if (!pending && !fs.existsSync(idx)) throw new Error('medya kaydı yok (mesaj eski olabilir)');
     const msg = JSON.parse(pending ?? fs.readFileSync(idx, 'utf8'), BufferJSON.reviver) as WAMessage;
+    // tek seferlik medya asla indirilmez / gösterilmez (yalnız telefonda bir kez açılır)
+    if (isViewOnce(msg.message)) {
+      this.forgetMedia(jid, id);
+      throw new Error('Tek seferlik medya yalnız telefonda açılabilir');
+    }
     const content = unwrap(msg.message);
     // ptvMessage (yuvarlak video notu) videoMessage ile aynı yapıdadır; Baileys indirmede 'ptv' medya türünü tanır
     const media = content?.imageMessage ?? content?.videoMessage ?? content?.ptvMessage ?? content?.audioMessage ?? content?.documentMessage ?? content?.stickerMessage;
@@ -1982,6 +1991,13 @@ export class WhatsAppConnector extends BaseConnector {
       // canlı: karşı taraf MESAJIMA tepki verdi → önizleme "❤️ Ayşe mesajına tepki verdi" (WhatsApp listesindeki gibi; mesaj değil)
       if (live && !m.key.fromMe && reaction.text && this.store.getMessage(`${chatIdOf(this.account.id, jid)}#${reaction.key.id}`)?.fromMe)
         this.reactionPreview(jid, `${reaction.text} ${name.split(/\s+/)[0]} mesajına tepki verdi`);
+      return;
+    }
+    // Tek seferlik (bir kez görüntülenen) medya: canlıda WhatsApp içeriği bağlı cihazlara göndermiyor (aşağıdaki içeriksiz yer
+    // tutucu), geçmiş eşitlemesinde ise sarmal/bayrakla İÇERİKLİ gelebiliyor → unwrap sarmalı soyunca normal fotoğraf gibi
+    // yazılıyor, medyası indirilip gösteriliyordu (gönderen tek seferlik gönderdi: ciddi gizlilik sorunu). Her iki yolda aynı uyarı.
+    if (isViewOnce(m.message)) {
+      this.viewOncePlaceholder(m, jid, live);
       return;
     }
     const content = unwrap(m.message);
@@ -2090,6 +2106,117 @@ export class WhatsAppConnector extends BaseConnector {
       },
       { live },
     );
+  }
+
+  /**
+   * İçerikli tek seferlik medya → yer tutucu (ek YOK, medya kaydı tutulmaz; önceden kaydedilmiş medya/önbellek silinir). Daha önce
+   * normal fotoğraf olarak yazılmış aynı mesaj (eski sürüm) yerinde çevrilir: ekler [] ile silinir (depo ekleri COALESCE ile korur).
+   */
+  private viewOncePlaceholder(m: WAMessage, jid: string, live: boolean): void {
+    const id = m.key.id!;
+    if (!m.key.fromMe && m.key.participant && this.isMe(jidNormalizedUser(m.key.participant))) m.key.fromMe = true;
+    const fromMe = !!m.key.fromMe;
+    const senderJid = fromMe ? 'me' : this.canon(m.key.participant ? jidNormalizedUser(m.key.participant) : jid);
+    this.forgetMedia(jid, id);
+    this.ensureWaChat(jid);
+    const input = {
+      remoteChatId: jid,
+      remoteId: id,
+      senderId: senderJid,
+      senderName: fromMe ? 'Ben' : this.nameOf(senderJid),
+      fromMe,
+      text: VIEW_ONCE_TEXT,
+      attachments: [] as Attachment[],
+      ts: toMs(m.messageTimestamp) || Date.now(),
+      status: fromMe ? waStatus(m.status) : ('delivered' as const),
+    };
+    if (this.hasMessage(jid, id)) {
+      this.rewriteViewOnce(jid, id);
+      return;
+    }
+    if (live && !fromMe) {
+      this.liveBumped.set(jid, (this.liveBumped.get(jid) ?? 0) + 1);
+      this.scheduleUnreadSettle();
+    }
+    this.upsertPlaceholder(input, { live });
+  }
+
+  /** Depodaki mesajı tek seferlik yer tutucusuna çevir (metin + ekler), arayüze yayınla; zaman/gönderen/durum korunur */
+  private rewriteViewOnce(jid: string, id: string): boolean {
+    const cid = chatIdOf(this.account.id, jid);
+    const cur = this.store.getMessage(`${cid}#${id}`);
+    if (!cur) return false;
+    if (cur.text === VIEW_ONCE_TEXT && !cur.attachments?.length) return false;
+    const stored = this.upsertMessage(
+      { remoteChatId: jid, remoteId: id, senderId: cur.senderId, senderName: cur.senderName, fromMe: cur.fromMe, text: VIEW_ONCE_TEXT, attachments: [], ts: cur.ts, status: cur.status },
+      { live: false },
+    );
+    // canlı olmayan güncellemede taban yalnız sohbeti yayınlar: açık sohbetteki balon da değişsin
+    const chat = this.store.getChatLite(cid);
+    if (stored && chat) bus.emit({ type: 'message.upsert', message: stored, chat });
+    return true;
+  }
+
+  /** Mesajın medya kaydını (indirme anahtarı) ve indirilmiş dosyasını sil: tek seferlik medya bir daha indirilemesin/gösterilemesin */
+  private forgetMedia(jid: string, id: string): void {
+    const key = this.mediaKey(jid, id);
+    const idx = path.join(this.mediaIndexDir(), key + '.json');
+    this.mediaPending.delete(idx);
+    const media = path.join(sessionDir(this.account.id), 'media', key);
+    for (const f of [idx, media, media + '.type']) fs.promises.rm(f, { force: true }).catch(() => undefined);
+  }
+
+  /**
+   * Eski sürümler geçmiş eşitlemesindeki tek seferlik medyayı normal fotoğraf/video olarak yazdı. Ham mesajlar medya kaydında
+   * (media-index/<jid>__<id>.json) duruyor: hesap başına BİR KEZ taranır (dilimli, olay döngüsünü kilitlemeden), tek seferlik
+   * olanlar yer tutucuya çevrilir, medya kaydı ve indirilmiş dosya silinir.
+   */
+  private async repairViewOnce(): Promise<number> {
+    const flag = `wa_viewonce_v1:${this.account.id}`;
+    if (this.store.flag(flag)) return 0;
+    const dir = this.mediaIndexDir();
+    let files: string[] = [];
+    try {
+      files = (await fs.promises.readdir(dir)).filter((f) => f.endsWith('.json'));
+    } catch {
+      /* kayıt yok */
+    }
+    let fixed = 0;
+    for (let i = 0; i < files.length; i += 32) {
+      if (this.stopping) return fixed; // hesap kapatıldı: bayrak yazılmaz, sonraki açılışta sürer
+      await Promise.all(
+        files.slice(i, i + 32).map(async (f) => {
+          let raw: string;
+          try {
+            raw = await fs.promises.readFile(path.join(dir, f), 'utf8');
+          } catch {
+            return;
+          }
+          if (!raw.includes('"viewOnce')) return; // ucuz ön eleme: sarmal adları ve bayrak bu dizeyi içerir
+          let msg: WAMessage;
+          try {
+            msg = JSON.parse(raw, BufferJSON.reviver) as WAMessage;
+          } catch {
+            return;
+          }
+          if (!isViewOnce(msg.message)) return;
+          const base = f.slice(0, -5);
+          const sep = base.lastIndexOf('__');
+          if (sep <= 0) return;
+          const jid = base.slice(0, sep);
+          const id = base.slice(sep + 2);
+          this.forgetMedia(jid, id);
+          if (this.rewriteViewOnce(jid, id)) fixed++;
+        }),
+      );
+      await new Promise((r) => setImmediate(r));
+    }
+    if (fixed) {
+      bus.log('info', `WhatsApp: ${fixed} tek seferlik medya normal fotoğraf/video gibi görünüyordu; "tek seferlik" uyarısına çevrildi, medyası silindi`);
+      for (const mid of this.store.dropTwins(VIEW_ONCE_TEXT)) bus.emit({ type: 'message.delete', chatId: mid.slice(0, mid.lastIndexOf('#')), messageId: mid });
+    }
+    this.store.setFlag(flag);
+    return fixed;
   }
 
   /**
@@ -2333,6 +2460,20 @@ async function transcodeToOpus(input: string): Promise<string | undefined> {
 
 function isChatJid(jid: string): boolean {
   return (jid.endsWith('@s.whatsapp.net') || jid.endsWith('@g.us') || jid.endsWith('@lid')) && jid !== 'status@broadcast';
+}
+
+/**
+ * Tek seferlik (bir kez görüntülenen) medya mı: sarmal (viewOnceMessage / V2 / V2Extension — ephemeral, belge, düzenleme vb.
+ * sarmalların içinde de) ya da medya alanındaki `viewOnce` bayrağı (geçmiş eşitlemesi sarmalsız, bayraklı verebiliyor).
+ */
+export function isViewOnce(m: proto.IMessage | null | undefined, depth = 0): boolean {
+  if (!m || depth > 6) return false;
+  const x = m as proto.IMessage & { viewOnceMessageV2Extension?: { message?: proto.IMessage | null } | null; editedMessage?: { message?: proto.IMessage | null } | null };
+  if (m.viewOnceMessage || m.viewOnceMessageV2 || x.viewOnceMessageV2Extension) return true;
+  if (m.imageMessage?.viewOnce || m.videoMessage?.viewOnce || m.audioMessage?.viewOnce || m.ptvMessage?.viewOnce) return true;
+  const y = x as typeof x & { groupMentionedMessage?: { message?: proto.IMessage | null } | null; botInvokeMessage?: { message?: proto.IMessage | null } | null };
+  const inner = m.ephemeralMessage?.message ?? m.documentWithCaptionMessage?.message ?? x.editedMessage?.message ?? y.groupMentionedMessage?.message ?? y.botInvokeMessage?.message;
+  return inner ? isViewOnce(inner, depth + 1) : false;
 }
 
 function unwrap(m: proto.IMessage | null | undefined): proto.IMessage | undefined {

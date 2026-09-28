@@ -542,6 +542,14 @@ Dil: arayüz ve yorumlar Türkçe.
   dizi e-postaları hiç yoktu); ileti görünümü okunamazsa satır özeti tek ileti; `openMail` #message/#thread görünümünde kalmışsa #inbox'a döner;
   avatar satırdaki img ya da avatar/logo kutusunun arka plan görseli (`Thread.avatarUrl`). Tanı günlüğü `threadish`/`avatarish`/`hash` da yazar. Giriş: oturum yokken mail.yandex ana sayfaya atıyor → passive loggedIn passport'a gider (`LOGIN_URL`). Token dosyalı eski IMAP hesapları sürer;
   şifre reddinde "Yandex ile giriş yap" (Yahoo gibi, IMAP hesabı tarayıcı yoluna çevrilir).
+- **WhatsApp tek seferlik (bir kez görüntülenen) medya (29.09, Kaan: "geçmişte gönderilen tek seferlikler normal foto gibi görünüyor, ciddi")**:
+  canlıda içerik bağlı cihazlara GELMEZ (içeriksiz → `VIEW_ONCE_TEXT` yer tutucu), ama geçmiş eşitlemesi sarmallı (viewOnceMessage/V2/V2Extension)
+  ya da sarmalsız `imageMessage.viewOnce` bayraklı İÇERİKLE veriyor → `unwrap` sarmalı soyup normal fotoğraf yazıyor, medya indirilip gösteriliyordu.
+  Şimdi `isViewOnce` (iç içe sarmallar + image/video/audio/ptv `viewOnce`) → `viewOncePlaceholder`: aynı uyarı metni, ek YOK (`attachments: []` —
+  depo ekleri COALESCE ile korur, undefined eski fotoğrafı bırakırdı), medya kaydı tutulmaz (`forgetMedia`: media-index + indirilmiş dosya silinir);
+  depoda normal foto olarak duran aynı kimlik yerinde çevrilir (`rewriteViewOnce`, açık sohbete message.upsert). Açılışta hesap başına BİR KEZ
+  (`wa_viewonce_v1:<hesap>` bayrağı) `repairViewOnce`: media-index'teki ham mesajlar dilimli taranır (`"viewOnce` ön elemesi), eski kayıtlar çevrilir.
+  `fetchMedia` tek seferlik medyayı (tam ve küçük önizleme) REDDEDER; alıntıda "🔒 Tek seferlik medya". Test: whatsapp-viewonce.test.ts.
 - WhatsApp tek seferlik medya ikizi: telefon aynı gönderimi iki kimlikle yollayabiliyor (biri tek, biri çift tik iki yer tutucu) → `upsertPlaceholder`
   aynı sohbet+gönderen ±10 sn ikizi varsa yeni kayıt açmaz, kimliği `twins` ile bağlar (alındılar tek balona); açılışta `store.dropTwins` eskileri birleştirir.
 - **Kaydırarak yanıt animasyonu** (Conversation.tsx `swipeProps`): ham dx → rAF ile yumuşatılan `--sw` (CSS `@property`, sayı), 60 px sonrası lastik direnci,
