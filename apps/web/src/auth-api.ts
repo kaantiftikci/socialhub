@@ -52,7 +52,16 @@ export function authSaveAccounts(accounts: Array<Record<string, unknown>>): Prom
   return call('accounts', 'PUT', { accounts });
 }
 
-/** Üyelik talebi: onaylanana kadar giriş yapılamaz (admin panelinden onaylanınca e-posta gider) */
+/** Yeni üyeler otomatik onaylanıyor mu (Admin → Demo). Okunamazsa onaylı üyelik varsayılır. */
+export async function authSignupConfig(): Promise<{ autoApprove: boolean }> {
+  try {
+    return await call('signup_config', 'GET');
+  } catch {
+    return { autoApprove: false };
+  }
+}
+
+/** Üyelik talebi (otomatik onay açıksa pending:false → hemen giriş): onaylanana kadar giriş yapılamaz (admin panelinden onaylanınca e-posta gider) */
 export function authRegister(form: { name: string; firstName?: string; lastName?: string; username: string; email: string; password: string; website?: string }): Promise<{ ok: boolean; pending: boolean }> {
   return call('register', 'POST', form);
 }

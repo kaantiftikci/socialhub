@@ -128,6 +128,14 @@ function user_status(array $u): string
     return in_array($s, ['pending', 'active', 'rejected'], true) ? $s : 'active';
 }
 
+/** Yeni üyeler otomatik onaylanır mı (Admin → Demo anahtarı, demo-settings.json). Varsayılan AÇIK: onay e-postası gidemediği sürece
+ *  (barındırma giden SMTP'yi kapatıyor) kayıt olan hemen girebilsin; e-posta düzelince admin kapatır → onaylı üyelik. */
+function demo_auto_approve(): bool
+{
+    $s = store_read(data_dir() . '/demo-settings.json', []);
+    return !array_key_exists('autoApprove', $s) || (bool) $s['autoApprove'];
+}
+
 function fail(int $code, string $message)
 {
     http_response_code($code);
@@ -305,8 +313,13 @@ if ($method === 'POST' || $method === 'PUT') {
     $body = is_array($decoded) ? $decoded : [];
 }
 
+if ($action === 'signup_config' && $method === 'GET') {
+    echo json_encode(['autoApprove' => demo_auto_approve()]);
+    exit;
+}
+
 /**
- * Üyelik talebi: onay bekleyen kullanıcı olarak kaydedilir (giriş yapamaz). IP (/64) başına saatte 5, toplam en çok 300
+ * Üyelik talebi (otomatik onay açıksa hemen etkin üye): onay bekleyen kullanıcı olarak kaydedilir (giriş yapamaz). IP (/64) başına saatte 5, toplam en çok 300
  * bekleyen talep; gizli "website" alanı bot tuzağı (doluysa sessizce başarılı görünür, kaydedilmez).
  */
 if ($action === 'register' && $method === 'POST') {
@@ -359,7 +372,8 @@ if ($action === 'register' && $method === 'POST') {
     flock($slh, LOCK_UN);
     fclose($slh);
     $hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]);
-    $err = with_users(function (array &$data) use ($name, $firstName, $lastName, $username, $email, $hash, $note) {
+    $auto = demo_auto_approve();
+    $err = with_users(function (array &$data) use ($name, $firstName, $lastName, $username, $email, $hash, $note, $auto) {
         $pending = 0;
         foreach ($data['users'] as $u) {
             if (strtolower((string) ($u['username'] ?? '')) === $username) {
@@ -383,19 +397,19 @@ if ($action === 'register' && $method === 'POST') {
             'lastName' => $lastName,
             'email' => $email,
             'pass' => $hash,
-            'status' => 'pending',
+            'status' => $auto ? 'active' : 'pending',
             'note' => $note,
             'accounts' => [],
             'seedVersion' => SEED_VERSION,
             'requestedAt' => time(),
             'createdAt' => (int) (microtime(true) * 1000),
-        ];
+        ] + ($auto ? ['approvedAt' => time(), 'approvedBy' => 'auto'] : []);
         return ['write' => true, 'out' => null];
     });
     if ($err !== null) {
         fail(409, $err);
     }
-    echo json_encode(['ok' => true, 'pending' => true]);
+    echo json_encode(['ok' => true, 'pending' => !$auto]);
     exit;
 }
 
@@ -423,9 +437,16 @@ if ($action === 'login' && $method === 'POST') {
     flock($alh, LOCK_UN);
     fclose($alh);
     usleep(250000); // kaba kuvvete karşı küçük gecikme
-    $user = with_users(function (array &$data) use ($username, $password) {
+    $auto = demo_auto_approve();
+    $user = with_users(function (array &$data) use ($username, $password, $auto) {
         foreach ($data['users'] as &$u) {
             if ((strtolower((string) ($u['username'] ?? '')) === $username || strtolower((string) ($u['email'] ?? '')) === $username) && password_verify($password, (string) ($u['pass'] ?? ''))) {
+                // otomatik onay açıkken bekleyen talep ilk girişte onaylanır (reddedilen asla)
+                if ($auto && user_status($u) === 'pending') {
+                    $u['status'] = 'active';
+                    $u['approvedAt'] = time();
+                    $u['approvedBy'] = 'auto';
+                }
                 // şifre doğru ama üyelik onaylanmamış: durumu söyle (şifre doğrulandıktan sonra → kullanıcı adı taraması olmaz)
                 if (user_status($u) !== 'active') {
                     return ['write' => false, 'out' => ['__status' => user_status($u)]];

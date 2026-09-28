@@ -73,6 +73,9 @@ Dil: arayüz ve yorumlar Türkçe.
   **Demo üyeliği**: hazır tek hesap `admin` (şifre karması `SEED_USERS`, `passVersion` artınca users.json'daki karma da güncellenir; editor/misafir
   `REMOVED_USERS` ile silinir). Giriş ekranında "Üyelik oluştur" (`Auth.tsx`, `authRegister`) → `action=register`: ad + soyad (ayrı alanlar; `firstName`/`lastName`, `name` birleşik), e-posta, kullanıcı adı
   (a-z0-9._-, 3-24), şifre ≥8 (iki kez; not alanı YOK); IP başına saatte 5 (`demo-signup.json`), gizli `website` bot tuzağı, ≤300 bekleyen. Kayıt users.json'da
+  **Otomatik onay** (Admin → Demo anahtarı, `~/mivelo-data/demo-settings.json` `autoApprove`, VARSAYILAN AÇIK — onay e-postası
+  gidemediği sürece; Kaan e-posta düzelince kapatacak): kayıt `active` + `approvedBy:'auto'`, yanıt `pending:false` → Auth.tsx doğrudan giriş
+  (`signup_config` ile metin "Üye ol"); açıkken bekleyen talep ilk girişte onaylanır (reddedilen asla). Kapalıyken:
   `status:'pending'` → giriş 403 "onaylanmadı" (şifre doğrulandıktan sonra söylenir); e-postayla da giriş olur. Admin → Demo: Onayla/Reddet/
   E-posta/Sil (`demo_update`/`demo_mail`/`demo_delete`, u-admin korunur); onayda `send_approval_mail` → `apps/landing/api/lib-smtp.php`
   `mv_send_mail` (kimlik doğrulamalı SMTP, bağımlılıksız; ayar `~/mivelo-data/smtp.json` 0600, Admin → Ayarlar → E-posta gönderimi + deneme

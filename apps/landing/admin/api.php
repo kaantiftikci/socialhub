@@ -450,6 +450,16 @@ if ($a === 'wl_delete' && $method === 'POST') {
     out(['deleted' => $n]);
 }
 
+// Yeni demo üyeleri otomatik onay (demo API'si demo-settings.json'u okur; varsayılan açık)
+if ($a === 'demo_settings' && $method === 'POST') {
+    $on = (bool) ($body['autoApprove'] ?? true);
+    with_json('demo-settings.json', [], function (array &$d) use ($on) {
+        $d['autoApprove'] = $on;
+        return null;
+    });
+    out(['autoApprove' => $on]);
+}
+
 if ($a === 'demo') {
     // kayıtla gelen üyelerin eski demo verisi (varsayılan uygulamalar) bir kez silinir — demo API'si ile aynı kural
     $users = with_json('users.json', ['users' => []], function (array &$d) {
@@ -479,7 +489,8 @@ if ($a === 'demo') {
         'apps' => array_values(array_map(fn ($x) => (string) ($x['platform'] ?? ''), is_array($u['accounts'] ?? null) ? $u['accounts'] : [])),
     ], is_array($users) ? $users : []);
     usort($list, fn ($x, $y) => [$rank[$x['status']], -$x['requestedAt']] <=> [$rank[$y['status']], -$y['requestedAt']]);
-    out(['users' => $list]);
+    $ds = read_json('demo-settings.json', []);
+    out(['users' => $list, 'autoApprove' => !array_key_exists('autoApprove', $ds) || (bool) $ds['autoApprove']]);
 }
 
 function demo_status(array $u): string

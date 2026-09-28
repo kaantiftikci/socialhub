@@ -340,6 +340,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     <!-- demo -->
     <section class="page" id="p-demo">
       <div class="top"><h2>Demo</h2><span class="sp"></span><a class="btn" href="https://demo.mivelo.app" target="_blank" rel="noopener">demo.mivelo.app ↗</a></div>
+      <div class="card" style="margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap"><div style="flex:1;min-width:240px"><b>Yeni üyeleri otomatik onayla</b><div class="muted" style="font-size:12.5px;margin-top:3px">Açıkken kayıt olan hemen giriş yapar (onay e-postası beklemez). Kapatınca talepler burada onayını bekler ve onayda e-posta gider.</div></div><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="autoApprove" style="width:18px;height:18px"> <span id="autoApproveTx">—</span></label></div>
       <div class="card" style="overflow-x:auto"><h3>Demo hesapları <span class="sub">üyelik talepleri burada; onaylayınca kullanıcıya e-posta gider</span></h3><div id="demoBox"></div></div>
     </section>
 
@@ -607,7 +608,10 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
 
   /* ---------- demo ---------- */
   var DEMO_ST={pending:['Onay bekliyor','st-invited'],active:['Etkin','st-joined'],rejected:['Reddedildi','st-spam']};
+  function setAuto(on){ $('#autoApprove').checked=on; $('#autoApproveTx').textContent=on?'Açık':'Kapalı'; }
+  $('#autoApprove').addEventListener('change',function(e){ var on=e.target.checked; api('demo_settings',{autoApprove:on}).then(function(d){ setAuto(d.autoApprove); toast(d.autoApprove?'Otomatik onay açık: yeni üyeler hemen girer':'Otomatik onay kapalı: yeni talepler onay bekler'); }).catch(function(x){ setAuto(!on); toast(x.message,true); }); });
   function loadDemo(){ api('demo').then(function(d){
+    setAuto(d.autoApprove!==false);
     var pend=d.users.filter(function(u){ return u.status==='pending'; }).length;
     $('#nc-demo').textContent=pend||'';
     $('#demoBox').innerHTML=d.users.length?'<table class="t"><thead><tr><th>Kullanıcı</th><th>Durum</th><th class="r">Giriş</th><th>Son giriş</th><th>Bağladığı uygulamalar</th><th></th></tr></thead><tbody>'+d.users.map(function(u){

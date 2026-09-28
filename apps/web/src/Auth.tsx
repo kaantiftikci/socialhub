@@ -1,6 +1,6 @@
 import { claimUserLocalData, wipeUserLocalData } from './demo-isolation';
 import { useEffect, useState } from 'react';
-import { authLoadAccounts, authLogin, authLogout, authMe, authRegister, type SessionUser } from './auth-api';
+import { authLoadAccounts, authLogin, authLogout, authMe, authRegister, authSignupConfig, type SessionUser } from './auth-api';
 import { setLeaveDemoPanel } from './demo-session';
 import { setProfileName, setProfileUser } from './profile';
 import { clearDemoAccounts, loadDemoAccounts } from './static-demo';
@@ -86,6 +86,11 @@ function AuthScreen({
   const [website, setWebsite] = useState('');
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState('');
+  // otomatik onay (Admin → Demo): açıksa kayıt olan hemen girer, metinler "talep" demez
+  const [autoApprove, setAutoApprove] = useState(false);
+  useEffect(() => {
+    void authSignupConfig().then((c) => setAutoApprove(!!c.autoApprove));
+  }, []);
 
   const switchTo = (m: 'login' | 'signup') => {
     setMode(m);
@@ -101,7 +106,15 @@ function AuthScreen({
     try {
       if (mode === 'signup') {
         if (password !== password2) throw new Error('Şifreler aynı değil');
-        await authRegister({ name: `${firstName.trim()} ${lastName.trim()}`.trim(), firstName: firstName.trim(), lastName: lastName.trim(), username: username.trim().toLowerCase(), email: email.trim(), password, website });
+        const reg = await authRegister({ name: `${firstName.trim()} ${lastName.trim()}`.trim(), firstName: firstName.trim(), lastName: lastName.trim(), username: username.trim().toLowerCase(), email: email.trim(), password, website });
+        if (reg.pending === false) {
+          // otomatik onay: doğrudan giriş
+          const res = await authLogin(username.trim().toLowerCase(), password);
+          setPassword('');
+          setPassword2('');
+          await onEnter(res.user);
+          return;
+        }
         setPassword('');
         setPassword2('');
         setMode('sent');
@@ -154,7 +167,7 @@ function AuthScreen({
         </div>
         {mode === 'signup' && (
           <>
-            <p className="auth-note">Demoyu denemek için üyelik talebi gönder. Onaylanınca e-posta ile haber veririz; demo sana özel olur.</p>
+            <p className="auth-note">{autoApprove ? 'Demoyu denemek için üye ol; hemen giriş yaparsın. Demo sana özel olur.' : 'Demoyu denemek için üyelik talebi gönder. Onaylanınca e-posta ile haber veririz; demo sana özel olur.'}</p>
             <div className="auth-row">
               <label>
                 Ad
@@ -195,7 +208,7 @@ function AuthScreen({
         )}
         {shown && <div className="auth-error">{shown}</div>}
         <button className="btn primary b" type="submit" disabled={busy}>
-          {busy ? <span className="spin" /> : mode === 'signup' ? 'Üyelik talebi gönder' : 'Giriş yap'}
+          {busy ? <span className="spin" /> : mode === 'signup' ? (autoApprove ? 'Üye ol' : 'Üyelik talebi gönder') : 'Giriş yap'}
         </button>
         {REMOTE_CORE && (
           <div className="auth-remote">
