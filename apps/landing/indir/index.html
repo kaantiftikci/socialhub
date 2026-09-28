@@ -50,12 +50,24 @@ svg{flex-shrink:0}
 .nav .wrap{width:100%;display:flex;align-items:center;gap:26px}
 .logo{display:inline-flex;align-items:center;gap:9px;font-weight:600;font-size:17px;letter-spacing:-.02em;text-decoration:none}
 .logo .mark{display:block}
-.nav .links{display:flex;gap:26px;margin-left:auto}
+.nav .links{display:flex;gap:26px;margin:0 auto}
 .nav .links a{font-size:14px;color:var(--ink-3);text-decoration:none;transition:color .2s}
 .nav .links a:hover{color:var(--ink)}
 .pill-btn{height:36px;padding:0 16px;border-radius:11px;background:var(--ink);color:#fff;font-size:14px;font-weight:500;text-decoration:none;display:inline-flex;align-items:center;gap:8px;transition:transform .2s var(--ease),background .2s;box-shadow:0 1px 2px rgba(0,0,0,.1)}
 .pill-btn:hover{background:#000}.pill-btn:active{transform:scale(.97)}
+/* "Listeye katıl": ana sayfadaki düğmenin dönen renkli ışık halkası (orada kaydırınca belirir; burada form yok, hep açık) */
+@property --beam{syntax:'<angle>';inherits:false;initial-value:0deg}
+.nav .pill-btn{position:relative}
+.nav .pill-btn::before,.nav .pill-btn::after{content:"";position:absolute;inset:-2px;border-radius:13px;pointer-events:none;
+  background:conic-gradient(from var(--beam),transparent 0 8%,rgba(34,197,94,.95) 16%,rgba(20,184,166,.75) 24%,transparent 34% 52%,rgba(245,158,11,.8) 60%,rgba(236,72,153,.75) 68%,rgba(139,92,246,.95) 76%,transparent 86%);
+  animation:beam 4s linear infinite;opacity:0;transition:opacity .6s var(--ease)}
+.nav .pill-btn::before{padding:2px;-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0)}
+.nav .pill-btn::after{z-index:-1;filter:blur(9px)}
+.nav.lit .pill-btn::before{opacity:1}
+.nav.lit .pill-btn::after{opacity:.6}
+@keyframes beam{to{--beam:360deg}}
 @media (max-width:720px){.nav .links{display:none}.nav .wrap{justify-content:space-between}}
+@media (prefers-reduced-motion:reduce){.nav .pill-btn::before,.nav .pill-btn::after{animation:none}}
 
 /* açılış: hareketli gradyan zemin */
 .hero{position:relative;overflow:hidden;padding:150px 0 90px}
@@ -192,6 +204,7 @@ footer a:hover{color:var(--ink)}
   <div class="wrap">
     <a class="logo" href="/" aria-label="Mivelo ana sayfa"><svg class="mark" width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><rect width="28" height="28" rx="9" fill="#6C47FF"/><path d="M8 8c4.5 0 6 3 6 6s1.5 6 6 6M8 20c4.5 0 6-3 6-6" stroke="#FFFFFF" stroke-width="2.3" fill="none" stroke-linecap="round"/><circle cx="20" cy="8" r="2.5" fill="#D4FF3F"/></svg>Mivelo</a>
     <nav class="links" aria-label="Bölümler"><a href="#surumler">Sürümler</a><a href="#kurulum">Kurulum</a><a href="#neden">Neden masaüstü</a></nav>
+    <a class="pill-btn" href="/" id="navCta">Listeye katıl</a>
   </div>
 </header>
 
@@ -297,6 +310,7 @@ footer a:hover{color:var(--ink)}
 
   /* üst çubuk kenarı */
   var nav=$('#nav'); function onScroll(){ nav.classList.toggle('scrolled',scrollY>8); } addEventListener('scroll',onScroll,{passive:true}); onScroll();
+  setTimeout(function(){ nav.classList.add('lit'); },1200);
 
   /* başlıklar kelime kelime, altındaki açıklama süpürülerek (ana sayfayla aynı) */
   function split(el){
