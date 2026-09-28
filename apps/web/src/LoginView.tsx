@@ -10,6 +10,8 @@ let current: Frame | null = null;
 const subs = new Set<() => void>();
 export function pushLoginEvent(ev: CoreEvent): boolean {
   if (ev.type === 'login.frame') current = ev;
+  // giriş ekranı hemen açılsın: ilk kare gelene dek "açılıyor…"
+  else if (ev.type === 'login.start') current = { type: 'login.frame', accountId: ev.accountId, data: '', width: 820, height: 700, host: '' };
   else if (ev.type === 'login.end') {
     if (current?.accountId !== ev.accountId) return true;
     current = null;
@@ -94,9 +96,15 @@ export function LoginView({ accounts }: { accounts: Account[] }) {
           </button>
         </div>
         <div className="login-screen" onClick={() => keyRef.current?.focus()}>
+          {!frame.data && (
+            <div className="login-loading" style={{ width: `min(100%, calc((94vh - 100px) * ${frame.width} / ${frame.height}))`, aspectRatio: `${frame.width} / ${frame.height}` }}>
+              <span className="spin" /> Giriş sayfası açılıyor…
+            </div>
+          )}
           <img
             ref={imgRef}
-            src={`data:image/jpeg;base64,${frame.data}`}
+            hidden={!frame.data}
+            src={frame.data ? `data:image/jpeg;base64,${frame.data}` : undefined}
             alt=""
             draggable={false}
             style={{ width: `min(100%, calc((94vh - 100px) * ${frame.width} / ${frame.height}))` }}

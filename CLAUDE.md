@@ -349,6 +349,10 @@ Dil: arayüz ve yorumlar Türkçe.
   arayüz sıralı toplu gönderir, köprü `inputQ` ile sırayla uygular; klavye gizli textarea `.login-keys` — üst öğelerin `user-select:none`'ı yazmayı
   engelliyordu, `user-select:text` şart), `login-cancel` (bekleyen girişi bırakır, 'pairing'), `login-window` (restart `{external:true}` → eski
   ayrı pencere). OAuth açılır penceresine geçilince yayın yeni sayfaya taşınır (`startEmbed`). `MIVELO_LOGIN_WINDOW=1` hep ayrı pencere.
+  Hız: `login.start` olayı → arayüz ekranı HEMEN "açılıyor…" ile açar; tarayıcı gezinmeden (`launch(…, navigate=false)`) yayın başlar,
+  sonra `Strategy.loginUrl ?? home` (Yandex: passport; eskiden 5-10 sn sonra açılıyordu). Akış donmasın: ana çerçeve gezinmesinde ve 2,5 sn kare
+  gelmezse yayın yeniden başlar (`keepEmbedAlive`; tıklama/tuş sonrası da); `Emulation.setFocusEmulationEnabled` (sayfa odakta sanılsın);
+  uygulanamayan girdi günlüğe. (Kaan: Yandex kod girildi ama butonlar tepki vermedi → bu düzeltmeler; doğrulanmadı.)
   Site iframe'e gömülemez (X-Frame-Options) ve oturum Mivelo profilinde olmalı → bu yol. Google görünmez tarayıcıda girişi reddederse "Ayrı pencerede aç".
 - Ayrı giriş penceresi `--app=<home>` (sekmesiz/adres çubuksuz 760×860 pencere, viewport null). Kullanıcının kendi tarayıcısında açılamaz:
   oturum çerezleri Mivelo'nun Chromium profilinde olmalı. Etiket genel kaldıysa köprü yoklamadan sonra 10 dk'da bir `me()`'yi yeniden dener

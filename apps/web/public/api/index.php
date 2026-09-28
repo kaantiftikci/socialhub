@@ -469,7 +469,20 @@ if ($action === 'me' && $method === 'GET') {
 
 if ($action === 'accounts' && $method === 'GET') {
     $user = with_users(function (array &$data) {
-        return ['write' => false, 'out' => current_user($data)];
+        $cur = current_user($data);
+        // kayıtla gelen kullanıcı: boş panel özelliğinden önceki girişte kaydedilen varsayılan demo uygulamaları bir kez sıfırla
+        if ($cur && !empty($cur['requestedAt']) && empty($cur['accountsReset'])) {
+            foreach ($data['users'] as &$u) {
+                if (($u['id'] ?? '') === $cur['id']) {
+                    $u['accounts'] = [];
+                    $u['accountsReset'] = 1;
+                    $cur = $u;
+                }
+            }
+            unset($u);
+            return ['write' => true, 'out' => $cur];
+        }
+        return ['write' => false, 'out' => $cur];
     });
     if ($user === null) {
         fail(401, 'Giriş gerekli');

@@ -224,6 +224,7 @@ export const yandex: Strategy = {
   unloadWhenIdle: true,
   watchSelector: ROW_SEL,
   home: HOME,
+  loginUrl: LOGIN_URL,
   loginHint: 'Açılan pencerede Yandex hesabına normal şifrenle gir (SMS/QR doğrulaması isterse tamamla); gelen kutusu görününce pencere kendiliğinden kapanır',
 
   async loggedIn(page, cookies, passive) {

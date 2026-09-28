@@ -90,6 +90,8 @@ export function needsPage(page: Page): void {
 export interface Strategy {
   home: string;
   loginHint: string;
+  /** Mivelo içi girişte doğrudan açılacak giriş sayfası (yoksa home; ör. Yandex: posta ana sayfası oturumsuzken portala atıyor) */
+  loginUrl?: string;
   /** API tabanlı: giriş sonrası tarayıcı kapanır, istekler Node'dan (Playwright request bağlamı, kayıtlı çerezler) atılır */
   pageless?: boolean;
   /** Görünmez sekme "arka planda" tanıtılmasın (site gizli sekmede içerik yüklemiyorsa) */
@@ -538,7 +540,7 @@ export class BrowserConnector extends BaseConnector {
   }
 
   /** Kalıcı profille Chromium aç. headless=true: arka planda çalışan görünmez pencere. */
-  private async launch(headless: boolean, retried = false): Promise<boolean> {
+  private async launch(headless: boolean, retried = false, navigate = true): Promise<boolean> {
     const profile = path.join(sessionDir(this.account.id), 'profile');
     try {
       const hidden = headless || process.env.KAVSAK_HEADLESS === '1';
@@ -603,7 +605,7 @@ export class BrowserConnector extends BaseConnector {
         await sleep(1500);
         // SingletonLock/Socket/Cookie: macOS/Linux; lockfile: Windows
         for (const f of ['SingletonLock', 'SingletonSocket', 'SingletonCookie', 'lockfile']) fs.rmSync(path.join(profile, f), { force: true });
-        return this.launch(headless, true);
+        return this.launch(headless, true, navigate);
       }
       this.setStatus('error', `Chromium açılamadı: ${msg.split('\n')[0]}. Çözüm: npx playwright install chromium`);
       return false;
@@ -621,7 +623,7 @@ export class BrowserConnector extends BaseConnector {
       if (!this.stopping) this.setStatus('disconnected', 'Tarayıcı penceresi kapatıldı');
       this.unschedule();
     });
-    await this.page.goto(this.strategy.home, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+    if (navigate) await this.page.goto(this.strategy.home, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
     return true;
   }
 
@@ -659,12 +661,26 @@ export class BrowserConnector extends BaseConnector {
     if (this.external) return this.launch(false);
     this.embedOn = true;
     this.loginAbort = false;
-    if (!(await this.launch(true))) {
+    // arayüz giriş ekranını hemen ("açılıyor…") gösterir; ilk kare sayfa yüklenmeden gelir (eskiden 5-10 sn sonra açılıyordu)
+    bus.emit({ type: 'login.start', accountId: this.account.id });
+    if (!(await this.launch(true, false, false))) {
       this.embedOn = false;
+      bus.emit({ type: 'login.end', accountId: this.account.id });
       return false;
     }
     await this.startEmbed().catch((e) => bus.log('warn', `${this.account.platform}: giriş ekranı yayını başlatılamadı: ${(e as Error).message}`));
+    await this.page?.goto(this.strategy.loginUrl ?? this.strategy.home, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
     return true;
+  }
+
+  /** Akış donmasın: sayfa değişince (süreç değişimi yayını durdurabiliyor) ya da 2,5 sn kare gelmezse yayını yeniden başlat */
+  private lastFrameAt = 0;
+  private async keepEmbedAlive(): Promise<void> {
+    if (!this.embedOn || !this.page || this.page.isClosed()) return;
+    if (this.embedPage !== this.page || Date.now() - this.lastFrameAt > 2500) {
+      this.embedPage = undefined;
+      await this.startEmbed().catch(() => undefined);
+    }
   }
 
   /** Etkin sayfanın ekran yayınını başlat (sayfa değiştiyse — OAuth açılır penceresi — yenisine geç) */
@@ -673,11 +689,22 @@ export class BrowserConnector extends BaseConnector {
     if (!this.embedOn || !page || page.isClosed() || !this.ctx || this.embedPage === page) return;
     await this.stopEmbed(false);
     this.embedPage = page;
+    this.lastFrameAt = Date.now();
     if (!page.viewportSize() || page.viewportSize()!.width !== EMBED_SIZE.width) await page.setViewportSize(EMBED_SIZE).catch(() => undefined);
     const cdp = await this.ctx.newCDPSession(page);
     this.cdp = cdp;
+    // görünmez tarayıcıda sayfa kendini "odakta değil" sanmasın (bazı giriş düğmeleri document.hasFocus() / focus olaylarına bakar)
+    await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => undefined);
+    await cdp.send('Page.bringToFront').catch(() => undefined);
+    if (!(page as Page & { __mvNav?: boolean }).__mvNav) {
+      (page as Page & { __mvNav?: boolean }).__mvNav = true;
+      page.on('framenavigated', (f) => {
+        if (f === page.mainFrame() && this.embedOn && this.embedPage === page) setTimeout(() => ((this.lastFrameAt = 0), void this.keepEmbedAlive()), 400);
+      });
+    }
     const id = this.account.id;
     cdp.on('Page.screencastFrame', (f: { data: string; sessionId: number }) => {
+      this.lastFrameAt = Date.now();
       void cdp.send('Page.screencastFrameAck', { sessionId: f.sessionId }).catch(() => undefined);
       let host = '';
       try {
@@ -736,7 +763,9 @@ export class BrowserConnector extends BaseConnector {
       }
     };
     const next = this.inputQ.then(run, run);
-    this.inputQ = next.catch(() => undefined);
+    this.inputQ = next.catch((e) => bus.log('warn', `${this.account.platform}: giriş ekranı girdisi uygulanamadı: ${(e as Error).message.split('\n')[0]}`));
+    // tıklama sonrası sayfa değişebilir: akışı canlı tut
+    if (events.some((e) => e.type === 'up' || e.type === 'key')) setTimeout(() => void this.keepEmbedAlive(), 900);
     return next;
   }
 
@@ -771,7 +800,7 @@ export class BrowserConnector extends BaseConnector {
     let ticks = 0;
     while (!this.stopping) {
       this.adoptNewestPage();
-      if (this.embedOn) await this.startEmbed().catch(() => undefined);
+      if (this.embedOn) await this.keepEmbedAlive();
       if (this.loginAbort) {
         this.loginAbort = false;
         await this.stopEmbed();
@@ -796,7 +825,7 @@ export class BrowserConnector extends BaseConnector {
     let stableFor = 0;
     for (let i = 0; i < 120 && !this.stopping; i++) {
       this.adoptNewestPage();
-      if (this.embedOn) await this.startEmbed().catch(() => undefined);
+      if (this.embedOn) await this.keepEmbedAlive();
       if (!this.page || this.page.isClosed()) return false;
       const url = this.page.url();
       const stillIn = await this.isLoggedIn(true);
