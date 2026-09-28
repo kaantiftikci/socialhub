@@ -82,6 +82,29 @@ jobs:
         run: |
           cfg='{"version":"${{ needs.version.outputs.v }}","build":{"beforeBuildCommand":null}}'
           npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundle }} --config "$cfg"
+      # Tauri DMG'ye birim simgesi olarak gizli .VolumeIcon.icns koyuyor; Finder'da gizli dosyalar açıkken pencerede Mivelo'nun
+      # yanında ikinci bir "amblem" gibi görünüyordu. Görüntü yazılabilir açılıp bu dosya (ve .fseventsd) silinir, yeniden sıkıştırılır.
+      - name: DMG — gizli birim simgesini kaldır
+        if: matrix.bundle == 'dmg'
+        shell: bash
+        run: |
+          set -euo pipefail
+          d=apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg
+          dmg=$(ls "$d"/*.dmg | head -1)
+          rw="$RUNNER_TEMP/rw.dmg"; mp="$RUNNER_TEMP/dmg-mnt"
+          hdiutil convert "$dmg" -format UDRW -o "$rw"
+          mkdir -p "$mp"
+          hdiutil attach "$rw" -readwrite -nobrowse -noverify -noautoopen -mountpoint "$mp"
+          echo "önce:"; ls -la "$mp"
+          rm -f "$mp/.VolumeIcon.icns"; rm -rf "$mp/.fseventsd"
+          SetFile -a c "$mp" 2>/dev/null || true
+          echo "sonra:"; ls -la "$mp"
+          sync
+          for i in 1 2 3 4 5; do hdiutil detach "$mp" && break || { sleep 3; [ $i = 5 ] && hdiutil detach -force "$mp"; }; done
+          rm -f "$dmg"
+          hdiutil convert "$rw" -format UDZO -imagekey zlib-level=9 -o "$dmg"
+          rm -f "$rw"
+          ls -la "$d"
       - name: Çıktıyı adlandır
         shell: bash
         run: |
