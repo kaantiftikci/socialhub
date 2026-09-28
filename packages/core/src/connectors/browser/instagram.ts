@@ -47,6 +47,8 @@ async function ig(page: Page, cookies: Record<string, string>, path: string, for
 }
 
 let viewerId = '';
+/** Sohbet listesi yanıtındaki oturum sahibinin kullanıcı adı (me() açılışta başarısız olsa da sonradan etiket olur) */
+let viewerName = '';
 /** thread → karşı tarafın son gördüğü an (ms) */
 const otherSeenMs = new Map<string, number>();
 const userNames = new Map<string, string>();
@@ -319,6 +321,7 @@ function latestOtherReaction(it: J): { uid: string; ts: number; emoji: string } 
 /** inbox yanıtı → sohbet listesi */
 function inboxThreads(data: J): Thread[] {
   if (data.viewer?.pk) viewerId = String(data.viewer.pk);
+  if (data.viewer?.username) viewerName = String(data.viewer.username);
   const out: Thread[] = [];
   for (const t of data.inbox?.threads ?? []) {
     rememberUsers(t.users);
@@ -376,7 +379,8 @@ export const instagram: Strategy = {
   },
 
   async me(page, cookies) {
-    viewerId = cookies.ds_user_id ?? '';
+    viewerId = cookies.ds_user_id || viewerId;
+    if (viewerName) return { id: viewerId, label: `@${viewerName}` };
     // inbox yanıtı viewer'ı da taşır ve users/info gibi hız sınırına (429) takılmaz
     try {
       const d = await ig(page, cookies, '/api/v1/direct_v2/inbox/?limit=1&thread_message_limit=1');

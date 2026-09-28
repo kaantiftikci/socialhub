@@ -75,7 +75,7 @@ function AuthScreen({
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [note, setNote] = useState('');
+  const [password2, setPassword2] = useState('');
   const [website, setWebsite] = useState('');
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState('');
@@ -93,8 +93,10 @@ function AuthScreen({
     setBusy(true);
     try {
       if (mode === 'signup') {
-        await authRegister({ name: name.trim(), username: username.trim().toLowerCase(), email: email.trim(), password, note: note.trim() || undefined, website });
+        if (password !== password2) throw new Error('Şifreler aynı değil');
+        await authRegister({ name: name.trim(), username: username.trim().toLowerCase(), email: email.trim(), password, website });
         setPassword('');
+        setPassword2('');
         setMode('sent');
         return;
       }
@@ -171,10 +173,8 @@ function AuthScreen({
         {mode === 'signup' && (
           <>
             <label>
-              <span>
-                Not <span className="auth-opt">(isteğe bağlı)</span>
-              </span>
-              <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={300} placeholder="Nereden duydun, ne için kullanacaksın?" />
+              Şifre (tekrar)
+              <PasswordInput value={password2} onChange={(e) => setPassword2(e.target.value)} autoComplete="new-password" required minLength={8} />
             </label>
             {/* bot tuzağı: görünmez alan */}
             <input className="auth-hp" value={website} onChange={(e) => setWebsite(e.target.value)} tabIndex={-1} autoComplete="off" aria-hidden="true" name="website" />

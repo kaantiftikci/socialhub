@@ -65,7 +65,7 @@ Dil: arayüz ve yorumlar Türkçe.
   karması `api.php` `DEFAULT_HASH`; panelden değişince `~/mivelo-data/admin.json`. 5 hatalı girişte IP 15 dk kilitlenir.
   **Demo üyeliği**: hazır tek hesap `admin` (şifre karması `SEED_USERS`, `passVersion` artınca users.json'daki karma da güncellenir; editor/misafir
   `REMOVED_USERS` ile silinir). Giriş ekranında "Üyelik oluştur" (`Auth.tsx`, `authRegister`) → `action=register`: ad, e-posta, kullanıcı adı
-  (a-z0-9._-, 3-24), şifre ≥8, not; IP başına saatte 5 (`demo-signup.json`), gizli `website` bot tuzağı, ≤300 bekleyen. Kayıt users.json'da
+  (a-z0-9._-, 3-24), şifre ≥8 (iki kez; not alanı YOK); IP başına saatte 5 (`demo-signup.json`), gizli `website` bot tuzağı, ≤300 bekleyen. Kayıt users.json'da
   `status:'pending'` → giriş 403 "onaylanmadı" (şifre doğrulandıktan sonra söylenir); e-postayla da giriş olur. Admin → Demo: Onayla/Reddet/
   E-posta/Sil (`demo_update`/`demo_mail`/`demo_delete`, u-admin korunur); onayda `send_approval_mail` (PHP mail(), From hello@mivelo.app,
   şifre e-postada YOK), sonuç `mailed` rozetinde. Her kullanıcının bağladığı uygulamalar kendi kaydında (bağımsız); reddedilenin oturumu düşer.
@@ -323,6 +323,9 @@ Dil: arayüz ve yorumlar Türkçe.
 - Bağlan: "resmi değil" etiketi kullanıcı isteğiyle KALDIRILDI (yalnız Sosyal Medya altındaki açıklama). Kart durumu en iyi durumdaki hesaptan
   (`STATUS_RANK`, bağlı önde; birden çoksa "· N hesap"), alt satırda bağlı hesabın adresi/@kullanıcı adı (`accountLabel`; genel adsa yöntem metni).
 - Parola alanları `PasswordInput` (ui.tsx): sağdaki göze BASILI TUTUNCA görünür, bırakınca gizlenir (Bağlan formları, 2FA istemi, AI anahtarı, giriş).
+- Görünür giriş penceresi `--app=<home>` (sekmesiz/adres çubuksuz 760×860 pencere, viewport null). Kullanıcının kendi tarayıcısında açılamaz:
+  oturum çerezleri Mivelo'nun Chromium profilinde olmalı. Etiket genel kaldıysa köprü yoklamadan sonra 10 dk'da bir `me()`'yi yeniden dener
+  (`refreshLabel`); Instagram adı sohbet listesi yanıtındaki `viewer.username`'den de öğrenilir.
 - Tarayıcı girişi hızı (bridge): hiç çerezi olmayan profilde (`hasProfileCookies`) görünmez denetim turu atlanır → pencere hemen açılır; giriş 700 ms'de bir
   denetlenir, sonra URL 1,5 sn sabit kalınca (500 ms adım) pencere kapanır (eskiden 2 sn adım + 4 sn → 6-8 sn).
 - Sol listede hesap tanıtıcısı her kanalda (`handleOf`): "Platform · X" etiketinde önek atılır; pazaryeri etiketleri küçük harfli
@@ -334,7 +337,9 @@ Dil: arayüz ve yorumlar Türkçe.
 - **Yandex (tarayıcı)** (`connectors/browser/yandex.ts`): Bağlan → doğrudan passport.yandex girişi (uygulama şifresi formu yok; `mode:'browser'`),
   mail.yandex.com liza BEM seçicileri (mail-MessageSnippet…) + yedekler, `Session_id` çerezi. Satır = en dıştaki metinli eşleşme (iç parçalar
   ayrı satır sayılıyordu → boş "(konu yok)" sohbetleri; `prune-v1` ile bir kez silinir), alanlar tutmazsa satır metninden; ilk turda
-  `Yandex Mail tanı:` günlüğü (seçici sayıları + ilk satırın sınıfları, içerik yok) → seçici ayarı buna göre. Adres `yandex_login` çerezinden. Token dosyalı eski IMAP hesapları sürer;
+  `Yandex Mail tanı:` günlüğü (seçici sayıları + ilk satırın sınıfları, içerik yok) → seçici ayarı buna göre. Adres `yandex_login` çerezinden.
+  Eşleşme metinsiz bağlantı kaplaması olabilir → metinli ama başka satır içermeyen üst öğeye çıkılır (`lift`); metin parçaları yaprak öğelerden;
+  tıklama en dıştaki eşleşme sırasıyla (`idx`). Giriş: oturum yokken mail.yandex ana sayfaya atıyor → passive loggedIn passport'a gider (`LOGIN_URL`). Token dosyalı eski IMAP hesapları sürer;
   şifre reddinde "Yandex ile giriş yap" (Yahoo gibi, IMAP hesabı tarayıcı yoluna çevrilir).
 - WhatsApp tek seferlik medya ikizi: telefon aynı gönderimi iki kimlikle yollayabiliyor (biri tek, biri çift tik iki yer tutucu) → `upsertPlaceholder`
   aynı sohbet+gönderen ±10 sn ikizi varsa yeni kayıt açmaz, kimliği `twins` ile bağlar (alındılar tek balona); açılışta `store.dropTwins` eskileri birleştirir.

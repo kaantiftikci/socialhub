@@ -20,6 +20,9 @@ const ROW_SEL = '.ns-view-messages-item-wrap a.mail-MessageSnippet, a.mail-Messa
 let meEmail = '';
 
 const onMail = (u: string) => /^https:\/\/mail\.yandex\.(com|com\.tr|ru)\//.test(u);
+/** Oturum yokken mail.yandex.com giriş formuna değil Yandex ana sayfasına yönlendiriyor → giriş penceresi doğrudan buraya gider */
+const LOGIN_URL = 'https://passport.yandex.com/auth?retpath=' + encodeURIComponent(HOME);
+const onPortal = (u: string) => /^https:\/\/(www\.)?(yandex\.(com|com\.tr|ru)|ya\.ru)\/?([?#].*)?$/.test(u);
 const onLogin = (u: string) => /^https:\/\/passport\.yandex\.(com|com\.tr|ru)\//.test(u);
 
 /** Posta kutusunu aç; liste çizildiyse true, giriş sayfasına düştüyse 'signin' */
@@ -43,6 +46,8 @@ interface YandexRow {
   subject: string;
   snippet: string;
   time: string;
+  /** tıklama için: sayfadaki en dıştaki eşleşmeler arasındaki sıra */
+  idx: number;
 }
 
 /** Liste satırlarını oku (threads ve messages aynı anahtarı üretsin diye tek yerde). Seçiciler satırın iç parçalarını da
@@ -54,24 +59,38 @@ function readRows(page: Page): Promise<YandexRow[]> {
     const out: YandexRow[] = [];
     const seen = new Map<string, number>();
     const all = Array.from(document.querySelectorAll<HTMLElement>(sel));
-    const rows = all.filter((el) => !all.some((o) => o !== el && o.contains(el)) && el.innerText.trim().length > 0);
+    const outer = all.filter((el) => !all.some((o) => o !== el && o.contains(el)));
+    // eşleşen öğe metinsiz bir bağlantı kaplaması olabilir (metin kardeş öğelerde): başka satır içermeyen, metinli en yakın üst öğe
+    const lift = (el: HTMLElement): HTMLElement => {
+      let r = el;
+      for (let i = 0; i < 6 && !r.innerText.trim() && r.parentElement; i++) {
+        const up = r.parentElement;
+        if (outer.filter((o) => up.contains(o)).length > 1) break;
+        r = up;
+      }
+      return r;
+    };
+    const rows = outer.map((el, idx) => ({ el: lift(el), link: el, idx })).filter((x) => x.el.innerText.trim().length > 0);
     const isTime = (t: string) => /^(\d{1,2}[:.]\d{2}|\d{1,2}[./]\d{1,2}([./]\d{2,4})?|\d{1,2}\s+\p{L}{3,}\.?(\s+\d{4})?|dün|yesterday|вчера)$/iu.test(t);
-    for (const el of rows) {
-      const lines = el.innerText.split('\n').map((t) => t.trim()).filter((t) => t.length > 1 && !isTime(t));
+    for (const { el, link, idx } of rows) {
+      // metin parçaları: yaprak öğelerin metni sırayla (innerText satır kırmayabilir: satır içi öğeler)
+      const leaves = Array.from(el.querySelectorAll<HTMLElement>('*')).filter((e) => !e.children.length && e.innerText?.trim());
+      const parts = (leaves.length ? leaves.map((e) => e.innerText.trim()) : el.innerText.split('\n')).map((t) => t.replace(/\s+/g, ' ').trim());
+      const lines = parts.filter((t, i) => t.length > 1 && !isTime(t) && parts.indexOf(t) === i);
       const senderEl = q(el, '.mail-MessageSnippet-FromText, [class*="FromText"], [class*="_from" i] [title*="@"], [title*="@"]');
       const sender = (senderEl?.innerText || lines[0] || '').trim();
       const senderEmail = (senderEl?.getAttribute('title') ?? '').match(/[\w.+-]+@[\w.-]+\.\w+/)?.[0] ?? '';
       const subjEl = q(el, '.mail-MessageSnippet-Item_subject, [class*="Item_subject"], [class*="subject" i]');
       const subject = (subjEl?.innerText || lines.find((l, i) => i > 0 && l !== sender) || '').trim();
-      const snipEl = q(el, '.mail-MessageSnippet-Item_firstline, [class*="firstline" i], [class*="snippet" i]:not(a)');
+      const snipEl = q(el, '.mail-MessageSnippet-Item_firstline, [class*="firstline" i]');
       const snippet = (snipEl?.innerText || lines.filter((l) => l !== sender && l !== subject).join(' ')).trim();
       const timeEl = q(el, '.mail-MessageSnippet-Item_dateText, [class*="dateText"], [class*="date" i][title], time');
-      const time = (timeEl?.getAttribute('title') || timeEl?.getAttribute('datetime') || timeEl?.innerText || el.innerText.split('\n').map((t) => t.trim()).find(isTime) || '').trim();
+      const time = (timeEl?.getAttribute('title') || timeEl?.getAttribute('datetime') || timeEl?.innerText || parts.find(isTime) || '').trim();
       const unread =
         /is-unread|_unread|unread/i.test(el.className) ||
         !!q(el, '.mail-MessageSnippet-Item_unread, [class*="_unread"], [class*="Unread"], [aria-label*="okunmadı" i], [title*="Okundu olarak" i], [title*="Mark as read" i]');
       // kararlı anahtar: ileti bağlantısı (#message/<id>, /message/<id>, /thread/<id>); yoksa içerik (zaman hariç)
-      const href = el.getAttribute('href') ?? el.querySelector('a[href*="message"], a[href*="thread"]')?.getAttribute('href') ?? '';
+      const href = link.getAttribute('href') ?? el.getAttribute('href') ?? el.querySelector('a[href*="message"], a[href*="thread"]')?.getAttribute('href') ?? '';
       let key = (href.match(/(?:message|thread)[s]?\/([^/?#]+)/) ?? [])[1] ?? el.getAttribute('data-id') ?? '';
       if (!key) {
         const base = 'c:' + [sender, subject, snippet.slice(0, 60)].join('|').slice(0, 200);
@@ -79,7 +98,7 @@ function readRows(page: Page): Promise<YandexRow[]> {
         seen.set(base, n + 1);
         key = n ? `${base}#${n}` : base;
       }
-      out.push({ key, unread, sender, senderEmail, subject, snippet: snippet.slice(0, 300), time });
+      out.push({ key, unread, sender, senderEmail, subject, snippet: snippet.slice(0, 300), time, idx });
     }
     return out;
   }, ROW_SEL);
@@ -107,10 +126,20 @@ async function diagnose(page: Page): Promise<void> {
 async function readThread(page: Page, threadId: string, limit: number, restore: boolean): Promise<Msg[]> {
   if ((await openMail(page)) !== true) return [];
   const list = await readRows(page).catch(() => [] as YandexRow[]);
-  const idx = list.findIndex((r) => hashId(r.key) === threadId);
-  if (idx < 0) return [];
-  const wasUnread = list[idx].unread;
-  await page.locator(ROW_SEL).nth(idx).click({ timeout: 8000 }).catch(() => undefined);
+  const row = list.find((r) => hashId(r.key) === threadId);
+  if (!row) return [];
+  const wasUnread = row.unread;
+  // en dıştaki eşleşmenin sırasıyla tıkla (iç parçalar sayılmaz)
+  await page
+    .evaluate(
+      ({ sel, idx }) => {
+        const all = Array.from(document.querySelectorAll<HTMLElement>(sel));
+        const outer = all.filter((el) => !all.some((o) => o !== el && o.contains(el)));
+        outer[idx]?.click();
+      },
+      { sel: ROW_SEL, idx: row.idx },
+    )
+    .catch(() => undefined);
   await page.waitForTimeout(2500);
   const rows = await page
     .evaluate(() => {
@@ -189,6 +218,11 @@ export const yandex: Strategy = {
 
   async loggedIn(page, cookies, passive) {
     if (passive) {
+      // giriş penceresi ana sayfaya düştüyse (ya da hiç gezinmediyse) giriş formunu aç
+      if (!cookies.Session_id && (onPortal(page.url()) || page.url() === 'about:blank')) {
+        await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+        return false;
+      }
       if (!onMail(page.url())) return false;
       return (await page.locator(ROW_SEL).count().catch(() => 0)) > 0 || !!cookies.Session_id;
     }

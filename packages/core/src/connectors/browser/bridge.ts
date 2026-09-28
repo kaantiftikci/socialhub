@@ -546,7 +546,9 @@ export class BrowserConnector extends BaseConnector {
         // tam Chromium (headless-shell değil): siteler "yeni headless" modu normal tarayıcı gibi görür
         channel: process.env.KAVSAK_CHROMIUM ? undefined : 'chromium',
         executablePath: process.env.KAVSAK_CHROMIUM || undefined,
-        viewport: { width: 1180, height: 820 },
+        // Görünür giriş penceresi: tam tarayıcı yerine sekmesiz/adres çubuksuz küçük uygulama penceresi (--app) — kullanıcının
+        // kendi tarayıcısında açılamaz (oturum çerezleri Mivelo'nun profilinde olmalı), ama giriş iletişim kutusu gibi görünür
+        viewport: hidden ? { width: 1180, height: 820 } : null,
         // boşta boşaltılan kanallarda service worker sekme kapansa da render sürecini (Outlook 470 MB) hayatta tutuyor: engelle
         serviceWorkers: this.strategy.unloadWhenIdle ? 'block' : 'allow',
         locale: 'tr-TR',
@@ -563,6 +565,7 @@ export class BrowserConnector extends BaseConnector {
           '--renderer-process-limit=2',
           '--js-flags=--max-old-space-size=512',
           '--disable-features=Translate,MediaRouter,OptimizationHints,BackForwardCache,InterestFeedContentSuggestions,AutofillServerCommunication',
+          ...(hidden ? [] : [`--app=${this.strategy.home}`, '--window-size=760,860', '--window-position=140,60']),
         ],
       });
       // tsx (npm run dev) esbuild keepNames ile iç fonksiyonlara __name(...) ekler; page.evaluate / init betiklerine giden
@@ -943,6 +946,24 @@ export class BrowserConnector extends BaseConnector {
     this.timer = undefined;
   }
 
+  /** Hesap adı açılışta okunamadıysa (etiket genel: "Instagram", "Messenger"…) bağlıyken 10 dk'da bir yeniden dene */
+  private labelTriedAt = 0;
+  private async refreshLabel(): Promise<void> {
+    if (this.account.status !== 'connected' || Date.now() - this.labelTriedAt < 10 * 60_000) return;
+    const cur = (this.account.label ?? '').trim();
+    if (cur && cur !== this.account.platform && !GENERIC_LABEL.test(cur)) return;
+    this.labelTriedAt = Date.now();
+    try {
+      const me = await this.strategy.me(this.target(), await this.cookies());
+      if (!me.label || GENERIC_LABEL.test(me.label.trim())) return;
+      this.account.label = me.label;
+      this.store.upsertAccount(this.account);
+      bus.emit({ type: 'account.status', account: { ...this.account } });
+    } catch {
+      /* sonraki denemede */
+    }
+  }
+
   private async poll(first: boolean): Promise<void> {
     if (this.polling || Date.now() < this.backoffUntil) return;
     // keepOpen: sayfasız (API) moddaki kanal için sayfa açılır → sayfanın kendi anlık soketi dinlenebilir
@@ -960,6 +981,7 @@ export class BrowserConnector extends BaseConnector {
         try {
           await this.pollInner(first);
           this.logFresh(turnStart);
+          await this.refreshLabel();
         } finally {
           // turun sonunda bekleyen kullanıcı işlemi kalmasın (boşaltma ile bayrak arasında await yok)
           await this.runUrgent(true).catch(() => undefined);
