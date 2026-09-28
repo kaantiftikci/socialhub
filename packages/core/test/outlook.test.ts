@@ -80,3 +80,11 @@ test('outlookRow: adres span\'ı yok, aria-label virgülsüz → gönderen/konu 
   assert.equal(k.subject, 'hk');
   assert.equal(k.preview, 'denemee');
 });
+
+test('parseOutlookDate: iki haneli yıl (Yandex listesi 28.04.25)', () => {
+  assert.equal(parseOutlookDate('28.04.25', now), at(2025, 3, 28));
+  assert.equal(parseOutlookDate('12.01.21 10:31', now), at(2021, 0, 12, 10, 31));
+  assert.equal(parseOutlookDate('17.03.21', now), at(2021, 2, 17));
+  // saat ve dört haneli yıl eskisi gibi
+  assert.equal(parseOutlookDate('19.09.2026', now), at(2026, 8, 19));
+});

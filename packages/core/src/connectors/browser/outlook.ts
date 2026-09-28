@@ -136,6 +136,14 @@ export function parseOutlookDate(s: string | undefined | null, now = new Date())
   };
   let m = t.match(/(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\D+(\d{1,2}):(\d{2}))?/);
   if (m) return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]), Number(m[4] ?? 0), Number(m[5] ?? 0)).getTime();
+  // "28.04.25" / "12.01.21 10:31" (iki haneli yıl; Yandex listesi): 20yy, gelecekteyse 19yy. ESKİDEN okunamıyordu → Yandex'te eski
+  // e-postalar eşitleme anında gelmiş görünüyor, sıra bozuluyordu
+  m = t.match(/(?<![\d.])(\d{1,2})\.(\d{1,2})\.(\d{2})(?![\d.])(?:\D+(\d{1,2}):(\d{2}))?/);
+  if (m) {
+    let y = 2000 + Number(m[3]);
+    if (new Date(y, Number(m[2]) - 1, Number(m[1])).getTime() > now.getTime() + 86400e3) y -= 100;
+    return new Date(y, Number(m[2]) - 1, Number(m[1]), Number(m[4] ?? 0), Number(m[5] ?? 0)).getTime();
+  }
   m = t.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\D+(\d{1,2}):(\d{2})\s*(AM|PM)?)?/i);
   if (m) {
     let h = Number(m[4] ?? 0);

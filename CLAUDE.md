@@ -200,7 +200,8 @@ Dil: arayüz ve yorumlar Türkçe.
   Hepsi `connectors/mail-html.ts` `cleanMailHtml` (betik/iframe/form/on*/javascript: atılır, `<base>` eklenir). Arayüz: sandbox'ta allow-scripts
   YOK (yalnız same-origin: yükseklik ölçümü + popups), CSP, `<base target=_blank>`, beyaz "kağıt" (koyu temada da), ResizeObserver yüksekliği (gövde gözlenir, ölçüm bir sonraki karede ve yalnız değişince: aynı karede boy yazmak
   "ResizeObserver loop …" uyarısı veriyordu; App'in hata bildirimi bu zararsız uyarıyı yok sayar).
-- **Tarayıcı e-posta saatleri**: `parseMailDate` (outlook.ts; TR/EN/RU, Bugün/Dün/Сегодня/Вчера, ISO/RFC; okunamazsa undefined — ESKİDEN NaN →
+- **Tarayıcı e-posta saatleri**: `parseMailDate` (outlook.ts; iki haneli yıl "28.04.25" de — Yandex listesi bunu kullanıyor, okunamayınca
+  eski e-postalar eşitleme saatinde en üste çıkıyordu; Yandex 'ts-v2' ile bir kez yeniden eşitlenir; TR/EN/RU, Bugün/Dün/Сегодня/Вчера, ISO/RFC; okunamazsa undefined — ESKİDEN NaN →
   Date.now(): her e-posta eşitleme anında gelmiş görünüyordu) + `fillListTimes` (okunamayan satır komşusundan) + ileti zamanı okunamazsa
   liste satırı zamanı (`threadTs`). Sohbet zamanı MAX ile güncellendiği için bozuk kayıtlar Yahoo/Yandex/iCloud tarayıcı hesaplarında
   bir kez silinip yeniden eşitlendi (`registry.resyncOnce` 'ts-v1'). Yahoo satırlarında ekran okuyucu etiketleri (`A11Y`) atlanır.

@@ -331,6 +331,8 @@ export class Registry {
         }
         // Yandex: aynı şekilde token'sız hesap = tarayıcı girişi (normal şifre + Yandex doğrulaması; uygulama şifresi gerekmez)
         if (account.platform === 'yandex' && !fs.existsSync(tokenFile)) {
+          // iki haneli yıllı liste tarihleri (28.04.25) okunamıyordu → eski e-postalar eşitleme saatinde görünüyordu; bir kez yeniden eşitle
+          this.resyncOnce(account, 'ts-v2', 'Yandex e-posta tarihleri düzeltildi');
           // ilk sürümün seçicileri satır parçalarını ayrı ileti sayıyordu → boş "(konu yok)" sohbetleri; bir kez temizle
           const mark = path.join(sessionDir(account.id), 'prune-v1');
           if (!fs.existsSync(mark)) {
