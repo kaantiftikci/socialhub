@@ -1293,12 +1293,13 @@ if ($a === 'smtp') {
 
 if ($a === 'smtp_save' && $method === 'POST') {
     $old = mv_smtp_config() ?? [];
-    $host = trim((string) ($body['host'] ?? ''));
-    $user = trim((string) ($body['user'] ?? ''));
+    // Türkticaret varsayılanları kendiliğinden: panelde yalnız e-posta + şifre yeter (sunucu/port/güvenlik/gönderen gelişmiş)
+    $host = trim((string) ($body['host'] ?? '')) ?: 'smtp.turkticaret.net';
+    $user = strtolower(trim((string) ($body['user'] ?? '')));
     $from = trim((string) ($body['from'] ?? '')) ?: $user;
     $secure = in_array($body['secure'] ?? '', ['ssl', 'tls', 'none'], true) ? $body['secure'] : 'ssl';
     $port = max(1, min(65535, (int) ($body['port'] ?? 465)));
-    if ($host === '' && $user === '') {
+    if (!empty($body['clear'])) {
         @unlink(mv_smtp_path());
         out(['ok' => true, 'configured' => false]);
     }
@@ -1322,7 +1323,10 @@ if ($a === 'smtp_save' && $method === 'POST') {
     @chmod($path, 0600);
     flock($lh, LOCK_UN);
     fclose($lh);
-    out(['ok' => true, 'configured' => true]);
+    // kaydedince hemen dene: posta kutusunun kendisine deneme e-postası (kimlik/gönderen hatası anında görünsün)
+    $res = mv_send_mail($cfg['from'], 'Mivelo e-posta gönderimi çalışıyor', "Bu deneme e-postası Mivelo yönetim panelinden, SMTP ayarları kaydedilince kendiliğinden gönderildi.\n\nGönderim: " . date('d.m.Y H:i') . "\n");
+    $sent = $res['ok'] && $res['via'] === 'smtp';
+    out(['ok' => true, 'configured' => true, 'tested' => $sent, 'to' => $cfg['from'], 'error' => $sent ? '' : ($res['error'] ?? ''), 'note' => $res['note'] ?? '', 'log' => $res['log'] ?? []]);
 }
 
 if ($a === 'smtp_test' && $method === 'POST') {
