@@ -142,7 +142,12 @@ Dil: arayüz ve yorumlar Türkçe.
   Siparişler varsayılan AÇIK (`ordersFlag`: token `ordersOff:true` kapatır; eski formun yazdığı `orders:false` yok sayılır). Trendyol soru/sipariş
   API'si istek başına ≤2 hafta: ilk eşitleme geriye 2 haftalık dilimler (sorular 13 dilim ≈6 ay, siparişler 6 dilim ≈3 ay), sonra son 3 gün.
   Ayrı "sipariş soruları" ucu belgelerde yok (aynı qna/questions/filter). Hepsiburada soruları sayfalı (bekleyen ≤500), n11 sipariş 6×14 gün,
-  Amazon ilk pencere 90 gün, Shopify/Etsy ilk 10 sayfa. ePttAVM `available:false` (resmi dokümana developers.pttavm.com erişilemedi).
+  Amazon ilk pencere 90 gün, Shopify/Etsy ilk 10 sayfa. **ePttAVM** (`connectors/pttavm.ts`, YALNIZ sipariş; API'de soru/mesaj
+  ucu yok): SOAP `https://ws.pttavm.com:93/service.svc`, WS-Security UsernameToken (panel → Entegrasyon Bilgileri kullanıcı adı/şifre; token
+  JSON {username,password}), `SiparisKontrolListesiV2` (ilk 4×1 hafta, sonra 3 gün; 90 sn/boşta 3 dk; 120 sn zaman aşımı). Türkçe durum metni
+  `pttStatus` (toLocaleLowerCase('tr'): JS /i "İptal"i tanımaz) → Created/Shipped/Delivered/Cancelled/Returned. TLS doğrulaması KAPATILMAZ
+  (resmi istemciler kapatıyor). REST (integration-api.pttavm.com, Api-Key+access-token) tek kaynaklı → kullanılmadı. Gerçek hesapla doğrulanmadı.
+  `ORDER_ONLY_PLATFORMS`'ta (sipariş sayfası). Test: pttavm.test.ts.
 - **E-posta girişi**: Gmail/iCloud Bağlan → önce "Google/Apple ile giriş yap" (tarayıcı, normal şifre; `:choose` pairbox), uygulama şifresi
   "gelişmiş". Yandex ayrı platform (`yandex`, imap.yandex.com, uygulama şifresi). "Diğer e-posta" yalnız e-posta+şifre: sunucu
   `mail-discover.ts` (bilinen sağlayıcılar → Thunderbird autoconfig → imap.<alan>); elle giriş "gelişmiş". Yahoo "Command failed": OBJECTID

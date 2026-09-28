@@ -186,7 +186,7 @@ export const PLATFORMS: Record<Platform, { name: string; code: string; color: st
   yandex: { name: 'Yandex Mail', code: 'YA', color: '#FC3F1D', method: 'Yandex hesabınla giriş', available: true, mode: 'browser', category: 'mail' },
   icloud: { name: 'iCloud Mail', code: 'IC', color: '#3693F3', method: 'Apple hesabınla giriş', available: true, mode: 'browser', category: 'mail' },
   imap: { name: 'Diğer e-posta', code: '@', color: '#4A4757', method: 'E-posta ve şifreyle', available: true, mode: 'mail', category: 'mail' },
-  pttavm: { name: 'ePttAVM', code: 'PT', color: '#FFC20E', method: 'Yakında', available: false, mode: 'token', category: 'shop' },
+  pttavm: { name: 'ePttAVM', code: 'PT', color: '#FFC20E', method: 'Siparişler', available: true, mode: 'token', category: 'shop' },
   shopier: { name: 'Shopier', code: 'SH', color: '#1F2A44', method: 'Siparişler', available: false, mode: 'token', category: 'shop' },
   trendyol: { name: 'Trendyol', code: 'TY', color: '#F27A1A', method: 'Siparişler ve müşteri soruları', available: true, mode: 'token', category: 'shop' },
   hepsiburada: { name: 'Hepsiburada', code: 'HB', color: '#FF6000', method: 'Siparişler ve müşteri soruları', available: true, mode: 'token', category: 'shop' },
@@ -297,7 +297,7 @@ export function shopPending(c: Pick<Chat, 'platform' | 'meta' | 'unread'>): bool
 
 /** Sipariş üzerinden alıcıya mesaj ucu OLMAYAN pazaryerleri: sipariş sohbet değil, sipariş sayfası olarak gösterilir.
  *  (Amazon/Etsy/Shopify'da alıcı mesajlaşması var; orada sohbet kalır.) */
-export const ORDER_ONLY_PLATFORMS = new Set<Platform>(['trendyol', 'hepsiburada', 'n11', 'shopier']);
+export const ORDER_ONLY_PLATFORMS = new Set<Platform>(['trendyol', 'hepsiburada', 'n11', 'shopier', 'pttavm']);
 export function isOrderPage(c: Pick<Chat, 'platform' | 'meta'>): boolean {
   return shopKind(c) === 'order' && ORDER_ONLY_PLATFORMS.has(c.platform);
 }

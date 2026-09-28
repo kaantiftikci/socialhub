@@ -36,7 +36,7 @@ const SLACK_APP_URL = `https://api.slack.com/apps?new_app=1&manifest_json=${enco
 const MAIL_FORM_FIRST = new Set<Platform>(['gmail', 'icloud', 'yahoo']);
 const usesMailForm = (p: Platform) => PLATFORMS[p]?.mode === 'mail' || MAIL_FORM_FIRST.has(p);
 
-const SHOP_ORDER: Platform[] = ['trendyol', 'hepsiburada', 'n11', 'etsy', 'shopify', 'amazon'];
+const SHOP_ORDER: Platform[] = ['trendyol', 'hepsiburada', 'n11', 'pttavm', 'etsy', 'shopify', 'amazon'];
 
 interface MailForm {
   /** Diğer e-posta: sunucuyu elle gir (varsayılan: adresten otomatik bulunur) */
@@ -138,7 +138,7 @@ export function ConnectModal({
         setActive('shopier:new');
         return;
       }
-      const SHOP_FIELDS: Partial<Record<Platform, string[]>> = { trendyol: ['sellerId', 'apiKey', 'apiSecret'], hepsiburada: ['merchantId', 'username', 'password'], etsy: ['keystring'], shopify: ['shop', 'accessToken'], n11: ['appKey', 'appSecret'], amazon: ['clientId', 'clientSecret', 'refreshToken'] };
+      const SHOP_FIELDS: Partial<Record<Platform, string[]>> = { trendyol: ['sellerId', 'apiKey', 'apiSecret'], hepsiburada: ['merchantId', 'username', 'password'], etsy: ['keystring'], shopify: ['shop', 'accessToken'], n11: ['appKey', 'appSecret'], pttavm: ['username', 'password'], amazon: ['clientId', 'clientSecret', 'refreshToken'] };
       const shopFields = SHOP_FIELDS[platform];
       if (shopFields && (active !== `${platform}:new` || shopFields.some((k) => !sf(k).trim()))) {
         setActive(`${platform}:new`);
@@ -357,11 +357,11 @@ export function ConnectModal({
           </div>
         )}
 
-        {(['trendyol', 'hepsiburada', 'etsy', 'shopify', 'n11', 'amazon'] as Platform[]).map((p) =>
+        {(['trendyol', 'hepsiburada', 'etsy', 'shopify', 'n11', 'amazon', 'pttavm'] as Platform[]).map((p) =>
           active === `${p}:new` ? (
             <div className="pairbox" key={p}>
               <div style={{ flexGrow: 1 }}>
-                <h3>{PLATFORMS[p].name}’{p === 'etsy' ? 'yi' : p === 'shopify' ? 'ı' : p === 'trendyol' ? 'u' : p === 'n11' ? 'i' : p === 'amazon' ? 'u' : 'yı'} bağla</h3>
+                <h3>{PLATFORMS[p].name}’{p === 'etsy' ? 'yi' : p === 'shopify' ? 'ı' : p === 'trendyol' ? 'u' : p === 'n11' ? 'i' : p === 'amazon' ? 'u' : p === 'pttavm' ? 'i' : 'yı'} bağla</h3>
                 <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.5 }}>
                   {p === 'trendyol' && (
                     <>
@@ -376,6 +376,11 @@ export function ConnectModal({
                   {p === 'etsy' && (
                     <>
                       Etsy geliştirici sayfasında oluşturduğun uygulamanın anahtarını gir; Bağlan deyince Etsy girişi açılır.
+                    </>
+                  )}
+                  {p === 'pttavm' && (
+                    <>
+                      ePttAVM Satıcı Paneli → <b>Hesap Yönetimi → Entegrasyon Bilgileri</b>'ndeki kullanıcı adı ve şifreyi gir. Siparişlerin burada görünür.
                     </>
                   )}
                   {p === 'n11' && (
@@ -413,6 +418,12 @@ export function ConnectModal({
                     <>
                       <input value={sf('keystring')} onChange={(e) => setSf('keystring', e.target.value)} placeholder="Uygulama anahtarı (Keystring)" autoComplete="off" />
                       <input value={sf('shopId')} onChange={(e) => setSf('shopId', e.target.value)} placeholder="Shop ID (isteğe bağlı)" autoComplete="off" />
+                    </>
+                  )}
+                  {p === 'pttavm' && (
+                    <>
+                      <input value={sf('username')} onChange={(e) => setSf('username', e.target.value)} placeholder="Entegrasyon kullanıcı adı" autoComplete="off" />
+                      <PasswordInput value={sf('password')} onChange={(e) => setSf('password', e.target.value)} placeholder="Şifre" autoComplete="off" />
                     </>
                   )}
                   {p === 'n11' && (

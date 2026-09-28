@@ -202,8 +202,6 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     localOnly(r);
     const b = body as { platform?: Platform; token?: string; label?: string };
     if (!b.platform || !ALL_PLATFORMS.includes(b.platform)) throw new HttpError(400, 'Geçersiz platform');
-    // arayüzde "Yakında" olan platformlar (Shopier, ePttAVM): connector yok → anlaşılır 400
-    if (b.platform === 'pttavm') throw new HttpError(400, 'Bu kanal henüz desteklenmiyor');
     return registry.add(b.platform, { token: typeof b.token === 'string' ? b.token : undefined, label: typeof b.label === 'string' ? b.label.slice(0, 80) : undefined });
   });
   route('DELETE', '/api/accounts/:id', async (r, _s, p) => {
