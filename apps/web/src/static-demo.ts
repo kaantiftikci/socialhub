@@ -58,6 +58,16 @@ const REACT_PLATFORMS = new Set<Platform>(['whatsapp', 'instagram', 'linkedin', 
 const REACT_EMOJI = ['👍', '❤️', '😂', '🔥', '👏'];
 export const isReactionText = (t: string) => /^(👍|❤️|😂|🔥|👏|😮) .+ (bir mesajı beğendi|mesajına tepki verdi)$/.test(t);
 
+/** Albüm satırı (metinsiz + ekli): kendinden sonraki satıra kadar olan 18 dk'lık aralığı kapat → albüm kareleri saniyeler arayla */
+function albumShift(lines: Array<[boolean, string, Attachment[]?]>, j: number): number {
+  const isAlbum = (l?: [boolean, string, Attachment[]?]) => !!l && !l[1] && !!l[2]?.length;
+  if (!isAlbum(lines[j])) return 0;
+  // dizinin ilk albüm satırına göre: zaman = ilk satırın zamanı + 4 sn × sıra (18 dk'lık satır aralığı geri alınır)
+  let first = j;
+  while (first > 0 && isAlbum(lines[first - 1]) && lines[first - 1][0] === lines[j][0]) first--;
+  return (j - first) * (18 * 60_000 - 4_000);
+}
+
 /** Sohbet sırası sayacı (zaman damgaları buna göre kademelenir); yeni eklenen hesap kaldığı yerden devam eder */
 let seedK = 0;
 
@@ -94,7 +104,8 @@ function seedAccount(acc: Account, now = Date.now()): void {
           senderAvatarUrl: fromMe ? undefined : s.kind === 'direct' ? demoAsset(`avatars/${s.avatar}`) : memberAvatar(who),
           fromMe,
           text: s.kind === 'direct' || fromMe ? text : text.replace(/^[^:]+:\s*/, ''),
-          ts: lastAt - (s.lines.length - 1 - j) * 18 * 60_000,
+          // metinsiz art arda medya (albüm) gerçekteki gibi saniyeler arayla: önceki satıra yapışık
+          ts: lastAt - (s.lines.length - 1 - j) * 18 * 60_000 - albumShift(s.lines, j),
           status: fromMe ? 'read' : 'delivered',
           attachments,
         });

@@ -536,6 +536,12 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
       remoteId: 'iade-beden', name: 'İade · beden uyumsuz', kind: 'direct', tags: ['müşteri'], unread: 1, handle: 'Emre K.', avatar: 'emre.jpg',
       lines: [
         [false, 'Gömlek dar geldi, iade etmek istiyorum. Sipariş 112-4402918-773.'],
+        // art arda fotoğraflar → arayüzde tek albüm balonu (4 kare + "+1")
+        [false, '', [pic('iade-1.jpg', 'gomlek.jpg')]],
+        [false, '', [pic('iade-2.jpg', 'kumas.jpg')]],
+        [false, '', [pic('iade-3.jpg', 'urun.jpg')]],
+        [false, '', [pic('iade-4.jpg', 'elbise.jpg')]],
+        [false, '', [pic('iade-5.jpg', 'gomlek.jpg')]],
         [true, '30 gün içinde iade açık. Etiketi Seller Central’dan kesiyorum, ücreti biz karşılıyoruz.'],
         [true, 'İade etiketi.', [pdf('amazon-iade-112.pdf', 48_100)]],
         [false, 'Aynı modeli bir büyük alabilir miyim, yoksa para iadesi mi?'],

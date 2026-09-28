@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EmojiPicker } from './emoji';
 import { api, USE_STATIC } from './api';
 import { EventEditor } from './CalendarView';
@@ -279,9 +279,10 @@ export function Conversation({
   const [tone, setTone] = useState<Tone>('default');
   const [tagInput, setTagInput] = useState('');
   const [addingTag, setAddingTag] = useState(false);
-  const [lightbox, setLightbox] = useState<Attachment | null>(null);
+  // Medya penceresi galeri olarak: sohbetteki tüm görsel/videolar arasında ←/→ ile gezinilir
+  const [lightbox, setLightboxState] = useState<{ list: Attachment[]; index: number } | null>(null);
   const lightboxP = useClosing(lightbox);
-  useEffect(() => setLightbox(null), [chat.id]);
+  useEffect(() => setLightboxState(null), [chat.id]);
   const endRef = useRef<HTMLDivElement>(null);
   const msgsRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -624,6 +625,18 @@ export function Conversation({
     return base.filter((m) => m.text.toLocaleLowerCase('tr-TR').includes(q) || m.senderName.toLocaleLowerCase('tr-TR').includes(q) || m.attachments?.some((a) => a.name?.toLocaleLowerCase('tr-TR').includes(q)));
   }, [messages, search, threadFocus]);
   const groups = useMemo(() => groupMessages(shown), [shown]);
+  /** Sohbetteki gezinilebilir medya (eski → yeni): görsel/video, pencerede açılabilen */
+  const mediaList = useMemo(() => shown.flatMap((m) => (m.attachments ?? []).filter(isGalleryMedia)), [shown]);
+  /** Eki galeri içinde aç; listede yoksa (ör. e-posta eki) tek başına */
+  const setLightbox = useCallback(
+    (a: Attachment | null) => {
+      if (!a) return setLightboxState(null);
+      const same = (x: Attachment) => x === a || (!!(x.url || x.link) && x.url === a.url && x.link === a.link);
+      const index = isGalleryMedia(a) ? mediaList.findIndex(same) : -1;
+      setLightboxState(index >= 0 ? { list: mediaList, index } : { list: [a], index: 0 });
+    },
+    [mediaList],
+  );
   const lastIncoming = [...messages].reverse().find((m) => !m.fromMe);
   const needsReply = !!lastIncoming && messages[messages.length - 1]?.id === lastIncoming.id;
   const [mediaOpen, setMediaOpen] = useState(false);
@@ -872,7 +885,27 @@ export function Conversation({
                       {g.senderName}
                     </span>
                   )}
-                  {g.items.map((m, i) => {
+                  {toUnits(g.items).map((u) => {
+                    if (u.kind === 'album') {
+                      // art arda gelen fotoğraf/videolar tek balonda (WhatsApp albümü gibi); saat ve tik son mesajın
+                      const last = u.items[u.items.length - 1];
+                      const end = u.i + u.items.length - 1;
+                      const pos = g.items.length === u.items.length ? 'first last' : u.i === 0 ? 'first' : end === g.items.length - 1 ? 'last' : 'mid';
+                      const reacts = u.items.flatMap((x) => x.reactions ?? []);
+                      return (
+                        <div key={u.items[0].id} data-mid={u.items[0].id} className={`bwrap ${g.fromMe ? 'me' : ''}`}>
+                          <div className={`bub album-bub ${pos}`}>
+                            <AlbumView items={u.items} onOpen={setLightbox} />
+                            <time className="bt" dateTime={new Date(last.ts).toISOString()} title={fmtStamp(last.ts)}>
+                              {fmtTime(last.ts)}
+                              {g.fromMe && statusIcon(last.status)}
+                            </time>
+                          </div>
+                          {reacts.length ? <ReactionChips list={reacts} onToggle={canReact ? (e) => react(last, e) : undefined} /> : null}
+                        </div>
+                      );
+                    }
+                    const { m, i } = u;
                     const isReact = /^(👍|❤️|😂|🔥|👏|😮) .+ (bir mesajı beğendi|mesajına tepki verdi)$/.test(m.text);
                     const parent = m.threadId ? byRemote.get(m.threadId) : undefined;
                     const url = !isReact && !m.attachments?.length ? firstUrl(m.text) : undefined;
@@ -1606,7 +1639,7 @@ export function Conversation({
           </div>
         </div>
       )}
-      {lightboxP.value && <Lightbox att={lightboxP.value} closing={lightboxP.closing} onClose={() => setLightbox(null)} />}
+      {lightboxP.value && <Lightbox list={lightboxP.value.list} index={lightboxP.value.index} onIndex={(index) => setLightboxState((v) => (v ? { ...v, index } : v))} closing={lightboxP.closing} onClose={() => setLightboxState(null)} />}
     </>
   );
 }
@@ -1887,16 +1920,26 @@ function profileRole(chat: Chat): { text: string; href?: string } | undefined {
 
 
 /** Medya penceresi: görsel/video doğrudan, Instagram/X gönderileri gömülü (embed) sayfayla, diğerleri bağlantıyla. */
-function Lightbox({ att, onClose, closing }: { att: Attachment; onClose: () => void; closing?: boolean }) {
+function Lightbox({ list, index, onIndex, onClose, closing }: { list: Attachment[]; index: number; onIndex: (i: number) => void; onClose: () => void; closing?: boolean }) {
+  const att = list[Math.min(Math.max(0, index), list.length - 1)];
+  const many = list.length > 1;
+  const go = useCallback((d: number) => many && onIndex((index + d + list.length) % list.length), [many, index, list.length, onIndex]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || e.defaultPrevented) return;
-      e.preventDefault(); // arkadaki sohbet kapanmasın
-      onClose();
+      if (e.defaultPrevented) return;
+      if (e.key === 'Escape') {
+        e.preventDefault(); // arkadaki sohbet kapanmasın
+        onClose();
+      } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && many) {
+        // oynatılan videonun ileri/geri sarması yerine medya değişir; sohbet listesinin ok gezintisi de çalışmasın
+        e.preventDefault();
+        e.stopPropagation();
+        go(e.key === 'ArrowLeft' ? -1 : 1);
+      }
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [onClose]);
+  }, [onClose, go, many]);
   const link = att.link ? abs(att.link) : undefined;
   const page = att.page ?? (att.link && !isMediaFile(att.link) ? att.link : undefined);
   const embed = page ? embedUrl(page) : undefined;
@@ -1905,7 +1948,7 @@ function Lightbox({ att, onClose, closing }: { att: Attachment; onClose: () => v
     <div className={`lightbox ${closing ? 'closing' : ''}`} onClick={onClose} role="dialog" aria-label={att.name ?? 'Medya'}>
       <div className="box" onClick={(e) => e.stopPropagation()}>
         {att.kind === 'video' && isFile && link ? (
-          <video src={link} poster={abs(att.url)} controls autoPlay playsInline />
+          <video key={link} src={link} poster={abs(att.url)} controls autoPlay playsInline />
         ) : att.kind === 'audio' && link ? (
           <div style={{ padding: 28, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center' }}>
             <Icon name="mic" size={28} color="#fff" />
@@ -1919,6 +1962,7 @@ function Lightbox({ att, onClose, closing }: { att: Attachment; onClose: () => v
           <div style={{ padding: 28, color: '#fff', fontSize: 13 }}>Önizleme yok — dosyayı aşağıdan indir.</div>
         ) : null}
         <div className="bar">
+          {many && <span className="lb-count">{index + 1} / {list.length}</span>}
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexGrow: 1 }}>{att.name ?? attLabel(att.kind)}</span>
           {page && (
             <a href={page} target="_blank" rel="noreferrer">
@@ -1935,6 +1979,16 @@ function Lightbox({ att, onClose, closing }: { att: Attachment; onClose: () => v
           <Icon name="x" size={14} sw={2} />
         </button>
       </div>
+      {many && (
+        <>
+          <button type="button" className="lb-nav prev b" onClick={(e) => (e.stopPropagation(), go(-1))} aria-label="Önceki medya" title="Önceki (←)">
+            <Icon name="back" size={20} sw={2.2} />
+          </button>
+          <button type="button" className="lb-nav next b" onClick={(e) => (e.stopPropagation(), go(1))} aria-label="Sonraki medya" title="Sonraki (→)">
+            <Icon name="back" size={20} sw={2.2} />
+          </button>
+        </>
+      )}
     </div>
   );
 }
@@ -2146,6 +2200,61 @@ function abs(u?: string): string | undefined {
   return mediaUrl(u);
 }
 /** Doğrudan oynatılabilir/indirilebilir dosya mı (vekil yolu ya da bilinen uzantı) — sayfa bağlantısı değil */
+/** Galeride gezinilebilen ek: görsel ya da oynatılabilir video (önizlemesi/dosyası olan) */
+function isGalleryMedia(a: Attachment): boolean {
+  if (a.kind === 'image') return !!(a.url || (a.link && isMediaFile(a.link)));
+  if (a.kind === 'video') return !!(a.link && isMediaFile(a.link)) || !!a.url;
+  return false;
+}
+
+/** Albüme girebilen mesaj: metinsiz, yalnız görsel/video ekli, tepki satırı değil */
+function isAlbumMsg(m: Message): boolean {
+  return !m.text?.trim() && !!m.attachments?.length && m.attachments.every(isGalleryMedia) && !m.threadId && !m.replyCount;
+}
+
+/** Grup içindeki mesajları çizim birimlerine böl: art arda ≥3 albümlük mesaj (aralar ≤3 dk) tek albüm, diğerleri tek tek */
+type Unit = { kind: 'msg'; m: Message; i: number } | { kind: 'album'; items: Message[]; i: number };
+function toUnits(items: Message[]): Unit[] {
+  const out: Unit[] = [];
+  for (let i = 0; i < items.length; ) {
+    let j = i;
+    while (j < items.length && isAlbumMsg(items[j]) && (j === i || items[j].ts - items[j - 1].ts <= 3 * 60_000)) j++;
+    if (j - i >= 3) {
+      out.push({ kind: 'album', items: items.slice(i, j), i });
+      i = j;
+    } else {
+      out.push({ kind: 'msg', m: items[i], i });
+      i++;
+    }
+  }
+  return out;
+}
+
+/** WhatsApp tarzı albüm: 2 sütunlu ızgara, en çok 4 kare; fazlası son karede "+N" */
+function AlbumView({ items, onOpen }: { items: Message[]; onOpen: (a: Attachment) => void }) {
+  const atts = items.flatMap((m) => (m.attachments ?? []).map((a) => ({ a, mid: m.id })));
+  const shownAtts = atts.slice(0, 4);
+  const more = atts.length - shownAtts.length;
+  return (
+    <span className={`album n${shownAtts.length}`}>
+      {shownAtts.map(({ a, mid }, k) => {
+        const src = abs(a.url) ?? (a.kind === 'image' ? abs(a.link) : undefined);
+        return (
+          <button key={k} type="button" className="al-tile b" data-mid={mid} onClick={() => onOpen(a)} title={a.name ?? 'Büyüt'}>
+            {src ? <img src={src} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span className="al-blank" />}
+            {a.kind === 'video' && (
+              <span className="al-play">
+                <Icon name="play" size={18} color="#fff" />
+              </span>
+            )}
+            {k === shownAtts.length - 1 && more > 0 && <span className="al-more">+{more}</span>}
+          </button>
+        );
+      })}
+    </span>
+  );
+}
+
 function isMediaFile(u?: string): boolean {
   // X/Twitter CDN'i uzantı yerine "?format=jpg" kullanır; o da dosya sayılır
   return !!u && (u.startsWith('/api/media/') || /\.(mp4|webm|mov|m4v|jpe?g|png|gif|webp|mp3|m4a|ogg|opus|wav|pdf)(\?|$)/i.test(u) || /[?&]format=(jpe?g|png|webp|gif|mp4)(&|$)/i.test(u));
