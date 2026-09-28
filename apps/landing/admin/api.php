@@ -1331,6 +1331,71 @@ if ($a === 'smtp_test' && $method === 'POST') {
     out(['ok' => $res['ok'] && $res['via'] === 'smtp', 'via' => $res['via'], 'error' => $res['ok'] && $res['via'] === 'smtp' ? '' : ($res['error'] ?? ''), 'note' => $res['note'] ?? '', 'log' => $res['log'] ?? []]);
 }
 
+/**
+ * SMTP bağlantı tanısı: PHP'nin ÇALIŞTIĞI kullanıcıyla (cPanel hesabı) giden SMTP portlarına ham bağlantı denenir. Barındırma
+ * desteği testi root ile yapınca (CSF/WHM SMTP_BLOCK root'u kapsamaz) sorun görünmüyordu; bu sonuç asıl kullanıcıdaki durumu gösterir.
+ * Şifre kullanılmaz, e-posta gönderilmez; yalnız TCP/TLS bağlantısı + sunucu karşılama satırı.
+ */
+if ($a === 'smtp_probe' && $method === 'POST') {
+    @set_time_limit(90);
+    $probe = function (string $host, int $port, bool $ssl) {
+        $t0 = microtime(true);
+        $errno = 0;
+        $errstr = '';
+        $ctx = stream_context_create(['ssl' => ['verify_peer' => true, 'verify_peer_name' => true, 'SNI_enabled' => true]]);
+        $fp = @stream_socket_client(($ssl ? 'ssl://' : 'tcp://') . $host . ':' . $port, $errno, $errstr, 5, STREAM_CLIENT_CONNECT, $ctx);
+        $ms = (int) round((microtime(true) - $t0) * 1000);
+        if (!$fp) {
+            // 111 ECONNREFUSED = kural reddi (CSF/iptables REJECT), 110 ETIMEDOUT = paket düşürülüyor (DROP)
+            $why = $errno === 111 ? ' (reddedildi: güvenlik duvarı kuralı)' : ($errno === 110 ? ' (zaman aşımı: paketler düşürülüyor)' : '');
+            return ['ok' => false, 'ms' => $ms, 'errno' => $errno, 'error' => ($errstr !== '' ? $errstr : 'bağlanılamadı') . $why];
+        }
+        stream_set_timeout($fp, 6);
+        $banner = trim((string) fgets($fp, 512));
+        @fwrite($fp, "QUIT\r\n");
+        fclose($fp);
+        return ['ok' => true, 'ms' => $ms, 'banner' => mb_substr($banner, 0, 120)];
+    };
+    $targets = [
+        ['smtp.turkticaret.net', 465, true],
+        ['smtp.turkticaret.net', 587, false],
+        ['smtp.turkticaret.net', 25, false],
+        ['smtp.gmail.com', 465, true],
+        ['smtp.gmail.com', 587, false],
+        ['127.0.0.1', 25, false],
+        ['www.google.com', 443, true],
+    ];
+    $rows = [];
+    foreach ($targets as [$h, $p, $ssl]) {
+        $r = $probe($h, $p, $ssl);
+        $rows[] = ['host' => $h, 'port' => $p, 'ssl' => $ssl, 'ip' => filter_var($h, FILTER_VALIDATE_IP) ? $h : (string) @gethostbyname($h)] + $r;
+    }
+    $user = function_exists('posix_geteuid') && function_exists('posix_getpwuid') ? ((posix_getpwuid(posix_geteuid())['name'] ?? '') ?: get_current_user()) : get_current_user();
+    $okOf = function ($h, $p) use ($rows) {
+        foreach ($rows as $r) if ($r['host'] === $h && $r['port'] === $p) return $r['ok'];
+        return false;
+    };
+    $ttOk = $okOf('smtp.turkticaret.net', 465) || $okOf('smtp.turkticaret.net', 587);
+    $smtpAny = $ttOk || $okOf('smtp.gmail.com', 465) || $okOf('smtp.gmail.com', 587);
+    $httpsOk = $okOf('www.google.com', 443);
+    if ($ttOk) {
+        $verdict = 'Giden SMTP açık: sorun bağlantıda değil (kullanıcı adı/şifre ya da gönderen adresi). "Deneme e-postası gönder" dökümüne bak.';
+    } elseif ($httpsOk && !$smtpAny) {
+        $verdict = 'ENGEL SENİN KULLANICINDA: aynı PHP HTTPS (443) ile dışarı çıkabiliyor ama TÜM uzak SMTP portları (465/587/25, Türkticaret ve Gmail) reddediliyor. Bu CSF SMTP_BLOCK / WHM "SMTP Restrictions" davranışıdır; root testinde görünmez.';
+    } elseif (!$httpsOk) {
+        $verdict = 'Sunucudan dışarıya hiç bağlantı kurulamıyor (HTTPS de yok); barındırma genel dış bağlantıyı kısıtlıyor.';
+    } else {
+        $verdict = 'Türkticaret SMTP reddediliyor, başka SMTP açık: Türkticaret sunucusu bu IP\'yi engelliyor olabilir.';
+    }
+    $lines = [];
+    foreach ($rows as $r) {
+        $lines[] = sprintf('%-22s %-4d %-4s %-16s %s', $r['host'], $r['port'], $r['ssl'] ? 'SSL' : 'TCP', $r['ip'], $r['ok'] ? "BAĞLANDI ({$r['ms']} ms) {$r['banner']}" : "HATA ({$r['ms']} ms) errno={$r['errno']} {$r['error']}");
+    }
+    $report = "PHP kullanıcısı: {$user} · sunucu: " . php_uname('n') . ' · PHP ' . PHP_VERSION . ' · ' . gmdate('Y-m-d H:i') . " UTC\n" . implode("\n", $lines);
+    $ticket = $ttOk ? '' : "Merhaba, aşağıdaki test web üzerinden, PHP ile, cPanel kullanıcımız ({$user}) olarak yapılmıştır (root değil). Aynı PHP süreci 443 portuyla dışarı çıkabildiği halde giden SMTP portları reddediliyor. Root ile yapılan nc testi CSF/WHM SMTP kısıtlamasından muaf olduğu için bu sorunu göstermez. Lütfen {$user} kullanıcısını CSF SMTP_ALLOWUSER listesine ekleyin ya da WHM > SMTP Restrictions için bu hesaba istisna tanımlayın.\n\n" . $report;
+    out(['ok' => true, 'user' => $user, 'rows' => $rows, 'verdict' => $verdict, 'report' => $report, 'ticket' => $ticket]);
+}
+
 if ($a === 'password' && $method === 'POST') {
     $cur = (string) ($body['current'] ?? '');
     $next = (string) ($body['next'] ?? '');

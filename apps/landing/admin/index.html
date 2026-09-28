@@ -515,6 +515,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
               <span class="sp" style="flex:1"></span>
               <input class="input" id="smTo" type="email" placeholder="deneme için alıcı adresi" style="max-width:260px">
               <button class="btn" type="button" id="smTest">Deneme e-postası gönder</button>
+              <button class="btn" type="button" id="smProbe" title="PHP'nin senin cPanel kullanıcınla giden SMTP portlarına bağlanabildiğini dener (şifre kullanmaz, e-posta göndermez)">Sunucu bağlantı tanısı</button>
             </div>
             <pre id="smLog" class="muted" style="display:none;white-space:pre-wrap;font-size:11.5px;max-height:220px;overflow:auto;background:var(--bg-2);padding:10px;border-radius:10px;margin:0"></pre>
           </form>
@@ -1022,6 +1023,10 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   $('#smTest').addEventListener('click',function(){ var b=this, to=$('#smTo').value.trim(); if(!to){ toast('Alıcı adresini yaz',true); return; } b.disabled=true; $('#smLog').style.display='none';
     api('smtp_test',{to:to}).then(function(r){ toast(r.ok?'Deneme e-postası gönderildi: '+to+(r.note?' ('+r.note+')':''):(r.error||'Gönderilemedi'),!r.ok); if(r.ok&&r.note) loadSmtp(); if(!r.ok||r.log&&r.log.length){ $('#smLog').textContent=(r.error?r.error+'\n\n':'')+(r.log||[]).join('\n'); $('#smLog').style.display=r.ok?'none':'block'; } })
       .catch(function(x){ toast(x.message,true); }).then(function(){ b.disabled=false; }); });
+  $('#smProbe').addEventListener('click',function(){ var b=this; b.disabled=true; b.textContent='Deneniyor…'; $('#smLog').style.display='none';
+    api('smtp_probe',{}).then(function(r){ var t=r.verdict+'\n\n'+r.report+(r.ticket?'\n\n——— Destek talebine yapıştır ———\n'+r.ticket:''); $('#smLog').textContent=t; $('#smLog').style.display='block';
+      if(r.ticket&&navigator.clipboard) navigator.clipboard.writeText(r.ticket).then(function(){ toast('Tanı tamam; destek metni panoya kopyalandı'); },function(){ toast('Tanı tamam'); }); else toast('Tanı tamam'); })
+      .catch(function(x){ toast(x.message,true); }).then(function(){ b.disabled=false; b.textContent='Sunucu bağlantı tanısı'; }); });
   $('#pwForm').addEventListener('submit',function(e){ e.preventDefault();
     api('password',{current:$('#pwCur').value,next:$('#pwNew').value}).then(function(){ $('#pwCur').value=''; $('#pwNew').value=''; toast('Şifre değiştirildi'); loaded.ayar=false; load('ayar'); }).catch(function(x){ toast(x.message,true); }); });
 
