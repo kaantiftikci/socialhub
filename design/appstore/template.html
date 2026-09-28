@@ -245,6 +245,96 @@ svg{flex-shrink:0}
 .safe .ico{width:38px;height:38px;border-radius:11px;background:rgba(212,255,63,.16);color:var(--lime);display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .safe b{display:block;font-size:15px;font-weight:600}
 .safe p{margin:3px 0 0;font-size:13px;line-height:1.45;color:rgba(255,255,255,.72)}
+
+/* =================== LIQUID GLASS (iOS 26 tasarım dili) ===================
+   Renkli duvar kâğıdı üstünde buzlu, ışığı kıran cam yüzeyler: yarı saydam beyaz + arka plan bulanıklığı + doygunluk,
+   üst kenarda parlak ışık çizgisi (specular), kenarda ince beyaz halka. Sekme çubuğu alttan kopuk yüzen kapsül. */
+.wall{position:absolute;inset:0;z-index:0;background:
+  radial-gradient(38% 22% at 12% 14%,rgba(132,98,255,.62),transparent 70%),
+  radial-gradient(34% 20% at 92% 26%,rgba(255,128,196,.5),transparent 70%),
+  radial-gradient(44% 24% at 18% 58%,rgba(96,184,255,.5),transparent 70%),
+  radial-gradient(40% 22% at 88% 72%,rgba(190,240,40,.42),transparent 70%),
+  radial-gradient(40% 20% at 40% 98%,rgba(160,120,255,.5),transparent 70%),
+  linear-gradient(180deg,#F3F0FF,#EAF0FF 55%,#F4EEFF)}
+.scr>.body,.scr>.sb{z-index:2}
+.gl,.round,.search,.chip,.list,.fcard,.promise,.ocard,.qcard,.cal,.ev,.app,.seg,.mini-g,.sum,.bub:not(.me),.comp-in,.glass-btn{
+  background:linear-gradient(160deg,rgba(255,255,255,.72),rgba(255,255,255,.42) 48%,rgba(255,255,255,.56));
+  -webkit-backdrop-filter:blur(22px) saturate(190%);backdrop-filter:blur(22px) saturate(190%);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.95),inset 0 -1px 0 rgba(255,255,255,.3),inset 0 0 0 1px rgba(255,255,255,.55),0 10px 28px -14px rgba(60,40,140,.32)}
+.round{width:40px;height:40px}
+.round.brand{background:linear-gradient(160deg,rgba(138,108,255,.95),rgba(108,71,255,.85));box-shadow:inset 0 1px 0 rgba(255,255,255,.55),inset 0 0 0 1px rgba(255,255,255,.25),0 10px 22px -8px rgba(108,71,255,.7)}
+.search{border-radius:999px;height:42px;color:#7B7890}
+.chip{box-shadow:inset 0 1px 0 rgba(255,255,255,.95),inset 0 0 0 1px rgba(255,255,255,.55),0 6px 16px -10px rgba(60,40,140,.3)}
+.chip.on{background:linear-gradient(160deg,rgba(40,34,70,.88),rgba(22,21,27,.8));box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 8px 18px -8px rgba(22,21,27,.5)}
+.list{margin:10px 12px 0;border-radius:26px;padding:4px 0}
+.list .row{padding:9px 14px}
+.row .mid{border-bottom-color:rgba(40,30,90,.08)}
+.av .bd{border-color:rgba(255,255,255,.9)}
+.tabbar{left:14px;right:78px;bottom:24px;height:62px;padding:0 6px;border-radius:31px;border-top:0;align-items:center;justify-content:space-between;
+  background:linear-gradient(160deg,rgba(255,255,255,.9),rgba(255,255,255,.74) 50%,rgba(255,255,255,.84));
+  -webkit-backdrop-filter:blur(30px) saturate(200%);backdrop-filter:blur(30px) saturate(200%);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.98),inset 0 0 0 1px rgba(255,255,255,.6),0 18px 40px -16px rgba(50,30,130,.45)}
+.tab{width:auto;flex:1;height:52px;justify-content:center;border-radius:26px;font-size:10px;color:#5E5A72}
+.tab .ic{width:23px;height:23px}
+.tab.on{color:var(--brand);background:linear-gradient(160deg,rgba(255,255,255,.95),rgba(236,230,255,.75));box-shadow:inset 0 1px 0 #fff,inset 0 0 0 1px rgba(108,71,255,.12),0 4px 12px -6px rgba(108,71,255,.45)}
+.tab .dotn{border-color:rgba(255,255,255,.9);left:auto;right:8px;top:2px}
+.fab{background:linear-gradient(160deg,rgba(255,255,255,.84),rgba(255,255,255,.62) 50%,rgba(255,255,255,.74))!important;position:absolute;right:14px;bottom:24px;width:62px;height:62px;border-radius:50%;z-index:21;display:flex;align-items:center;justify-content:center;color:var(--ink)}
+.fab .ic{width:24px;height:24px}
+.homeind{z-index:31;background:rgba(17,17,17,.85)}
+.focus-banner{box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 14px 26px -14px rgba(108,71,255,.9)}
+/* sohbet */
+.chat-h{background:transparent;border-bottom:0;padding:6px 12px 8px}
+.chat-h .back{width:40px;height:40px;border-radius:50%;justify-content:center}
+.chat-h .who-pill{flex:1;display:flex;align-items:center;gap:9px;height:48px;padding:0 14px 0 5px;border-radius:24px}
+.chat-h .acts{height:40px;padding:0 12px;border-radius:20px;align-items:center;gap:14px}
+.chat-h .acts .ic{width:20px;height:20px}
+.sum{border-radius:24px;box-shadow:inset 0 1px 0 rgba(255,255,255,.95),inset 0 0 0 1px rgba(255,255,255,.55),inset 0 0 0 1.5px rgba(108,71,255,.12),0 18px 34px -18px rgba(108,71,255,.55)}
+.sum .act{background:rgba(108,71,255,.1);box-shadow:inset 0 0 0 1px rgba(108,71,255,.12)}
+.day{background:rgba(255,255,255,.55);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);box-shadow:inset 0 0 0 1px rgba(255,255,255,.6)}
+.bub{border-radius:20px}
+.bub.me{background:linear-gradient(160deg,rgba(134,104,255,.96),rgba(108,71,255,.9));box-shadow:inset 0 1px 0 rgba(255,255,255,.4),inset 0 0 0 1px rgba(255,255,255,.18),0 10px 20px -10px rgba(108,71,255,.7)}
+.comp{background:transparent;border-top:0;backdrop-filter:none;-webkit-backdrop-filter:none;padding:0 12px 26px}
+.draft{background:linear-gradient(160deg,rgba(247,243,255,.82),rgba(236,229,255,.6));-webkit-backdrop-filter:blur(22px) saturate(190%);backdrop-filter:blur(22px) saturate(190%);
+  box-shadow:inset 0 1px 0 #fff,inset 0 0 0 1px rgba(108,71,255,.16),0 12px 28px -14px rgba(108,71,255,.5);border-radius:20px}
+.pbtn{border-radius:999px;height:32px;padding:0 14px}
+.pbtn:not(.ghost){box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 6px 14px -8px rgba(40,20,120,.6)}
+.pbtn.ghost{background:rgba(255,255,255,.6);box-shadow:inset 0 1px 0 #fff,inset 0 0 0 1px rgba(255,255,255,.7),0 4px 10px -6px rgba(60,40,140,.3)}
+.comp-in{border-radius:26px;height:52px;padding:0 6px 0 8px}
+.inrow .field{background:transparent;box-shadow:none;padding:0 6px}
+.inrow .send{width:40px;height:40px;box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 6px 14px -6px rgba(108,71,255,.8)}
+/* kartlar */
+.fcard,.ocard,.qcard,.promise,.cal{border-radius:26px}
+.ev{border-radius:22px}
+.app{border-radius:22px}
+.app.add{background:rgba(255,255,255,.28);box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.8);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
+.seg{border-radius:999px;padding:4px}
+.seg span{border-radius:999px}
+.seg span.on{background:linear-gradient(160deg,#fff,rgba(255,255,255,.8));box-shadow:inset 0 1px 0 #fff,0 4px 12px -6px rgba(60,40,140,.4)}
+.ship{background:rgba(255,255,255,.5);box-shadow:inset 0 0 0 1px rgba(255,255,255,.6)}
+.mini-g{margin:6px 12px 0;border-radius:22px}
+.mini-g .mini{padding:11px 14px}
+.cal .g .d.t{background:linear-gradient(160deg,#8A6CFF,#6C47FF);box-shadow:inset 0 1px 0 rgba(255,255,255,.45),0 6px 12px -6px rgba(108,71,255,.8)}
+.cal .g .d.s{background:rgba(108,71,255,.12)}
+.safe{box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 18px 34px -16px rgba(30,20,80,.6);background:linear-gradient(160deg,rgba(38,28,80,.9),rgba(46,34,102,.82));-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px)}
+.sec-t{color:#5E5A72}
+/* dış sahne: cam başlık hapı + telefonun kenarından taşan yüzen cam kartlar */
+.kick{background:linear-gradient(160deg,rgba(255,255,255,.8),rgba(255,255,255,.5));-webkit-backdrop-filter:blur(16px) saturate(180%);backdrop-filter:blur(16px) saturate(180%);
+  box-shadow:inset 0 1px 0 #fff,inset 0 0 0 1px rgba(255,255,255,.6),0 8px 20px -10px rgba(60,40,140,.35)}
+.shot.dark .kick{background:linear-gradient(160deg,rgba(255,255,255,.2),rgba(255,255,255,.06));box-shadow:inset 0 1px 0 rgba(255,255,255,.35),inset 0 0 0 1px rgba(255,255,255,.14)}
+.float{position:absolute;z-index:5;border-radius:24px;padding:11px 14px 11px 11px;display:flex;align-items:center;gap:11px;font-size:12.5px;line-height:1.3;color:var(--ink);
+  background:linear-gradient(160deg,rgba(255,255,255,.95),rgba(250,248,255,.86) 50%,rgba(255,255,255,.9));
+  -webkit-backdrop-filter:blur(30px) saturate(220%);backdrop-filter:blur(30px) saturate(220%);
+  box-shadow:inset 0 1px 0 #fff,inset 0 0 0 1px rgba(255,255,255,.6),0 24px 44px -18px rgba(40,20,120,.55)}
+.float b{display:block;font-size:13px;font-weight:600}
+.float small{display:block;color:#5E5A72;font-size:12px;margin-top:1px}
+.float .nt{font-size:10.5px;color:#7B7890;margin-left:auto;align-self:flex-start}
+.shot.dark .float{box-shadow:inset 0 1px 0 #fff,inset 0 0 0 1px rgba(255,255,255,.6),0 26px 50px -16px rgba(0,0,0,.7),0 0 40px -10px rgba(108,71,255,.5)}
+.float>div{flex:1;min-width:0}
+.float small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.float .nt{white-space:nowrap}
+.float .app-lbl{display:flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:#7B7890;text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px}
+.float .ok-ic{width:30px;height:30px;border-radius:50%;background:var(--green);color:#fff;display:flex;align-items:center;justify-content:center}
+.float .ok-ic .ic{width:17px;height:17px;stroke-width:3}
 </style>
 </head>
 <body>
@@ -304,10 +394,10 @@ const statusBar = (dark) => `<div class="island"></div><div class="sb" style="co
   <svg width="18" height="12" viewBox="0 0 18 12"><rect x="0" y="8" width="3" height="4" rx="1" fill="currentColor"/><rect x="5" y="5.5" width="3" height="6.5" rx="1" fill="currentColor"/><rect x="10" y="3" width="3" height="9" rx="1" fill="currentColor"/><rect x="15" y="0" width="3" height="12" rx="1" fill="currentColor"/></svg>
   <svg width="16" height="12" viewBox="0 0 16 12"><path d="M8 2.2c2.4 0 4.6.9 6.2 2.5l1.2-1.2A10.4 10.4 0 0 0 8 .5 10.4 10.4 0 0 0 .6 3.5l1.2 1.2A8.7 8.7 0 0 1 8 2.2zm0 3.4c1.5 0 2.9.6 4 1.6l1.2-1.2A7.3 7.3 0 0 0 8 3.9 7.3 7.3 0 0 0 2.8 6l1.2 1.2c1.1-1 2.5-1.6 4-1.6zm0 3.4c.7 0 1.3.3 1.8.7L8 11.5 6.2 9.7c.5-.4 1.1-.7 1.8-.7z" fill="currentColor"/></svg>
   <svg width="27" height="13" viewBox="0 0 27 13"><rect x=".5" y=".5" width="23" height="12" rx="3.5" fill="none" stroke="currentColor" opacity=".4"/><rect x="2" y="2" width="18" height="9" rx="2" fill="currentColor"/><path d="M25 4.5v4a2 2 0 0 0 0-4z" fill="currentColor" opacity=".45"/></svg></span></div>`;
-const tabbar = (on) => `<div class="tabbar">${[['inbox','Gelen kutusu'],['spark','Odak'],['cal','Takvim'],['grid','Kanallar'],['sliders','Ayarlar']]
-  .map(([i,t])=>`<span class="tab${on===i?' on':''}">${ic(i)}${t}${i==='spark'?'<span class="dotn">4</span>':''}</span>`).join('')}</div>`;
-const phone = (inner, opts={}) => `<div class="phone"><div class="scr" style="${opts.bg?`background:${opts.bg}`:''}">${statusBar(opts.darkBar)}<div class="body">${inner}</div><div class="homeind"></div></div></div>`;
-const shot = (o) => `<section class="shot${o.dark?' dark':''}" id="${o.id}"><div class="bg"></div><div class="head"><span class="kick">${ic(o.kicon)}${o.kick}</span><h1 class="h">${o.h}</h1>${o.sub?`<p class="sub">${o.sub}</p>`:''}</div>${phone(o.screen,o.phoneOpts)}</section>`;
+const tabbar = (on) => `<div class="tabbar">${[['inbox','Gelen'],['spark','Odak'],['cal','Takvim'],['grid','Kanallar']]
+  .map(([i,t])=>`<span class="tab${on===i?' on':''}">${ic(i)}${t}${i==='spark'?'<span class="dotn">4</span>':''}</span>`).join('')}</div><span class="fab glass-btn">${ic('search')}</span>`;
+const phone = (inner, opts={}) => `<div class="phone"><div class="scr"><div class="wall"></div>${statusBar(opts.darkBar)}<div class="body">${inner}</div><div class="homeind"></div></div></div>`;
+const shot = (o) => `<section class="shot${o.dark?' dark':''}" id="${o.id}"><div class="bg"></div><div class="head"><span class="kick">${ic(o.kicon)}${o.kick}</span><h1 class="h">${o.h}</h1>${o.sub?`<p class="sub">${o.sub}</p>`:''}</div>${phone(o.screen,o.phoneOpts)}${o.float||''}</section>`;
 
 /* ================= 1. Gelen kutusu ================= */
 const rows = [
@@ -328,7 +418,7 @@ const s1 = `<div class="topbar"><span class="round">${ic('sliders')}</span><span
 ${tabbar('inbox')}`;
 
 /* ================= 2. Sohbet + AI özeti ================= */
-const s2 = `<div class="chat-h"><span class="back">${ic('back')}</span>${avatar('ayse',null,38)}<div class="who"><b>Ayşe Kaya</b><small>${brand('whatsapp',14,4)} WhatsApp · <i></i> çevrimiçi</small></div><span class="acts">${ic('video')}${ic('phone')}</span></div>
+const s2 = `<div class="chat-h"><span class="back glass-btn">${ic('back')}</span><div class="who-pill gl">${avatar('ayse',null,38)}<div class="who"><b>Ayşe Kaya</b><small>${brand('whatsapp',14,4)} WhatsApp · <i></i> çevrimiçi</small></div></div><span class="acts glass-btn">${ic('video')}${ic('phone')}</span></div>
 <div class="sum"><div class="hd">${ic('spark')}Sohbet özeti<span>32 mesaj · 3 gün</span></div>
 <ul><li>Lansman sunumu cuma gününe kadar hazır olmalı.</li><li>Bütçe onayı Selin'den bekleniyor.</li><li>Ayşe toplantıyı perşembe 14:00'e almayı öneriyor.</li></ul>
 <div class="act">${ic('cal')}<div><b>Lansman toplantısı</b><small>Perşembe, 14:00 · mesajdan bulundu</small></div><span class="pbtn">Takvime ekle</span></div></div>
@@ -337,7 +427,7 @@ const s2 = `<div class="chat-h"><span class="back">${ic('back')}</span>${avatar(
 <div class="bub me">Harika, öğlene kadar dönüyorum<span class="m"><span class="ticks">${ic('checks')}</span>09:20</span></div>
 <div class="bub">Toplantıyı perşembe 14:00'e alabilir miyiz? Sunumu da o gün konuşuruz.<span class="m">09:41</span></div></div>
 <div class="comp"><div class="draft"><div class="hd">${ic('spark')}Yanıt taslağı <span>· senin tarzında</span></div><p>Perşembe 14:00 bana uyar, takvime ekliyorum. Sunumdaki notlarımı da o zamana hazırlarım!</p><div class="bt"><span class="pbtn">${ic('up','ic" style="width:14px;height:14px;stroke-width:2.4')} Gönder</span><span class="pbtn ghost">Düzenle</span><span class="pbtn ghost">Daha kısa</span></div></div>
-<div class="inrow"><span class="plus">${ic('plus')}</span><span class="field">Mesaj yaz…</span><span class="send">${ic('mic')}</span></div></div>`;
+<div class="inrow comp-in"><span class="plus">${ic('plus')}</span><span class="field">Mesaj yaz…</span><span class="send">${ic('mic')}</span></div></div>`;
 
 /* ================= 3. Odak ================= */
 const fc = (img,p,n,wait,q,d) => `<div class="fcard"><div class="top">${avatar(img,p,40)}<div><b>${n}</b><small>${ic('clock')}${wait}</small></div></div>
@@ -362,7 +452,7 @@ const s4 = `<div class="topbar"><span class="round">${ic('chevl')}</span><span c
 <p class="qq">Bu gömleğin kumaşı yazın terletir mi? Boyum 1,80, L mi almalıyım?</p>
 <div class="draft" style="margin:10px 0 0"><div class="hd">${ic('spark')}Önerilen yanıt</div><p>%100 keten, nefes alan bir kumaş; yazın rahatlıkla giyilir. Oversize kalıp olduğu için 1,80 boyda M beden önerilir.</p><div class="bt"><span class="pbtn dark">Yanıtla</span><span class="pbtn ghost">Düzenle</span></div></div></div>
 <div class="sec-t">Diğer siparişler</div>
-<div class="mini">${brand('hepsiburada',40,11)}<div class="mid"><b>Hepsiburada · #HB88213</b><small>Deri Kartlık · Siyah</small></div><span class="pill y">Hazırlanıyor</span></div>
+<div class="mini-g"><div class="mini">${brand('hepsiburada',40,11)}<div class="mid"><b>Hepsiburada · #HB88213</b><small>Deri Kartlık · Siyah</small></div><span class="pill y">Hazırlanıyor</span></div></div>
 ${tabbar('inbox')}`;
 
 /* ================= 5. Takvim + takip ================= */
@@ -395,10 +485,10 @@ const s6 = `<div class="topbar"><span></span><span class="round">${ic('search')}
 ${tabbar('grid')}`;
 
 document.getElementById('root').innerHTML = [
-  shot({id:'s1',kicon:'inbox',kick:'Birleşik gelen kutusu',h:'Tüm mesajların,<br><em>tek bir yerde</em>',sub:'WhatsApp, Instagram, Gmail, Slack ve pazaryerleri tek listede.',screen:s1}),
-  shot({id:'s2',dark:1,kicon:'spark',kick:'Yapay zekâ özetleri',h:'Uzun sohbetler,<br><em>tek bakışta</em>',sub:'Özetler, yapılacaklar ve tarihler mesajların içinden çıkar.',screen:s2}),
+  shot({id:'s1',float:`<div class="float" style="left:30px;right:30px;top:300px">${avatar('ayse','whatsapp',40)}<div><span class="app-lbl">WhatsApp</span><b>Ayşe Kaya</b><small>Toplantıyı perşembe 14:00'e alabilir miyiz?</small></div><span class="nt">şimdi</span></div>`,kicon:'inbox',kick:'Birleşik gelen kutusu',h:'Tüm mesajların,<br><em>tek bir yerde</em>',sub:'WhatsApp, Instagram, Gmail, Slack ve pazaryerleri tek listede.',screen:s1}),
+  shot({id:'s2',float:`<div class="float" style="left:30px;right:30px;top:300px"><span class="ok-ic" style="width:40px;height:40px">${ic('check')}</span><div><span class="app-lbl">Mivelo takvimi</span><b>Lansman toplantısı eklendi</b><small>Perşembe, 14:00 · 1 saat önce hatırlatılacak</small></div></div>`,dark:1,kicon:'spark',kick:'Yapay zekâ özetleri',h:'Uzun sohbetler,<br><em>tek bakışta</em>',sub:'Özetler, yapılacaklar ve tarihler mesajların içinden çıkar.',screen:s2}),
   shot({id:'s3',kicon:'spark',kick:'Odak',h:'Senin tarzında<br><em>yanıt taslakları</em>',sub:'Bekleyenler öne çıkar, verdiğin sözler unutulmaz.',screen:s3}),
-  shot({id:'s4',kicon:'pkg',kick:'Pazaryerleri',h:'Siparişler ve<br><em>müşteri soruları</em>',sub:'Trendyol, Hepsiburada, n11 ve daha fazlası aynı gelen kutusunda.',screen:s4}),
+  shot({id:'s4',float:`<div class="float" style="left:30px;right:30px;top:300px">${brand('trendyol',40,11)}<div><span class="app-lbl">Trendyol</span><b>Yeni sipariş · ₺749,90</b><small>Oversize Keten Gömlek · Bej · M</small></div><span class="nt">şimdi</span></div>`,kicon:'pkg',kick:'Pazaryerleri',h:'Siparişler ve<br><em>müşteri soruları</em>',sub:'Trendyol, Hepsiburada, n11 ve daha fazlası aynı gelen kutusunda.',screen:s4}),
   shot({id:'s5',kicon:'cal',kick:'Takvim ve takip',h:'Hiçbir dönüşü<br><em>kaçırma</em>',sub:'Mesajdan etkinliğe tek dokunuş; yanıt gelmezse hatırlatır.',screen:s5}),
   shot({id:'s6',dark:1,kicon:'shield',kick:'Gizlilik',h:'20+ uygulama.<br><em>Verin sende.</em>',sub:'Mesajların ve oturumların yalnız kendi cihazında kalır.',screen:s6}),
 ].join('');

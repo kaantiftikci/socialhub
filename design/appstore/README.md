@@ -2,7 +2,9 @@
 
 Mivelo iPhone uygulaması için tasarım önerisi: 6 App Store ekranı, 1290×2796 (iPhone 6,9" / 6,7" boyutu; App Store
 küçük iPhone'lar için kendisi ölçekler). Mobil uygulama henüz yok; ekranlar masaüstü/web arayüzünün iOS uyarlamasıdır
-(Inter, mor #6C47FF, lime #D4FF3F, açık zemin, iOS sekme çubuğu + büyük başlık).
+(Inter, mor #6C47FF, lime #D4FF3F) — **Liquid Glass** (iOS 26) odaklı: renkli duvar kâğıdı üstünde buzlu cam kartlar
+(yarı saydam beyaz + blur + doygunluk, üst kenarda ışık çizgisi), alttan kopuk yüzen kapsül sekme çubuğu + ayrı cam arama düğmesi,
+cam başlık/geri düğmeleri, yüzen cam yazma alanı; 1, 2 ve 4. ekranda telefonun kenarından taşan cam bildirim bandı.
 
 | # | Ekran | Başlık |
 |---|---|---|
