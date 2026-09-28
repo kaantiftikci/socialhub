@@ -53,7 +53,7 @@ Dil: arayüz ve yorumlar Türkçe.
   karması `api.php` `DEFAULT_HASH`; panelden değişince `~/mivelo-data/admin.json`. 5 hatalı girişte IP 15 dk kilitlenir.
   Demoda örnek AI açık (`demo-ai.ts`: sohbete özel taslak/özet/aksiyon/olay, model çağrısı yok); pazaryeri sipariş kartı `Script.order`.
   Tek dosya demo (`npm run demo:html`) profil adı "Mivelo".
-- **Tanıtım videosu (reels 1080×1920, ~46 sn)** `scripts/promo/`: videodaki arayüz GERÇEK tek dosya demo (iframe, Playwright sanal saati
+- **Tanıtım videosu (reels 1080×1920, ~68 sn; TM() zaman eşlemesi: 5,5 sn sonrası ×1,25 + GAPS araları: AI özeti, sağ panel, takip/zamanlama hareketli grafikleri)** `scripts/promo/`: videodaki arayüz GERÇEK tek dosya demo (iframe, Playwright sanal saati
   `clock.runFor`; imleç/klavye gerçek girişler, CSS animasyonları video zamanına bağlı `syncAnims`; ıskalanan tıklamada DOM güvencesi).
   `reel.html` kompozisyon (tek nesne biçim değiştirir: bildirim hapı → logo → pencere → logo → CTA; Apple tarzı açık zemin, kelime kelime
   bulanıklıktan açılan başlıklar; logolar yalnız ilk iki sahnede), `render.mjs` (--scale 2, --stills), `audio.mjs` (kodla üretilen 120 BPM

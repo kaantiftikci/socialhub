@@ -72,6 +72,26 @@ html, body { margin: 0; width: 1080px; height: 1920px; overflow: clip; backgroun
 .cta.done { background: var(--lime); color: var(--lime-ink); box-shadow: 0 24px 50px -18px rgba(150,190,20,.6); }
 .url { font-family: var(--display); font-size: 52px; font-weight: 700; letter-spacing: -0.03em; }
 .foot { font-size: 28px; color: var(--ink3); font-weight: 500; white-space: nowrap; }
+/* ara bölümler (uygulama dışı hareketli grafik) */
+.bub { max-width: 640px; padding: 22px 30px; border-radius: 30px; background: #EFEEF4; color: var(--ink); font-size: 30px; font-weight: 500; white-space: nowrap; letter-spacing: -0.01em; }
+.bub.me { background: var(--brand); color: #fff; }
+.bigbtn { padding: 30px 52px; border-radius: 999px; background: #fff; border: 1px solid var(--line); display: flex; align-items: center; gap: 16px; font-family: var(--display); font-size: 42px; font-weight: 650; color: var(--ink);
+  box-shadow: 0 1px 2px rgba(20,18,40,.05), 0 24px 50px -20px rgba(40,30,110,.35); white-space: nowrap; }
+.bigbtn svg { color: var(--brand); }
+.bigbtn.on { background: var(--lime); border-color: transparent; color: var(--lime-ink); }
+.bigbtn.on svg { color: var(--lime-ink); }
+.sumcard { width: 860px; height: 470px; border-radius: 44px; background: #fff; border: 1px solid var(--line); box-shadow: 0 2px 6px rgba(20,18,40,.05), 0 40px 90px -30px rgba(40,30,110,.4); }
+.sumh { display: flex; align-items: center; gap: 14px; font-family: var(--display); font-size: 32px; font-weight: 650; color: var(--brand); white-space: nowrap; }
+.sumh span { color: var(--ink3); font-weight: 500; font-size: 28px; }
+.li { display: flex; gap: 18px; align-items: baseline; width: 760px; font-size: 32px; font-weight: 500; color: var(--ink); letter-spacing: -0.01em; }
+.li::before { content: ''; width: 12px; height: 12px; border-radius: 50%; background: var(--brand); flex: none; transform: translateY(-4px); }
+.chiprow { display: flex; gap: 14px; }
+.achip { padding: 14px 24px; border-radius: 999px; background: var(--brand-soft); color: var(--brand); font-size: 26px; font-weight: 600; white-space: nowrap; display: flex; gap: 10px; align-items: center; }
+.seg { display: flex; gap: 10px; padding: 12px; border-radius: 999px; background: #fff; border: 1px solid var(--line); box-shadow: 0 20px 44px -20px rgba(40,30,110,.35); }
+.seg div { padding: 18px 30px; border-radius: 999px; font-size: 32px; font-weight: 600; color: var(--ink2); white-space: nowrap; }
+.seg div.on { background: var(--lime); color: var(--lime-ink); }
+.bell { width: 110px; height: 110px; border-radius: 34px; background: var(--ink); color: var(--lime); display: grid; place-items: center; box-shadow: 0 24px 50px -18px rgba(22,21,27,.5); }
+.stamp { font-size: 26px; color: var(--ink3); font-weight: 500; display: flex; align-items: center; gap: 10px; white-space: nowrap; }
 /* üst köşe işaretleri */
 .hud { font-size: 26px; font-weight: 600; color: var(--ink3); display: flex; align-items: center; gap: 12px; font-family: var(--display); letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
 .hud b { color: var(--ink); font-size: 30px; letter-spacing: -0.02em; }
@@ -85,7 +105,27 @@ html, body { margin: 0; width: 1080px; height: 1920px; overflow: clip; backgroun
 'use strict';
 const Q = new URLSearchParams(location.search);
 const A = 'assets';
-const DUR = 46;
+/**
+ * Zaman eşlemesi: sahneler ilk taslağa göre yazıldı (46 sn); 5,5. saniyeden sonra her şey K kat yavaş oynar ve aralara
+ * uygulama dışı "hareketli grafik" araları (GAPS) eklenir. Yardımcılar (cam, mv, click, say…) zamanı TM() ile çevirir;
+ * ara içindeki öğeler ABS modunda mutlak zamanla yazılır.
+ */
+const K = 1.25, T0 = 5.5;
+const GAPS = [
+  { id: 'sum', at: 13.9, len: 4.4 },
+  { id: 'panel', at: 17.9, len: 2.2 },
+  { id: 'follow', at: 21.9, len: 4.8 },
+];
+let ABS = false;
+function TM(t) {
+  if (ABS || t < T0) return t;
+  let n = T0 + (t - T0) * K;
+  for (const g of GAPS) if (t >= g.at) n += g.len;
+  return n;
+}
+const gapStart = (id) => { const g = GAPS.find((x) => x.id === id); let n = T0 + (g.at - T0) * K; for (const x of GAPS) if (x.at < g.at) n += x.len; return n; };
+const absolute = (fn) => { ABS = true; try { fn(); } finally { ABS = false; } };
+const DUR = Math.ceil(TM(46));
 const stage = document.getElementById('stage');
 
 /* ───────── motor ───────── */
@@ -114,8 +154,8 @@ function el(html, cls = '', parent = stage) {
  * Anahtar kare izi: [[t, {özellik: değer}, kolaylık]]. Bir özellik tanımlandığı ilk kareden önce o ilk değeri, sonuncudan sonra
  * son değeri taşır; aradaki geçişte bir SONRAKİ karenin kolaylığı kullanılır. S (ölçek) logaritmik aralıkta.
  */
-function track(keys) {
-  const ks = keys.map(([t, p, e]) => ({ t, p, e: e || 'io' })).sort((a, b) => a.t - b.t);
+function track(keys, mapped = false) {
+  const ks = keys.map(([t, p, e]) => ({ t: mapped ? t : TM(t), p, e: e || 'io' })).sort((a, b) => a.t - b.t);
   // {f: hedef} anahtarı fx/fy'yi tanımlar (değer geçişin başında DOM'dan çözülür)
   for (const k of ks) if (k.p.f) { if (!('fx' in k.p)) k.p.fx = undefined; if (!('fy' in k.p)) k.p.fy = undefined; }
   const val = (prop, t, def) => {
@@ -166,13 +206,13 @@ function rectOf(tg) {
 /* ───────── eylemler (render.mjs gerçek fare/klavye ile uygular) ───────── */
 const ACTS = [];
 const CUES = []; // ses efektleri: {t, k}
-const cue = (t, k, v) => CUES.push({ t, k, v });
-const click = (t, sfx) => (ACTS.push({ t, k: 'down', sfx }), ACTS.push({ t: t + 0.08, k: 'up' }), CLICKS.push(t));
-const press = (t, key) => ACTS.push({ t, k: 'key', key });
-const typeText = (t0, text, cps = 17) => ACTS.push({ t: t0, k: 'type', text, cps, done: 0 });
-const inApp = (t, fn) => ACTS.push({ t, k: 'eval', fn });
+const cue = (t, k, v) => CUES.push({ t: TM(t), k, v });
+const click = (t, sfx) => ((t = TM(t)), ACTS.push({ t, k: 'down', sfx }), ACTS.push({ t: t + 0.08, k: 'up' }), CLICKS.push(t));
+const press = (t, key) => ACTS.push({ t: TM(t), k: 'key', key });
+const typeText = (t0, text, cps = 17) => ACTS.push({ t: TM(t0), k: 'type', text, cps: ABS ? cps : cps / K, done: 0 });
+const inApp = (t, fn) => ACTS.push({ t: TM(t), k: 'eval', fn });
 const SCROLLS = [];
-const scroll = (t0, t1, sel, to, e = 'io') => SCROLLS.push({ t0, t1, sel, to, e, from: null });
+const scroll = (t0, t1, sel, to, e = 'io') => SCROLLS.push({ t0: TM(t0), t1: TM(t1), sel, to, e, from: null });
 const CLICKS = [];
 
 /* ───────── arka plan ───────── */
@@ -195,6 +235,9 @@ const ICON = {
   sparkle: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4"/><path d="M12 8.5 13.3 11 16 12l-2.7 1-1.3 2.5-1.3-2.5L8 12l2.7-1z"/>',
   calendar: '<rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
   send: '<path d="M4 12 20 4l-5 16-3.5-6.5z"/><path d="m11.5 13.5 3-3"/>',
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  receipt: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/>',
+  box: '<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>',
   quote: '<path d="M7 7h4v4c0 3-1.5 5-4 6M14 7h4v4c0 3-1.5 5-4 6"/>',
   text: '<path d="M5 7h14M5 12h10M5 17h7"/>',
   hand: '<path d="M8 13V6.5a1.5 1.5 0 0 1 3 0V12M11 11V5a1.5 1.5 0 0 1 3 0v6M14 11V6.5a1.5 1.5 0 0 1 3 0V14c0 3.5-2.5 6-6 6-2.2 0-3.8-1-5-3l-2-3.5a1.5 1.5 0 0 1 2.6-1.5L8 13"/>',
@@ -227,6 +270,8 @@ function place(node, keys) {
  * Her kelime 55 ms arayla aşağıdan, 14 px bulanıktan netleşerek girer; t1'de yukarı doğru bulanıklaşarak çıkar.
  */
 function say(t0, t1, o) {
+  t0 = TM(t0);
+  t1 = t1 >= 99 ? t1 : TM(t1);
   const box = el('', 'say');
   box.style.top = (o.y ?? 280) + 'px';
   box.style.left = '0';
@@ -287,7 +332,7 @@ glyph.innerHTML = GLYPH(200);
 pilltxt.innerHTML = '<span><b>213</b> yeni mesaj · 12 uygulama</span>';
 const FULL = 1000 / 1440; // pencerenin tamamı 1000 px genişlikte
 const CARD = [];
-const cam = (t, p, e) => CARD.push([t, p, e]);
+const cam = (t, p, e) => CARD.push([TM(t), p, e]); // zaman burada çevrilir; track(CARD, true) yeniden çevirmez
 let camTrack = null;
 let camNow = null; // bu karedeki kart geometrisi (imleç eşlemesi için)
 function camHook(t) {
@@ -333,8 +378,8 @@ const ring = el('');
 ring.id = 'ring';
 const CUR = [];
 /** İmleç anahtarı: at = uygulama hedefi {sel,text,…} ya da {x,y} (uygulama koord.) ya da {sx,sy} (sahne koord.) */
-const mv = (t, at, e = 'io') => CUR.push({ t, at, e });
-const hideCur = (t) => CUR.push({ t, hide: true });
+const mv = (t, at, e = 'io') => CUR.push({ t: TM(t), at, e, K: ABS ? 1 : K });
+const hideCur = (t) => CUR.push({ t: TM(t), hide: true });
 let lastPos = { x: 720, y: 450, stage: false };
 function curPos(k) {
   if (k.at.sx != null) return { x: k.at.sx, y: k.at.sy, stage: true };
@@ -354,7 +399,7 @@ function curHook(t) {
   // geçiş k0.t'de, imlecin o anki konumundan başlar; hedef canlı izlenir (liste kayarsa imleç de kayar)
   if (!k0.from) k0.from = { ...lastPos };
   const dest = curPos(k0);
-  const p = ease[k0.e](clamp((t - k0.t) / (k0.dur ?? 0.55)));
+  const p = ease[k0.e](clamp((t - k0.t) / ((k0.dur ?? 0.55) * (k0.K ?? 1))));
   let f = k0.from, d = dest;
   if (f.stage !== d.stage) (f = toStage(f)), (d = toStage(d));
   // hafif kavis: düz çizgi yerine el hareketi gibi
@@ -385,6 +430,7 @@ function keycaps(t0, t1, labels, presses = [], y = 1610) {
   row.style.display = 'flex';
   row.style.gap = '18px';
   const keysEl = [...row.children];
+  presses = presses.map(TM);
   place(row, [[t0 - 0.01, { o: 0, s: 0.85, y: y + 30, b: 10 }], [t0 + 0.35, { o: 1, s: 1, y, b: 0 }, 'back'], [t1, { o: 1, s: 1, y, b: 0 }], [t1 + 0.3, { o: 0, s: 0.92, y: y - 20, b: 10 }, 'i']]);
   hook((t) => {
     const on = presses.some((p) => t >= p && t < p + 0.22);
@@ -404,11 +450,7 @@ function pill(t0, t1, html, x, y, cls = '') {
 
 /* ───────── üst köşe ───────── */
 const hudL = el(`${LOGO(40)}<b>mivelo</b>`, 'hud');
-place(hudL, [[0.2, { o: 0, x: 170, y: 150 }], [0.6, { o: 1, x: 170, y: 150 }], [40.2, { o: 1 }], [40.6, { o: 0 }]]);
-const hudR = el('<span id="chap">01</span><span style="color:var(--ink4)">/ 09</span>', 'hud');
-place(hudR, [[0.2, { o: 0, x: 935, y: 150 }], [0.6, { o: 1, x: 935, y: 150 }], [40.2, { o: 1 }], [40.6, { o: 0 }]]);
-const CH = [[0, '01'], [5.6, '02'], [9.9, '03'], [13.9, '04'], [17.9, '05'], [21.9, '06'], [27.9, '07'], [31.9, '08'], [35.9, '09']];
-hook((t) => { let c = '01'; for (const [a, v] of CH) if (t >= a) c = v; document.getElementById('chap').textContent = c; });
+place(hudL, [[0.2, { o: 0, x: 540, y: 150 }], [0.6, { o: 1, x: 540, y: 150 }], [40.2, { o: 1 }], [40.6, { o: 0 }]]);
 
 /* ════════════════════════════════════════════════════════════════════
    S0 · 0–4 · Mesajların her yerde mi? (bildirim fırtınası → tek hap)
@@ -507,7 +549,7 @@ const s2 = say(5.7, 9.75, { k: 'Gelen kutusu', l: ['Tek [gelen kutusu.]'], sub: 
   const spans = s2.subLine ? [...s2.subLine.querySelectorAll('.w')] : [];
   // kelimeler: Sosyal medya · E-posta · Pazaryerleri → gruplar
   const groups = [[0, 1], [3], [5]];
-  const at = [7.35, 8.15, 8.85];
+  const at = [7.35, 8.15, 8.85].map(TM);
   hook((t) => {
     let g = -1;
     at.forEach((a, i) => { if (t >= a) g = i; });
@@ -551,7 +593,7 @@ CUR[CUR.length - 1].dur = 0.4;
 click(12.9, 'send');
 cam(12.9, { S: 2.1, fx: 860, fy: 740 });
 cam(13.55, { S: 1.55, fx: 860, fy: 330 }, 'io');
-pill(13.05, 13.75, `${ic('check', 34)} Instagram üzerinden gönderildi`, 540, 1590, 'ink');
+pill(13.05, 13.45, `${ic('check', 34)} Instagram üzerinden gönderildi`, 540, 1590, 'ink');
 
 /* ════════════════════════════════════════════════════════════════════
    S4 · 14–18 · AI senin tarzında yazar (Taslak yaz → Tab → Gönder)
@@ -567,9 +609,9 @@ cam(14.85, { W: 1000, H: 820, S: 1.95, fx: 860, fy: 730 }, 'iox');
 mv(14.55, { sel: 'button.aipill', text: 'Taslak yaz' });
 CUR[CUR.length - 1].dur = 0.45;
 click(15.05);
-pill(16.05, 17.75, `${ic('text', 32)} Kısa–orta cümleler`, 330, 1560);
-pill(16.2, 17.75, `${ic('quote', 32)} “Siz” diye hitap`, 760, 1560);
-pill(16.35, 17.75, `${ic('hand', 32)} “Merhaba” ile açılış`, 540, 1660);
+pill(16.05, 17.5, `${ic('text', 32)} Kısa–orta cümleler`, 330, 1560);
+pill(16.2, 17.5, `${ic('quote', 32)} “Siz” diye hitap`, 760, 1560);
+pill(16.35, 17.5, `${ic('hand', 32)} “Merhaba” ile açılış`, 540, 1660);
 keycaps(16.45, 16.95, ['Tab'], [16.7], 1440);
 press(16.7, 'Tab');
 mv(16.95, { sel: 'section.conv button.btn.primary', text: 'Gönder' });
@@ -685,7 +727,7 @@ keycaps(34.9, 35.45, ['⌘', '2'], [35.1], 1500);
 press(35.1, 'Meta+2');
 {
   const sc = el(`<div><kbd>⌘K</kbd>Her yerde ara</div><div><kbd>⌘1–9</kbd>Görünümler</div><div><kbd>⌘⇧K</kbd>Mivelo’yu çağır</div><div><kbd>Tab</kbd>Taslağı kabul et</div><div><kbd>J K</kbd>Sohbetler arası</div><div><kbd>↵</kbd>Gönder</div>`, 'sc');
-  place(sc, [[35.45, { o: 0, s: 0.9, y: 1580, b: 14 }], [35.85, { o: 1, s: 1, y: 1560, b: 0 }, 'back'], [37.0, { o: 1, s: 1, y: 1560 }], [37.3, { o: 0, s: 0.95, y: 1540, b: 10 }, 'i']]);
+  place(sc, [[35.45, { o: 0, s: 0.9, y: 1580, b: 14 }], [35.85, { o: 1, s: 1, y: 1560, b: 0 }, 'back'], [37.0, { o: 1, s: 1, y: 1560, b: 0 }], [37.3, { o: 0, s: 0.95, y: 1540, b: 10 }, 'i']]);
 }
 cam(35.4, { S: 0.95, fx: 720, fy: 380 });
 cam(35.9, { W: 1000, H: 640, cy: 1010, S: FULL, fx: 720, fy: 450 }, 'io');
@@ -725,7 +767,7 @@ say(40.5, 99, { l: ['Tüm mesajların.', '[Tek yerde.]'], y: 960, size: 96 });
   const cta = el(`<span class="lbl">Bekleme listesine katıl</span>`, 'cta');
   place(cta, [[41.3, { o: 0, s: 0.7, y: 1330, b: 12 }], [41.75, { o: 1, s: 1, y: 1310, b: 0 }, 'back'], [42.55, { s: 1 }], [42.65, { s: 0.94 }, 'o'], [42.85, { s: 1.04 }, 'o'], [43.05, { s: 1 }, 'io']]);
   hook((t) => {
-    const done = t >= 42.65;
+    const done = t >= TM(42.65);
     cta.classList.toggle('done', done);
     cta.innerHTML = done ? `${ic('check', 40)}<span>Listedesin</span>` : 'Bekleme listesine katıl';
   });
@@ -741,8 +783,114 @@ click(42.6, 'success');
 hideCur(43.4);
 cue(44.0, 'final');
 
+
+/* ════════════════════════════════════════════════════════════════════
+   ARA BÖLÜMLER — uygulama dışı hareketli grafik (referanslardaki gibi: düğme belirir, basılır, yanında yazı çıkar,
+   başka bir görüntüye dönüşür). Kart bu sürede kenara çekilir; zamanlar mutlak.
+   ════════════════════════════════════════════════════════════════════ */
+/** Kartı ara boyunca gizle (kısa küçülüp bulanıklaşarak) ve sonunda geri getir */
+function cardAway(g0, g1) {
+  cam(g0, { o: 1, s: 1 });
+  cam(g0 + 0.45, { o: 0, s: 0.9 }, 'i');
+  cam(g1 - 0.5, { o: 0, s: 0.9 });
+  cam(g1, { o: 1, s: 1 }, 'ox');
+}
+absolute(() => {
+  /* ── 1 · Sohbet özeti: mesaj yığını → "Özetle" → üç satırlık özet kartı ── */
+  const g0 = gapStart('sum'), g1 = g0 + 4.4;
+  hideCur(g0);
+  cardAway(g0, g1);
+  say(g0 + 0.35, g1 - 0.5, { k: 'AI özeti', l: ['Uzun sohbet,', '[üç satırda.]'], y: 270, size: 82 });
+  const msgs = ['Kargo ne zaman çıkar?', 'Kurumsal fatura lazım', 'Unvan: Demir Studio', 'Kapıcıya bırakmayın lütfen', 'Takip no gelince yazar mısınız?', 'Vergi no mesajda'];
+  msgs.forEach((m, i) => {
+    const b = el(m, 'bub' + (i % 3 === 2 ? ' me' : ''));
+    const x = i % 2 ? 620 : 460, y = 700 + i * 105;
+    place(b, [[g0 + 0.35 + i * 0.12, { o: 0, x, y: y + 30, s: 0.9, b: 10 }], [g0 + 0.75 + i * 0.12, { o: 1, x, y, s: 1, b: 0 }, 'back'], [g0 + 1.55, { o: 1, x, y, s: 1, b: 0 }], [g0 + 1.95, { o: 0, x: 540, y: 1060, s: 0.3, b: 8 }, 'iox']]);
+    cue(g0 + 0.35 + i * 0.12, 'pop', i);
+  });
+  const btn = el(`${ic('sparkle', 44)}<span>Özetle</span>`, 'bigbtn');
+  place(btn, [[g0 + 1.15, { o: 0, y: 1330, s: 0.8, b: 10 }], [g0 + 1.5, { o: 1, y: 1300, s: 1, b: 0 }, 'back'], [g0 + 1.9, { s: 1, o: 1, y: 1300, b: 0 }], [g0 + 1.97, { s: 0.92 }, 'o'], [g0 + 2.1, { s: 1.04 }, 'o'], [g0 + 2.4, { o: 0, s: 0.6, y: 1060, b: 10 }, 'iox']]);
+  hook((t) => btn.classList.toggle('on', t >= g0 + 1.97));
+  mv(g0 + 1.3, { sx: 760, sy: 1500 });
+  mv(g0 + 1.45, { sx: 560, sy: 1310 });
+  CUR[CUR.length - 1].dur = 0.4;
+  CLICKS.push(g0 + 1.95);
+  cue(g0 + 1.95, 'click');
+  hideCur(g0 + 2.2);
+  const card = el('', 'sumcard');
+  place(card, [[g0 + 2.1, { o: 0, y: 1040, s: 0.35, b: 14 }], [g0 + 2.55, { o: 1, y: 1040, s: 1, b: 0 }, 'back'], [g1 - 0.55, { o: 1, s: 1, y: 1040, b: 0 }], [g1 - 0.2, { o: 0, s: 0.94, y: 1020, b: 12 }, 'i']]);
+  cue(g0 + 2.1, 'morph');
+  const inCard = (html, cls, x, y, t) => place(el(html, cls), [[t, { o: 0, x, y: y + 20, b: 10 }], [t + 0.4, { o: 1, x, y, b: 0 }, 'ox'], [g1 - 0.55, { o: 1, x, y, b: 0 }], [g1 - 0.2, { o: 0, x, y: y - 20, b: 10 }, 'i']]);
+  inCard(`${ic('sparkle', 34)} Özet <span>· 42 mesaj</span>`, 'sumh', 330, 860, g0 + 2.45);
+  inCard('Sipariş bugün Yurtiçi ile çıkıyor', 'li', 540, 950, g0 + 2.6);
+  inCard('Kurumsal fatura: Demir Studio', 'li', 540, 1015, g0 + 2.75);
+  inCard('Kapıcıya bırakılmayacak', 'li', 540, 1080, g0 + 2.9);
+  inCard(`<span class="achip">${ic('box', 26)} Takip no gönder</span><span class="achip">${ic('receipt', 26)} Faturayı kes</span>`, 'chiprow', 450, 1180, g0 + 3.1);
+  pill(g0 + 3.2, g1 - 0.4, `${ic('check', 32)} Aksiyonlar da hazır`, 540, 1440, 'ink');
+  cue(g0 + 2.6, 'type'); cue(g0 + 2.75, 'type'); cue(g0 + 2.9, 'type'); cue(g0 + 3.1, 'success');
+  // arada imleç sonraki sahnenin satırına geri döner
+  mv(g1 - 0.45, { sel: '.row', text: 'Ayşe Demir', ax: 0.45 });
+  CUR[CUR.length - 1].dur = 0.4;
+});
+absolute(() => {
+  /* ── 2 · Gerçek uygulamada sağ panel: sohbet özeti + aksiyonlar + not ── */
+  const g0 = gapStart('panel'), g1 = g0 + 2.2;
+  hideCur(g0);
+  cam(g0, { W: 1000, H: 820, S: 1.7, fx: 860, fy: 560 });
+  cam(g0 + 0.7, { W: 1000, H: 900, cy: 1090, S: 2.0, fx: 1270, fy: 590 }, 'iox');
+  cam(g1 - 0.1, { W: 1000, H: 900, cy: 1090, S: 2.0, fx: 1270, fy: 720 }, 'io');
+  say(g0 + 0.2, g1 - 0.25, { k: 'AI özeti', l: ['Her sohbetin özeti', '[sağ panelde.]'], y: 270, size: 78 });
+  pill(g0 + 0.8, g1 - 0.3, `${ic('sparkle', 32)} Özet · aksiyonlar · notlar`, 540, 1620);
+});
+absolute(() => {
+  /* ── 3 · Takip hatırlatıcısı → zamanlanmış gönderim ── */
+  const g0 = gapStart('follow'), g1 = g0 + 4.8;
+  hideCur(g0);
+  cardAway(g0, g1);
+  say(g0 + 0.35, g0 + 2.5, { k: 'Takip', l: ['Yanıt gelmezse,', '[hatırlatır.]'], y: 270, size: 82 });
+  say(g0 + 2.75, g1 - 0.5, { k: 'Zamanlama', l: ['Doğru anda,', '[kendisi gönderir.]'], y: 270, size: 82 });
+  const bub = el('Teklifi ekte iletiyorum, bakabilir misiniz?', 'bub me');
+  place(bub, [[g0 + 0.4, { o: 0, x: 540, y: 820, s: 0.85, b: 12 }], [g0 + 0.8, { o: 1, x: 540, y: 800, s: 1, b: 0 }, 'back'], [g1 - 0.55, { o: 1, x: 540, y: 800, b: 0 }], [g1 - 0.2, { o: 0, y: 780, b: 10 }, 'i']]);
+  cue(g0 + 0.4, 'send');
+  const stamp = el(`${ic('check', 26)} Gönderildi · 10:24`, 'stamp');
+  place(stamp, [[g0 + 0.7, { o: 0, x: 700, y: 880 }], [g0 + 1.0, { o: 1, x: 700, y: 880 }, 'o'], [g0 + 2.9, { o: 1 }], [g0 + 3.1, { o: 0 }]]);
+  const stamp2 = el(`${ic('clock', 26)} Yarın 09:00’da gönderilecek`, 'stamp');
+  place(stamp2, [[g0 + 3.3, { o: 0, x: 640, y: 890, b: 8 }], [g0 + 3.6, { o: 1, x: 640, y: 880, b: 0 }, 'o'], [g1 - 0.55, { o: 1, b: 0 }], [g1 - 0.2, { o: 0 }]]);
+  // takip: gün seçici → 2 gün → zil
+  const seg = el('<div>1 gün</div><div>2 gün</div><div>3 gün</div><div>1 hafta</div>', 'seg');
+  place(seg, [[g0 + 0.9, { o: 0, y: 1110, s: 0.85, b: 12 }], [g0 + 1.25, { o: 1, y: 1080, s: 1, b: 0 }, 'back'], [g0 + 2.5, { o: 1, y: 1080, s: 1, b: 0 }], [g0 + 2.85, { o: 0, y: 1080, s: 0.5, b: 12 }, 'iox']]);
+  const two = seg.children[1];
+  hook((t) => two.classList.toggle('on', t >= g0 + 1.72));
+  mv(g0 + 1.15, { sx: 820, sy: 1300 });
+  mv(g0 + 1.3, { sx: 470, sy: 1085 });
+  CUR[CUR.length - 1].dur = 0.4;
+  CLICKS.push(g0 + 1.7);
+  cue(g0 + 1.7, 'click');
+  const bell = el(ic('bell', 58), 'bell');
+  place(bell, [[g0 + 1.85, { o: 0, x: 540, y: 1300, s: 0.4 }], [g0 + 2.2, { o: 1, x: 540, y: 1290, s: 1 }, 'back'], [g0 + 2.55, { r: 0 }], [g0 + 2.62, { r: -14 }], [g0 + 2.7, { r: 12 }], [g0 + 2.78, { r: -8 }], [g0 + 2.86, { r: 0 }], [g0 + 3.0, { o: 1, s: 1, x: 540, y: 1290, b: 0 }], [g0 + 3.25, { o: 0, s: 0.5, b: 10 }, 'i']]);
+  pill(g0 + 2.1, g0 + 2.9, `${ic('bell', 32)} 2 gün içinde yanıt yoksa hatırlat`, 540, 1450);
+  cue(g0 + 2.2, 'notif', 4);
+  // zamanla: saat düğmesi → Zamanlandı
+  const sch = el(`${ic('clock', 44)}<span>Yarın 09:00’da gönder</span>`, 'bigbtn');
+  place(sch, [[g0 + 2.85, { o: 0, y: 1110, s: 0.5, b: 12 }], [g0 + 3.2, { o: 1, y: 1080, s: 1, b: 0 }, 'back'], [g0 + 3.55, { s: 1 }], [g0 + 3.62, { s: 0.93 }, 'o'], [g0 + 3.78, { s: 1.03 }, 'o'], [g0 + 3.95, { s: 1 }], [g1 - 0.55, { o: 1, y: 1080, b: 0 }], [g1 - 0.2, { o: 0, s: 0.9, b: 10 }, 'i']]);
+  hook((t) => {
+    const on = t >= g0 + 3.62;
+    if (sch.dataset.on !== String(on)) {
+      sch.dataset.on = String(on);
+      sch.classList.toggle('on', on);
+      sch.innerHTML = on ? `${ic('check', 44)}<span>Zamanlandı · Yarın 09:00</span>` : `${ic('clock', 44)}<span>Yarın 09:00’da gönder</span>`;
+    }
+  });
+  mv(g0 + 3.2, { sx: 560, sy: 1090 });
+  CUR[CUR.length - 1].dur = 0.35;
+  CLICKS.push(g0 + 3.6);
+  cue(g0 + 3.6, 'success');
+  mv(g1 - 0.45, { sel: '.chan', text: 'Trendyol', ax: 0.3 });
+  CUR[CUR.length - 1].dur = 0.4;
+});
+
 /* ───────── kurulum ───────── */
-camTrack = track(CARD);
+camTrack = track(CARD, true);
 CUR.sort((a, b) => a.t - b.t);
 ACTS.sort((a, b) => a.t - b.t);
 // uygulamaya gitmeyen tıklamalar: sahne koordinatındaki imleç (CTA) için fare olayı gönderme
