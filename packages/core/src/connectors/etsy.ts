@@ -307,7 +307,7 @@ export class EtsyConnector extends BaseConnector {
     }
     try {
       const receipts: J[] = [];
-      const pages = first ? 3 : 1;
+      const pages = first ? 10 : 1;
       for (let i = 0; i < pages; i++) {
         const data = await this.api(`/shops/${encodeURIComponent(this.cfg.shopId ?? '')}/receipts?limit=50&offset=${i * 50}&sort_on=created&sort_order=desc`);
         const list: J[] = Array.isArray(data.results) ? data.results : [];

@@ -199,7 +199,21 @@ export class TrendyolConnector extends BaseConnector {
       const startDate = now - (first ? FIRST_WINDOW : NEXT_WINDOW);
       // İki servis ayrı hız sınırına sahip: biri 429 verirse öteki yine işlensin
       // sipariş sohbetleri isteğe bağlı (varsayılan kapalı: yalnız müşteri soruları)
-      const [ro, rq] = await Promise.allSettled([this.ordersOn ? this.fetchOrders(startDate, now, first ? 50 : 5) : Promise.resolve(new Map<string, J[]>()), this.fetchQuestions(startDate, now, first ? 50 : 5)]);
+      // API tek istekte en çok 2 haftalık aralık kabul ediyor: ilk eşitlemede geriye doğru 2 haftalık dilimler
+      // (sorular ~6 ay, siparişler ~3 ay); sonraki yoklamalarda yalnız son 3 gün
+      const spans = (n: number): Array<[number, number]> => (first ? Array.from({ length: n }, (_, i) => [now - (i + 1) * FIRST_WINDOW, now - i * FIRST_WINDOW] as [number, number]) : [[startDate, now]]);
+      const allOrders = async () => {
+        const m = new Map<string, J[]>();
+        for (const [a, b] of spans(6)) for (const [k, v] of await this.fetchOrders(a, b, first ? 50 : 5)) if (!m.has(k)) m.set(k, v);
+        return m;
+      };
+      const allQuestions = async () => {
+        const out: J[] = [];
+        const ids = new Set<string>();
+        for (const [a, b] of spans(13)) for (const q of await this.fetchQuestions(a, b, first ? 50 : 5)) if (!ids.has(String(q.id))) (ids.add(String(q.id)), out.push(q));
+        return out;
+      };
+      const [ro, rq] = await Promise.allSettled([this.ordersOn ? allOrders() : Promise.resolve(new Map<string, J[]>()), allQuestions()]);
       for (const r of [ro, rq]) if (r.status === 'rejected' && r.reason instanceof TrendyolAuthError) throw r.reason;
       const orders = ro.status === 'fulfilled' ? ro.value : new Map<string, J[]>();
       const questions = rq.status === 'fulfilled' ? rq.value : [];

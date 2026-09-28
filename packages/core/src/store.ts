@@ -497,6 +497,17 @@ export class Store {
     return rows.map((r) => r.id);
   }
 
+  /**
+   * Kendi mesajımın yankısı mı: aynı sohbette ±3 dk içinde birebir aynı metinli (≥12 karakter) benim gönderdiğim bir mesaj var.
+   * Bazı platformlar/istemciler gönderdiğim mesajı başka kimlikle (WhatsApp LID, DOM okuyan köprüler) karşı taraftan gelmiş gibi
+   * tekrar verir; bu kayıt gelen mesaj sayılmaz (okunmamış sayacı artmaz, kopya balon çıkmaz).
+   */
+  isOwnEcho(chatId: string, text: string, ts: number): boolean {
+    const t = text.trim();
+    if (t.length < 12) return false;
+    return !!this.db.prepare('SELECT 1 FROM messages WHERE chat_id = ? AND from_me = 1 AND text = ? AND ts BETWEEN ? AND ?').get(chatId, t, ts - 180_000, ts + 180_000);
+  }
+
   hasMessage(id: string): boolean {
     return !!this.db.prepare('SELECT 1 FROM messages WHERE id = ?').get(id);
   }

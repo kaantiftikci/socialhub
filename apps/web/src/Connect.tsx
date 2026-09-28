@@ -5,7 +5,7 @@ import { MAC_ONLY, PLATFORMS, type Account, type CoreOs, type Platform } from '.
 import { Chip, Icon, SyncBar } from './ui';
 
 const ORDER: Platform[] = ['whatsapp', 'telegram', 'slack', 'imessage', 'linkedin', 'x', 'instagram', 'messenger'];
-const MAIL_ORDER: Platform[] = ['gmail', 'outlook', 'yahoo', 'icloud', 'imap'];
+const MAIL_ORDER: Platform[] = ['gmail', 'outlook', 'yahoo', 'yandex', 'icloud', 'imap'];
 // Alışveriş kanalları yalnızca müşteri sorularını/mesajlarını görmek ve yanıtlamak için; Shopier'de mesajlaşma ucu olmadığından listede yok
 /** Resmi (kişisel hesaba açık) API'si olmayan, web oturumu/bağlı cihazla çalışan kanallar: kartta şeffaflık etiketi */
 /**
@@ -46,6 +46,8 @@ const UNOFFICIAL: Partial<Record<Platform, string>> = {
 const SHOP_ORDER: Platform[] = ['trendyol', 'hepsiburada', 'n11', 'etsy', 'shopify', 'amazon'];
 
 interface MailForm {
+  /** Diğer e-posta: sunucuyu elle gir (varsayılan: adresten otomatik bulunur) */
+  manual: boolean;
   user: string;
   pass: string;
   clientId: string;
@@ -57,7 +59,7 @@ interface MailForm {
   smtpPort: string;
   smtpSecure: boolean;
 }
-const EMPTY_MAIL: MailForm = { user: '', pass: '', clientId: '', clientSecret: '', useOAuth: false, host: '', port: '993', smtpHost: '', smtpPort: '465', smtpSecure: true };
+const EMPTY_MAIL: MailForm = { user: '', pass: '', clientId: '', clientSecret: '', useOAuth: false, host: '', port: '993', smtpHost: '', smtpPort: '465', smtpSecure: true, manual: false };
 
 export function ConnectModal({
   accounts,
@@ -69,7 +71,10 @@ export function ConnectModal({
   notify,
   onChanged,
   sync = {},
+  focus,
 }: {
+  /** Açılışta doğrudan bu hesabın eşleştirme alanı açık gelsin (uyarıdaki "QR'ı göster") */
+  focus?: string | null;
   /** hesap → eşitleme ilerlemesi (App'ten) */
   sync?: Record<string, { progress: number; since: number; label?: string }>;
   accounts: Account[];
@@ -82,7 +87,7 @@ export function ConnectModal({
   notify: (t: string, err?: boolean) => void;
   onChanged: () => Promise<void>;
 }) {
-  const [active, setActive] = useState<string | null>(null); // account id
+  const [active, setActive] = useState<string | null>(focus ?? null); // account id
   const [tg, setTg] = useState({ apiId: '', apiHash: '' });
   /** Slack resmi uygulama: User OAuth Token (xoxp) + isteğe bağlı App-Level Token (xapp, Socket Mode) */
   const [slackTok, setSlackTok] = useState({ user: '', app: '' });
@@ -114,7 +119,7 @@ export function ConnectModal({
   const macOnlyOff = (p: Platform) => MAC_ONLY.has(p) && !!coreOs && coreOs !== 'darwin';
 
   /** opts.browser: Slack'i resmi uygulama yerine tarayıcı oturumuyla bağla (yedek yol) */
-  async function add(platform: Platform, opts: { browser?: boolean } = {}) {
+  async function add(platform: Platform, opts: { browser?: boolean; form?: boolean } = {}) {
     setBusy(true);
     try {
       if (platform === 'slack' && !opts.browser && (active !== 'slack:new' || !slackTok.user.trim())) {
@@ -133,6 +138,11 @@ export function ConnectModal({
       const shopFields = SHOP_FIELDS[platform];
       if (shopFields && (active !== `${platform}:new` || shopFields.some((k) => !sf(k).trim()))) {
         setActive(`${platform}:new`);
+        return;
+      }
+      // Gmail / iCloud: varsayılan yol kendi giriş sayfasında normal e-posta + şifre (tarayıcı); uygulama şifresi isteğe bağlı
+      if (MAIL_FORM_FIRST.has(platform) && !opts.browser && !opts.form && active !== `${platform}:new`) {
+        setActive(`${platform}:choose`);
         return;
       }
       const isMail = usesMailForm(platform) && !opts.browser;
@@ -156,13 +166,13 @@ export function ConnectModal({
       if (shopFields) {
         const cfg: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(shop)) if (v.trim()) cfg[k] = v.trim();
-        cfg.orders = shop.orders === 'true'; // varsayılan kapalı: alışveriş kanalları yalnız müşteri soruları/mesajları
+        if (shop.ordersOff === 'true') cfg.ordersOff = true; // varsayılan: siparişler + müşteri soruları
         token = JSON.stringify(cfg);
       }
       if (isMail) {
         const oauth = platform === 'outlook' || (platform === 'gmail' && mail.useOAuth);
         const cfg: Record<string, unknown> = { user: mail.user.trim(), pass: oauth ? undefined : mail.pass || undefined, clientId: oauth ? mail.clientId.trim() || undefined : undefined, clientSecret: oauth ? mail.clientSecret.trim() || undefined : undefined };
-        if (platform === 'imap') {
+        if (platform === 'imap' && mail.manual && mail.host.trim()) {
           Object.assign(cfg, { host: mail.host.trim(), port: Number(mail.port) || 993, secure: (Number(mail.port) || 993) === 993, smtpHost: mail.smtpHost.trim() || mail.host.trim().replace(/^imap\./, 'smtp.'), smtpPort: Number(mail.smtpPort) || 465, smtpSecure: mail.smtpSecure });
         }
         token = JSON.stringify(cfg);
@@ -211,6 +221,32 @@ export function ConnectModal({
   // Etkin kartın hemen altında açılan panel (form / QR / durum) — kullanıcı aşağı kaydırmak zorunda kalmasın
   const panel = (
     <>
+        {active?.endsWith(':choose') && (() => {
+          const p = active.split(':')[0] as Platform;
+          const who = p === 'gmail' ? 'Google' : 'Apple';
+          return (
+            <div className="pairbox">
+              <div style={{ flexGrow: 1 }}>
+                <h3>{PLATFORMS[p].name} hesabını bağla</h3>
+                <p style={{ margin: '0 0 12px', fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.5 }}>
+                  {who} giriş sayfası açılır; her zamanki e-posta adresin ve şifrenle giriş yap (doğrulama isterse tamamla). Giriş algılanınca pencere kendiliğinden kapanır. Şifren Mivelo'ya girilmez.
+                </p>
+                <div className="field" style={{ gap: 8, flexWrap: 'wrap' }}>
+                  <button className="btn lime b" onClick={() => void add(p, { browser: true })} disabled={busy}>
+                    {who} ile giriş yap
+                  </button>
+                </div>
+                <p style={{ margin: '10px 0 0', fontSize: 12.5, color: 'var(--text3, var(--text2))', lineHeight: 1.5 }}>
+                  E-postaların saniyesinde gelsin ve arka planda tarayıcı açılmasın istersen{' '}
+                  <a href="#form" onClick={(e) => (e.preventDefault(), setActive(`${p}:new`))} style={{ color: 'var(--v-txt)', fontWeight: 600 }}>
+                    uygulama şifresiyle bağlan (gelişmiş)
+                  </a>
+                  .
+                </p>
+              </div>
+            </div>
+          );
+        })()}
         {active?.endsWith(':new') && usesMailForm(active.split(':')[0] as Platform) && (() => {
           const p = active.split(':')[0] as Platform;
           const isOutlook = p === 'outlook';
@@ -255,7 +291,12 @@ export function ConnectModal({
                     </>
                   )}
                   {isOutlook && <> Bağlan deyince Microsoft giriş penceresi kod önceden dolu açılır; giriş yapınca kendiliğinden kapanır.</>}
-                  {isImap && <>Sağlayıcının IMAP/SMTP sunucularını gir (Yandex: imap.yandex.com / smtp.yandex.com, Fastmail: imap.fastmail.com / smtp.fastmail.com). Çoğu sağlayıcı uygulama şifresi ister.</>}
+                  {p === 'yandex' && (
+                    <>
+                      <a href="https://id.yandex.com/security/app-passwords" target="_blank" rel="noreferrer" style={{ color: 'var(--v-txt)' }}><b>Yandex uygulama şifresi sayfasını aç</b></a> → "E-posta" türünde bir şifre üret ve buraya gir (Yandex, posta uygulamalarında normal şifreyi kabul etmiyor).
+                    </>
+                  )}
+                  {isImap && <>E-posta adresini ve şifreni gir; sunucu ayarları adresten otomatik bulunur. Bazı sağlayıcılar (GMX, Zoho…) normal şifre yerine uygulama şifresi ister.</>}
                 </p>
                 <div className="field" style={{ marginTop: 6, flexWrap: 'wrap', gap: 8 }}>
                   <input value={mail.user} onChange={(e) => setMail({ ...mail, user: e.target.value })} placeholder="e-posta adresi" type="email" autoComplete="off" style={{ flex: '1 1 220px' }} />
@@ -267,9 +308,9 @@ export function ConnectModal({
                       <input value={mail.clientSecret} onChange={(e) => setMail({ ...mail, clientSecret: e.target.value })} placeholder="Client secret" type="password" autoComplete="off" style={{ flex: '1 1 200px' }} />
                     </>
                   ) : (
-                    <input value={mail.pass} onChange={(e) => setMail({ ...mail, pass: e.target.value })} placeholder="uygulama şifresi" type="password" autoComplete="new-password" style={{ flex: '1 1 200px' }} />
+                    <input value={mail.pass} onChange={(e) => setMail({ ...mail, pass: e.target.value })} placeholder={isImap ? 'şifre' : 'uygulama şifresi'} type="password" autoComplete="new-password" style={{ flex: '1 1 200px' }} />
                   )}
-                  {isImap && (
+                  {isImap && mail.manual && (
                     <>
                       <input value={mail.host} onChange={(e) => setMail({ ...mail, host: e.target.value })} placeholder="IMAP sunucusu (imap.…)" style={{ flex: '1 1 200px' }} />
                       <input value={mail.port} onChange={(e) => setMail({ ...mail, port: e.target.value })} placeholder="993" style={{ flex: '0 0 70px' }} />
@@ -277,10 +318,17 @@ export function ConnectModal({
                       <input value={mail.smtpPort} onChange={(e) => setMail({ ...mail, smtpPort: e.target.value, smtpSecure: e.target.value === '465' })} placeholder="465" style={{ flex: '0 0 70px' }} />
                     </>
                   )}
-                  <button className="btn lime b" onClick={() => add(p)} disabled={busy || !mail.user.trim() || (isOutlook ? !mail.clientId.trim() : p === 'gmail' && mail.useOAuth ? !mail.clientId.trim() || !mail.clientSecret.trim() : !mail.pass) || (isImap && !mail.host.trim())}>
+                  <button className="btn lime b" onClick={() => add(p)} disabled={busy || !mail.user.trim() || (isOutlook ? !mail.clientId.trim() : p === 'gmail' && mail.useOAuth ? !mail.clientId.trim() || !mail.clientSecret.trim() : !mail.pass) || (isImap && mail.manual && !mail.host.trim())}>
                     Bağlan
                   </button>
                 </div>
+                {isImap && (
+                  <p style={{ margin: '8px 0 0', fontSize: 12.5, color: 'var(--text3, var(--text2))' }}>
+                    <a href="#manual" onClick={(e) => (e.preventDefault(), setMail({ ...mail, manual: !mail.manual }))} style={{ color: 'var(--v-txt)', fontWeight: 600 }}>
+                      {mail.manual ? 'Sunucuyu otomatik bul' : 'Sunucuyu elle gir (gelişmiş)'}
+                    </a>
+                  </p>
+                )}
                 {MAIL_FORM_FIRST.has(p) && (
                   <p style={{ margin: '10px 0 0', fontSize: 12.5, color: 'var(--text3, var(--text2))', lineHeight: 1.5 }}>
                     Uygulama şifresiyle yeni e-postalar anında (~2 sn) gelir ve tarayıcı açılmaz. Şifre üretmek istemiyorsan{' '}
@@ -396,8 +444,8 @@ export function ConnectModal({
                   </button>
                 </div>
                 <label className="row-toggle" style={{ marginTop: 10, gap: 8 }}>
-                  <span style={{ fontSize: 12.5, color: 'var(--text2)' }}>Siparişleri de sohbet olarak göster (varsayılan: yalnız müşteri soruları/mesajları)</span>
-                  <input type="checkbox" checked={sf('orders') === 'true'} onChange={(e) => setSf('orders', e.target.checked ? 'true' : '')} />
+                  <span style={{ fontSize: 12.5, color: 'var(--text2)' }}>Siparişleri de göster (kapatırsan yalnız müşteri soruları gelir)</span>
+                  <input type="checkbox" checked={sf('ordersOff') !== 'true'} onChange={(e) => setSf('ordersOff', e.target.checked ? '' : 'true')} />
                 </label>
               </div>
             </div>

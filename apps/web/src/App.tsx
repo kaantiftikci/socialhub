@@ -183,6 +183,8 @@ export default function App() {
     return () => clearTimeout(t);
   }, [query]);
   const [connectOpen, setConnectOpen] = useState(false);
+  /** Bağlan penceresinde açık gelecek hesap (uyarıdaki "QR'ı göster") */
+  const [connectFocus, setConnectFocus] = useState<string | null>(null);
   // Kanal uyarı kartı (yanıp sönen kırmızı işaretin üzerine gelince / dokununca): hangi hesap, işaretin konumu
   const [alertPop, setAlertPop] = useState<{ id: string; x: number; y: number } | null>(null);
   const alertTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -1511,7 +1513,12 @@ export default function App() {
                 className="btn sm primary b"
                 onClick={() => {
                   setAlertPop(null);
-                  if (is.action === 'connect') setConnectOpen(true);
+                  if (is.action === 'connect') {
+                    setConnectFocus(a.id);
+                    setConnectOpen(true);
+                    // QR süresi dolmuşsa (ekranda kod yok) yenisini iste
+                    if (!qr[a.id]) api.restartAccount(a.id).catch((e) => notify(e.message, true));
+                  }
                   else (notify(is.done), api.restartAccount(a.id).catch((e) => notify(e.message, true)));
                 }}
               >
@@ -1532,7 +1539,7 @@ export default function App() {
         <ConnectModal
           closing={connectP.closing}
           sync={sync}
-          accounts={accounts} qr={qr} prompts={prompts} connected={connectedPlatforms} onClose={() => setConnectOpen(false)} notify={notify} onChanged={refresh} />
+          focus={connectFocus} accounts={accounts} qr={qr} prompts={prompts} connected={connectedPlatforms} onClose={() => (setConnectOpen(false), setConnectFocus(null))} notify={notify} onChanged={refresh} />
       )}
       {menuP.value && ((menu: NonNullable<typeof menuP.value>) => (
         <div className={`menu-backdrop ${menuP.closing ? 'closing' : ''}`} onClick={() => setMenu(null)} onContextMenu={(e) => (e.preventDefault(), setMenu(null))}>

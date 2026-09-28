@@ -1515,6 +1515,8 @@ export class WhatsAppConnector extends BaseConnector {
         }
       }
     }
+    // Kendi başka cihazımdan (LID/numara) gelen mesaj bazen key.fromMe=false işaretlenir: kimlik benimse benden say
+    if (!m.key.fromMe && m.key.participant && this.isMe(jidNormalizedUser(m.key.participant))) m.key.fromMe = true;
     const senderJid = m.key.fromMe ? 'me' : this.canon(m.key.participant ? jidNormalizedUser(m.key.participant) : jid);
     if (jid.endsWith('@g.us')) this.ensureGroupMeta(jid);
     this.ensureWaChat(jid);
@@ -1538,6 +1540,10 @@ export class WhatsAppConnector extends BaseConnector {
       },
       { live },
     );
+  }
+
+  private isMe(jid: string): boolean {
+    return this.meIds.has(jid) || this.meIds.has(this.canon(jid)) || [...this.meIds].some((me) => me.split('@')[0].split(':')[0] === jid.split('@')[0].split(':')[0]);
   }
 
   private ensureWaChat(jid: string): void {

@@ -291,7 +291,9 @@ test('status parametresiz istek 400 verirse durum durum sorgulanır ve seçim ka
   assert.equal(account.status, 'connected', account.detail);
   assert.ok(store.getChat(orderChat));
   const statuses = calls.filter((x) => x.url.includes('/shipmentPackages')).map((x) => new URL(x.url).searchParams.get('status'));
-  assert.deepEqual(statuses, [null, 'Created', 'Picking', 'Shipped', 'Cancelled', 'Delivered', 'UnPacked', 'UnSupplied']);
+  // ilk dilimde parametresiz deneme 400 → durum durum; sonraki 5 dilim (ilk eşitleme ~3 ay) doğrudan durum durum
+  const PER = ['Created', 'Picking', 'Shipped', 'Cancelled', 'Delivered', 'UnPacked', 'UnSupplied'];
+  assert.deepEqual(statuses, [null, ...PER, ...PER, ...PER, ...PER, ...PER, ...PER]);
   const st = JSON.parse(fs.readFileSync(path.join(tmp, 'sessions', account.id, 'n11-state.json'), 'utf8'));
   assert.equal(st.perStatus, true);
   await c.stop();

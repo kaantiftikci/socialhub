@@ -99,6 +99,16 @@ Dil: arayüz ve yorumlar Türkçe.
   `shopPending`: açık sipariş / cevap bekleyen soru). Satırda 📦/❓ işareti (`.skind`); sağ panelde `OrderPanel` ya da `QuestionPanel` (meta.question).
   Trendyol/Hepsiburada/n11/Shopier'de (`ORDER_ONLY_PLATFORMS`, `isOrderPage`) sipariş sohbet DEĞİL: orta alanda `OrderPage` (özet + durum
   geçmişi, yazma alanı yok; API'de sipariş üzerinden alıcıya mesaj ucu yok). Bağlı soru varsa (question.orderNumber) "Soruyu aç". Odak'ta sayılmaz.
+  Siparişler varsayılan AÇIK (`ordersFlag`: token `ordersOff:true` kapatır; eski formun yazdığı `orders:false` yok sayılır). Trendyol soru/sipariş
+  API'si istek başına ≤2 hafta: ilk eşitleme geriye 2 haftalık dilimler (sorular 13 dilim ≈6 ay, siparişler 6 dilim ≈3 ay), sonra son 3 gün.
+  Ayrı "sipariş soruları" ucu belgelerde yok (aynı qna/questions/filter). Hepsiburada soruları sayfalı (bekleyen ≤500), n11 sipariş 6×14 gün,
+  Amazon ilk pencere 90 gün, Shopify/Etsy ilk 10 sayfa. ePttAVM `available:false` (resmi dokümana developers.pttavm.com erişilemedi).
+- **E-posta girişi**: Gmail/iCloud Bağlan → önce "Google/Apple ile giriş yap" (tarayıcı, normal şifre; `:choose` pairbox), uygulama şifresi
+  "gelişmiş". Yandex ayrı platform (`yandex`, imap.yandex.com, uygulama şifresi). "Diğer e-posta" yalnız e-posta+şifre: sunucu
+  `mail-discover.ts` (bilinen sağlayıcılar → Thunderbird autoconfig → imap.<alan>); elle giriş "gelişmiş". Yahoo "Command failed": OBJECTID
+  bildiren sunucuda imapflow THREADID istiyordu → threadId yalnız Gmail'de, reddedilirse onsuz yeniden.
+- **Kendi mesajının yankısı**: `store.isOwnEcho` (aynı sohbette ±3 dk, ≥12 kr. aynı metinli fromMe) → base.upsertMessage gelen saymaz (tüm
+  platformlar); WhatsApp'ta katılımcı kimliği `meIds` ise fromMe. Uyarıdaki "QR'ı göster" Bağlan'ı o hesabın eşleştirme alanıyla açar (`focus`).
 
 ## Üretkenlik özellikleri
 - **Takip hatırlatıcısı**: `chats.followup` {at, since, due}; `POST /api/chats/:id/followup {at|null}`. Sunucu dakikada bir

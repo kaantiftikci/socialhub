@@ -37,6 +37,7 @@ const PRESETS: Partial<Record<Platform, Required<Pick<MailConfig, 'host' | 'port
   gmail: { host: 'imap.gmail.com', port: 993, secure: true, smtpHost: 'smtp.gmail.com', smtpPort: 465, smtpSecure: true },
   outlook: { host: 'outlook.office365.com', port: 993, secure: true, smtpHost: 'smtp.office365.com', smtpPort: 587, smtpSecure: false },
   yahoo: { host: 'imap.mail.yahoo.com', port: 993, secure: true, smtpHost: 'smtp.mail.yahoo.com', smtpPort: 465, smtpSecure: true },
+  yandex: { host: 'imap.yandex.com', port: 993, secure: true, smtpHost: 'smtp.yandex.com', smtpPort: 465, smtpSecure: true },
   icloud: { host: 'imap.mail.me.com', port: 993, secure: true, smtpHost: 'smtp.mail.me.com', smtpPort: 587, smtpSecure: false },
 };
 
@@ -109,6 +110,7 @@ export class MailConnector extends BaseConnector {
   /** Şimdiye dek alınan en küçük UID (daha eski sayfa buradan geriye gider); 0 = bilinmiyor, 1 = kutunun başı */
   private oldestUid = 0;
   private threadOf = new Map<string, string>(); // message-id → thread key
+  private threadIdOk = true;
   /** Dizi → gelen kutusundaki okunmamış UID'ler (Mivelo'da okununca sunucuda da \\Seen) */
   private unseen = new Map<string, Set<number>>();
   private stateFile: string;
@@ -157,9 +159,16 @@ export class MailConnector extends BaseConnector {
     if (!this.cfg.user) return this.setStatus('error', 'E-posta adresi girilmedi');
     this.setStatus('connecting');
     try {
+      // "Diğer e-posta": sunucu girilmediyse adresten bul (bilinen sağlayıcı / autoconfig / imap.<alan>)
+      if (!this.cfg.host) {
+        const { discoverMail } = await import('./mail-discover.js');
+        Object.assign(this.cfg, await discoverMail(this.cfg.user));
+        this.saveCfg();
+        bus.log('info', `${this.account.platform}: sunucu bulundu ${this.cfg.host} / ${this.cfg.smtpHost}`);
+      }
       if (this.account.platform === 'outlook' || (!this.cfg.pass && this.cfg.clientId)) await this.ensureOAuth();
       else if (this.cfg.pass && this.cfg.accessToken) this.cfg.accessToken = undefined;
-      else if (!this.cfg.pass) return this.setStatus('error', 'Uygulama şifresi gerekli');
+      else if (!this.cfg.pass) return this.setStatus('error', 'Şifre gerekli');
       if (this.stopping) return;
       await this.poll(true);
       this.setStatus('connected', this.cfg.user);
@@ -421,7 +430,20 @@ export class MailConnector extends BaseConnector {
     let mails = 0;
     let chats = 0;
     if (!uids.length) return { mails, chats };
-    for await (const msg of client.fetch(uids, { uid: true, source: true, flags: true, threadId: true }, { uid: true })) {
+    // Dizi kimliği yalnız Gmail'de (X-GM-THRID). OBJECTID bildiren bazı sunucular (Yahoo) THREADID isteğini "Command failed" ile
+    // reddediyor; o durumda alan olmadan bir kez daha denenir
+    const useThread = this.account.platform === 'gmail' && this.threadIdOk;
+    const it = async function* (self: MailConnector) {
+      try {
+        yield* client.fetch(uids, { uid: true, source: true, flags: true, threadId: useThread }, { uid: true });
+      } catch (e) {
+        if (!useThread) throw e;
+        self.threadIdOk = false;
+        bus.log('warn', `${self.account.platform}: dizi kimliği alınamadı (${(e as Error).message}); onsuz devam`);
+        yield* client.fetch(uids, { uid: true, source: true, flags: true }, { uid: true });
+      }
+    };
+    for await (const msg of it(this)) {
       try {
         if (!msg.source) continue;
         const parsed: ParsedMail = await simpleParser(msg.source);

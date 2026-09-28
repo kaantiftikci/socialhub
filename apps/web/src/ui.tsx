@@ -4,7 +4,7 @@ import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import type { ReactNode } from 'react';
 import { PLATFORMS, TAG_COLORS, type Platform } from './types';
 import { siWhatsapp, siTelegram, siX, siInstagram, siMessenger, siGmail, siIcloud } from 'simple-icons';
-import { faSlack, faLinkedinIn, faMicrosoft, faYahoo } from '@fortawesome/free-brands-svg-icons';
+import { faSlack, faLinkedinIn, faMicrosoft, faYahoo, faYandex } from '@fortawesome/free-brands-svg-icons';
 
 const PATHS: Record<string, ReactNode> = {
   search: (<><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></>),
@@ -172,6 +172,7 @@ const BRAND: Partial<Record<Platform, Brand>> = {
   gmail: { path: siGmail.path, bg: '#EA4335', ratio: 0.6 },
   outlook: { ...fa(faMicrosoft), bg: '#0F6CBD', ratio: 0.52 },
   yahoo: { ...fa(faYahoo), bg: '#6001D2', ratio: 0.58 },
+  yandex: { ...fa(faYandex), bg: '#FC3F1D', ratio: 0.5 },
   icloud: { path: siIcloud.path, bg: '#3693F3', ratio: 0.62 },
 };
 const MIN_BRAND = 18;

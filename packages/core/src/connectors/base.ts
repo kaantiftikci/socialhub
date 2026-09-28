@@ -191,6 +191,11 @@ export abstract class BaseConnector implements Connector {
     }
     const { remoteChatId: _drop, ...rest } = input;
     const message: Message = { ...rest, id: messageId(cid, input.remoteId), chatId: cid };
+    // gönderdiğim mesajın "gelen" gibi dönen yankısı: kaydetme (sayaç artmasın, kopya balon çıkmasın)
+    if (!input.fromMe && input.text && !this.store.hasMessage(message.id) && this.store.isOwnEcho(cid, input.text, input.ts)) {
+      bus.log('info', `${this.account.platform}: kendi mesajının yankısı gelen sayılmadı (${input.remoteId})`);
+      return undefined;
+    }
     // bump: okunmamış sayacını artır (varsayılan canlı mesajlarda); platform sayacı yetkiliyse (tarayıcı köprüsü) kapatılır
     const inserted = this.store.upsertMessage(message, { bumpUnread: opts.bump ?? opts.live });
     if (inserted && input.fromMe && !input.remoteId.startsWith('local-')) {
@@ -221,13 +226,13 @@ export abstract class BaseConnector implements Connector {
 }
 
 /**
- * Alışveriş kanalları yalnızca müşteri soruları/mesajları için kullanılır; sipariş sohbetleri isteğe bağlıdır
- * (Bağlan formunda "Siparişleri de göster" → token JSON'ında orders:true).
+ * Alışveriş kanallarında siparişler varsayılan AÇIK (sipariş sayfası + durum geçmişi). Kapatmak için token JSON'ında
+ * ordersOff:true (Bağlan formundaki "Siparişleri gösterme"). Eski formun her zaman yazdığı orders:false yok sayılır.
  */
 export function ordersFlag(raw: string): boolean {
   try {
-    return (JSON.parse(raw) as { orders?: unknown }).orders === true;
+    return (JSON.parse(raw) as { ordersOff?: unknown }).ordersOff !== true;
   } catch {
-    return false;
+    return true;
   }
 }

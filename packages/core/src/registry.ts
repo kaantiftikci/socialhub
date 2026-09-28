@@ -221,6 +221,7 @@ export class Registry {
         break;
       }
       case 'yahoo':
+      case 'yandex':
       case 'imap': {
         const tokenFile = path.join(sessionDir(account.id), 'token');
         let cfg: MailConfig = { user: '' };

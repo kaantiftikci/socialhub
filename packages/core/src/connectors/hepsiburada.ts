@@ -504,8 +504,18 @@ export class HepsiburadaConnector extends BaseConnector {
     let issues: J[] = [];
     try {
       // bekleyenler (hepsi) + son cevaplanan/kapananlar (kendi cevaplarımız ve süresi dolanlar için)
-      const waiting = await this.askList({ status: '1', page: 1, size: 50, sortBy: 0, desc: 'true' });
-      const done = await this.askList({ status: ['2', '4', '3'], page: 1, size: first ? 50 : 25, sortBy: 1, desc: 'true' });
+      // sayfalı: ilk eşitlemede bekleyenlerin hepsi (≤500) ve son 250 kapanan; sonra ilk sayfalar
+      const pages = async (params: Record<string, string | number | string[]>, max: number) => {
+        const out: J[] = [];
+        for (let page = 1; page <= max; page++) {
+          const list = await this.askList({ ...params, page, size: 50 });
+          out.push(...list);
+          if (list.length < 50) break;
+        }
+        return out;
+      };
+      const waiting = await pages({ status: '1', sortBy: 0, desc: 'true' }, first ? 10 : 2);
+      const done = await pages({ status: ['2', '4', '3'], sortBy: 1, desc: 'true' }, first ? 5 : 1);
       issues = [...done, ...waiting];
     } catch (e) {
       const err = e as HbError;

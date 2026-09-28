@@ -267,7 +267,14 @@ export class N11Connector extends BaseConnector {
       const now = Date.now();
       // REST ve SOAP ayrı servisler: biri çökerse öteki yine işlensin
       // sipariş sohbetleri isteğe bağlı (varsayılan kapalı: yalnız müşteri soruları)
-      const [ro, rq] = await Promise.allSettled([this.ordersOn ? this.fetchOrders(now - WINDOW, now, first ? 50 : 5) : Promise.resolve(new Map<string, J[]>()), this.fetchQuestions(first ? 10 : 2)]);
+      const [ro, rq] = await Promise.allSettled([this.ordersOn
+          ? (async () => {
+              // ilk eşitlemede geriye doğru 14 günlük 6 dilim (~3 ay), sonra son 14 gün
+              const m = new Map<string, J[]>();
+              for (let i = 0; i < (first ? 6 : 1); i++) for (const [k, v] of await this.fetchOrders(now - (i + 1) * WINDOW, now - i * WINDOW, first ? 50 : 5)) if (!m.has(k)) m.set(k, v);
+              return m;
+            })()
+          : Promise.resolve(new Map<string, J[]>()), this.fetchQuestions(first ? 20 : 2)]);
       for (const r of [ro, rq]) if (r.status === 'rejected' && r.reason instanceof N11AuthError) throw r.reason;
       const orders = ro.status === 'fulfilled' ? ro.value : new Map<string, J[]>();
       const questions = rq.status === 'fulfilled' ? rq.value : [];

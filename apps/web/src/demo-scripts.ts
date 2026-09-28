@@ -1122,5 +1122,5 @@ for (const platform of Object.keys(SCRIPTS) as Platform[]) {
 }
 
 /** Yahoo ve diğer e-posta demoda bağlı gelmez. Sohbet, e-posta ve alışveriş örnekleri kalır. */
-const DEMO_SKIP: Platform[] = ['yahoo', 'imap'];
+const DEMO_SKIP: Platform[] = ['yahoo', 'yandex', 'imap'];
 export const DEMO_APPS: Platform[] = (Object.keys(PLATFORMS) as Platform[]).filter((p) => p !== 'demo' && !DEMO_SKIP.includes(p) && SCRIPTS[p]);

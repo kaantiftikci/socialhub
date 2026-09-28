@@ -38,7 +38,7 @@ const ENDPOINTS: Record<'eu' | 'na' | 'fe', string> = {
   fe: 'https://sellingpartnerapi-fe.amazon.com',
 };
 const POLL_MS = 120_000;
-const FIRST_WINDOW_MS = 14 * 86_400_000;
+const FIRST_WINDOW_MS = 90 * 86_400_000;
 const ITEMS_FIRST_MAX = 30;
 const USER_AGENT = 'Mivelo/1.0 (Language=TypeScript; Platform=Node)';
 

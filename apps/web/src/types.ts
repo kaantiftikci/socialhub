@@ -1,4 +1,4 @@
-export type Platform = 'whatsapp' | 'telegram' | 'slack' | 'linkedin' | 'x' | 'imessage' | 'instagram' | 'messenger' | 'gmail' | 'outlook' | 'yahoo' | 'icloud' | 'imap' | 'shopier' | 'trendyol' | 'hepsiburada' | 'etsy' | 'shopify' | 'n11' | 'amazon' | 'demo';
+export type Platform = 'whatsapp' | 'telegram' | 'slack' | 'linkedin' | 'x' | 'imessage' | 'instagram' | 'messenger' | 'gmail' | 'outlook' | 'yahoo' | 'yandex' | 'icloud' | 'imap' | 'shopier' | 'trendyol' | 'hepsiburada' | 'etsy' | 'shopify' | 'n11' | 'amazon' | 'pttavm' | 'demo';
 export type Category = 'chat' | 'mail' | 'shop';
 export type AccountStatus = 'disconnected' | 'connecting' | 'pairing' | 'connected' | 'error';
 
@@ -163,11 +163,13 @@ export const PLATFORMS: Record<Platform, { name: string; code: string; color: st
   x: { name: 'X', code: 'X', color: '#2B2833', method: 'Tarayıcı oturumu', available: true, mode: 'browser' },
   instagram: { name: 'Instagram', code: 'IG', color: '#C13584', method: 'Tarayıcı oturumu', available: true, mode: 'browser' },
   messenger: { name: 'Messenger', code: 'MS', color: '#0866FF', method: 'Tarayıcı oturumu', available: true, mode: 'browser' },
-  gmail: { name: 'Gmail', code: 'GM', color: '#EA4335', method: 'Uygulama şifresi · anlık', available: true, mode: 'browser', category: 'mail' },
+  gmail: { name: 'Gmail', code: 'GM', color: '#EA4335', method: 'Google hesabınla giriş', available: true, mode: 'browser', category: 'mail' },
   outlook: { name: 'Outlook', code: 'OL', color: '#0F6CBD', method: 'Tarayıcı girişi · Outlook web', available: true, mode: 'browser', category: 'mail' },
-  yahoo: { name: 'Yahoo Mail', code: 'YH', color: '#6001D2', method: 'IMAP · uygulama şifresi', available: true, mode: 'mail', category: 'mail' },
-  icloud: { name: 'iCloud Mail', code: 'IC', color: '#3693F3', method: 'Uygulamaya özel şifre · anlık', available: true, mode: 'browser', category: 'mail' },
-  imap: { name: 'Diğer e-posta', code: '@', color: '#4A4757', method: 'IMAP/SMTP · Yandex, Fastmail, kurumsal…', available: true, mode: 'mail', category: 'mail' },
+  yahoo: { name: 'Yahoo Mail', code: 'YH', color: '#6001D2', method: 'Uygulama şifresi · anlık', available: true, mode: 'mail', category: 'mail' },
+  yandex: { name: 'Yandex Mail', code: 'YA', color: '#FC3F1D', method: 'Uygulama şifresi · anlık', available: true, mode: 'mail', category: 'mail' },
+  icloud: { name: 'iCloud Mail', code: 'IC', color: '#3693F3', method: 'Apple hesabınla giriş', available: true, mode: 'browser', category: 'mail' },
+  imap: { name: 'Diğer e-posta', code: '@', color: '#4A4757', method: 'E-posta + şifre · kurumsal, Fastmail, GMX…', available: true, mode: 'mail', category: 'mail' },
+  pttavm: { name: 'ePttAVM', code: 'PT', color: '#FFC20E', method: 'Resmi satıcı API · yakında', available: false, mode: 'token', category: 'shop' },
   shopier: { name: 'Shopier', code: 'SH', color: '#1F2A44', method: 'Resmi API · yalnız sipariş (müşteri mesajı yok)', available: false, mode: 'token', category: 'shop' },
   trendyol: { name: 'Trendyol', code: 'TY', color: '#F27A1A', method: 'Satıcı API · sipariş + müşteri soruları', available: true, mode: 'token', category: 'shop' },
   hepsiburada: { name: 'Hepsiburada', code: 'HB', color: '#FF6000', method: 'Pazaryeri API · sipariş + müşteri soruları', available: true, mode: 'token', category: 'shop' },

@@ -235,7 +235,7 @@ export class ShopifyConnector extends BaseConnector {
       const orders: J[] = [];
       // ilk yoklama: en yeni siparişlerden 3 sayfa; sonrakiler: son yoklamadan beri değişenler
       let url: string | undefined = first || !this.since ? '/orders.json?status=any&limit=50&order=created_at%20desc' : `/orders.json?status=any&limit=50&updated_at_min=${encodeURIComponent(this.since)}`;
-      const maxPages = first ? 3 : 10;
+      const maxPages = first ? 10 : 10;
       for (let page = 0; url && page < maxPages; page++) {
         const { data, headers } = await this.api(url);
         const list: J[] = Array.isArray(data.orders) ? data.orders : [];
