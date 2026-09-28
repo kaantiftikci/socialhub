@@ -125,6 +125,20 @@ Dil: arayüz ve yorumlar Türkçe.
   (yalnız Windows). Mac'e özgü kalanlar: iMessage (arayüzde "Yalnız Mac"), macOS Kişiler, Anahtar Zinciri, Dock rozeti.
   Linux'ta `cargo check --target x86_64-pc-windows-msvc` çalışır (webkit gerekmez; `src-tauri/core-bundle/` klasörü var olmalı);
   gerçek Windows cihaz testi yapılmadı.
+- **Sunucu çekirdeği (demo üyeleri, core.mivelo.app)**: `apps/gateway/gateway.mjs` (bağımlılıksız Node, package.json YOK → workspace değil)
+  üye başına ayrı çekirdek süreci açar: `MIVELO_DATA_DIR=<USERS_DIR>/<uid>` (/var/lib/mivelo/users, 0700; HOME=<dir>/home), port 17000+,
+  `MIVELO_SERVER=1` + `MIVELO_LOGIN_EMBED=1`, `DISPLAY` (Xvfb :99). Belirteç (`token.mjs`, PHP ile aynı): `<b64url JSON {u,e}>.<b64url HMAC-SHA256(CORE_SECRET, yük)>`,
+  uid `^u-[a-z0-9-]{3,40}$`; `x-kavsak-token` ya da `?token=` → doğrulanır, SİLİNİR, yerine çekirdeğin kendi belirteci (+X-Forwarded-For, Host 127.0.0.1:port,
+  Origin/çerez gitmez). `/api/*` + `/ws` aktarılır; `GET /gw/health` yetkisiz; 401 "Oturum geçersiz…"; CORS yalnız `ALLOWED_ORIGINS`. İlk istekler tek başlatmayı
+  paylaşır (≤60 sn, /api/health), `MAX_CORES` dolu → 503, `IDLE_MINUTES` (720; açık WS = etkin) boşta → SIGTERM→10 sn→SIGKILL (grup + üyenin Chromium'ları);
+  çöken çekirdek sonraki istekte, art arda hızlı çöküşte 5 sn→≤5 dk bekleme. Çekirdek çıktısı doğrudan `<dir>/core.log` (5 MB → core.log.1), `core.pid`
+  (ağ geçidi yeniden başlayınca artık süreç öldürülür). **KVKK**: `POST /gw/delete-user {uid, ts}` + `x-gw-sig` = b64url(HMAC(CORE_SECRET, "delete:<uid>:<ts>")), ±300 sn
+  → çekirdek durur, klasör silinir, `{ok, deleted}`. Çekirdekte sunucu modu (`platform.ts IS_SERVER`): her istek belirteç ister (yerelden de), `localOnly` serbest
+  (hesap ekle/sil/yeniden başlat/AI anahtarı ağ geçidinden), LAN/iMessage/cihaz takvimi/`openExternal` kapalı, `login-window`/`external` yok sayılır (hep
+  Mivelo içi giriş), `DISPLAY` varsa Chromium Xvfb'de görünür (headful; `MIVELO_HEADFUL=0` kapatır), `/api/health` `server:true`. Kurulum `deploy/server/`
+  (`setup.sh` tek satır: Node 22, Caddy, Xvfb, Playwright Chromium `/opt/mivelo/.pw`, kullanıcı `mivelo`, `/etc/mivelo/gateway.env` 0600, systemd
+  `mivelo-xvfb`/`mivelo-gateway`/`mivelo-update.timer` (5 dk: ff-only çekme; yalnız çekirdek/ağ geçidi/kilit değişince derleme + yeniden başlatma), Oracle
+  iptables 80/443; README Türkçe). Testler: `node --test apps/gateway/token.test.mjs`, `test/server-mode.test.ts`. Gerçek VPS'te DENENMEDİ.
 
 ## Connector'lar ve kritik bilgiler
 - **WhatsApp** (`connectors/whatsapp.ts`, Baileys 7.0.0-rc14): `browser: ['Mac','Mivelo','1.0']` + `syncFullHistory: true`.

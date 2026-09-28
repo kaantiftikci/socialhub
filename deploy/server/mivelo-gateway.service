@@ -1,0 +1,35 @@
+# Mivelo — sunucu çekirdeği ağ geçidi (apps/gateway/gateway.mjs). Demo üyesi başına ayrı çekirdek süreci başlatır/durdurur;
+# Caddy (HTTPS) → 127.0.0.1:8787. Ayarlar /etc/mivelo/gateway.env (setup.sh yazar). Günlük: journalctl -u mivelo-gateway
+[Unit]
+Description=Mivelo sunucu çekirdeği ağ geçidi
+After=network-online.target mivelo-xvfb.service
+Wants=network-online.target mivelo-xvfb.service
+
+[Service]
+Type=simple
+User=mivelo
+Group=mivelo
+WorkingDirectory=/opt/mivelo
+EnvironmentFile=/etc/mivelo/gateway.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /opt/mivelo/apps/gateway/gateway.mjs
+Restart=always
+RestartSec=3
+# SIGTERM yalnız ağ geçidine: çekirdekleri kendisi sırayla kapatır (≤10 sn + pay); süre dolarsa kalan her süreç SIGKILL
+KillMode=mixed
+TimeoutStopSec=40
+LimitNOFILE=65536
+# sertleştirme (Chromium kendi sanal alanını kullanmıyor: Playwright --no-sandbox; bu yüzden yetki yükseltme kapalı)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/mivelo /opt/mivelo/.pw
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

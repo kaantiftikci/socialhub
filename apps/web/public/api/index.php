@@ -529,7 +529,7 @@ if ($action === 'core_token' && $method === 'GET') {
         exit;
     }
     $b64 = fn (string $x) => rtrim(strtr(base64_encode($x), '+/', '-_'), '=');
-    $payload = $b64(json_encode(['u' => $uid, 'e' => time() + 30 * 86400]));
+    $payload = $b64(json_encode(['u' => $uid, 'e' => time() + 7 * 86400]));
     $token = $payload . '.' . $b64(hash_hmac('sha256', $payload, $secret, true));
     echo json_encode(['core' => $url, 'token' => $token]);
     exit;

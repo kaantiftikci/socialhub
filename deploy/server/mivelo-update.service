@@ -1,0 +1,12 @@
+# Mivelo — otomatik güncelleme (mivelo-update.timer 5 dk'da bir). root olarak çalışır (ağ geçidini yeniden başlatır, gerekirse
+# Playwright sistem paketlerini kurar); git/npm işleri mivelo kullanıcısıyla. Günlük: journalctl -u mivelo-update
+[Unit]
+Description=Mivelo sunucu güncellemesi (git pull → gerekirse npm ci, çekirdek derlemesi, ağ geçidi yeniden başlatma)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/mivelo/deploy/server/update.sh
+TimeoutStartSec=30min
+Nice=10

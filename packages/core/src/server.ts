@@ -19,7 +19,7 @@ import { bus } from './bus.js';
 import { AiError, aiEnabled, aiKey, aiKeySource, draftReply, isAiTone, setAiKey } from './ai.js';
 import { analyzeStyle, describeStyle } from './style.js';
 import { buildIcs, formatStart, parseStart } from './calendar.js';
-import { openExternal } from './platform.js';
+import { IS_SERVER, openExternal } from './platform.js';
 import { ALL_PLATFORMS } from './model.js';
 import { MEDIA_HOSTS, PLATFORM_MEDIA_HOSTS, MEDIA_MAX } from './media-hosts.js';
 import { fetchPreview } from './link-preview.js';
@@ -89,7 +89,8 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   persistSendGuard(path.join(DATA_DIR, 'send-guard.json'));
   const scheduled = new ScheduledQueue(path.join(DATA_DIR, 'scheduled.json'));
   const token = loadToken();
-  let lanEnabled = !!readSettings().lan;
+  // sunucu modunda telefondan erişim (0.0.0.0 dinleyicisi) asla açılmaz: çekirdek yalnız ağ geçidinin arkasında
+  let lanEnabled = !IS_SERVER && !!readSettings().lan;
   LOCAL_ORIGIN = localOriginRe(port);
   // açılışta eski outbox artıkları (çekirdek kapanırken silinememiş dosyalar)
   try {
@@ -131,6 +132,8 @@ export function createServer(store: Store, registry: Registry, port: number): ht
    */
   const authorized = (req: http.IncomingMessage): boolean => {
     if (!hostAllowed(req)) return false;
+    // Sunucu modu: aynı makinede başka üyelerin çekirdekleri ve tarayıcıları (site betikleri) var → yerelden de belirteç şart
+    if (IS_SERVER) return tokenOk(req);
     if (!isLoopback(req.socket.remoteAddress)) {
       if (!lanEnabled) return false;
       // arayüz dosyaları (index, assets) belirteçsiz inebilir; veri (/api, /ws) belirteç ister
@@ -147,6 +150,8 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   /** Uzak (LAN/tünel) istemciden hesap ekleme/silme/LAN ayarı yapılamaz: belirteç sızsa da yıkıcı işlemler bu Mac'te kalır */
   const isRemote = (req: http.IncomingMessage) => !isLoopback(req.socket.remoteAddress) || hasForwarded(req);
   const localOnly = (req: http.IncomingMessage) => {
+    // Sunucu modu: kullanıcı hep uzakta (ağ geçidi); çekirdek o üyeye ait, ağ geçidi oturumu doğruladı, belirteç zorunlu
+    if (IS_SERVER) return;
     if (isRemote(req)) throw new HttpError(403, 'Bu işlem yalnızca bu bilgisayardan yapılabilir');
   };
   const dec = (s: string): string => {
@@ -194,7 +199,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   // ---------- routes ----------
   route('GET', '/api/health', () => {
     const m = process.memoryUsage();
-    return { ok: true, ai: aiEnabled(), stats: store.stats(), os: process.platform, pid: process.pid, uptimeSec: Math.round(process.uptime()), memoryMb: { rss: Math.round(m.rss / 1048576), heapUsed: Math.round(m.heapUsed / 1048576), heapTotal: Math.round(m.heapTotal / 1048576), external: Math.round(m.external / 1048576) } };
+    return { ok: true, ai: aiEnabled(), server: IS_SERVER, stats: store.stats(), os: process.platform, pid: process.pid, uptimeSec: Math.round(process.uptime()), memoryMb: { rss: Math.round(m.rss / 1048576), heapUsed: Math.round(m.heapUsed / 1048576), heapTotal: Math.round(m.heapTotal / 1048576), external: Math.round(m.external / 1048576) } };
   });
 
   route('GET', '/api/accounts', () => registry.list().map((a) => ({ ...a, qrDataUrl: pendingQr.get(a.id) })));
@@ -202,6 +207,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     localOnly(r);
     const b = body as { platform?: Platform; token?: string; label?: string };
     if (!b.platform || !ALL_PLATFORMS.includes(b.platform)) throw new HttpError(400, 'Geçersiz platform');
+    if (IS_SERVER && b.platform === 'imessage') throw new HttpError(400, 'iMessage yalnız Mac uygulamasında');
     return registry.add(b.platform, { token: typeof b.token === 'string' ? b.token : undefined, label: typeof b.label === 'string' ? b.label.slice(0, 80) : undefined });
   });
   route('DELETE', '/api/accounts/:id', async (r, _s, p) => {
@@ -240,7 +246,8 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   route('POST', '/api/accounts/:id/login-window', async (r, _s, p) => {
     localOnly(r);
     if (!store.getAccount(dec(p.id))) throw new HttpError(404, 'Hesap yok');
-    await registry.restart(dec(p.id), { external: true });
+    // sunucuda ayrı pencere yok: giriş yeniden Mivelo içinde açılır
+    await registry.restart(dec(p.id), { external: !IS_SERVER });
     return { ok: true };
   });
   route('POST', '/api/accounts/:id/input', (_r, _s, p, body) => {
@@ -658,8 +665,9 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   });
   route('GET', '/api/logs', () => bus.recent.slice(-200));
   // Telefondan erişim (aynı Wi‑Fi): bağlantı + QR; açma/kapama
-  route('GET', '/api/lan', (r) => lanInfo(!isRemote(r)));
+  route('GET', '/api/lan', (r) => (IS_SERVER ? { enabled: false, urls: [] } : lanInfo(!isRemote(r))));
   route('POST', '/api/lan', async (r, _s, _p, body) => {
+    if (IS_SERVER) throw new HttpError(403, 'Sunucuda telefondan erişim yok');
     localOnly(r);
     lanEnabled = !!(body as { enabled?: boolean }).enabled;
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify({ ...readSettings(), lan: lanEnabled }), { mode: 0o600 });
