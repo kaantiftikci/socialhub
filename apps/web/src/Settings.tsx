@@ -7,7 +7,7 @@ import { setAiPrefs, useAiPrefs } from './ai-prefs';
 import { DEMO_OFFLINE, STATIC_DEMO } from './profile';
 import { leaveDemoPanel } from './demo-session';
 
-type Tab = 'notify' | 'apps' | 'ai' | 'phone' | 'account';
+type Tab = 'notify' | 'apps' | 'ai' | 'phone';
 type Lan = { enabled: boolean; urls: string[]; qr?: string } | null;
 
 /** Açma/kapama anahtarı (checkbox yerine; tüm ayarlarda aynı görünüm) */
@@ -85,7 +85,6 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
     ['apps', 'Uygulama sesleri', 'volume'],
     ['ai', 'AI özellikleri', 'sparkle'],
     ['phone', 'Telefondan erişim', 'link'],
-    ...(STATIC_DEMO && !DEMO_OFFLINE ? ([['account', 'Hesap', 'user']] as Array<[Tab, string, string]>) : []),
   ];
 
   return (
@@ -99,6 +98,13 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
               <span>{l}</span>
             </button>
           ))}
+          {/* web demo: çıkış doğrudan menüde (eskiden Hesap bölümünün içindeydi); basınca hemen çıkar */}
+          {STATIC_DEMO && !DEMO_OFFLINE && (
+            <button type="button" className="set-tab set-logout b" onClick={() => leaveDemoPanel()}>
+              <Icon name="logout" size={16} />
+              <span>Çıkış yap</span>
+            </button>
+          )}
         </aside>
         <section className="set-body">
           <header className="set-head">
@@ -260,15 +266,6 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
             </>
           )}
 
-          {tab === 'account' && (
-            <div className="set-group">
-              <Row title="Demodan çık" hint="Demo oturumunu kapatır">
-                <button type="button" className="btn ghost xs b b2" onClick={() => leaveDemoPanel()}>
-                  Çıkış yap
-                </button>
-              </Row>
-            </div>
-          )}
         </section>
       </div>
     </div>

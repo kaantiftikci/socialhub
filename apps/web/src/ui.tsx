@@ -40,6 +40,7 @@ const PATHS: Record<string, ReactNode> = {
   send: (<><path d="M4.5 12L20 4.5l-5 15.5-3.2-6.3z" /><path d="M11.8 13.7L20 4.5" /></>),
   refresh: <path d="M20 12a8 8 0 1 1-2.3-5.7L20 8.5M20 3.5v5h-5" />,
   x: <path d="M6 6l12 12M18 6L6 18" />,
+  logout: (<><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4" /><path d="M10 16l-4-4 4-4M6 12h10" /></>),
   clip: <path d="M21 11.5l-8.6 8.6a5 5 0 01-7.1-7.1l8.6-8.6a3.3 3.3 0 014.7 4.7l-8.6 8.6a1.7 1.7 0 01-2.4-2.4l7.9-7.9" />,
   file: (<><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v4h4" /></>),
   image: (<><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" /><circle cx="9" cy="10" r="1.8" /><path d="M20.5 16l-5-5-9 8.5" /></>),
