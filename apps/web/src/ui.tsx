@@ -3,7 +3,7 @@ import { publicAsset } from './demo-asset';
 import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import type { ReactNode } from 'react';
 import { PLATFORMS, TAG_COLORS, type Platform } from './types';
-import { siWhatsapp, siTelegram, siX, siInstagram, siMessenger, siGmail, siIcloud } from 'simple-icons';
+import { siWhatsapp, siTelegram, siX, siInstagram, siMessenger, siGmail, siIcloud, siShopify } from 'simple-icons';
 import { faSlack, faLinkedinIn, faMicrosoft, faYahoo, faYandex } from '@fortawesome/free-brands-svg-icons';
 
 const PATHS: Record<string, ReactNode> = {
@@ -174,6 +174,8 @@ const BRAND: Partial<Record<Platform, Brand>> = {
   yahoo: { ...fa(faYahoo), bg: '#6001D2', ratio: 0.58 },
   yandex: { ...fa(faYandex), bg: '#FC3F1D', ratio: 0.5 },
   icloud: { path: siIcloud.path, bg: '#3693F3', ratio: 0.62 },
+  // Shopify: PNG'nin beyaz zemini yerine marka yeşilinde beyaz çanta (diğer alışveriş simgeleri gibi dolu kare)
+  shopify: { path: siShopify.path, bg: '#7AB55C', ratio: 0.62 },
 };
 const MIN_BRAND = 18;
 
@@ -184,7 +186,6 @@ const SHOP_ICON: Partial<Record<Platform, { src: string; fit: 'cover' | 'contain
   hepsiburada: { src: '/brands/hepsiburada.png', fit: 'cover' },
   n11: { src: '/brands/n11.png', fit: 'contain' },
   etsy: { src: '/brands/etsy.png', fit: 'cover' },
-  shopify: { src: '/brands/shopify.png', fit: 'contain' },
   amazon: { src: '/brands/amazon.png', fit: 'cover' },
 };
 
