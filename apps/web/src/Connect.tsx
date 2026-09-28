@@ -583,11 +583,11 @@ export function ConnectModal({
                       api.restartAccount(activeAccount.id).then(() => notify('Giriş penceresi açılıyor')).catch((e) => (notify(e.message, true), onChanged())).finally(() => setBusy(false));
                     }}
                   >
-                    <Icon name="refresh" size={14} sw={2} color="#fff" /> Giriş penceresini aç
+                    <Icon name="refresh" size={14} sw={2} color="#fff" /> Giriş ekranını aç
                   </button>
                   <ol>
-                    <li>Açılan pencerede {PLATFORMS[activeAccount.platform].name} hesabına giriş yap</li>
-                    <li>Giriş tamamlanınca pencere kendiliğinden kapanır</li>
+                    <li>Açılan giriş ekranında {PLATFORMS[activeAccount.platform].name} hesabına giriş yap</li>
+                    <li>Giriş tamamlanınca ekran kendiliğinden kapanır</li>
                   </ol>
                 </>
               )}

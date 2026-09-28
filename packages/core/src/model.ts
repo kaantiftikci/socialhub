@@ -154,6 +154,9 @@ export type CoreEvent =
   | { type: 'event.reminder'; event: CalEvent }
   /** Zamanlanmış mesaj gönderilemedi / kaçırıldı */
   | { type: 'scheduled.missed'; item: { id: string; chatId: string; text: string; at: number; missed?: { reason: string; at: number } }; chatName: string }
+  /** Mivelo içi giriş: görünmez tarayıcıdaki giriş sayfasının canlı görüntüsü (JPEG base64; boyut CSS pikseli) */
+  | { type: 'login.frame'; accountId: string; data: string; width: number; height: number; host: string }
+  | { type: 'login.end'; accountId: string }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; text: string };
 
 export interface CalEvent {

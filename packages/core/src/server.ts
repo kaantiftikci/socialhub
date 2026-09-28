@@ -13,7 +13,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { markActive } from './activity.js';
 import type { Store } from './store.js';
 import type { Registry } from './registry.js';
-import type { Connector } from './connectors/base.js';
+import type { Connector, LoginInput } from './connectors/base.js';
 import { resolveOAuth } from './connectors/mail.js';
 import { bus } from './bus.js';
 import { AiError, aiEnabled, aiKey, aiKeySource, draftReply, isAiTone, setAiKey } from './ai.js';
@@ -221,6 +221,28 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     localOnly(r);
     if (!store.getAccount(dec(p.id))) throw new HttpError(404, 'Hesap yok');
     await registry.restart(dec(p.id));
+    return { ok: true };
+  });
+  // Mivelo içi giriş ekranı: fare/klavye girdisi, iptal, ayrı pencereye geçiş
+  route('POST', '/api/accounts/:id/login-input', async (_r, _s, p, body) => {
+    const c = registry.get(dec(p.id)) as { loginInput?: (e: LoginInput[]) => Promise<void> } | undefined;
+    if (!c?.loginInput) throw new HttpError(400, 'Bu hesap giriş ekranı açmıyor');
+    const events = (body as { events?: LoginInput[] }).events;
+    if (!Array.isArray(events) || events.length > 200) throw new HttpError(400, 'Geçersiz girdi');
+    await c.loginInput(events).catch((e) => {
+      throw new HttpError(409, (e as Error).message);
+    });
+    return { ok: true };
+  });
+  route('POST', '/api/accounts/:id/login-cancel', (_r, _s, p) => {
+    const c = registry.get(dec(p.id)) as { loginCancel?: () => void } | undefined;
+    c?.loginCancel?.();
+    return { ok: true };
+  });
+  route('POST', '/api/accounts/:id/login-window', async (r, _s, p) => {
+    localOnly(r);
+    if (!store.getAccount(dec(p.id))) throw new HttpError(404, 'Hesap yok');
+    await registry.restart(dec(p.id), { external: true });
     return { ok: true };
   });
   route('POST', '/api/accounts/:id/input', (_r, _s, p, body) => {

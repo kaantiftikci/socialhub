@@ -1,8 +1,8 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
-import type { APIRequestContext, BrowserContext, Page } from 'playwright';
-import { BaseConnector, type ComposeDraft, type SendOptions, type StartOptions } from '../base.js';
+import type { APIRequestContext, BrowserContext, CDPSession, Page } from 'playwright';
+import { BaseConnector, type ComposeDraft, type LoginInput, type SendOptions, type StartOptions } from '../base.js';
 import { chatId } from '../../model.js';
 import { persistSessionCookies } from './outlook.js';
 import { bus } from '../../bus.js';
@@ -356,6 +356,7 @@ export class BrowserConnector extends BaseConnector {
   async start(opts: StartOptions = {}): Promise<void> {
     const interactive = opts.interactive !== false;
     this.stopping = false;
+    this.external = !!opts.external || process.env.MIVELO_LOGIN_WINDOW === '1';
     try {
       ({ chromium: this.chromium, request: this.request } = await import('playwright'));
     } catch {
@@ -367,7 +368,7 @@ export class BrowserConnector extends BaseConnector {
     // Uyarıdaki "PIN'i gir": PIN adımı bekleniyor olduğu zaten biliniyor → görünmez açılış + sayfa denetimi + kapatma
     // turunu (10-20 sn) atla, görünür pencereyi hemen aç; oturum çerezleri varsa giriş beklemeden PIN adımına geç
     if (interactive && opts.window && this.strategy.afterLogin) {
-      if (!(await this.launch(false))) return;
+      if (!(await this.launchLogin())) return;
       if (!(await this.visibleLogin(await this.isLoggedIn(true)))) return;
       if (this.stopping) return;
       this.syncProgress(45, 'oturum doğrulandı');
@@ -392,7 +393,7 @@ export class BrowserConnector extends BaseConnector {
     }
     // Hiç giriş yapılmamış profil (yeni "Bağlan"): görünmez denetim turu (10-20 sn) boşuna — giriş penceresini hemen aç
     if (interactive && !hasProfileCookies(path.join(sessionDir(this.account.id), 'profile'))) {
-      if (!(await this.launch(false))) return;
+      if (!(await this.launchLogin())) return;
       if (!(await this.visibleLogin(await this.isLoggedIn(true)))) return;
       if (this.stopping) return;
       this.syncProgress(45, 'oturum doğrulandı');
@@ -421,7 +422,7 @@ export class BrowserConnector extends BaseConnector {
       }
       // 2) Yok: görünür pencere aç, kullanıcı giriş yapsın; izin adımları bitince pencereyi kapat.
       await this.closeCtx();
-      if (!(await this.launch(false))) return;
+      if (!(await this.launchLogin())) return;
       if (!(await this.visibleLogin(false))) return;
     }
     if (this.stopping) return;
@@ -445,6 +446,7 @@ export class BrowserConnector extends BaseConnector {
       if (n) bus.log('info', `${this.account.platform}: ${n} oturum çerezi kalıcı yapıldı`);
     }
     bus.log('info', `${this.account.platform}: giriş yapıldı, pencere kapatılıyor`);
+    await this.stopEmbed();
     await this.closeCtx();
     return this.launch(true);
   }
@@ -548,7 +550,8 @@ export class BrowserConnector extends BaseConnector {
         executablePath: process.env.KAVSAK_CHROMIUM || undefined,
         // Görünür giriş penceresi: tam tarayıcı yerine sekmesiz/adres çubuksuz küçük uygulama penceresi (--app) — kullanıcının
         // kendi tarayıcısında açılamaz (oturum çerezleri Mivelo'nun profilinde olmalı), ama giriş iletişim kutusu gibi görünür
-        viewport: hidden ? { width: 1180, height: 820 } : null,
+        viewport: hidden ? (this.embedOn ? EMBED_SIZE : { width: 1180, height: 820 }) : null,
+        deviceScaleFactor: hidden && this.embedOn ? 2 : undefined,
         // boşta boşaltılan kanallarda service worker sekme kapansa da render sürecini (Outlook 470 MB) hayatta tutuyor: engelle
         serviceWorkers: this.strategy.unloadWhenIdle ? 'block' : 'allow',
         locale: 'tr-TR',
@@ -574,7 +577,7 @@ export class BrowserConnector extends BaseConnector {
       await this.ctx.addInitScript({ content: 'globalThis.__name = globalThis.__name || function (t) { return t; };' });
       // Görünmez oturum: sayfa kendini "arka planda/odaksız" tanıtsın. Messenger, X, LinkedIn gibi siteler görünür ve odaklı
       // sekmeyi "aktif" sayıp telefona bildirim göndermeyi kesiyor; gizli sekme (WhatsApp Web'deki gibi) bunu yapmıyor.
-      if (hidden && !this.strategy.keepVisible) {
+      if (hidden && !this.strategy.keepVisible && !this.embedOn) {
         await this.ctx
           .addInitScript(() => {
             try {
@@ -640,6 +643,106 @@ export class BrowserConnector extends BaseConnector {
     return ok;
   }
 
+  /* ---------- Mivelo içi giriş (canlı görüntü + girdi aktarımı) ---------- */
+  private external = false;
+  /** Giriş görünmez tarayıcıda, görüntüsü arayüze akıyor */
+  private embedOn = false;
+  private embedPage?: Page;
+  private cdp?: CDPSession;
+  private loginAbort = false;
+  private inputQ: Promise<unknown> = Promise.resolve();
+
+  /** Giriş sayfasını aç: varsayılan Mivelo içinde (görünmez tarayıcı + ekran yayını), istenirse ayrı küçük pencerede */
+  private async launchLogin(): Promise<boolean> {
+    if (this.external) return this.launch(false);
+    this.embedOn = true;
+    this.loginAbort = false;
+    if (!(await this.launch(true))) {
+      this.embedOn = false;
+      return false;
+    }
+    await this.startEmbed().catch((e) => bus.log('warn', `${this.account.platform}: giriş ekranı yayını başlatılamadı: ${(e as Error).message}`));
+    return true;
+  }
+
+  /** Etkin sayfanın ekran yayınını başlat (sayfa değiştiyse — OAuth açılır penceresi — yenisine geç) */
+  private async startEmbed(): Promise<void> {
+    const page = this.page;
+    if (!this.embedOn || !page || page.isClosed() || !this.ctx || this.embedPage === page) return;
+    await this.stopEmbed(false);
+    this.embedPage = page;
+    if (!page.viewportSize() || page.viewportSize()!.width !== EMBED_SIZE.width) await page.setViewportSize(EMBED_SIZE).catch(() => undefined);
+    const cdp = await this.ctx.newCDPSession(page);
+    this.cdp = cdp;
+    const id = this.account.id;
+    cdp.on('Page.screencastFrame', (f: { data: string; sessionId: number }) => {
+      void cdp.send('Page.screencastFrameAck', { sessionId: f.sessionId }).catch(() => undefined);
+      let host = '';
+      try {
+        host = new URL(page.url()).host;
+      } catch {
+        /* about:blank */
+      }
+      bus.emit({ type: 'login.frame', accountId: id, data: f.data, width: EMBED_SIZE.width, height: EMBED_SIZE.height, host });
+    });
+    await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 72, maxWidth: EMBED_SIZE.width * 2, maxHeight: EMBED_SIZE.height * 2, everyNthFrame: 1 });
+  }
+
+  private async stopEmbed(end = true): Promise<void> {
+    const cdp = this.cdp;
+    this.cdp = undefined;
+    this.embedPage = undefined;
+    if (cdp) {
+      await cdp.send('Page.stopScreencast').catch(() => undefined);
+      await cdp.detach().catch(() => undefined);
+    }
+    if (end && this.embedOn) {
+      this.embedOn = false;
+      bus.emit({ type: 'login.end', accountId: this.account.id });
+    }
+  }
+
+  /** Arayüzden gelen fare/klavye girdisi (sıralı işlenir) */
+  loginInput(events: LoginInput[]): Promise<void> {
+    const run = async () => {
+      const page = this.embedPage;
+      if (!page || page.isClosed()) throw new Error('Giriş ekranı açık değil');
+      for (const ev of events) {
+        switch (ev.type) {
+          case 'move':
+            await page.mouse.move(ev.x, ev.y);
+            break;
+          case 'down':
+            await page.mouse.move(ev.x, ev.y);
+            await page.mouse.down({ button: ev.button ?? 'left', clickCount: ev.clicks ?? 1 });
+            break;
+          case 'up':
+            await page.mouse.move(ev.x, ev.y);
+            await page.mouse.up({ button: ev.button ?? 'left', clickCount: ev.clicks ?? 1 });
+            break;
+          case 'wheel':
+            await page.mouse.move(ev.x, ev.y);
+            await page.mouse.wheel(ev.dx, ev.dy);
+            break;
+          case 'text':
+            if (ev.text) await page.keyboard.insertText(ev.text.slice(0, 2000));
+            break;
+          case 'key':
+            if (/^((Shift|Control|Alt|Meta|ControlOrMeta)\+)*[\w]{1,16}$/.test(ev.key)) await page.keyboard.press(ev.key);
+            break;
+        }
+      }
+    };
+    const next = this.inputQ.then(run, run);
+    this.inputQ = next.catch(() => undefined);
+    return next;
+  }
+
+  /** Mivelo içi girişi iptal et */
+  loginCancel(): void {
+    if (this.embedOn) this.loginAbort = true;
+  }
+
   private async closeCtx(): Promise<void> {
     const ctx = this.ctx;
     this.ctx = undefined;
@@ -666,6 +769,14 @@ export class BrowserConnector extends BaseConnector {
     let ticks = 0;
     while (!this.stopping) {
       this.adoptNewestPage();
+      if (this.embedOn) await this.startEmbed().catch(() => undefined);
+      if (this.loginAbort) {
+        this.loginAbort = false;
+        await this.stopEmbed();
+        await this.closeCtx();
+        this.setStatus('pairing', 'Giriş iptal edildi — tekrar denemek için Yeniden bağlan');
+        return false;
+      }
       if (!this.page || this.page.isClosed()) {
         bus.log('warn', `${this.account.platform}: giriş penceresi kapatıldı, giriş tamamlanmadı`);
         return false;
@@ -683,6 +794,7 @@ export class BrowserConnector extends BaseConnector {
     let stableFor = 0;
     for (let i = 0; i < 120 && !this.stopping; i++) {
       this.adoptNewestPage();
+      if (this.embedOn) await this.startEmbed().catch(() => undefined);
       if (!this.page || this.page.isClosed()) return false;
       const url = this.page.url();
       const stillIn = await this.isLoggedIn(true);
@@ -707,6 +819,7 @@ export class BrowserConnector extends BaseConnector {
 
   async stop(): Promise<void> {
     this.stopping = true;
+    await this.stopEmbed().catch(() => undefined);
     this.offActive?.();
     this.offActive = undefined;
     await this.api?.dispose().catch(() => undefined);
@@ -1175,6 +1288,9 @@ export const VERIFY_RE = /checkpoint|challenge_required|captcha|account\/access|
 export const RATE_RE = /\b(429|999)\b|rate.?limit|too many/i;
 
 /** Genel ya da hatalı etiket (eski sürümlerin yazdığı "Error" / "olk-mail_…" dahil): yenisi gelince üstüne yazılabilir */
+/** Mivelo içi giriş ekranının boyutu (CSS px; görüntü 2x) */
+const EMBED_SIZE = { width: 820, height: 700 };
+
 const GENERIC_LABEL = /^(messenger|instagram|x|linkedin|slack|outlook|gmail|icloud mail|yahoo mail|yandex mail|yahoo|yandex|etsy|shopify|amazon|error|hata)$|^olk-|pivot/i;
 
 /** Kalıcı profilde çerez veritabanı var mı (daha önce giriş denenmiş mi) */

@@ -1,3 +1,4 @@
+import { LoginView, pushLoginEvent } from './LoginView';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, connectEvents } from './api';
 import { PLATFORMS, ORDER_Q_PLATFORMS, isOrderPage, questionOrderRef, shopKind, shopPending, shopTabOf, type Account, type Chat, type ChatFlags, type CoreEvent, type Message, type Platform, type ShopTab, DEFAULT_TAGS } from './types';
@@ -354,6 +355,7 @@ export default function App() {
       if (flushTimer === undefined) flushTimer = window.setTimeout(flushChats, 150);
     };
     const onEvent = (ev: CoreEvent) => {
+      if (pushLoginEvent(ev)) return; // Mivelo içi giriş ekranı kareleri App durumundan geçmez
       switch (ev.type) {
         case 'account.status':
           setAccounts((prev) => {
@@ -1412,6 +1414,8 @@ export default function App() {
           </>
         )}
       </div>
+
+      <LoginView accounts={accounts} />
 
       {settingsP.value && (
         <SettingsModal

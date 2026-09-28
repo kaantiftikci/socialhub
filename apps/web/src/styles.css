@@ -1485,3 +1485,16 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .pw-eye { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--text3); cursor: pointer; touch-action: none; -webkit-user-select: none; user-select: none; }
 .pw-eye:hover { color: var(--text2); background: var(--faint); }
 .pw-eye.on { color: var(--v-txt); }
+/* Mivelo içi giriş ekranı (çekirdekteki görünmez tarayıcının canlı görüntüsü) */
+.overlay.login-ov { z-index: 60; }
+.login-box { width: min(860px, 96vw); max-height: 94vh; display: flex; flex-direction: column; background: var(--bg); border-radius: 22px; overflow: hidden; box-shadow: 0 40px 80px -30px rgba(0,0,0,.5); animation: modalIn .2s cubic-bezier(.2,.8,.2,1) both; }
+.login-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 14px; border-bottom: 1px solid var(--line); }
+.login-title { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.login-title b { font-size: 14px; }
+.login-title span { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.login-screen { position: relative; overflow: auto; background: var(--surface); line-height: 0; }
+.login-screen { display: flex; justify-content: center; }
+.login-screen img { display: block; height: auto; cursor: default; user-select: none; -webkit-user-select: none; touch-action: none; }
+.login-keys { position: absolute; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; resize: none; pointer-events: none; user-select: text; -webkit-user-select: text; font-size: 16px; line-height: normal; }
+.login-foot { padding: 8px 14px; font-size: 12px; color: var(--text3); border-top: 1px solid var(--line); }
+.login-err { color: var(--danger-txt); }

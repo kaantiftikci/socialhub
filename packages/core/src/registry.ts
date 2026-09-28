@@ -184,11 +184,11 @@ export class Registry {
     bus.log('info', `Hesap kaldırıldı: ${id}`);
   }
 
-  restart(id: string): Promise<void> {
-    return this.serial(id, () => this.restartNow(id));
+  restart(id: string, opts: { external?: boolean } = {}): Promise<void> {
+    return this.serial(id, () => this.restartNow(id, opts));
   }
 
-  private async restartNow(id: string): Promise<void> {
+  private async restartNow(id: string, opts: { external?: boolean } = {}): Promise<void> {
     const a = this.store.getAccount(id);
     if (!a) throw new Error('Hesap yok');
     const c = this.connectors.get(id);
@@ -198,10 +198,10 @@ export class Registry {
       this.connectors.delete(id);
       await withTimeout(c.stop(), 15_000).catch(() => undefined);
     }
-    await this.spawn(a, true, window);
+    await this.spawn(a, true, window, !!opts.external);
   }
 
-  private async spawn(account: Account, interactive = true, window = false): Promise<void> {
+  private async spawn(account: Account, interactive = true, window = false, external = false): Promise<void> {
     let c: Connector;
     switch (account.platform) {
       case 'whatsapp':
@@ -346,7 +346,7 @@ export class Registry {
     }
     this.connectors.set(account.id, c);
     // start() uzun sürebilir (QR bekleme vb.); arka planda çalışsın
-    void c.start({ interactive, window }).catch((e) => bus.log('error', `${account.platform} hata: ${(e as Error).message}`));
+    void c.start({ interactive, window, external }).catch((e) => bus.log('error', `${account.platform} hata: ${(e as Error).message}`));
   }
 
   async stopAll(): Promise<void> {

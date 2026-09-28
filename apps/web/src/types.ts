@@ -115,7 +115,16 @@ export type CoreEvent =
   | { type: 'events.update' }
   | { type: 'event.reminder'; event: CalEvent }
   | { type: 'scheduled.missed'; item: { id: string; chatId: string; text: string; at: number; missed?: { reason: string; at: number } }; chatName: string }
+  | { type: 'login.frame'; accountId: string; data: string; width: number; height: number; host: string }
+  | { type: 'login.end'; accountId: string }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; text: string };
+
+/** Mivelo içi giriş ekranına girdi (çekirdek LoginInput ile aynı) */
+export type LoginInput =
+  | { type: 'move' | 'down' | 'up'; x: number; y: number; button?: 'left' | 'right' | 'middle'; clicks?: number }
+  | { type: 'wheel'; x: number; y: number; dx: number; dy: number }
+  | { type: 'text'; text: string }
+  | { type: 'key'; key: string };
 
 /** Çekirdeğin çalıştığı işletim sistemi (Node process.platform); /api/health `os` alanı */
 export type CoreOs = 'darwin' | 'win32' | 'linux' | (string & {});

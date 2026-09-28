@@ -323,7 +323,14 @@ Dil: arayüz ve yorumlar Türkçe.
 - Bağlan: "resmi değil" etiketi kullanıcı isteğiyle KALDIRILDI (yalnız Sosyal Medya altındaki açıklama). Kart durumu en iyi durumdaki hesaptan
   (`STATUS_RANK`, bağlı önde; birden çoksa "· N hesap"), alt satırda bağlı hesabın adresi/@kullanıcı adı (`accountLabel`; genel adsa yöntem metni).
 - Parola alanları `PasswordInput` (ui.tsx): sağdaki göze BASILI TUTUNCA görünür, bırakınca gizlenir (Bağlan formları, 2FA istemi, AI anahtarı, giriş).
-- Görünür giriş penceresi `--app=<home>` (sekmesiz/adres çubuksuz 760×860 pencere, viewport null). Kullanıcının kendi tarayıcısında açılamaz:
+- **Mivelo içi giriş** (varsayılan; `bridge.launchLogin`): giriş sayfası GÖRÜNMEZ tarayıcıda açılır (görünürlük taklidi yok, 820×700, DPR 2),
+  CDP `Page.startScreencast` kareleri `login.frame` olayıyla (JPEG base64) arayüze; `apps/web/src/LoginView.tsx` üst katmanda gösterir
+  (kareler App durumundan geçmez: `pushLoginEvent` yayıncısı). Girdi `POST /api/accounts/:id/login-input {events}` (move/down/up/wheel/text/key;
+  arayüz sıralı toplu gönderir, köprü `inputQ` ile sırayla uygular; klavye gizli textarea `.login-keys` — üst öğelerin `user-select:none`'ı yazmayı
+  engelliyordu, `user-select:text` şart), `login-cancel` (bekleyen girişi bırakır, 'pairing'), `login-window` (restart `{external:true}` → eski
+  ayrı pencere). OAuth açılır penceresine geçilince yayın yeni sayfaya taşınır (`startEmbed`). `MIVELO_LOGIN_WINDOW=1` hep ayrı pencere.
+  Site iframe'e gömülemez (X-Frame-Options) ve oturum Mivelo profilinde olmalı → bu yol. Google görünmez tarayıcıda girişi reddederse "Ayrı pencerede aç".
+- Ayrı giriş penceresi `--app=<home>` (sekmesiz/adres çubuksuz 760×860 pencere, viewport null). Kullanıcının kendi tarayıcısında açılamaz:
   oturum çerezleri Mivelo'nun Chromium profilinde olmalı. Etiket genel kaldıysa köprü yoklamadan sonra 10 dk'da bir `me()`'yi yeniden dener
   (`refreshLabel`); Instagram adı sohbet listesi yanıtındaki `viewer.username`'den de öğrenilir.
 - Tarayıcı girişi hızı (bridge): hiç çerezi olmayan profilde (`hasProfileCookies`) görünmez denetim turu atlanır → pencere hemen açılır; giriş 700 ms'de bir

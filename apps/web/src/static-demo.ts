@@ -381,6 +381,9 @@ export const staticApi = {
     }
     throw new Error(DEMO_BLOCK);
   },
+  loginInput: async (_id: string, _events: unknown[]) => ({ ok: true }),
+  loginCancel: async (_id: string) => ({ ok: true }),
+  loginWindow: async (_id: string) => ({ ok: true }),
   accountInput: async (_id: string, _kind: 'phone' | 'code' | 'password', _value: string) => {
     throw new Error(DEMO_BLOCK);
   },

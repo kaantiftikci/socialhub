@@ -1,4 +1,4 @@
-import type { Account, CalEvent, CalendarDraft, Chat, ChatFlags, CoreEvent, CoreOs, DraftResult, LinkPreview, Message, Platform } from './types';
+import type { Account, CalEvent, LoginInput, CalendarDraft, Chat, ChatFlags, CoreEvent, CoreOs, DraftResult, LinkPreview, Message, Platform } from './types';
 import { API_BASE, REMOTE_CORE, coreToken } from './desktop';
 import { STATIC_DEMO } from './profile';
 import { connectStaticEvents, staticApi } from './static-demo';
@@ -39,6 +39,9 @@ const liveApi = {
   addAccount: (platform: Platform, token?: string) => call<Account>('POST', '/accounts', { platform, token }),
   removeAccount: (id: string) => call('DELETE', `/accounts/${enc(id)}`),
   restartAccount: (id: string) => call('POST', `/accounts/${enc(id)}/restart`),
+  loginInput: (id: string, events: LoginInput[]) => call('POST', `/accounts/${enc(id)}/login-input`, { events }),
+  loginCancel: (id: string) => call('POST', `/accounts/${enc(id)}/login-cancel`),
+  loginWindow: (id: string) => call('POST', `/accounts/${enc(id)}/login-window`),
   accountInput: (id: string, kind: 'phone' | 'code' | 'password', value: string) => call('POST', `/accounts/${enc(id)}/input`, { kind, value }),
   chats: () => call<Chat[]>('GET', '/chats'),
   messages: (chatId: string, limit = 100, before?: number) => call<Message[]>('GET', `/chats/${enc(chatId)}/messages?limit=${limit}${before ? `&before=${before}` : ''}`),

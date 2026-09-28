@@ -11,7 +11,16 @@ export interface StartOptions {
   interactive?: boolean;
   /** Kullanıcı eylemi bekleyen uyarıdan (PIN) gelindi: görünmez denetimi atla, görünür pencereyi hemen aç */
   window?: boolean;
+  /** Giriş Mivelo içinde (canlı görüntü) değil, ayrı tarayıcı penceresinde */
+  external?: boolean;
 }
+
+/** Mivelo içi giriş ekranına kullanıcı girdisi (görüntü koordinatları CSS pikseli) */
+export type LoginInput =
+  | { type: 'move' | 'down' | 'up'; x: number; y: number; button?: 'left' | 'right' | 'middle'; clicks?: number }
+  | { type: 'wheel'; x: number; y: number; dx: number; dy: number }
+  | { type: 'text'; text: string }
+  | { type: 'key'; key: string };
 
 export interface SendOptions {
   threadId?: string;
