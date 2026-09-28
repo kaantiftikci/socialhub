@@ -1401,8 +1401,9 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .set-tab:hover { background: var(--bg2); color: var(--text); }
 .set-tab.on { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: var(--shadow-1); }
 .set-tab.on svg { color: var(--v); }
-.set-tab.set-logout { margin-top: auto; color: var(--danger-txt); }
-.set-tab.set-logout:hover { background: var(--danger-bg); color: var(--danger-txt); }
+.set-tab.set-logout { margin-top: auto; background: var(--danger-txt); color: #fff; font-weight: 600; }
+.set-tab.set-logout svg { color: #fff; }
+.set-tab.set-logout:hover { background: var(--danger); color: #fff; }
 .set-body { flex: 1; min-width: 0; overflow-y: auto; overscroll-behavior: contain; padding: 10px 14px 18px 22px; display: flex; flex-direction: column; gap: 14px; scrollbar-width: thin; scrollbar-color: var(--scroll) transparent; }
 .set-body > * { flex-shrink: 0; }
 .set-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; position: sticky; top: -10px; padding: 6px 0; background: var(--bg); z-index: 1; }
