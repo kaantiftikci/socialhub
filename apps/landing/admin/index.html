@@ -825,7 +825,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     return '<span class="pp-st muted">Anahtar yok</span>';
   }
   function renderPeople(){
-    var rows=ppVisible(), SRC={waitlist:'Bekleme listesi',demo:'Demo üyesi'};
+    var rows=ppVisible(), SRC={waitlist:'Bekleme listesi',demo:'Demo üyesi',indir:'İndirme kaydı'};
     $('#ppList').innerHTML=rows.length?rows.map(function(p){
       return '<label class="pp-row"><input type="checkbox" data-psel="'+esc(p.email)+'"'+(PP_SEL[p.email]?' checked':'')+'>'+
         '<span class="pp-main"><b>'+esc(p.name||p.email)+'</b><span>'+(p.name?esc(p.email)+' · ':'')+p.src.map(function(s){ return SRC[s]||s; }).join(' + ')+(p.at?' · '+ago(p.at):'')+'</span></span>'+ppState(p)+'</label>'; }).join('')

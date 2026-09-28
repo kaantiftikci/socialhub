@@ -24,6 +24,7 @@ const LIC_MAIL_DEFAULT = [
 const LIC_MAIL_OLD = ['Mivelo lisans anahtarın hazır'];
 
 require_once __DIR__ . '/../api/lib-smtp.php';
+require_once __DIR__ . '/../api/lib-members.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
@@ -472,6 +473,25 @@ if ($a === 'demo_settings' && $method === 'POST') {
 if ($a === 'demo') {
     // kayıtla gelen üyelerin eski demo verisi (varsayılan uygulamalar) bir kez silinir — demo API'si ile aynı kural
     $users = with_json('users.json', ['users' => []], function (array &$d) {
+        // demo API'siyle aynı tek seferlik temizlik (MEMBERS_PURGE 1): yalnız hazır admin kalır; silinenler üye listesine aktarılır
+        if ((int) ($d['membersPurged'] ?? 0) < 1) {
+            $gone = array_filter($d['users'], fn ($u) => ($u['username'] ?? '') !== 'admin' || !empty($u['requestedAt']));
+            try {
+                mv_members_update(function (array &$members) use ($gone) {
+                    foreach ($gone as $u) {
+                        $m = strtolower(trim((string) ($u['email'] ?? '')));
+                        if ($m === '' || substr($m, -5) === '@demo' || !filter_var($m, FILTER_VALIDATE_EMAIL) || ($u['status'] ?? '') === 'rejected') {
+                            continue;
+                        }
+                        mv_member_upsert($members, ['email' => $m, 'firstName' => $u['firstName'] ?? '', 'lastName' => $u['lastName'] ?? '', 'name' => $u['name'] ?? '',
+                            'src' => 'demo', 'at' => (int) (($u['requestedAt'] ?? 0) ?: time())]);
+                    }
+                });
+            } catch (Throwable $e) {
+            }
+            $d['users'] = array_values(array_filter($d['users'], fn ($u) => ($u['username'] ?? '') === 'admin' && empty($u['requestedAt'])));
+            $d['membersPurged'] = 1;
+        }
         foreach ($d['users'] as &$u) {
             if (!empty($u['requestedAt']) && (int) ($u['dataReset'] ?? 0) < 2) {
                 $u['accounts'] = [];
@@ -846,6 +866,20 @@ function lic_people(): array
             continue;
         }
         $p[$m] = ['email' => $m, 'name' => '', 'src' => ['waitlist'], 'at' => (int) ($e['at'] ?? 0), 'wl' => $e['status'] ?? 'waiting'];
+    }
+    // indirme kaydı (src 'indir') ve kapatılan demo üyeliklerinden aktarılanlar (src 'demo'): lib-members.php
+    foreach (mv_members_read() as $x) {
+        $m = strtolower((string) ($x['email'] ?? ''));
+        if ($m === '' || !filter_var($m, FILTER_VALIDATE_EMAIL)) {
+            continue;
+        }
+        $src = ($x['src'] ?? '') === 'demo' ? 'demo' : 'indir';
+        if (isset($p[$m])) {
+            $p[$m]['name'] = $p[$m]['name'] ?: (string) ($x['name'] ?? '');
+            $p[$m]['src'] = array_values(array_unique(array_merge($p[$m]['src'], [$src])));
+        } else {
+            $p[$m] = ['email' => $m, 'name' => (string) ($x['name'] ?? ''), 'src' => [$src], 'at' => (int) ($x['at'] ?? 0), 'wl' => ''];
+        }
     }
     foreach (read_json('users.json', ['users' => []])['users'] ?? [] as $u) {
         $m = strtolower((string) ($u['email'] ?? ''));

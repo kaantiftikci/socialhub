@@ -54,10 +54,48 @@ const REMOVED_USERS = ['editor', 'misafir'];
 /** Demo kullanıcıları boş başlar; uygulamaları kendileri "Uygulama bağla" ile ekler. Sürüm artınca mevcut listeleri de sıfırlanır. */
 const SEED_ACCOUNTS = [];
 const SEED_VERSION = 2;
+/** Üye temizliği: sürüm artınca hazır hesaplar (admin) dışındaki TÜM demo üyeleri silinir; oturumları da düşer (current_user bulamaz). */
+const MEMBERS_PURGE = 1;
+/** Demo üyeliği kapalı (Kaan: demoda yalnız admin; indirenler mivelo.app/indir'den lisans için kayıt olur). */
+const SIGNUP_OPEN = false;
+
+/**
+ * Silinen demo üyelerinin ad + e-postası üye listesine taşınır (lib-members.php → ~/mivelo-data/members.json, src 'demo'):
+ * Admin → Lisanslar → "Üyelere anahtar gönder"de görünmeye devam eder, anahtar gönderilebilir. Kütüphane yoksa sessizce atlanır.
+ */
+function purged_to_members(array $users): void
+{
+    $lib = is_file(__DIR__ . '/lib-members.php') ? __DIR__ . '/lib-members.php' : dirname(__DIR__, 2) . '/mivelo.app/api/lib-members.php';
+    if (!is_file($lib)) {
+        return;
+    }
+    require_once $lib;
+    try {
+        mv_members_update(function (array &$members) use ($users) {
+            foreach ($users as $u) {
+                $m = strtolower(trim((string) ($u['email'] ?? '')));
+                if ($m === '' || substr($m, -5) === '@demo' || !filter_var($m, FILTER_VALIDATE_EMAIL) || ($u['status'] ?? '') === 'rejected') {
+                    continue;
+                }
+                mv_member_upsert($members, ['email' => $m, 'firstName' => $u['firstName'] ?? '', 'lastName' => $u['lastName'] ?? '', 'name' => $u['name'] ?? '',
+                    'src' => 'demo', 'at' => (int) (($u['requestedAt'] ?? 0) ?: time())]);
+            }
+        });
+    } catch (Throwable $e) {
+        // üye listesi yazılamazsa temizlik yine de yapılır (demo girişleri kapanmalı)
+    }
+}
 
 function seed_users(array &$data): bool
 {
     $changed = false;
+    if ((int) ($data['membersPurged'] ?? 0) < MEMBERS_PURGE) {
+        $keep = array_column(SEED_USERS, 'username');
+        purged_to_members(array_filter($data['users'], fn ($u) => !in_array($u['username'] ?? '', $keep, true) || !empty($u['requestedAt'])));
+        $data['users'] = array_values(array_filter($data['users'], fn ($u) => in_array($u['username'] ?? '', $keep, true) && empty($u['requestedAt'])));
+        $data['membersPurged'] = MEMBERS_PURGE;
+        $changed = true;
+    }
     $before = count($data['users']);
     $data['users'] = array_values(array_filter($data['users'], fn ($u) => !(in_array($u['username'] ?? '', REMOVED_USERS, true) && strpos((string) ($u['id'] ?? ''), 'u-' . ($u['username'] ?? '')) === 0 && empty($u['requestedAt']))));
     if (count($data['users']) !== $before) {
@@ -314,7 +352,7 @@ if ($method === 'POST' || $method === 'PUT') {
 }
 
 if ($action === 'signup_config' && $method === 'GET') {
-    echo json_encode(['autoApprove' => demo_auto_approve()]);
+    echo json_encode(['autoApprove' => demo_auto_approve(), 'open' => SIGNUP_OPEN]);
     exit;
 }
 
@@ -323,6 +361,9 @@ if ($action === 'signup_config' && $method === 'GET') {
  * bekleyen talep; gizli "website" alanı bot tuzağı (doluysa sessizce başarılı görünür, kaydedilmez).
  */
 if ($action === 'register' && $method === 'POST') {
+    if (!SIGNUP_OPEN) {
+        fail(410, "Demo üyeliği kapandı. Mivelo'yu kullanmak için mivelo.app/indir adresinden kayıt olabilirsin.");
+    }
     $clean = fn ($v) => trim(preg_replace('/\s+/u', ' ', (string) $v) ?? '');
     $firstName = $clean($body['firstName'] ?? '');
     $lastName = $clean($body['lastName'] ?? '');

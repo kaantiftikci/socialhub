@@ -89,17 +89,17 @@ function LicenseScreen({ status, onDone }: { status: LicenseStatus; onDone: (s: 
           {busy ? 'Doğrulanıyor…' : 'Etkinleştir'}
         </button>
         <p className="lic-help">
-          Anahtarın yok mu?{' '}
+          Anahtarın, uygulamayı{' '}
           <a
-            href="https://mivelo.app"
+            href="https://mivelo.app/indir/"
             onClick={(e) => {
               e.preventDefault();
-              void openExternal('https://mivelo.app');
+              void openExternal('https://mivelo.app/indir/');
             }}
           >
-            mivelo.app
+            mivelo.app/indir
           </a>{' '}
-          üzerinden bekleme listesine katıl ya da <b>hello@mivelo.app</b>'e yaz.
+          adresinden indirirken kayıt olduğun e-postaya gelir. Gelmediyse <b>hello@mivelo.app</b>'e yaz.
         </p>
       </form>
     </div>

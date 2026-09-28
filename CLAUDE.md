@@ -74,7 +74,16 @@ Dil: arayüz ve yorumlar Türkçe.
   Bekliyor/Davet edildi/Katıldı/Spam, not, toplu işlem, CSV), trafik (`api/track.php` çerezsiz sayaç → `~/mivelo-data/stats/`),
   demo hesapları (demo `index.php` girişte `logins`/`lastLogin` yazar), görevler, şifre değiştirme, JSON yedek. Varsayılan şifre
   karması `api.php` `DEFAULT_HASH`; panelden değişince `~/mivelo-data/admin.json`. 5 hatalı girişte IP 15 dk kilitlenir.
-  **Demo üyeliği**: hazır tek hesap `admin` (şifre karması `SEED_USERS`, `passVersion` artınca users.json'daki karma da güncellenir; editor/misafir
+  **Demo üyeliği KAPALI (Kaan, 29.09)**: demoda YALNIZ `admin` girer; `index.php` `SIGNUP_OPEN=false` (register 410, signup_config `open:false`),
+  `Auth.tsx` yalnız "Giriş yap" (üyelik sekmesi/formu SİLİNDİ). `MEMBERS_PURGE` 1: admin dışındaki tüm demo üyeleri users.json'dan bir kez silinir
+  (oturumları düşer; aynı temizlik admin `demo` ucunda da), silinenlerin ad+e-postası (reddedilen hariç) `members.json`'a src 'demo' aktarılır.
+  **Lisans için kayıt = indirme sayfası**: kartlardaki "İndir" → kayıt penceresi `#dlm` (ad, soyad, e-posta, gizlilik onayı, bot tuzağı) →
+  `api/register.php` → `lib-members.php` `mv_members_update`/`mv_member_upsert` → `~/mivelo-data/members.json` (src 'indir', indirme geçmişi ≤20;
+  IP başına saatte 10 yeni, günde 1000) → dosya kendiliğinden iner; tarayıcıda kayıt varsa (`localStorage mivelo.reg`) pencere açılmaz, indirme
+  keepalive ile kayda yazılır. Bekleme listesi (waitlist.json) AYRI ve yalnız e-posta — ona ekleme YAPILMAZ. Admin → Lisanslar → "Üyelere anahtar gönder"
+  (`lic_people`) üyeleri + bekleme listesini + demo kullanıcılarını birleştirir (kaynak: İndirme kaydı / Demo üyesi / Bekleme listesi). `lib-members.php`
+  demo api/'ye de kopyalanır (deploy-demo.yml). LicenseGate: "anahtarın mivelo.app/indir'den indirirken kayıt olduğun e-postaya gelir".
+  (Eski) Demo üyeliği: hazır tek hesap `admin` (şifre karması `SEED_USERS`, `passVersion` artınca users.json'daki karma da güncellenir; editor/misafir
   `REMOVED_USERS` ile silinir). Giriş ekranında "Üyelik oluştur" (`Auth.tsx`, `authRegister`) → `action=register`: ad + soyad (ayrı alanlar; `firstName`/`lastName`, `name` birleşik), e-posta, kullanıcı adı
   (a-z0-9._-, 3-24), şifre ≥8 (iki kez; not alanı YOK); IP başına saatte 5 (`demo-signup.json`), gizli `website` bot tuzağı, ≤300 bekleyen. Kayıt users.json'da
   **Otomatik onay** (Admin → Demo anahtarı, `~/mivelo-data/demo-settings.json` `autoApprove`, VARSAYILAN AÇIK — onay e-postası
