@@ -390,10 +390,11 @@ export const staticApi = {
       .filter((m) => m.chatId === chatId && (before == null || m.ts < before))
       .sort((a, b) => a.ts - b.ts)
       .slice(-limit),
-  send: async (chatId: string, text: string, _threadId?: string) => {
+  send: async (chatId: string, text: string, _threadId?: string, replyTo?: string) => {
     const chat = chatOf(chatId);
     const ts = Date.now();
     const remoteId = `demo-${ts}`;
+    const q = replyTo ? messages.find((m) => m.chatId === chatId && m.remoteId === replyTo) : undefined;
     const message: Message = {
       id: `${chatId}#${remoteId}`,
       chatId,
@@ -404,6 +405,7 @@ export const staticApi = {
       text,
       ts,
       status: 'sent',
+      replyTo: q ? { remoteId: q.remoteId, senderName: q.fromMe ? 'Sen' : q.senderName, text: (q.text || q.attachments?.[0]?.name || '').slice(0, 160), fromMe: q.fromMe } : undefined,
     };
     messages.push(message);
     const next = { ...touch(chat, text, true, ts), unread: 0 };

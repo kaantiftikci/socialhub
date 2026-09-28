@@ -19,6 +19,7 @@ import { messenger } from './connectors/browser/messenger.js';
 import { gmail } from './connectors/browser/gmail.js';
 import { outlook } from './connectors/browser/outlook.js';
 import { icloud } from './connectors/browser/icloud.js';
+import { yahoo } from './connectors/browser/yahoo.js';
 import { slackStrategy } from './connectors/browser/slack.js';
 import { MailConnector, type MailConfig } from './connectors/mail.js';
 import { ShopierConnector } from './connectors/shopier.js';
@@ -90,6 +91,17 @@ export class Registry {
       if (opts.token) fs.writeFileSync(path.join(sessionDir(existing.id), 'token'), opts.token, { mode: 0o600 });
       await this.restart(existing.id);
       return existing;
+    }
+    // Yahoo tarayıcı girişi (token'sız): IMAP'i reddedilen var olan Yahoo hesabı kopya açılmadan tarayıcı yoluna geçirilir
+    if (platform === 'yahoo' && !opts.token) {
+      const imapOnes = this.list().filter((a) => a.platform === 'yahoo' && readToken(a.id) !== undefined);
+      const broken = imapOnes.find((a) => a.status === 'error' || a.status === 'disconnected') ?? (imapOnes.length === 1 ? imapOnes[0] : undefined);
+      if (broken) {
+        fs.rmSync(path.join(sessionDir(broken.id), 'token'), { force: true });
+        bus.log('info', `${broken.id}: uygulama şifresi yolu bırakıldı, Yahoo tarayıcı girişine geçiliyor`);
+        await this.restart(broken.id);
+        return broken;
+      }
     }
     // E-posta: aynı adres yeniden bağlanınca kopya hesap açma → var olan hesabın bilgilerini güncelle (ör. yenilenen uygulama şifresi)
     // ve yeniden başlat. Yeni formda verilmeyen alanlar (elle girilmiş sunucu vb.) eskisinden korunur.
@@ -270,6 +282,11 @@ export class Registry {
       case 'yandex':
       case 'imap': {
         const tokenFile = path.join(sessionDir(account.id), 'token');
+        // Yahoo: uygulama şifresi (token) yoksa tarayıcı girişi — Yahoo birçok hesapta uygulama şifresini kapattı, IMAP normal şifreyi reddediyor
+        if (account.platform === 'yahoo' && !fs.existsSync(tokenFile)) {
+          c = new BrowserConnector(account, this.store, yahoo, 30_000, { idlePollMs: 90_000, keepOpen: 'whileActive' });
+          break;
+        }
         let cfg: MailConfig = { user: '' };
         try {
           cfg = JSON.parse(fs.readFileSync(tokenFile, 'utf8')) as MailConfig;

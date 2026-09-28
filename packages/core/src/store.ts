@@ -111,6 +111,7 @@ export class Store {
     if (!cols.has('reactions')) this.db.exec('ALTER TABLE messages ADD COLUMN reactions TEXT');
     if (!cols.has('thread_id')) this.db.exec('ALTER TABLE messages ADD COLUMN thread_id TEXT');
     if (!cols.has('reply_count')) this.db.exec('ALTER TABLE messages ADD COLUMN reply_count INTEGER');
+    if (!cols.has('reply_to')) this.db.exec('ALTER TABLE messages ADD COLUMN reply_to TEXT'); // alıntılı yanıt (JSON ReplyRef)
     const ccols = new Set((this.db.prepare('PRAGMA table_info(chats)').all() as Array<{ name: string }>).map((c) => c.name));
     if (!ccols.has('handle')) this.db.exec('ALTER TABLE chats ADD COLUMN handle TEXT');
     if (!ccols.has('link')) this.db.exec('ALTER TABLE chats ADD COLUMN link TEXT');
@@ -382,8 +383,8 @@ export class Store {
     const existed = this.hasMessage(m.id);
     this.db
       .prepare(
-        `INSERT INTO messages (id, chat_id, remote_id, sender_id, sender_name, from_me, text, ts, status, attachments, sender_avatar, reactions, thread_id, reply_count)
-         VALUES (@id, @chatId, @remoteId, @senderId, @senderName, @fromMe, @text, @ts, @status, @attachments, @senderAvatar, @reactions, @threadId, @replyCount)
+        `INSERT INTO messages (id, chat_id, remote_id, sender_id, sender_name, from_me, text, ts, status, attachments, sender_avatar, reactions, thread_id, reply_count, reply_to)
+         VALUES (@id, @chatId, @remoteId, @senderId, @senderName, @fromMe, @text, @ts, @status, @attachments, @senderAvatar, @reactions, @threadId, @replyCount, @replyTo)
          ON CONFLICT(id) DO UPDATE SET
            -- durum geri gitmez (tüm platformlar): yeniden eşitleme/yoklama "görüldü"yü "gönderildi"ye indirmesin; başarısız yalnız henüz
            -- iletilmemiş mesajın yerini alır, başarısızdan sonra gelen gerçek durum ise yazılır
@@ -399,7 +400,8 @@ export class Store {
            sender_name = CASE WHEN excluded.sender_name <> '' THEN excluded.sender_name ELSE messages.sender_name END,
            reactions = COALESCE(excluded.reactions, messages.reactions),
            thread_id = COALESCE(excluded.thread_id, messages.thread_id),
-           reply_count = COALESCE(excluded.reply_count, messages.reply_count)`,
+           reply_count = COALESCE(excluded.reply_count, messages.reply_count),
+           reply_to = COALESCE(excluded.reply_to, messages.reply_to)`,
       )
       .run({
         ...m,
@@ -409,6 +411,7 @@ export class Store {
         reactions: m.reactions ? JSON.stringify(m.reactions) : null,
         threadId: m.threadId ?? null,
         replyCount: m.replyCount ?? null,
+        replyTo: m.replyTo ? JSON.stringify(m.replyTo) : null,
       });
     const inserted = !existed;
     const chat = this.getChat(m.chatId);
@@ -771,6 +774,7 @@ function rowToMessage(r: unknown): Message {
     reactions: x.reactions ? safeJson<Reaction[] | undefined>(x.reactions as string, undefined) : undefined,
     threadId: x.thread_id ? String(x.thread_id) : undefined,
     replyCount: x.reply_count != null ? Number(x.reply_count) : undefined,
+    replyTo: x.reply_to ? safeJson<Message['replyTo']>(x.reply_to as string, undefined) : undefined,
   };
 }
 

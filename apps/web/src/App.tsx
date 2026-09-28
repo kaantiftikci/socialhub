@@ -635,8 +635,12 @@ export default function App() {
     }
     return { n, total };
   }, [inboxChats, platformFilter, isShop]);
-  const chatList = useMemo(() => {
-    // Telegram "Arşiv" sekmesi yalnızca arşivlenmişleri, iMessage klasör sekmeleri o klasörü; diğer her görünüm gelen kutusunu listeler
+  /**
+   * Görüntülenen küme (platform, arşiv/klasör sekmesi, etiket, pazaryeri sekmesi uygulanmış; okunmamış/bekleyen/arama DEĞİL).
+   * Liste ve başlıktaki "N yeni" + Okunmamış/Bekleyen sayıları aynı kümeden: eskiden sayılar her zaman gelen kutusundan geliyordu
+   * (WhatsApp Arşiv'de 3 okunmuş sohbet varken "233 yeni" görünüyordu; iMessage klasörleri ve e-posta klasörlerinde de aynı).
+   */
+  const baseList = useMemo(() => {
     const imActive = platformFilter === 'imessage' ? imFolder : null;
     const mailActive = platformFilter && PLATFORMS[platformFilter].category === 'mail' ? mailFolder : null;
     let list = platformFilter && ARCHIVE_TABS.has(platformFilter) && tgArchive ? activeChats.filter((c) => c.platform === platformFilter && !!c.meta?.archived) : imActive ? activeChats : mailActive ? activeChats.filter((c) => c.platform === platformFilter && (mailActive === 'junk' ? c.meta?.folder === 'junk' : c.meta?.folder === 'sent' || (c.meta?.folder !== 'junk' && !!c.lastFromMe))) : [...inboxChats];
@@ -653,6 +657,10 @@ export default function App() {
     });
     if (tagFilter) list = list.filter((c) => c.tags.includes(tagFilter));
     if (shopTab && isShop) list = list.filter((c) => shopTabOf(c) === shopTab);
+    return list;
+  }, [activeChats, inboxChats, platformFilter, tagFilter, imFolder, tgArchive, mailFolder, shopTab, isShop]);
+  const chatList = useMemo(() => {
+    let list = [...baseList];
     // iMessage'da Okunmamış/Bekleyen sekmeleri yok (Mesajlar uygulamasındaki klasörler var)
     const effFilter = platformFilter === 'imessage' && filter !== 'followup' ? 'all' : filter;
     if (effFilter === 'unread') list = list.filter((c) => c.unread > 0);
@@ -667,7 +675,7 @@ export default function App() {
     if (effFilter === 'waiting') list.sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || Number(a.kind !== 'direct') - Number(b.kind !== 'direct') || b.lastMessageAt - a.lastMessageAt);
     else if (filter !== 'followup') list.sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || (smartSort ? score(b) - score(a) : 0) || b.lastMessageAt - a.lastMessageAt);
     return list;
-  }, [activeChats, inboxChats, filter, platformFilter, tagFilter, query, smartSort, imFolder, tgArchive, mailFolder, shopTab, isShop]);
+  }, [baseList, filter, platformFilter, query, smartSort]);
   // Liste parça parça çizilir (binlerce sohbet tek seferde DOM'a girince kaydırma/yazma takılıyordu): ilk 300, sona yaklaşınca +300
   const [rowLimit, setRowLimit] = useState(300);
   useEffect(() => setRowLimit(300), [view, filter, platformFilter, tagFilter, imFolder, mailFolder, tgArchive, shopTab, query]);
@@ -694,18 +702,16 @@ export default function App() {
     for (const c of inboxChats) unread += countable(c);
     return { unread, waiting: waitingChats.length };
   }, [inboxChats, waitingChats]);
-  /** Başlıktaki "N yeni": yalnızca görüntülenen kapsam (platform/etiket) */
+  /** Başlıktaki "N yeni" ve Okunmamış/Bekleyen sayıları: yalnızca görüntülenen küme (arşiv/klasör sekmesi dahil) */
   const scoped = useMemo(() => {
     let unread = 0;
     let waiting = 0;
-    for (const c of inboxChats) {
-      if (platformFilter && c.platform !== platformFilter) continue;
-      if (tagFilter && !c.tags.includes(tagFilter)) continue;
+    for (const c of baseList) {
       unread += countable(c);
       if (isWaiting(c)) waiting++;
     }
     return { unread, waiting };
-  }, [inboxChats, platformFilter, tagFilter]);
+  }, [baseList]);
 
   const perPlatform = useMemo(() => {
     const m = new Map<Platform, number>();
@@ -1443,6 +1449,9 @@ export default function App() {
                     // Bağlan: bu hesabın formu, e-posta adresi dolu gelir; kaydedince var olan hesap güncellenip yeniden bağlanır
                     setConnectFocus(`edit:${a.id}`);
                     setConnectOpen(true);
+                  } else if (is.action === 'panelOnly') {
+                    setConnectFocus(a.id);
+                    setConnectOpen(true);
                   } else if (is.action === 'panel') {
                     setConnectFocus(a.id);
                     setConnectOpen(true);
@@ -1732,14 +1741,23 @@ const AUTH_FAIL = /giriş reddedildi|uygulama şifresi|şifre|parola|kimlik doğ
 /** Bilgileri Bağlan formundan yeniden girilebilen (şifre/API anahtarıyla bağlanan) kanallar */
 const credentialForm = (a: Account) => {
   const p = PLATFORMS[a.platform];
-  return p.mode === 'mail' || p.category === 'shop' || ((a.platform === 'gmail' || a.platform === 'icloud') && /uygulama şifresi|giriş reddedildi/i.test(a.detail ?? ''));
+  return p.mode === 'mail' || p.category === 'shop' || ((a.platform === 'gmail' || a.platform === 'icloud' || a.platform === 'yahoo') && /uygulama şifresi|giriş reddedildi/i.test(a.detail ?? ''));
 };
 
-function accountIssue(a: Account): { title: string; how: string; label: string; action: 'reconnect' | 'connect' | 'credentials' | 'panel'; done: string } | null {
+function accountIssue(a: Account): { title: string; how: string; label: string; action: 'reconnect' | 'connect' | 'credentials' | 'panel' | 'panelOnly'; done: string } | null {
   const name = PLATFORMS[a.platform].name;
   const browser = PLATFORMS[a.platform].mode === 'browser';
   const detail = (a.detail ?? '').replace(/\s+/g, ' ').trim();
   // Şifre/anahtar reddedildiyse "Yeniden bağlan" aynı bilgiyle tekrar dener ve sessizce yine düşer → bilgileri güncelleme formunu aç
+  // Yahoo: uygulama şifresi reddedildi (Yahoo birçok hesapta kapattı) → tarayıcı girişi. Aynı şifreyle yeniden deneme yok (kilitlenme riski)
+  if (a.platform === 'yahoo' && (a.status === 'error' || a.status === 'disconnected') && AUTH_FAIL.test(detail))
+    return {
+      title: 'Yahoo uygulama şifresini kabul etmedi',
+      how: 'Yahoo birçok hesapta uygulama şifresini kapattı. Açılan panelde “Yahoo ile giriş yap” de; normal şifrenle bir kez giriş yapman yeterli.',
+      label: 'Yahoo ile giriş yap',
+      action: 'panelOnly',
+      done: '',
+    };
   if ((a.status === 'error' || a.status === 'pairing' || a.status === 'disconnected') && credentialForm(a) && AUTH_FAIL.test(detail))
     return {
       title: 'Giriş bilgileri reddedildi',

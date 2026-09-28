@@ -160,6 +160,19 @@ Dil: arayüz ve yorumlar Türkçe.
 - **Albüm + galeri** (Conversation.tsx `toUnits`/`AlbumView`): aynı kişiden art arda ≥3 metinsiz görsel/video mesajı (aralar ≤3 dk) tek
   balonda 2 sütun ızgara (≤4 kare, "+N"); tüm platformlarda arayüz tarafında. Medya penceresi `Lightbox` sohbetteki tüm medya
   (`mediaList`) arasında ←/→ ve `.lb-nav` okları, "i / n" sayacı. Medyalı balon iç boşluğu 2 px (ince mor çerçeve).
+- **Alıntılı yanıt** (`Message.replyTo` {remoteId, senderName, text, fromMe}; DB `reply_to` JSON, COALESCE): arayüzde balonu sağa kaydır
+  (fare/dokunma sürükleme ya da trackpad yatay tekerlek, 64 px; `swipeProps`) ya da üzerine gelince "Yanıtla" → yazma alanında `.reply-bar`
+  (Esc iptal); balonda `.quote` (tıkla → o mesaja kaydır). `REPLY_PLATFORMS` (types.ts): WhatsApp (`sendMessage(..., {quoted})`, gelen
+  `contextInfo.stanzaId` → `quotedOf`), Telegram (`replyTo`, gelen `replyTo.replyToMsgId`), Instagram (`replied_to_item_id`, gelen
+  `replied_to_message`; strateji `canReply`), Slack (iş parçacığına: threadId), demo. `SendOptions.replyTo` = platform kimliği.
+- **Yahoo Mail**: varsayılan tarayıcı girişi (`connectors/browser/yahoo.ts`, mail.yahoo.com; `data-test-id` seçicileri + ARIA yedekleri,
+  çerez onayı, oturum çerezleri kalıcı; DOĞRULANMADI → ilk girişte günlükle ayarlanacak). Yahoo birçok hesapta uygulama şifresini kapattı,
+  IMAP normal şifreyi reddediyor. Token dosyası varsa IMAP (`MailConnector`). `registry.add('yahoo')` token'sız çağrılınca IMAP'i bozuk
+  Yahoo hesabının token'ını silip tarayıcı yoluna geçirir (kopya yok). Uyarı `panelOnly` (aynı şifreyle yeniden denemez → kilit riski).
+- **Sayaçlar** (App.tsx `baseList`): başlıktaki "N yeni" ve Okunmamış/Bekleyen sayıları listelenen kümeden (arşiv/iMessage klasörü/
+  e-posta klasörü/pazaryeri sekmesi dahil); eskiden hep gelen kutusundan hesaplanıyordu.
+- Sistem mesajı baş emojileri (🔒 🚫 ⏳ 🗑 ⚠; `SYSTEM_LEAD`) balonda da ikon (`bubbleText`). Kendi (mor) balonumda seçim beyaz zemin
+  (`.grp.me .bub ::selection`). SyncBar yüzdesi çubukla aynı hizada, dolan ucun üstünde.
 - **Web bildirimleri**: tarayıcı izni yalnız kullanıcı tıklamasıyla istenebilir (açılışta istenen sessizce engelleniyordu → sağ üstte
   sistem bildirimi çıkmıyordu); ilk `pointerdown`'da `requestWebNotify`; Ayarlar → Bildirimler'de izin durumu + "Deneme bildirimi".
 - **Kendi mesajının yankısı**: `store.isOwnEcho` (aynı sohbette ±3 dk, ≥12 kr. aynı metinli fromMe) → base.upsertMessage gelen saymaz (tüm

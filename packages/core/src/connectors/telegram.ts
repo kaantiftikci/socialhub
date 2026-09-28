@@ -9,8 +9,8 @@ import { TelegramClient, Api } from 'teleproto';
 import { StringSession } from 'teleproto/sessions/index.js';
 import { NewMessage, Raw, type NewMessageEvent } from 'teleproto/events/index.js';
 import { getPeerId } from 'teleproto/Utils.js';
-import { BaseConnector, type OutFile } from './base.js';
-import type { Reaction } from '../model.js';
+import { BaseConnector, type OutFile, type SendOptions } from './base.js';
+import type { Reaction, ReplyRef } from '../model.js';
 import { bus } from '../bus.js';
 import { FFMPEG_HINT } from '../platform.js';
 import { sessionDir, TELEGRAM_API_ID, TELEGRAM_API_HASH } from '../config.js';
@@ -232,14 +232,22 @@ export class TelegramConnector extends BaseConnector {
     }
   }
 
-  async sendText(remoteChatId: string, text: string): Promise<{ remoteId: string }> {
+  async sendText(remoteChatId: string, text: string, opts?: SendOptions): Promise<{ remoteId: string }> {
     if (!this.client) throw new Error('Telegram bağlı değil');
     const entity = await this.entityOf(remoteChatId);
-    const sent = await this.client.sendMessage(entity, { message: text });
+    // yanıt: Telegram mesaj kimliği sayısal (replyTo)
+    const replyId = opts?.replyTo && /^\d+$/.test(opts.replyTo) ? Number(opts.replyTo) : undefined;
+    const sent = await this.client.sendMessage(entity, { message: text, ...(replyId ? { replyTo: replyId } : {}) });
     const id = String(sent.id);
     this.offlineSoon();
-    this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent' });
+    this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent', replyTo: replyId ? this.replyRef(remoteChatId, String(replyId)) : undefined });
     return { remoteId: id };
+  }
+
+  /** Yanıtlanan mesaj bilgisi (depodan; yoksa yalnız kimlik) */
+  private replyRef(remoteChatId: string, remoteId: string): ReplyRef {
+    const q = this.store.getMessage(`${this.account.id}/${remoteChatId}#${remoteId}`);
+    return { remoteId, senderName: q ? (q.fromMe ? 'Sen' : q.senderName) : 'Mesaj', text: (q?.text || q?.attachments?.[0]?.name || '').slice(0, 160), fromMe: q?.fromMe };
   }
 
   /** Yeni sohbet: @kullanıcıadı, +telefon ya da sayısal kimlik → varlık çözülür, sohbet kimliği (kullanıcı id) döner */
@@ -559,6 +567,11 @@ export class TelegramConnector extends BaseConnector {
         // Boş dizi de yazılır: eski sürümün bağlantı önizlemesi için bıraktığı içi boş {kind:'other'} eki temizlensin
         attachments: attachments ?? undefined,
         reactions: tgReactions(m.reactions, chat.kind === 'direct' ? chatName : ''),
+        // gelen yanıt: hangi mesaja (replyTo.replyToMsgId) — alıntı kutusu depodaki metinle
+        replyTo: (() => {
+          const rid = (m.replyTo as { replyToMsgId?: number } | undefined)?.replyToMsgId;
+          return rid ? this.replyRef(remoteChatId, String(rid)) : undefined;
+        })(),
       },
       { live },
     );

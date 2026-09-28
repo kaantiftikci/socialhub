@@ -397,7 +397,7 @@ export function SyncBar({ progress, since, compact = false }: { progress: number
   return (
     <span className={`syncbar ${compact ? 'compact' : ''}`} role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
       <span className="fill" style={{ width: `${shown}%` }} />
-      <span className="pct" style={{ left: `min(calc(${shown}% - 6px), calc(100% - 34px))` }}>
+      <span className="pct" style={{ left: `clamp(0px, calc(${shown}% - 17px), calc(100% - 34px))` }}>
         {pct}%
       </span>
     </span>

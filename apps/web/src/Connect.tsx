@@ -33,7 +33,7 @@ const SLACK_MANIFEST = {
 const SLACK_APP_URL = `https://api.slack.com/apps?new_app=1&manifest_json=${encodeURIComponent(JSON.stringify(SLACK_MANIFEST))}`;
 
 /** Tarayıcı yolu olsa da önce uygulama şifresi (IMAP + anlık IDLE) formu açılan e-posta sağlayıcıları; tarayıcı girişi formda yedek */
-const MAIL_FORM_FIRST = new Set<Platform>(['gmail', 'icloud']);
+const MAIL_FORM_FIRST = new Set<Platform>(['gmail', 'icloud', 'yahoo']);
 const usesMailForm = (p: Platform) => PLATFORMS[p]?.mode === 'mail' || MAIL_FORM_FIRST.has(p);
 
 const UNOFFICIAL: Partial<Record<Platform, string>> = {
@@ -233,7 +233,7 @@ export function ConnectModal({
     <>
         {active?.endsWith(':choose') && (() => {
           const p = active.split(':')[0] as Platform;
-          const who = p === 'gmail' ? 'Google' : 'Apple';
+          const who = p === 'gmail' ? 'Google' : p === 'yahoo' ? 'Yahoo' : 'Apple';
           return (
             <div className="pairbox">
               <div style={{ flexGrow: 1 }}>
@@ -292,7 +292,7 @@ export function ConnectModal({
                   )}
                   {p === 'yahoo' && (
                     <>
-                      <a href="https://login.yahoo.com/myaccount/security/app-password/" target="_blank" rel="noreferrer" style={{ color: 'var(--v-txt)' }}><b>Yahoo uygulama şifresi sayfasını aç</b></a>, bir şifre üret ve buraya gir.
+                      <a href="https://login.yahoo.com/myaccount/security/app-password/" target="_blank" rel="noreferrer" style={{ color: 'var(--v-txt)' }}><b>Yahoo uygulama şifresi sayfasını aç</b></a>, bir şifre üret ve buraya gir. Yahoo birçok hesapta uygulama şifresini kapattı; sayfada seçenek yoksa aşağıdaki tarayıcı girişini kullan (normal şifrenle).
                     </>
                   )}
                   {p === 'icloud' && (
@@ -632,6 +632,11 @@ export function ConnectModal({
 
               {(activeAccount.status === 'error' || activeAccount.status === 'disconnected') && (
                 <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {activeAccount.platform === 'yahoo' && (
+                    <button className="btn lime b" onClick={() => void add('yahoo', { browser: true })} disabled={busy}>
+                      Yahoo ile giriş yap
+                    </button>
+                  )}
                   {(PLATFORMS[activeAccount.platform].mode === 'mail' || PLATFORMS[activeAccount.platform].category === 'shop' || /uygulama şifresi|giriş reddedildi/i.test(activeAccount.detail ?? '')) && (
                     <button className="btn primary b" onClick={() => editCredentials(activeAccount)}>
                       <Icon name="lock" size={14} sw={2} /> {PLATFORMS[activeAccount.platform].category === 'shop' ? 'Bilgileri güncelle' : 'Şifreyi güncelle'}

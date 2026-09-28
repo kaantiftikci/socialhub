@@ -42,7 +42,7 @@ const liveApi = {
   accountInput: (id: string, kind: 'phone' | 'code' | 'password', value: string) => call('POST', `/accounts/${enc(id)}/input`, { kind, value }),
   chats: () => call<Chat[]>('GET', '/chats'),
   messages: (chatId: string, limit = 100, before?: number) => call<Message[]>('GET', `/chats/${enc(chatId)}/messages?limit=${limit}${before ? `&before=${before}` : ''}`),
-  send: (chatId: string, text: string, threadId?: string) => call<{ remoteId: string }>('POST', `/chats/${enc(chatId)}/send`, { text, threadId }),
+  send: (chatId: string, text: string, threadId?: string, replyTo?: string) => call<{ remoteId: string }>('POST', `/chats/${enc(chatId)}/send`, { text, threadId, replyTo }),
   compose: (accountId: string, draft: { to: string; subject: string; text: string }) => call<Chat>('POST', `/accounts/${enc(accountId)}/compose`, draft),
   react: (chatId: string, messageId: string, emoji: string) => call<Message>('POST', `/chats/${enc(chatId)}/react`, { messageId, emoji }),
   setFlags: (chatId: string, flags: ChatFlags) => call<Chat>('POST', `/chats/${enc(chatId)}/flags`, flags),

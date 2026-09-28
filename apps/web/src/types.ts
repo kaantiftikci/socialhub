@@ -92,7 +92,12 @@ export interface Message {
   /** Slack iş parçacığı yanıtı: üst mesajın remoteId'si */
   threadId?: string;
   replyCount?: number;
+  /** Alıntılı yanıt: yanıtlanan mesaj (balonda alıntı kutusu) */
+  replyTo?: { remoteId: string; senderName: string; text: string; fromMe?: boolean };
 }
+
+/** Mesaja alıntılı yanıt verilebilen platformlar (sağa kaydır / Yanıtla); Slack'te yanıt iş parçacığına gider */
+export const REPLY_PLATFORMS = new Set<Platform>(['whatsapp', 'telegram', 'instagram', 'slack', 'demo']);
 
 export type CoreEvent =
   | { type: 'account.status'; account: Account }
@@ -165,7 +170,7 @@ export const PLATFORMS: Record<Platform, { name: string; code: string; color: st
   messenger: { name: 'Messenger', code: 'MS', color: '#0866FF', method: 'Tarayıcı oturumu', available: true, mode: 'browser' },
   gmail: { name: 'Gmail', code: 'GM', color: '#EA4335', method: 'Google hesabınla giriş', available: true, mode: 'browser', category: 'mail' },
   outlook: { name: 'Outlook', code: 'OL', color: '#0F6CBD', method: 'Tarayıcı girişi · Outlook web', available: true, mode: 'browser', category: 'mail' },
-  yahoo: { name: 'Yahoo Mail', code: 'YH', color: '#6001D2', method: 'Uygulama şifresi · anlık', available: true, mode: 'mail', category: 'mail' },
+  yahoo: { name: 'Yahoo Mail', code: 'YH', color: '#6001D2', method: 'Yahoo hesabınla giriş', available: true, mode: 'browser', category: 'mail' },
   yandex: { name: 'Yandex Mail', code: 'YA', color: '#FC3F1D', method: 'Uygulama şifresi · anlık', available: true, mode: 'mail', category: 'mail' },
   icloud: { name: 'iCloud Mail', code: 'IC', color: '#3693F3', method: 'Apple hesabınla giriş', available: true, mode: 'browser', category: 'mail' },
   imap: { name: 'Diğer e-posta', code: '@', color: '#4A4757', method: 'E-posta + şifre · kurumsal, Fastmail, GMX…', available: true, mode: 'mail', category: 'mail' },
@@ -231,6 +236,8 @@ export function openInAppLink(c: Chat): { href: string; label: string } | null {
       return { href: 'https://outlook.live.com/mail/0/', label };
     case 'icloud':
       return { href: 'https://www.icloud.com/mail/', label };
+    case 'yahoo':
+      return { href: 'https://mail.yahoo.com/', label };
     default:
       return c.link ? { href: c.link, label } : null;
   }

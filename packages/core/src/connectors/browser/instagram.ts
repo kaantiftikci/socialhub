@@ -488,7 +488,10 @@ export const instagram: Strategy = {
       const uid = String(it.user_id);
       const { text, attachments } = itemContent(it);
       const mine = uid === viewerId || it.is_sent_by_viewer === true;
+      // gelen/giden yanıt: replied_to_message { item_id, text?, user_id }
+      const rep: J | undefined = it.replied_to_message;
       return {
+        replyTo: rep?.item_id ? { remoteId: String(rep.item_id), text: typeof rep.text === 'string' ? rep.text : undefined } : undefined,
         status: mine ? (seenMs && tsMs(it.timestamp) <= seenMs ? ('read' as const) : ('sent' as const)) : ('delivered' as const),
         id: String(it.item_id),
         text,
@@ -528,13 +531,16 @@ export const instagram: Strategy = {
     });
   },
 
-  async send(page, cookies, threadId, text) {
+  canReply: true,
+  async send(page, cookies, threadId, text, opts) {
     const r = await ig(page, cookies, '/api/v1/direct_v2/threads/broadcast/text/', {
       action: 'send_item',
       client_context: String(Date.now()) + Math.floor(Math.random() * 1e6),
       mutation_token: String(Date.now()),
       text,
       thread_ids: `["${threadId}"]`,
+      // yanıt: web istemcisinin "Yanıtla"sı gibi yanıtlanan öğenin kimliği
+      ...(opts?.replyTo ? { replied_to_item_id: opts.replyTo } : {}),
     });
     return r?.payload?.item_id ? String(r.payload.item_id) : undefined;
   },

@@ -97,6 +97,17 @@ export interface Message {
   threadId?: string;
   /** Slack: bu mesajın iş parçacığındaki yanıt sayısı */
   replyCount?: number;
+  /** Alıntılı yanıt: yanıtlanan mesaj (WhatsApp/Telegram/Instagram) — balonda alıntı kutusu, tıklayınca o mesaja gider */
+  replyTo?: ReplyRef;
+}
+
+export interface ReplyRef {
+  /** yanıtlanan mesajın platform kimliği */
+  remoteId: string;
+  senderName: string;
+  /** kısaltılmış metin (ek ise ek adı) */
+  text: string;
+  fromMe?: boolean;
 }
 
 export interface Reaction {

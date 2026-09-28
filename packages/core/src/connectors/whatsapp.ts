@@ -7,11 +7,11 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as Baileys from '@whiskeysockets/baileys';
 import type { WASocket, WAMessage, Contact, proto, GroupMetadata } from '@whiskeysockets/baileys';
-import { BaseConnector, type OutFile, type StartOptions } from './base.js';
+import { BaseConnector, type OutFile, type SendOptions, type StartOptions } from './base.js';
 import { bus } from '../bus.js';
 import { FFMPEG_HINT } from '../platform.js';
 import { sessionDir } from '../config.js';
-import { chatId as chatIdOf, messageId as messageIdOf, type Attachment, type Message, type Participant } from '../model.js';
+import { chatId as chatIdOf, messageId as messageIdOf, type Attachment, type Message, type Participant, type ReplyRef } from '../model.js';
 import { macContacts } from '../contacts-mac.js';
 import { onUiInactive } from '../activity.js';
 import { newerVersion, TtlCache, useAtomicAuthState } from './wa-auth.js';
@@ -1027,16 +1027,55 @@ export class WhatsAppConnector extends BaseConnector {
     if (!hasIncoming) throw new Error(`WhatsApp hesabın yeni sohbet başlatma kısıtında (${new Date(this.reachoutUntil).toLocaleString('tr-TR')} tarihine dek); bu kişiye şimdilik ilk mesaj gönderilemez`);
   }
 
-  async sendText(remoteChatId: string, text: string): Promise<{ remoteId: string }> {
+  async sendText(remoteChatId: string, text: string, opts?: SendOptions): Promise<{ remoteId: string }> {
     if (!this.sock) throw new Error('WhatsApp bağlı değil');
     this.guardReachout(remoteChatId);
+    // Alıntılı yanıt: yanıtlanan mesaj depodan kurulur (WhatsApp alıntıyı key + mesaj içeriğiyle gönderir)
+    const target = opts?.replyTo ? this.store.getMessage(`${chatIdOf(this.account.id, this.canon(remoteChatId))}#${opts.replyTo}`) : undefined;
+    const quoted = target
+      ? ({
+          key: {
+            remoteJid: this.wireOf(this.canon(remoteChatId)),
+            id: target.remoteId,
+            fromMe: target.fromMe,
+            // grupta alıntının sahibi (karşı taraf) katılımcı kimliğiyle
+            ...(remoteChatId.endsWith('@g.us') && !target.fromMe ? { participant: this.participantOf(remoteChatId, target.senderId) } : {}),
+          },
+          message: { conversation: target.text || target.attachments?.[0]?.name || '' },
+        } as WAMessage)
+      : undefined;
     await this.gateSend();
-    const sent = await this.sock.sendMessage(remoteChatId, { text });
+    const sent = await this.sock.sendMessage(remoteChatId, { text }, quoted ? { quoted } : undefined);
     this.rememberSent(sent);
     this.afterActivity('gönderim');
     const id = sent?.key.id ?? `local-${Date.now()}`;
-    this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent' });
+    const replyTo = target ? { remoteId: target.remoteId, senderName: target.fromMe ? 'Sen' : target.senderName, text: (target.text || target.attachments?.[0]?.name || '').slice(0, 160), fromMe: target.fromMe } : undefined;
+    this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent', replyTo });
     return { remoteId: id };
+  }
+
+  /** Gelen mesajın alıntısı (contextInfo.stanzaId + quotedMessage): yanıtlanan mesaj bilgisi; depoda varsa oradan ad/metin */
+  private quotedOf(content: proto.IMessage | undefined, jid: string): ReplyRef | undefined {
+    if (!content) return undefined;
+    let ctx: proto.IContextInfo | null | undefined;
+    for (const v of Object.values(content)) {
+      const c = (v as { contextInfo?: proto.IContextInfo | null } | null)?.contextInfo;
+      if (c?.stanzaId) {
+        ctx = c;
+        break;
+      }
+    }
+    if (!ctx?.stanzaId) return undefined;
+    const stored = this.store.getMessage(`${chatIdOf(this.account.id, jid)}#${ctx.stanzaId}`);
+    const qText = textOf(unwrap(ctx.quotedMessage ?? undefined)) || attachmentsOf(unwrap(ctx.quotedMessage ?? undefined))[0]?.name || '';
+    const who = ctx.participant ? this.canon(jidNormalizedUser(ctx.participant)) : undefined;
+    const fromMe = stored?.fromMe ?? (who ? this.isMe(who) : false);
+    return {
+      remoteId: ctx.stanzaId,
+      senderName: fromMe ? 'Sen' : stored?.senderName || (who ? this.nameOf(who) : '') || 'Mesaj',
+      text: (stored?.text || qText || stored?.attachments?.[0]?.name || '').slice(0, 160),
+      fromMe,
+    };
   }
 
   /**
@@ -1867,6 +1906,7 @@ export class WhatsAppConnector extends BaseConnector {
         ts: toMs(m.messageTimestamp) || Date.now(),
         status: m.key.fromMe ? waStatus(m.status) : 'delivered',
         attachments: attachments.length ? attachments : undefined,
+        replyTo: this.quotedOf(content, jid),
       },
       { live },
     );

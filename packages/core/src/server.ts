@@ -314,15 +314,20 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     return { added: await c.loadMoreChats(), supported: true };
   });
   /** Metin gönderimi (anlık /send ve zamanlanmış gönderim aynı yoldan: güvenlik sınırları, hata metni) */
-  const sendTextNow = async (id: string, text: string, threadId?: string) => {
+  const sendTextNow = async (id: string, text: string, threadId?: string, replyTo?: string) => {
     const chat = store.getChat(id);
     if (!chat) throw new HttpError(404, 'Sohbet yok');
     if (!text) throw new HttpError(400, 'Boş mesaj');
     const c = registry.get(chat.accountId);
     if (!c) throw new HttpError(409, 'Hesap bağlı değil');
     guardSend(chat, text);
+    const opts = {
+      ...(threadId ? { threadId: String(threadId).slice(0, 64) } : {}),
+      // yanıtlanan mesaj (platform kimliği): WhatsApp alıntı, Telegram reply, Instagram replied_to
+      ...(replyTo ? { replyTo: String(replyTo).slice(0, 200) } : {}),
+    };
     try {
-      return await c.sendText(chat.remoteId, text, threadId ? { threadId: String(threadId).slice(0, 64) } : undefined);
+      return await c.sendText(chat.remoteId, text, Object.keys(opts).length ? opts : undefined);
     } catch (e) {
       // gönderim hatası kullanıcıya anlamlı dönsün (oturum düşmüş, alıcı yok…); ayrıntı yine günlükte
       bus.log('warn', `${chat.platform} gönderilemedi: ${(e as Error).message.split('\n')[0].slice(0, 300)}`);
@@ -330,8 +335,8 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     }
   };
   route('POST', '/api/chats/:id/send', async (_r, _s, p, body) => {
-    const b = body as { text?: string; threadId?: string };
-    return sendTextNow(dec(p.id), String(b.text ?? '').trim(), b.threadId);
+    const b = body as { text?: string; threadId?: string; replyTo?: string };
+    return sendTextNow(dec(p.id), String(b.text ?? '').trim(), b.threadId, typeof b.replyTo === 'string' ? b.replyTo : undefined);
   });
   // Zamanlanmış gönderim: çekirdekte tutulur, arayüz kapalıyken de gider (bkz. scheduled.ts)
   route('GET', '/api/scheduled', (req) => {

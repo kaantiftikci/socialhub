@@ -3,10 +3,28 @@ import { EmojiPicker } from './emoji';
 import { api, USE_STATIC } from './api';
 import { EventEditor } from './CalendarView';
 import { API_BASE, mediaUrl, openExternal } from './desktop';
-import { DEFAULT_TAGS, PLATFORMS, isOrderPage, questionOrderRef, shopKind, QUICK_REACTIONS, REACT_PLATFORMS, TAG_COLORS, openInAppLink, type Attachment, type CalendarDraft, type Chat, type ChatFlags, type DraftResult, type LinkPreview, type Message, type Reaction } from './types';
+import { DEFAULT_TAGS, PLATFORMS, REPLY_PLATFORMS, isOrderPage, questionOrderRef, shopKind, QUICK_REACTIONS, REACT_PLATFORMS, TAG_COLORS, openInAppLink, type Attachment, type CalendarDraft, type Chat, type ChatFlags, type DraftResult, type LinkPreview, type Message, type Reaction } from './types';
 import { guessWhen } from './when';
 import { useAiPrefs } from './ai-prefs';
-import { useClosing, Avatar, Chip, Icon, IconText, Resizer, Tag, ago, fmtDay, fmtStamp, fmtTime } from './ui';
+import { useClosing, Avatar, Chip, Icon, IconText, Resizer, Tag, ago, fmtDay, fmtStamp, fmtTime, leadIcon } from './ui';
+
+/** Bağlayıcıların yazdığı sistem mesajı baş emojileri (kullanıcıların nadiren mesaja başladığı): balonda ikon olarak çizilir */
+const SYSTEM_LEAD = new Set(['🔒', '🚫', '⏳', '⌛', '🗑', '⚠']);
+
+/** Balon metni: sistem mesajıysa baştaki emoji ikon ("🔒 Tek seferlik fotoğraf…"), değilse olduğu gibi (bağlantılar tıklanır) */
+function bubbleText(text: string) {
+  const first = Array.from(text)[0] ?? '';
+  const lead = SYSTEM_LEAD.has(first) ? leadIcon(text) : undefined;
+  if (!lead?.icon || lead.prefix) return linkify(text);
+  return (
+    <>
+      <span className="lead-ic" aria-hidden="true">
+        <Icon name={lead.icon} size={14} />
+      </span>
+      {linkify(lead.rest)}
+    </>
+  );
+}
 
 type Tone = 'default' | 'short' | 'formal' | 'en';
 
@@ -286,6 +304,66 @@ export function Conversation({
   const endRef = useRef<HTMLDivElement>(null);
   const msgsRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  /** Yanıtlanan mesaj (sağa kaydır / Yanıtla): yazma alanının üstünde çubuk, gönderimde alıntılı yanıt */
+  const [replyTarget, setReplyTarget] = useState<Message | null>(null);
+  useEffect(() => setReplyTarget(null), [chat.id]);
+  const canReplyChat = REPLY_PLATFORMS.has(chat.platform);
+  const startReply = useCallback((m: Message) => {
+    setReplyTarget(m);
+    requestAnimationFrame(() => taRef.current?.focus());
+  }, []);
+  /** Sağa kaydırarak yanıt: dokunmatik/fare sürükleme ya da trackpad yatay kaydırması; 64 px'i geçince yanıt modu */
+  const swipe = useRef<{ id: string; x0: number; y0: number; dx: number; el: HTMLElement | null; wheelT?: number }>({ id: '', x0: 0, y0: 0, dx: 0, el: null });
+  const swipeProps = (m: Message) => {
+    const set = (el: HTMLElement | null, dx: number) => {
+      if (!el) return;
+      el.style.transform = dx ? `translateX(${Math.min(90, dx)}px)` : '';
+      el.classList.toggle('swiping', dx > 0);
+      el.classList.toggle('swipe-ready', dx >= 64);
+    };
+    const done = () => {
+      const s = swipe.current;
+      if (s.dx >= 64) startReply(m);
+      if (s.el) {
+        s.el.style.transition = 'transform .18s ease';
+        set(s.el, 0);
+        const el = s.el;
+        window.setTimeout(() => (el.style.transition = ''), 200);
+      }
+      swipe.current = { id: '', x0: 0, y0: 0, dx: 0, el: null };
+    };
+    return {
+      onPointerDown: (e: React.PointerEvent<HTMLElement>) => {
+        if (e.button !== 0 || (e.target as HTMLElement).closest('button, a, video, audio, input, textarea')) return;
+        swipe.current = { id: m.id, x0: e.clientX, y0: e.clientY, dx: 0, el: e.currentTarget };
+      },
+      onPointerMove: (e: React.PointerEvent<HTMLElement>) => {
+        const s = swipe.current;
+        if (s.id !== m.id) return;
+        const dx = e.clientX - s.x0;
+        // dikey kaydırma ya da metin seçimi: iptal
+        if (Math.abs(e.clientY - s.y0) > 24 && s.dx < 12) return void (swipe.current = { id: '', x0: 0, y0: 0, dx: 0, el: null });
+        if (dx > 8 && !window.getSelection()?.toString()) {
+          s.dx = dx;
+          set(s.el, dx);
+        }
+      },
+      onPointerUp: () => swipe.current.id === m.id && done(),
+      onPointerCancel: () => swipe.current.id === m.id && done(),
+      onPointerLeave: () => swipe.current.id === m.id && swipe.current.dx > 0 && done(),
+      // Mac trackpad: iki parmakla sağa kaydırma yatay tekerlek olayı (deltaX < 0) üretir
+      onWheel: (e: React.WheelEvent<HTMLElement>) => {
+        if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+        const s = swipe.current;
+        if (s.id !== m.id) swipe.current = { id: m.id, x0: 0, y0: 0, dx: 0, el: e.currentTarget };
+        const cur = swipe.current;
+        cur.dx = Math.max(0, cur.dx - e.deltaX);
+        set(cur.el, cur.dx);
+        window.clearTimeout(cur.wheelT);
+        cur.wheelT = window.setTimeout(done, 140);
+      },
+    };
+  };
   /** Slack iş parçacığı odağı: üst mesajın remoteId'si (yalnız o mesaj + yanıtları listelenir, gönderim thread'e gider) */
   const [threadFocus, setThreadFocus] = useState<string | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -692,14 +770,19 @@ export function Conversation({
     const body = (text || draftShown?.draft || '').trim();
     if (!body) return;
     const chatId = chat.id;
-    const threadId = threadFocus ?? undefined;
+    // yanıt: Slack'te iş parçacığına, diğerlerinde alıntılı yanıt (platform kimliğiyle)
+    const rt = replyTarget;
+    const threadId = threadFocus ?? (rt && chat.platform === 'slack' ? rt.threadId ?? rt.remoteId : undefined);
+    const replyTo = rt && chat.platform !== 'slack' ? rt.remoteId : undefined;
+    const quote = rt && replyTo ? { remoteId: rt.remoteId, senderName: rt.fromMe ? 'Sen' : rt.senderName, text: (rt.text || rt.attachments?.[0]?.name || '').slice(0, 160), fromMe: rt.fromMe } : undefined;
     const id = `out-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    setOutbox((x) => [...x, { id, chatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text: body, ts: Date.now(), status: 'pending', threadId }]);
+    setOutbox((x) => [...x, { id, chatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text: body, ts: Date.now(), status: 'pending', threadId, replyTo: quote }]);
     setText('');
     setDraft(null);
+    setReplyTarget(null);
     // art arda gönderimler sırasını korusun (her biri bir öncekini bekler; arayüz beklemez). Zincir modül düzeyinde,
     // sohbet kimliğine göre: sohbetten çıkıp dönünce yeni mesaj yoldaki eskisini geçmesin
-    const run = (sendChains.get(chatId) ?? Promise.resolve()).then(() => api.send(chatId, body, threadId));
+    const run = (sendChains.get(chatId) ?? Promise.resolve()).then(() => api.send(chatId, body, threadId, replyTo));
     const tail = run.catch(() => undefined);
     sendChains.set(chatId, tail);
     void tail.then(() => {
@@ -718,6 +801,11 @@ export function Conversation({
   }
 
   function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Escape' && replyTarget) {
+      e.preventDefault(); // sohbet kapanmasın, yalnız yanıt iptal
+      setReplyTarget(null);
+      return;
+    }
     if (e.key === 'Tab' && draftShown && !text.trim()) {
       e.preventDefault();
       setText(draftShown.draft);
@@ -906,11 +994,12 @@ export function Conversation({
                       );
                     }
                     const { m, i } = u;
+                    const replyable = canReplyChat && !m.remoteId.startsWith('local-') && !m.remoteId.startsWith('out-') && !m.id.startsWith('out-');
                     const isReact = /^(👍|❤️|😂|🔥|👏|😮) .+ (bir mesajı beğendi|mesajına tepki verdi)$/.test(m.text);
                     const parent = m.threadId ? byRemote.get(m.threadId) : undefined;
                     const url = !isReact && !m.attachments?.length ? firstUrl(m.text) : undefined;
                     return (
-                      <div key={m.id} data-mid={m.id} className={`bwrap ${g.fromMe ? 'me' : ''}`}>
+                      <div key={m.id} data-mid={m.id} className={`bwrap ${g.fromMe ? 'me' : ''}`} {...(replyable && !isReact ? swipeProps(m) : {})}>
                         {m.threadId && !threadFocus && (
                           <button type="button" className="tq b" onClick={() => setThreadFocus(m.threadId!)} title="İş parçacığını aç">
                             <Icon name="reply" size={12} sw={2} />
@@ -919,6 +1008,24 @@ export function Conversation({
                           </button>
                         )}
                         <div className={`bub ${g.items.length === 1 ? 'first last' : i === 0 ? 'first' : i === g.items.length - 1 ? 'last' : 'mid'} ${isReact ? 'react' : ''}`}>
+                          {m.replyTo && (
+                            // alıntı: tıklayınca yanıtlanan mesaja kaydır ve vurgula
+                            <button
+                              type="button"
+                              className={`quote b ${m.replyTo.fromMe ? 'mine' : ''}`}
+                              onClick={() => {
+                                const el = document.querySelector<HTMLElement>(`[data-mid="${CSS.escape(`${chat.id}#${m.replyTo!.remoteId}`)}"]`);
+                                if (!el) return notify('Yanıtlanan mesaj yüklenmemiş (daha eski)');
+                                el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                                el.classList.remove('flash');
+                                void el.offsetWidth;
+                                el.classList.add('flash');
+                              }}
+                            >
+                              <b>{m.replyTo.fromMe ? 'Sen' : m.replyTo.senderName}</b>
+                              <span>{m.replyTo.text || 'Mesaj'}</span>
+                            </button>
+                          )}
                           {m.attachments?.map((a, j) => (
                             <AttachmentView key={j} a={a} onOpen={setLightbox} />
                           ))}
@@ -932,13 +1039,13 @@ export function Conversation({
                             if (m.text && m.attachments?.length)
                               return (
                                 <span className="bub-text">
-                                  {linkify(m.text)}
+                                  {bubbleText(m.text)}
                                   {timeEl}
                                 </span>
                               );
                             return (
                               <>
-                                {m.text ? linkify(m.text) : null}
+                                {m.text ? bubbleText(m.text) : null}
                                 {timeEl}
                               </>
                             );
@@ -962,6 +1069,11 @@ export function Conversation({
                         )}
                         {!isReact &&
                           [
+                            replyable && (
+                              <button key="y" type="button" className="rtrig" aria-label="Yanıtla" title="Yanıtla (ya da balonu sağa kaydır)" onClick={() => (startReply(m), setBarFor(null))}>
+                                <Icon name="reply" size={14} />
+                              </button>
+                            ),
                             (canReact || chat.platform === 'slack') && (
                               <button key="r" type="button" className={`rtrig ${barFor === m.id ? 'on' : ''}`} aria-label={canReact ? 'Tepki ver' : 'Hızlı işlemler'} title={canReact ? 'Tepki ver' : 'Hızlı işlemler'} onClick={() => (setBarFor(barFor === m.id ? null : m.id), setReactPick(null))}>
                                 <Icon name={canReact ? 'smile' : 'thread'} size={15} />
@@ -1158,6 +1270,18 @@ export function Conversation({
                 {pending.voice && pending.url ? <audio src={pending.url} controls preload="metadata" /> : <span>{fmtSize(pending.file.size)} · Gönder ile gider; yazdığın metin açıklama olur</span>}
               </span>
               <button className="btn ghost xs icon b" onClick={clearPending} aria-label="Eki kaldır" title="Eki kaldır">
+                <Icon name="x" size={13} sw={2} />
+              </button>
+            </div>
+          )}
+          {replyTarget && (
+            <div className="reply-bar">
+              <Icon name="reply" size={14} sw={2} />
+              <span className="rb-body">
+                <b>{replyTarget.fromMe ? 'Kendine' : replyTarget.senderName} yanıt veriyorsun</b>
+                <span>{replyTarget.text || replyTarget.attachments?.[0]?.name || 'Mesaj'}</span>
+              </span>
+              <button className="btn ghost xs icon b" onClick={() => setReplyTarget(null)} aria-label="Yanıtı iptal et" title="İptal (Esc)">
                 <Icon name="x" size={13} sw={2} />
               </button>
             </div>

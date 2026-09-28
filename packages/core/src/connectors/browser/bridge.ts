@@ -55,6 +55,8 @@ export interface Msg {
   /** Slack iş parçacığı: üst mesajın kimliği / yanıt sayısı */
   threadId?: string;
   replyCount?: number;
+  /** Alıntılı yanıt: yanıtlanan mesajın kimliği (ad/metin verilmezse depodan doldurulur) */
+  replyTo?: { remoteId: string; senderName?: string; text?: string };
 }
 
 /** Sayfasız (tarayıcısız) modda stratejiye verilen sahte sayfanın taşıdığı istek bağlamı */
@@ -92,6 +94,8 @@ export interface Strategy {
   keepVisible?: boolean;
   /** Yoklama bitince sayfayı about:blank'e al (ağır siteler boşta bellek tutmasın); strateji her çağrıda kendi sayfasına döner */
   unloadWhenIdle?: boolean;
+  /** send() opts.replyTo ile alıntılı yanıt gönderebilir (Instagram) */
+  canReply?: boolean;
   /** Giriş yapılmış mı? (çerezler Node tarafında okunur, sayfa da verilir) */
   /** passive=true: görünür giriş penceresi açıkken çağrılır — sayfayı YÖNLENDİRME, yalnızca çerez/URL'ye bak (kullanıcının girişini bölmemek için) */
   loggedIn(page: Page, cookies: Record<string, string>, passive?: boolean): Promise<boolean>;
@@ -729,8 +733,19 @@ export class BrowserConnector extends BaseConnector {
   async sendText(remoteChatId: string, text: string, opts?: SendOptions): Promise<{ remoteId: string }> {
     if (!this.pageless && !(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
     const id = (await this.urgent(async () => this.run((p, c) => this.strategy.send(p, c, remoteChatId, text, opts)))) ?? `local-${Date.now()}`;
-    this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent', threadId: opts?.threadId });
+    const replyTo = opts?.replyTo && this.strategy.canReply ? { remoteId: opts.replyTo, ...this.replyInfo(remoteChatId, opts.replyTo) } : undefined;
+    this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent', threadId: opts?.threadId, replyTo });
     return { remoteId: id };
+  }
+
+  /** Yanıtlanan mesajın adı/metni depodan (strateji yalnız kimlik verdiyse doldurmak için) */
+  private replyInfo(remoteChatId: string, remoteId: string, given?: { senderName?: string; text?: string }): { senderName: string; text: string; fromMe?: boolean } {
+    const q = this.store.getMessage(`${this.account.id}/${remoteChatId}#${remoteId}`);
+    return {
+      senderName: q ? (q.fromMe ? 'Sen' : q.senderName) : given?.senderName || 'Mesaj',
+      text: (q?.text || q?.attachments?.[0]?.name || given?.text || '').slice(0, 160),
+      fromMe: q?.fromMe,
+    };
   }
 
   async react(remoteChatId: string, remoteMsgId: string, emoji: string, remove: boolean): Promise<void> {
@@ -1107,6 +1122,7 @@ export class BrowserConnector extends BaseConnector {
         reactions: m.reactions,
         threadId: m.threadId,
         replyCount: m.replyCount,
+        replyTo: m.replyTo ? { ...m.replyTo, ...this.replyInfo(threadId, m.replyTo.remoteId, m.replyTo) } : undefined,
       },
       { live, bump: false },
     );

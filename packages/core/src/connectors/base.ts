@@ -15,6 +15,8 @@ export interface StartOptions {
 
 export interface SendOptions {
   threadId?: string;
+  /** Yanıtlanan mesajın platform kimliği (remoteId): destekleyen platformda alıntılı yanıt olarak gider */
+  replyTo?: string;
 }
 
 /** Yeni e-posta (Kime / Konu / Metin) */
