@@ -526,6 +526,18 @@ export class Store {
     return rows.map((r) => r.id);
   }
 
+  /** Hesabın belirli adlı sohbetlerini (ve mesajlarını) sil — hatalı sürümün ürettiği boş kayıtları temizlemek için */
+  dropChatsNamed(accountId: string, name: string): number {
+    const ids = (this.db.prepare('SELECT id FROM chats WHERE account_id = ? AND name = ?').all(accountId, name) as Array<{ id: string }>).map((r) => r.id);
+    this.transaction(() => {
+      for (const id of ids) {
+        this.db.prepare('DELETE FROM messages WHERE chat_id = ?').run(id);
+        this.db.prepare('DELETE FROM chats WHERE id = ?').run(id);
+      }
+    });
+    return ids.length;
+  }
+
   /** Aynı sohbette, aynı gönderenden, ±10 sn içinde aynı yer tutucu metinli başka kimlikli mesaj (WhatsApp tek seferlik medya ikizi) */
   findTwin(chatId: string, remoteId: string, fromMe: boolean, senderId: string, text: string, ts: number): Message | undefined {
     const r = this.db

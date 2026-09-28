@@ -45,37 +45,62 @@ interface YandexRow {
   time: string;
 }
 
-/** Liste satırlarını oku (threads ve messages aynı anahtarı üretsin diye tek yerde) */
+/** Liste satırlarını oku (threads ve messages aynı anahtarı üretsin diye tek yerde). Seçiciler satırın iç parçalarını da
+ *  yakalayabildiği için yalnız EN DIŞTAKİ ve metni olan eşleşmeler satır sayılır; alan seçicileri tutmazsa satır metninin
+ *  satırlarından (gönderen / konu / özet, saat satırları hariç) çıkarılır. */
 function readRows(page: Page): Promise<YandexRow[]> {
   return page.evaluate((sel) => {
     const q = (el: Element, s: string) => el.querySelector<HTMLElement>(s);
     const out: YandexRow[] = [];
     const seen = new Map<string, number>();
-    for (const el of Array.from(document.querySelectorAll<HTMLElement>(sel))) {
-      const lines = el.innerText.split('\n').map((t) => t.trim()).filter(Boolean);
-      const senderEl = q(el, '.mail-MessageSnippet-FromText, [class*="FromText"], [data-testid*="sender" i]');
+    const all = Array.from(document.querySelectorAll<HTMLElement>(sel));
+    const rows = all.filter((el) => !all.some((o) => o !== el && o.contains(el)) && el.innerText.trim().length > 0);
+    const isTime = (t: string) => /^(\d{1,2}[:.]\d{2}|\d{1,2}[./]\d{1,2}([./]\d{2,4})?|\d{1,2}\s+\p{L}{3,}\.?(\s+\d{4})?|dün|yesterday|вчера)$/iu.test(t);
+    for (const el of rows) {
+      const lines = el.innerText.split('\n').map((t) => t.trim()).filter((t) => t.length > 1 && !isTime(t));
+      const senderEl = q(el, '.mail-MessageSnippet-FromText, [class*="FromText"], [class*="_from" i] [title*="@"], [title*="@"]');
       const sender = (senderEl?.innerText || lines[0] || '').trim();
-      const senderEmail = senderEl?.getAttribute('title') ?? '';
-      const subject = (q(el, '.mail-MessageSnippet-Item_subject, [class*="Item_subject"], [data-testid*="subject" i]')?.innerText || lines[1] || '(konu yok)').trim();
-      const snippet = (q(el, '.mail-MessageSnippet-Item_firstline, [class*="firstline"], [data-testid*="firstline" i]')?.innerText || lines.slice(2).join(' ')).trim();
-      const timeEl = q(el, '.mail-MessageSnippet-Item_dateText, [class*="dateText"], time');
-      const time = (timeEl?.getAttribute('title') || timeEl?.getAttribute('datetime') || timeEl?.innerText || '').trim();
+      const senderEmail = (senderEl?.getAttribute('title') ?? '').match(/[\w.+-]+@[\w.-]+\.\w+/)?.[0] ?? '';
+      const subjEl = q(el, '.mail-MessageSnippet-Item_subject, [class*="Item_subject"], [class*="subject" i]');
+      const subject = (subjEl?.innerText || lines.find((l, i) => i > 0 && l !== sender) || '').trim();
+      const snipEl = q(el, '.mail-MessageSnippet-Item_firstline, [class*="firstline" i], [class*="snippet" i]:not(a)');
+      const snippet = (snipEl?.innerText || lines.filter((l) => l !== sender && l !== subject).join(' ')).trim();
+      const timeEl = q(el, '.mail-MessageSnippet-Item_dateText, [class*="dateText"], [class*="date" i][title], time');
+      const time = (timeEl?.getAttribute('title') || timeEl?.getAttribute('datetime') || timeEl?.innerText || el.innerText.split('\n').map((t) => t.trim()).find(isTime) || '').trim();
       const unread =
         /is-unread|_unread|unread/i.test(el.className) ||
-        !!q(el, '.mail-MessageSnippet-Item_unread, [class*="_unread"], [aria-label*="okunmadı" i], [title*="Okundu olarak" i], [title*="Mark as read" i]');
-      // kararlı anahtar: ileti bağlantısı (#message/<id> ya da /message/<id>); yoksa içerik (zaman hariç)
-      const href = el.getAttribute('href') ?? el.querySelector('a[href*="message"]')?.getAttribute('href') ?? '';
-      let key = (href.match(/message[s]?\/([^/?#]+)/) ?? [])[1] ?? el.getAttribute('data-id') ?? '';
+        !!q(el, '.mail-MessageSnippet-Item_unread, [class*="_unread"], [class*="Unread"], [aria-label*="okunmadı" i], [title*="Okundu olarak" i], [title*="Mark as read" i]');
+      // kararlı anahtar: ileti bağlantısı (#message/<id>, /message/<id>, /thread/<id>); yoksa içerik (zaman hariç)
+      const href = el.getAttribute('href') ?? el.querySelector('a[href*="message"], a[href*="thread"]')?.getAttribute('href') ?? '';
+      let key = (href.match(/(?:message|thread)[s]?\/([^/?#]+)/) ?? [])[1] ?? el.getAttribute('data-id') ?? '';
       if (!key) {
         const base = 'c:' + [sender, subject, snippet.slice(0, 60)].join('|').slice(0, 200);
         const n = seen.get(base) ?? 0;
         seen.set(base, n + 1);
         key = n ? `${base}#${n}` : base;
       }
-      out.push({ key, unread, sender, senderEmail, subject, snippet, time });
+      out.push({ key, unread, sender, senderEmail, subject, snippet: snippet.slice(0, 300), time });
     }
     return out;
   }, ROW_SEL);
+}
+
+let diagDone = false;
+/** Tanı (bir kez, içerik yok): hangi seçici kaç öğe buldu, ilk satırın yapısı (etiket, sınıf, data-testid'ler) */
+async function diagnose(page: Page): Promise<void> {
+  if (diagDone) return;
+  diagDone = true;
+  const d = await page
+    .evaluate((sel) => {
+      const counts = sel.split(',').map((x) => `${x.trim().slice(0, 40)}=${document.querySelectorAll(x).length}`);
+      const first = document.querySelector<HTMLElement>(sel);
+      const desc = (e: Element | null) => (e ? `${e.tagName.toLowerCase()}.${String(e.className).slice(0, 80)}` : '-');
+      const inner = first ? Array.from(first.querySelectorAll('[class]')).slice(0, 25).map((e) => String(e.className).split(' ')[0]).filter(Boolean) : [];
+      const tids = first ? Array.from(first.querySelectorAll('[data-testid]')).map((e) => e.getAttribute('data-testid')).slice(0, 15) : [];
+      return { counts, row: desc(first), parent: desc(first?.parentElement ?? null), inner: [...new Set(inner)], tids };
+    }, ROW_SEL)
+    .catch((e) => ({ error: String(e).slice(0, 100) }));
+  bus.log('info', `Yandex Mail tanı: ${JSON.stringify(d)}`);
 }
 
 /** Satırı aç, iletileri oku; restore=true ise (yoklama) okunmamış satır sonra yeniden okunmadı yapılır */
@@ -183,7 +208,14 @@ export const yandex: Strategy = {
     bus.log('info', `Yandex Mail: ${n} oturum çerezi kalıcı yapıldı (görünmez tarayıcıda oturum sürsün diye)`);
   },
 
-  async me(page) {
+  async me(page, cookies) {
+    // Yandex oturum çerezi giriş adını taşır (yandex_login) — sayfa seçicisinden güvenilir
+    const login = decodeURIComponent(cookies?.yandex_login ?? '').trim();
+    if (/^[\w.+-]+(@[\w.-]+)?$/.test(login)) {
+      const email = login.includes('@') ? login : `${login}@yandex.com`;
+      meEmail = email.toLowerCase();
+      return { id: meEmail, label: email };
+    }
     await openMail(page);
     const email = await page
       .evaluate(() => {
@@ -200,7 +232,7 @@ export const yandex: Strategy = {
     return { id: meEmail || 'yandex', label: email || 'Yandex Mail' };
   },
 
-  async threads(page): Promise<Thread[]> {
+  async threads(page, cookies): Promise<Thread[]> {
     const r = await openMail(page);
     if (r === 'signin') throw new Error('Yandex oturumu düşmüş (giriş sayfası açılıyor) — kanal uyarısından Yeniden bağlan');
     if (!r) {
@@ -208,7 +240,8 @@ export const yandex: Strategy = {
       return [];
     }
     await persistSessionCookies(page.context(), YANDEX_COOKIE_DOMAINS).catch(() => 0);
-    if (!meEmail) await this.me(page, {});
+    if (!meEmail) await this.me(page, cookies);
+    await diagnose(page);
     const rows = await readRows(page);
     return rows.map((row) => {
       const parsed = parseOutlookDate(row.time) ?? Date.parse(row.time);

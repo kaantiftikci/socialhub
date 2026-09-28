@@ -233,7 +233,7 @@ export class N11Connector extends BaseConnector {
   async start(_opts: StartOptions = {}): Promise<void> {
     this.stopping = false;
     if (!this.cfg) return this.setStatus('error', 'n11 App Key / App Secret girilmedi');
-    if (!this.account.label || this.account.label === 'n11') this.account.label = `n11 · ${this.cfg.appKey.slice(0, 8)}…`;
+    if (!this.account.label || /^n11$/i.test(this.account.label)) this.account.label = `n11 · ${this.cfg.appKey.slice(0, 8)}…`;
     this.setStatus('connecting');
     try {
       await this.poll(true);

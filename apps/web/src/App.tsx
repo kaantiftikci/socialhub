@@ -1804,7 +1804,8 @@ function accountIssue(a: Account): { title: string; how: string; label: string; 
 /** Kanal satırında platform adının yanında gösterilecek hesap tanıtıcısı (@kullanıcı, +numara, ad) */
 function handleOf(a: Account): string {
   const pn = PLATFORMS[a.platform].name.toLowerCase();
-  const label = (a.label ?? '').trim();
+  // "Trendyol · 12345" → "12345" (platform adı zaten satırda yazıyor)
+  const label = (a.label ?? '').trim().replace(new RegExp(`^${PLATFORMS[a.platform].name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*·\\s*`, 'i'), '');
   if (label && !/^(error|hata)$|^olk-|pivot/i.test(label) && label.toLowerCase() !== pn && label.toLowerCase() !== a.platform) return label;
   if (a.status === 'connected' && a.detail && /^[+@]/.test(a.detail)) return a.detail;
   return '';

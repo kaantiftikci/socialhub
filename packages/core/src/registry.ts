@@ -316,6 +316,13 @@ export class Registry {
         }
         // Yandex: aynı şekilde token'sız hesap = tarayıcı girişi (normal şifre + Yandex doğrulaması; uygulama şifresi gerekmez)
         if (account.platform === 'yandex' && !fs.existsSync(tokenFile)) {
+          // ilk sürümün seçicileri satır parçalarını ayrı ileti sayıyordu → boş "(konu yok)" sohbetleri; bir kez temizle
+          const mark = path.join(sessionDir(account.id), 'prune-v1');
+          if (!fs.existsSync(mark)) {
+            const n = this.store.dropChatsNamed(account.id, '(konu yok)');
+            if (n) bus.log('info', `Yandex Mail: ${n} hatalı boş sohbet temizlendi`);
+            fs.writeFileSync(mark, '');
+          }
           c = new BrowserConnector(account, this.store, yandex, 30_000, { idlePollMs: 90_000, keepOpen: 'whileActive' });
           break;
         }

@@ -190,7 +190,7 @@ export class HepsiburadaConnector extends BaseConnector {
     this.stopping = false;
     if (!this.cfg.merchantId || !this.cfg.username || !this.cfg.password) return this.setStatus('error', 'Hepsiburada merchant ID / kullanıcı adı / şifre girilmedi');
     this.setStatus('connecting');
-    this.account.label = this.account.label && this.account.label !== 'Hepsiburada' ? this.account.label : `Hepsiburada · ${this.cfg.username}`;
+    this.account.label = this.account.label && !/^hepsiburada$/i.test(this.account.label) ? this.account.label : `Hepsiburada · ${this.cfg.username}`;
     try {
       await this.poll(true);
       this.setStatus('connected', `merchant ${this.cfg.merchantId.slice(0, 8)}…`);

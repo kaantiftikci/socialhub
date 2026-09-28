@@ -227,7 +227,7 @@ export class TrendyolConnector extends BaseConnector {
   async start(_opts: StartOptions = {}): Promise<void> {
     this.stopping = false;
     if (!this.cfg) return this.setStatus('error', 'Trendyol satıcı ID / API anahtarı / API secret girilmedi');
-    if (!this.account.label || this.account.label === 'Trendyol') this.account.label = `Trendyol · ${this.sellerId}`;
+    if (!this.account.label || /^trendyol$/i.test(this.account.label)) this.account.label = `Trendyol · ${this.sellerId}`;
     this.setStatus('connecting');
     try {
       await this.poll(true);

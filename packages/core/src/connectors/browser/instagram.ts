@@ -393,6 +393,13 @@ export const instagram: Strategy = {
     } catch (e) {
       bus.log('info', `Instagram: kullanıcı adı (current_user) okunamadı: ${(e as Error).message.slice(0, 120)}`);
     }
+    // profil düzenleme formu verisi: yalnız oturum sahibinin kullanıcı adı
+    try {
+      const f = await ig(page, cookies, '/api/v1/web/accounts/edit/web_form_data/');
+      if (f.form_data?.username) return { id: viewerId, label: `@${f.form_data.username}` };
+    } catch (e) {
+      bus.log('info', `Instagram: kullanıcı adı (web_form_data) okunamadı: ${(e as Error).message.slice(0, 120)}`);
+    }
     try {
       const u = await ig(page, cookies, `/api/v1/users/${viewerId}/info/`);
       if (u.user?.username) return { id: viewerId, label: `@${u.user.username}` };

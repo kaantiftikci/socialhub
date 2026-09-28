@@ -763,7 +763,8 @@ export const BAD_LABEL = /^(error|hata)$|^olk-|pivot/i;
 /** Bağlı hesabın adresi / kullanıcı adı (etiket platform adından ibaretse yok) */
 function accountLabel(a: Account | undefined): string | undefined {
   if (!a?.label) return undefined;
-  const l = a.label.trim();
+  const name = PLATFORMS[a.platform]?.name ?? '';
+  const l = a.label.trim().replace(new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*·\\s*`, 'i'), '');
   const generic = [a.platform, PLATFORMS[a.platform]?.name, 'Gmail', 'Outlook', 'Yahoo Mail', 'iCloud Mail', 'Messenger', 'Instagram', 'X', 'LinkedIn', 'Slack', 'WhatsApp', 'Telegram', 'iMessage'];
   return l && !BAD_LABEL.test(l) && !generic.some((g) => g && g.toLowerCase() === l.toLowerCase()) ? l : undefined;
 }

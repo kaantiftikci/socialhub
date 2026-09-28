@@ -325,12 +325,16 @@ Dil: arayüz ve yorumlar Türkçe.
 - Parola alanları `PasswordInput` (ui.tsx): sağdaki göze BASILI TUTUNCA görünür, bırakınca gizlenir (Bağlan formları, 2FA istemi, AI anahtarı, giriş).
 - Tarayıcı girişi hızı (bridge): hiç çerezi olmayan profilde (`hasProfileCookies`) görünmez denetim turu atlanır → pencere hemen açılır; giriş 700 ms'de bir
   denetlenir, sonra URL 1,5 sn sabit kalınca (500 ms adım) pencere kapanır (eskiden 2 sn adım + 4 sn → 6-8 sn).
+- Sol listede hesap tanıtıcısı her kanalda (`handleOf`): "Platform · X" etiketinde önek atılır; pazaryeri etiketleri küçük harfli
+  platform adı ("trendyol") da boş sayar (`Trendyol · <satıcı>`). Instagram ek kaynak `web/accounts/edit/web_form_data`.
 - Hesap etiketi: `finishStart` genel adı ("Instagram", "Outlook"…, `GENERIC_LABEL`) önceden öğrenilmiş @kullanıcı/adresin üstüne yazmaz. Instagram
   `accounts/current_user` + DOM yedeği; Messenger `facebook.com/me` (başlık = ad, son adres = @kullanıcı); Outlook localStorage ANAHTARLARINDAKI adres.
 - Yarım kalmış tarayıcı girişi kopyaları: token'sız e-posta hesabı bağlanınca aynı platformdaki token'sız, bağlanmamış, sohbetsiz hesaplar silinir
   (`pruneStaleLogins`); token'sız yeniden "Bağlan" bağlanmamış token'sız hesabı yeniden başlatır (kopya açmaz). (Yahoo kartı "Bağlı değil" / panel "Bağlı".)
 - **Yandex (tarayıcı)** (`connectors/browser/yandex.ts`): Bağlan → doğrudan passport.yandex girişi (uygulama şifresi formu yok; `mode:'browser'`),
-  mail.yandex.com liza BEM seçicileri (mail-MessageSnippet…) + yedekler, `Session_id` çerezi. DOĞRULANMADI. Token dosyalı eski IMAP hesapları sürer;
+  mail.yandex.com liza BEM seçicileri (mail-MessageSnippet…) + yedekler, `Session_id` çerezi. Satır = en dıştaki metinli eşleşme (iç parçalar
+  ayrı satır sayılıyordu → boş "(konu yok)" sohbetleri; `prune-v1` ile bir kez silinir), alanlar tutmazsa satır metninden; ilk turda
+  `Yandex Mail tanı:` günlüğü (seçici sayıları + ilk satırın sınıfları, içerik yok) → seçici ayarı buna göre. Adres `yandex_login` çerezinden. Token dosyalı eski IMAP hesapları sürer;
   şifre reddinde "Yandex ile giriş yap" (Yahoo gibi, IMAP hesabı tarayıcı yoluna çevrilir).
 - WhatsApp tek seferlik medya ikizi: telefon aynı gönderimi iki kimlikle yollayabiliyor (biri tek, biri çift tik iki yer tutucu) → `upsertPlaceholder`
   aynı sohbet+gönderen ±10 sn ikizi varsa yeni kayıt açmaz, kimliği `twins` ile bağlar (alındılar tek balona); açılışta `store.dropTwins` eskileri birleştirir.
