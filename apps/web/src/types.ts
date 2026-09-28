@@ -94,6 +94,8 @@ export interface Message {
   replyCount?: number;
   /** Alıntılı yanıt: yanıtlanan mesaj (balonda alıntı kutusu) */
   replyTo?: { remoteId: string; senderName: string; text: string; fromMe?: boolean };
+  /** E-posta: özgün HTML gövdesi var (api.messageHtml ile yüklenir) */
+  hasHtml?: boolean;
 }
 
 /** Mesaja alıntılı yanıt verilebilen platformlar (sağa kaydır / Yanıtla); Slack'te yanıt iş parçacığına gider */

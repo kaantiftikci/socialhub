@@ -201,6 +201,15 @@ export class Registry {
     await this.spawn(a, true, window, !!opts.external);
   }
 
+  /** Bir düzeltmeden sonra hesabın sohbetlerini bir kez silip yeniden eşitlet (işaret dosyası hesabın oturum klasöründe) */
+  private resyncOnce(account: Account, mark: string, why: string): void {
+    const file = path.join(sessionDir(account.id), mark);
+    if (fs.existsSync(file)) return;
+    const n = this.store.dropAccountChats(account.id);
+    if (n) bus.log('info', `${account.platform}: ${why}; ${n} sohbet yeniden eşitlenecek`);
+    fs.writeFileSync(file, '');
+  }
+
   private async spawn(account: Account, interactive = true, window = false, external = false): Promise<void> {
     let c: Connector;
     switch (account.platform) {
@@ -287,6 +296,7 @@ export class Registry {
       case 'icloud': {
         // Outlook.com / iCloud Mail: varsayılan tarayıcı girişi; IMAP yapılandırması (token) verildiyse eski yol
         const tokenFile = path.join(sessionDir(account.id), 'token');
+        if (account.platform === 'icloud' && !fs.existsSync(tokenFile)) this.resyncOnce(account, 'ts-v1', 'e-posta saatleri düzeltildi');
         if (!fs.existsSync(tokenFile)) {
           // Outlook: IMAP yolu yok (Microsoft şifreli IMAP'i kapattı) → sayfa sürekli açık, canlı liste izlenir (~3-5 sn; ~200-300 MB).
           // iCloud tarayıcı yolu Gmail gibi: odaktayken açık. (Uygulamaya özel şifreyle IMAP önerilen yol.)
@@ -309,6 +319,7 @@ export class Registry {
       case 'yandex':
       case 'imap': {
         const tokenFile = path.join(sessionDir(account.id), 'token');
+        if (account.platform !== 'imap' && !fs.existsSync(tokenFile)) this.resyncOnce(account, 'ts-v1', 'e-posta saatleri düzeltildi');
         // Yahoo: uygulama şifresi (token) yoksa tarayıcı girişi — Yahoo birçok hesapta uygulama şifresini kapattı, IMAP normal şifreyi reddediyor
         if (account.platform === 'yahoo' && !fs.existsSync(tokenFile)) {
           c = new BrowserConnector(account, this.store, yahoo, 30_000, { idlePollMs: 90_000, keepOpen: 'whileActive' });

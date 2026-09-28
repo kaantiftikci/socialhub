@@ -255,6 +255,12 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   });
 
   route('GET', '/api/chats', () => store.listChats());
+  // e-postanın özgün HTML gövdesi (listede taşınmaz; arayüz ileti açılınca ister)
+  route('GET', '/api/messages/:id/html', (_r, _s, p) => {
+    const html = store.getMessageHtml(dec(p.id));
+    if (html === undefined) throw new HttpError(404, 'HTML gövde yok');
+    return { html };
+  });
   route('GET', '/api/chats/:id/messages', (req, _s, p) => {
     const url = new URL(req.url ?? '/', 'http://x');
     const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit')) || 100));

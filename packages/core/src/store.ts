@@ -112,6 +112,7 @@ export class Store {
     if (!cols.has('thread_id')) this.db.exec('ALTER TABLE messages ADD COLUMN thread_id TEXT');
     if (!cols.has('reply_count')) this.db.exec('ALTER TABLE messages ADD COLUMN reply_count INTEGER');
     if (!cols.has('reply_to')) this.db.exec('ALTER TABLE messages ADD COLUMN reply_to TEXT'); // alıntılı yanıt (JSON ReplyRef)
+    if (!cols.has('html')) this.db.exec('ALTER TABLE messages ADD COLUMN html TEXT'); // e-posta özgün HTML gövdesi
     const ccols = new Set((this.db.prepare('PRAGMA table_info(chats)').all() as Array<{ name: string }>).map((c) => c.name));
     if (!ccols.has('handle')) this.db.exec('ALTER TABLE chats ADD COLUMN handle TEXT');
     if (!ccols.has('link')) this.db.exec('ALTER TABLE chats ADD COLUMN link TEXT');
@@ -379,12 +380,12 @@ export class Store {
 
   // ---------- messages ----------
   /** Mesajı kaydeder; sohbetin özetini (son mesaj, okunmamış) günceller. Yeni eklendiyse true döner. */
-  upsertMessage(m: Message, opts: { bumpUnread?: boolean } = {}): boolean {
+  upsertMessage(m: Message, opts: { bumpUnread?: boolean; html?: string } = {}): boolean {
     const existed = this.hasMessage(m.id);
     this.db
       .prepare(
-        `INSERT INTO messages (id, chat_id, remote_id, sender_id, sender_name, from_me, text, ts, status, attachments, sender_avatar, reactions, thread_id, reply_count, reply_to)
-         VALUES (@id, @chatId, @remoteId, @senderId, @senderName, @fromMe, @text, @ts, @status, @attachments, @senderAvatar, @reactions, @threadId, @replyCount, @replyTo)
+        `INSERT INTO messages (id, chat_id, remote_id, sender_id, sender_name, from_me, text, ts, status, attachments, sender_avatar, reactions, thread_id, reply_count, reply_to, html)
+         VALUES (@id, @chatId, @remoteId, @senderId, @senderName, @fromMe, @text, @ts, @status, @attachments, @senderAvatar, @reactions, @threadId, @replyCount, @replyTo, @html)
          ON CONFLICT(id) DO UPDATE SET
            -- durum geri gitmez (tüm platformlar): yeniden eşitleme/yoklama "görüldü"yü "gönderildi"ye indirmesin; başarısız yalnız henüz
            -- iletilmemiş mesajın yerini alır, başarısızdan sonra gelen gerçek durum ise yazılır
@@ -401,7 +402,8 @@ export class Store {
            reactions = COALESCE(excluded.reactions, messages.reactions),
            thread_id = COALESCE(excluded.thread_id, messages.thread_id),
            reply_count = COALESCE(excluded.reply_count, messages.reply_count),
-           reply_to = COALESCE(excluded.reply_to, messages.reply_to)`,
+           reply_to = COALESCE(excluded.reply_to, messages.reply_to),
+           html = COALESCE(excluded.html, messages.html)`,
       )
       .run({
         ...m,
@@ -412,6 +414,7 @@ export class Store {
         threadId: m.threadId ?? null,
         replyCount: m.replyCount ?? null,
         replyTo: m.replyTo ? JSON.stringify(m.replyTo) : null,
+        html: opts.html ? opts.html.slice(0, 1_500_000) : null,
       });
     const inserted = !existed;
     const chat = this.getChat(m.chatId);
@@ -437,6 +440,12 @@ export class Store {
   findMessageByRemote(accountId: string, remoteId: string): Message | undefined {
     const r = this.db.prepare("SELECT id FROM messages WHERE remote_id = ? AND chat_id LIKE ? ESCAPE '\\' LIMIT 1").get(remoteId, accountId.replace(/[\\%_]/g, (c) => '\\' + c) + '/%') as { id: string } | undefined;
     return r ? this.getMessage(r.id) : undefined;
+  }
+
+  /** E-postanın özgün HTML gövdesi (yoksa undefined) */
+  getMessageHtml(id: string): string | undefined {
+    const r = this.db.prepare('SELECT html FROM messages WHERE id = ?').get(id) as { html?: string | null } | undefined;
+    return r?.html ?? undefined;
   }
 
   getMessage(id: string): Message | undefined {
@@ -524,6 +533,16 @@ export class Store {
       .all(chatId) as Array<{ id: string }>;
     for (const r of rows) this.db.prepare('DELETE FROM messages WHERE id = ?').run(r.id);
     return rows.map((r) => r.id);
+  }
+
+  /** Hesabın tüm sohbetlerini ve mesajlarını sil (yeniden eşitleme için; hesap kalır) */
+  dropAccountChats(accountId: string): number {
+    const n = (this.db.prepare('SELECT COUNT(*) AS n FROM chats WHERE account_id = ?').get(accountId) as { n: number }).n;
+    this.transaction(() => {
+      this.db.prepare('DELETE FROM messages WHERE chat_id IN (SELECT id FROM chats WHERE account_id = ?)').run(accountId);
+      this.db.prepare('DELETE FROM chats WHERE account_id = ?').run(accountId);
+    });
+    return n;
   }
 
   /** Hesabın belirli adlı sohbetlerini (ve mesajlarını) sil — hatalı sürümün ürettiği boş kayıtları temizlemek için */
@@ -811,6 +830,7 @@ function rowToMessage(r: unknown): Message {
     threadId: x.thread_id ? String(x.thread_id) : undefined,
     replyCount: x.reply_count != null ? Number(x.reply_count) : undefined,
     replyTo: x.reply_to ? safeJson<Message['replyTo']>(x.reply_to as string, undefined) : undefined,
+    hasHtml: x.html ? true : undefined,
   };
 }
 

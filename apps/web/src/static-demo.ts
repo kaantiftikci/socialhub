@@ -381,6 +381,9 @@ export const staticApi = {
     }
     throw new Error(DEMO_BLOCK);
   },
+  messageHtml: async (_id: string): Promise<{ html: string }> => {
+    throw new Error('HTML gövde yok');
+  },
   loginInput: async (_id: string, _events: unknown[]) => ({ ok: true }),
   loginCancel: async (_id: string) => ({ ok: true }),
   loginWindow: async (_id: string) => ({ ok: true }),

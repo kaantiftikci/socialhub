@@ -1,7 +1,8 @@
 import type { Locator, Page } from 'playwright';
 import { hashId, type Msg, type Strategy, type Thread } from './bridge.js';
 import { bus } from '../../bus.js';
-import { parseOutlookDate, persistSessionCookies } from './outlook.js';
+import { fillListTimes, parseMailDate, persistSessionCookies } from './outlook.js';
+import { cleanMailHtml } from '../mail-html.js';
 
 /**
  * Yandex Mail (tarayıcı oturumu): kullanıcı görünür pencerede passport.yandex.com'da normal şifresiyle (SMS/QR doğrulamasıyla)
@@ -18,6 +19,8 @@ const YANDEX_COOKIE_DOMAINS = /(^|\.)yandex\.(com|com\.tr|ru)$/;
 const ROW_SEL = '.ns-view-messages-item-wrap a.mail-MessageSnippet, a.mail-MessageSnippet, [data-testid="message-list-item"], [data-testid*="message-snippet" i], [role="listitem"] a[href*="message"]';
 
 let meEmail = '';
+/** Liste satırının zamanı (ileti görünümünde zaman okunamazsa yedek; "şimdi" yazılınca sıra bozuluyordu) */
+const threadTs = new Map<string, number>();
 
 const onMail = (u: string) => /^https:\/\/mail\.yandex\.(com|com\.tr|ru)\//.test(u);
 /** Oturum yokken mail.yandex.com giriş formuna değil Yandex ana sayfasına yönlendiriyor → giriş penceresi doğrudan buraya gider */
@@ -145,26 +148,33 @@ async function readThread(page: Page, threadId: string, limit: number, restore: 
     .evaluate(() => {
       const views = Array.from(document.querySelectorAll<HTMLElement>('.mail-Message, .ns-view-message, [data-testid="message-view"], article'));
       return views.map((v) => {
-        const body = v.querySelector<HTMLElement>('.mail-Message-Body-Content, [class*="Body-Content"], [data-testid*="message-body" i]')?.innerText ?? v.innerText;
+        const bodyEl = v.querySelector<HTMLElement>('.mail-Message-Body-Content, [class*="Body-Content"], [data-testid*="message-body" i]');
+        const body = bodyEl?.innerText ?? v.innerText;
+        let html = '';
+        if (bodyEl) {
+          const c = bodyEl.cloneNode(true) as HTMLElement;
+          for (const img of Array.from(c.querySelectorAll<HTMLImageElement>('img[src]'))) img.setAttribute('src', img.src);
+          html = c.innerHTML;
+        }
         const fromEl = v.querySelector<HTMLElement>('.mail-Message-Sender-Email, [class*="Sender-Email"], [data-testid*="sender-email" i]');
         const from = (fromEl?.innerText || fromEl?.getAttribute('title') || (v.innerText.match(/[\w.+-]+@[\w.-]+\.\w+/) ?? [])[0] || '').trim();
         const fromName = (v.querySelector<HTMLElement>('.mail-Message-Sender-Name, [class*="Sender-Name"]')?.innerText || from).trim();
         const dateEl = v.querySelector<HTMLElement>('.mail-Message-Date, [class*="Message-Date"], time');
         const time = dateEl?.getAttribute('title') || dateEl?.getAttribute('datetime') || dateEl?.innerText || '';
-        return { text: body.trim(), from, fromName, time };
+        return { text: body.trim(), from, fromName, time, html };
       });
     })
-    .catch(() => [] as Array<{ text: string; from: string; fromName: string; time: string }>);
+    .catch(() => [] as Array<{ text: string; from: string; fromName: string; time: string; html: string }>);
   if (restore && wasUnread) await markUnread(page, threadId);
   const good = rows.filter((r) => r.text.length > 0);
   return good
     .map((r, i) => {
       const fromMe = !!meEmail && r.from.toLowerCase() === meEmail;
-      const parsed = parseOutlookDate(r.time) ?? Date.parse(r.time);
       return {
         id: hashId(threadId + '|' + r.from + '|' + r.text.slice(0, 120)),
-        text: r.text.slice(0, 8000),
-        ts: Number.isFinite(parsed) ? parsed : Date.now() - (good.length - i) * 60_000,
+        text: r.text.replace(/[ \t\u00a0]+$/gm, '').replace(/\n{3,}/g, '\n\n').slice(0, 20_000),
+        html: cleanMailHtml(r.html, 'https://mail.yandex.com/'),
+        ts: parseMailDate(r.time) ?? (threadTs.get(threadId) ?? Date.now()) - (good.length - 1 - i) * 60_000,
         fromMe,
         senderId: fromMe ? 'me' : r.from || threadId,
         senderName: fromMe ? 'Ben' : r.fromName || r.from || 'Gönderen',
@@ -277,13 +287,14 @@ export const yandex: Strategy = {
     if (!meEmail) await this.me(page, cookies);
     await diagnose(page);
     const rows = await readRows(page);
-    return rows.map((row) => {
-      const parsed = parseOutlookDate(row.time) ?? Date.parse(row.time);
+    const times = fillListTimes(rows.map((r) => parseMailDate(r.time)));
+    return rows.map((row, i) => {
+      if (times[i] !== undefined) threadTs.set(hashId(row.key), times[i]!);
       return {
         id: hashId(row.key),
         name: row.subject || '(konu yok)',
         kind: 'direct' as const,
-        lastTs: Number.isFinite(parsed) ? parsed : 0,
+        lastTs: times[i] ?? 0,
         preview: `${row.sender}: ${row.snippet}`.slice(0, 200),
         unread: row.unread ? 1 : 0,
         participants: row.sender ? [{ id: row.senderEmail || row.sender, name: row.sender, handle: row.senderEmail || undefined }] : undefined,

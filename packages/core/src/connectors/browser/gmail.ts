@@ -1,3 +1,4 @@
+import { cleanMailHtml } from '../mail-html.js';
 import type { Page } from 'playwright';
 import { hashId, needsPage, type Msg, type Strategy, type Thread } from './bridge.js';
 import { bus } from '../../bus.js';
@@ -405,7 +406,7 @@ export const gmail: Strategy = {
     if (!(await openThread(page, threadId))) return [];
     if (!meEmail) meEmail = (await readMe(page).catch(() => ({ email: '' }))).email.toLowerCase();
     const rows = await page.evaluate(() => {
-      const out: Array<{ id: string; name: string; email: string; time: string; text: string; atts: string[] }> = [];
+      const out: Array<{ id: string; name: string; email: string; time: string; text: string; html: string; atts: string[] }> = [];
       const all = Array.from(document.querySelectorAll<HTMLElement>('div.adn'));
       const visible = all.filter((e) => e.offsetParent !== null);
       for (const el of visible.length ? visible : all) {
@@ -414,13 +415,21 @@ export const gmail: Strategy = {
         const body = el.querySelector<HTMLElement>('div.a3s');
         // alıntılanmış önceki iletiler gövdeyi şişirmesin
         let text = '';
+        let html = '';
         if (body) {
+          text = body.innerText?.trim() ?? '';
+          // özgün biçim: Gmail'in gösterdiği gibi alıntılanan önceki iletiler (…) HTML'de de gizlenir
           const clone = body.cloneNode(true) as HTMLElement;
-          for (const q of Array.from(clone.querySelectorAll('.gmail_quote, blockquote, .gmail_extra'))) q.remove();
-          text = clone.innerText?.trim() ?? '';
+          for (const q of Array.from(clone.querySelectorAll('.gmail_quote, .gmail_extra, .adL > div[style*="display: none"]'))) q.remove();
+          for (const img of Array.from(clone.querySelectorAll<HTMLImageElement>('img[src]'))) img.setAttribute('src', img.src);
+          html = clone.innerHTML;
+          // alıntılanmış önceki iletiler düz metni şişirmesin
+          const tclone = body.cloneNode(true) as HTMLElement;
+          for (const q of Array.from(tclone.querySelectorAll('.gmail_quote, blockquote, .gmail_extra'))) q.remove();
+          text = tclone.innerText?.trim() ?? text;
         }
         const atts = Array.from(el.querySelectorAll<HTMLElement>('span.aZo[download_url], div.aQH [download_url]')).map((a) => a.getAttribute('download_url') ?? '');
-        out.push({ id, name: from?.getAttribute('name') ?? from?.innerText ?? '', email: (from?.getAttribute('email') ?? '').toLowerCase(), time: el.querySelector<HTMLElement>('span.g3')?.getAttribute('title') ?? el.querySelector<HTMLElement>('span.g3')?.innerText ?? '', text, atts });
+        out.push({ id, name: from?.getAttribute('name') ?? from?.innerText ?? '', email: (from?.getAttribute('email') ?? '').toLowerCase(), time: el.querySelector<HTMLElement>('span.g3')?.getAttribute('title') ?? el.querySelector<HTMLElement>('span.g3')?.innerText ?? '', text, html, atts });
       }
       return out;
     });
@@ -432,6 +441,7 @@ export const gmail: Strategy = {
         return {
           id: r.id || hashId(threadId + '|' + r.email + '|' + r.time + '|' + r.text.slice(0, 80)),
           text: r.text,
+          html: cleanMailHtml(r.html, 'https://mail.google.com/'),
           ts: parseGmailDate(r.time) ?? Date.now() - (rows.length - i) * 60_000,
           fromMe,
           senderId: fromMe ? 'me' : r.email || threadId,

@@ -99,6 +99,8 @@ export interface Message {
   replyCount?: number;
   /** Alıntılı yanıt: yanıtlanan mesaj (WhatsApp/Telegram/Instagram) — balonda alıntı kutusu, tıklayınca o mesaja gider */
   replyTo?: ReplyRef;
+  /** E-posta: özgün HTML gövdesi var (ayrı yüklenir: GET /api/messages/:id/html; listede taşınmaz) */
+  hasHtml?: boolean;
 }
 
 export interface ReplyRef {

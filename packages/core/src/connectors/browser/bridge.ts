@@ -57,6 +57,8 @@ export interface Msg {
   replyCount?: number;
   /** Alıntılı yanıt: yanıtlanan mesajın kimliği (ad/metin verilmezse depodan doldurulur) */
   replyTo?: { remoteId: string; senderName?: string; text?: string };
+  /** E-posta: özgün gövde HTML'i (arayüz güvenli çerçevede gösterir) */
+  html?: string;
 }
 
 /** Sayfasız (tarayıcısız) modda stratejiye verilen sahte sayfanın taşıdığı istek bağlamı */
@@ -1270,6 +1272,7 @@ export class BrowserConnector extends BaseConnector {
         threadId: m.threadId,
         replyCount: m.replyCount,
         replyTo: m.replyTo ? { ...m.replyTo, ...this.replyInfo(threadId, m.replyTo.remoteId, m.replyTo) } : undefined,
+        html: m.html,
       },
       { live, bump: false },
     );

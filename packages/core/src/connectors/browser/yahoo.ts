@@ -1,7 +1,8 @@
 import type { Locator, Page } from 'playwright';
 import { hashId, type Msg, type Strategy, type Thread } from './bridge.js';
 import { bus } from '../../bus.js';
-import { parseOutlookDate, persistSessionCookies } from './outlook.js';
+import { fillListTimes, parseMailDate, persistSessionCookies } from './outlook.js';
+import { cleanMailHtml } from '../mail-html.js';
 
 /**
  * Yahoo Mail (tarayıcı oturumu): kullanıcı görünür pencerede login.yahoo.com'da normal şifresiyle (ve doğrulamayla) girer,
@@ -18,6 +19,10 @@ const YAHOO_COOKIE_DOMAINS = /(^|\.)(yahoo\.com|yahoo\.net|login\.yahoo\.com)$/;
 const ROW_SEL = '[data-test-id="message-list-item"], ul[role="list"] li[role="listitem"] a[href*="/messages/"], [role="list"] [role="listitem"]';
 
 let meEmail = '';
+/** Liste satırının zamanı (ileti görünümünde zaman okunamazsa yedek; "şimdi" yazılınca sıra bozuluyordu) */
+const threadTs = new Map<string, number>();
+/** Ekran okuyucu etiketleri (görünmez): gönderen/konu yerine okunmasın */
+const A11Y = /^(Okunmamış mesaj|Okunmuş mesaj|Okundu|Unread message|Read message|Unread|Yıldızlı|Starred|Mesaj Gövdesi|Message body|Ek var|Has attachment|Seç|Select)$/i;
 
 const onLogin = (u: string) => /^https:\/\/login\.yahoo\.com\//.test(u);
 const onConsent = (u: string) => /^https:\/\/(consent\.yahoo\.com|guce\.yahoo\.com)\//.test(u);
@@ -60,12 +65,13 @@ interface YahooRow {
 
 /** Liste satırlarını oku (threads ve messages aynı anahtarı üretsin diye tek yerde) */
 function readRows(page: Page): Promise<YahooRow[]> {
-  return page.evaluate((sel) => {
+  return page.evaluate(({ sel, a11ySrc }) => {
+    const a11y = new RegExp(a11ySrc, 'i');
     const q = (el: Element, s: string) => el.querySelector<HTMLElement>(s);
     const out: YahooRow[] = [];
     const seen = new Map<string, number>();
     for (const el of Array.from(document.querySelectorAll<HTMLElement>(sel))) {
-      const lines = el.innerText.split('\n').map((t) => t.trim()).filter(Boolean);
+      const lines = el.innerText.split('\n').map((t) => t.trim()).filter((t) => t && !a11y.test(t));
       const senderEl = q(el, '[data-test-id="senders"], [data-test-id="senders_list"] span, [data-test-id="message-from"]');
       const sender = (senderEl?.innerText || lines[0] || '').trim();
       const senderEmail = senderEl?.getAttribute('title') ?? '';
@@ -89,7 +95,7 @@ function readRows(page: Page): Promise<YahooRow[]> {
       out.push({ key, unread, sender, senderEmail, subject, snippet, time });
     }
     return out;
-  }, ROW_SEL);
+  }, { sel: ROW_SEL, a11ySrc: A11Y.source });
 }
 
 /** Satırı aç, okuma bölmesindeki iletileri oku; restore=true ise (yoklama) okunmamış satır sonra yeniden okunmadı yapılır */
@@ -105,15 +111,22 @@ async function readThread(page: Page, threadId: string, limit: number, restore: 
     .evaluate(() => {
       const views = Array.from(document.querySelectorAll<HTMLElement>('[data-test-id="message-view"], [data-test-id="message-group-view"] article, [role="article"], article'));
       return views.map((v) => {
-        const body = v.querySelector<HTMLElement>('[data-test-id="message-view-body-content"], [data-test-id="message-view-body"]')?.innerText ?? v.innerText;
+        const bodyEl = v.querySelector<HTMLElement>('[data-test-id="message-view-body-content"], [data-test-id="message-view-body"], .msg-body, [class*="msg-body"]');
+        const body = (bodyEl?.innerText ?? v.innerText).replace(/^(Mesaj Gövdesi|Message body)\s*\n/i, '');
+        let html = '';
+        if (bodyEl) {
+          const c = bodyEl.cloneNode(true) as HTMLElement;
+          for (const img of Array.from(c.querySelectorAll<HTMLImageElement>('img[src]'))) img.setAttribute('src', img.src);
+          html = c.innerHTML;
+        }
         const pill = v.querySelector<HTMLElement>('[data-test-id="message-from"] [data-test-id="email-pill"], [data-test-id="email-pill"]');
         const from = pill?.getAttribute('title') || (v.innerText.match(/[\w.+-]+@[\w.-]+\.\w+/) ?? [])[0] || '';
         const fromName = pill?.innerText?.trim() || from;
         const time = v.querySelector<HTMLElement>('[data-test-id="message-date"], time')?.getAttribute('title') || v.querySelector('time')?.getAttribute('datetime') || (v.innerText.match(/\d{1,2}\.\d{1,2}\.\d{4}[^\n]*\d{1,2}:\d{2}|\d{1,2}:\d{2}/) ?? [])[0] || '';
-        return { text: body.trim(), from, fromName, time };
+        return { text: body.trim(), from, fromName, time, html };
       });
     })
-    .catch(() => [] as Array<{ text: string; from: string; fromName: string; time: string }>);
+    .catch(() => [] as Array<{ text: string; from: string; fromName: string; time: string; html: string }>);
   if (restore && wasUnread) await markUnread(page, threadId);
   const good = rows.filter((r) => r.text.length > 0);
   return good
@@ -121,14 +134,14 @@ async function readThread(page: Page, threadId: string, limit: number, restore: 
       const fromMe = !!meEmail && r.from.toLowerCase() === meEmail;
       return {
         id: hashId(threadId + '|' + r.from + '|' + r.text.slice(0, 120)),
-        text: r.text.slice(0, 8000),
-        ts: parseOutlookDate(r.time) ?? Date.parse(r.time) ?? Date.now() - (good.length - i) * 60_000,
+        text: r.text.replace(/[ \t\u00a0]+$/gm, '').replace(/\n{3,}/g, '\n\n').slice(0, 20_000),
+        html: cleanMailHtml(r.html, 'https://mail.yahoo.com/'),
+        ts: parseMailDate(r.time) ?? (threadTs.get(threadId) ?? Date.now()) - (good.length - 1 - i) * 60_000,
         fromMe,
         senderId: fromMe ? 'me' : r.from || threadId,
         senderName: fromMe ? 'Ben' : r.fromName || r.from || 'Gönderen',
       };
     })
-    .map((m) => ({ ...m, ts: Number.isFinite(m.ts) ? m.ts : Date.now() }))
     .slice(-limit);
 }
 
@@ -220,11 +233,12 @@ export const yahoo: Strategy = {
     await persistSessionCookies(page.context(), YAHOO_COOKIE_DOMAINS).catch(() => 0);
     if (!meEmail) await this.me(page, {});
     const rows = await readRows(page);
-    return rows.map((row) => ({
+    const times = fillListTimes(rows.map((r) => parseMailDate(r.time)));
+    return rows.map((row, i) => ({
       id: hashId(row.key),
       name: row.subject || '(konu yok)',
       kind: 'direct' as const,
-      lastTs: parseOutlookDate(row.time) ?? (Number.isFinite(Date.parse(row.time)) ? Date.parse(row.time) : 0),
+      lastTs: times[i] !== undefined ? (threadTs.set(hashId(row.key), times[i]!), times[i]!) : 0,
       preview: `${row.sender}: ${row.snippet}`.slice(0, 200),
       unread: row.unread ? 1 : 0,
       participants: row.sender ? [{ id: row.senderEmail || row.sender, name: row.sender, handle: row.senderEmail || undefined }] : undefined,

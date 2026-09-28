@@ -1,7 +1,8 @@
 import type { Frame, Locator, Page } from 'playwright';
 import { hashId, type Msg, type Strategy, type Thread } from './bridge.js';
 import { bus } from '../../bus.js';
-import { parseOutlookDate, persistSessionCookies, pickFileInput } from './outlook.js';
+import { fillListTimes, parseMailDate, persistSessionCookies, pickFileInput } from './outlook.js';
+import { cleanMailHtml } from '../mail-html.js';
 
 /**
  * iCloud Mail (tarayıcı oturumu): kullanıcı görünür pencerede Apple hesabına girer (2FA dahil), sonra
@@ -25,6 +26,8 @@ async function signInVisible(page: Page): Promise<boolean> {
 }
 
 let meEmail = '';
+/** Liste satırının zamanı (ileti görünümünde zaman okunamazsa yedek) */
+const threadTs = new Map<string, number>();
 
 /** İleti listesini içeren çerçeve (ana sayfa ya da iframe) */
 async function mailFrame(page: Page): Promise<Frame | undefined> {
@@ -109,10 +112,13 @@ export const icloud: Strategy = {
     }
     if (!meEmail) await this.me(page, {});
     const rows = await readRows(f);
-    return rows.map((r) => {
+    const timeOf = (r: (typeof rows)[number]) => r.lines.find((l) => parseMailDate(l) !== undefined) ?? '';
+    const times = fillListTimes(rows.map((r) => parseMailDate(timeOf(r))));
+    return rows.map((r, i) => {
       const [sender = '', subject = '(konu yok)', ...rest] = r.lines;
-      const time = r.lines.find((l) => /\d{1,2}[:.]\d{2}|\d{1,2}\.\d{1,2}\.\d{4}/.test(l)) ?? '';
-      return { id: hashId(r.key), name: subject, kind: 'direct' as const, lastTs: parseOutlookDate(time) ?? 0, preview: `${sender}: ${rest.filter((l) => l !== time).join(' ')}`.slice(0, 200), unread: r.unread ? 1 : 0, participants: sender ? [{ id: sender, name: sender }] : undefined };
+      const time = timeOf(r);
+      if (times[i] !== undefined) threadTs.set(hashId(r.key), times[i]!);
+      return { id: hashId(r.key), name: subject, kind: 'direct' as const, lastTs: times[i] ?? 0, preview: `${sender}: ${rest.filter((l) => l !== time).join(' ')}`.slice(0, 200), unread: r.unread ? 1 : 0, participants: sender ? [{ id: sender, name: sender }] : undefined };
     });
   },
 
@@ -226,21 +232,21 @@ async function readThread(page: Page, threadId: string, limit: number, restore: 
   const wasUnread = list[idx].unread;
   await f.locator(ROW_SEL).nth(idx).click({ timeout: 8000 }).catch(() => undefined);
   await page.waitForTimeout(2500);
-  const rows: Array<{ text: string; from: string; time: string }> = [];
+  const rows: Array<{ text: string; from: string; time: string; html: string }> = [];
   for (const fr of page.frames()) {
     const got = await fr
       .evaluate(() => {
         const arts = Array.from(document.querySelectorAll<HTMLElement>('[role="article"], article, [role="document"]'));
-        return arts.map((a) => ({ text: a.innerText.trim(), from: (a.innerText.match(/[\w.+-]+@[\w.-]+/) ?? [])[0] ?? '', time: (a.innerText.match(/\d{1,2}\.\d{1,2}\.\d{4}[^\n]*\d{1,2}:\d{2}|\d{1,2}:\d{2}/) ?? [])[0] ?? '' }));
+        return arts.map((a) => ({ html: a.innerHTML, text: a.innerText.trim(), from: (a.innerText.match(/[\w.+-]+@[\w.-]+/) ?? [])[0] ?? '', time: (a.innerText.match(/\d{1,2}\.\d{1,2}\.\d{4}[^\n]*\d{1,2}:\d{2}|\d{1,2}:\d{2}/) ?? [])[0] ?? '' }));
       })
-      .catch(() => [] as Array<{ text: string; from: string; time: string }>);
+      .catch(() => [] as Array<{ text: string; from: string; time: string; html: string }>);
     rows.push(...got.filter((r) => r.text.length > 0));
   }
   if (restore && wasUnread) await markUnread(page, threadId);
   return rows
     .map((r, i) => {
       const fromMe = !!meEmail && r.from.toLowerCase() === meEmail;
-      return { id: hashId(threadId + '|' + r.from + '|' + r.text.slice(0, 120)), text: r.text.slice(0, 8000), ts: parseOutlookDate(r.time) ?? Date.now() - (rows.length - i) * 60_000, fromMe, senderId: fromMe ? 'me' : r.from || threadId, senderName: fromMe ? 'Ben' : r.from || 'Gönderen' };
+      return { id: hashId(threadId + '|' + r.from + '|' + r.text.slice(0, 120)), text: r.text.replace(/[ \t\u00a0]+$/gm, '').replace(/\n{3,}/g, '\n\n').slice(0, 20_000), html: cleanMailHtml(r.html, 'https://www.icloud.com/'), ts: parseMailDate(r.time) ?? (threadTs.get(threadId) ?? Date.now()) - (rows.length - 1 - i) * 60_000, fromMe, senderId: fromMe ? 'me' : r.from || threadId, senderName: fromMe ? 'Ben' : r.from || 'Gönderen' };
     })
     .slice(-limit);
 }

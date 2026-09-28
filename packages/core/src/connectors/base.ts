@@ -193,14 +193,14 @@ export abstract class BaseConnector implements Connector {
   }
 
   protected upsertMessage(
-    input: Omit<Message, 'id' | 'chatId'> & { remoteChatId: string },
+    input: Omit<Message, 'id' | 'chatId' | 'hasHtml'> & { remoteChatId: string; html?: string },
     opts: { live?: boolean; bump?: boolean } = {},
   ): Message | undefined {
     const cid = chatId(this.account.id, input.remoteChatId);
     if (!this.store.getChat(cid)) {
       this.upsertChat({ remoteId: input.remoteChatId, name: input.fromMe ? input.remoteChatId : input.senderName });
     }
-    const { remoteChatId: _drop, ...rest } = input;
+    const { remoteChatId: _drop, html, ...rest } = input;
     const message: Message = { ...rest, id: messageId(cid, input.remoteId), chatId: cid };
     // gönderdiğim mesajın "gelen" gibi dönen yankısı: kaydetme (sayaç artmasın, kopya balon çıkmasın)
     if (!input.fromMe && input.text && !this.store.hasMessage(message.id) && this.store.isOwnEcho(cid, input.text, input.ts)) {
@@ -208,7 +208,7 @@ export abstract class BaseConnector implements Connector {
       return undefined;
     }
     // bump: okunmamış sayacını artır (varsayılan canlı mesajlarda); platform sayacı yetkiliyse (tarayıcı köprüsü) kapatılır
-    const inserted = this.store.upsertMessage(message, { bumpUnread: opts.bump ?? opts.live });
+    const inserted = this.store.upsertMessage(message, { bumpUnread: opts.bump ?? opts.live, html: html?.trim() ? html : undefined });
     if (inserted && input.fromMe && !input.remoteId.startsWith('local-')) {
       for (const id of this.store.dropLocalDuplicates(cid)) bus.emit({ type: 'message.delete', chatId: cid, messageId: id });
     }

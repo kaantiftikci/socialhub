@@ -1,3 +1,4 @@
+import { cleanMailHtml } from '../mail-html.js';
 import type { BrowserContext, Page } from 'playwright';
 import { hashId, needsPage, type Msg, type Strategy, type Thread } from './bridge.js';
 import { bus } from '../../bus.js';
@@ -99,9 +100,31 @@ const WEEKDAYS: Record<string, number> = {
 const MONTHS: Record<string, number> = {
   oca: 0, şub: 1, mar: 2, nis: 3, may: 4, haz: 5, tem: 6, ağu: 7, eyl: 8, eki: 9, kas: 10, ara: 11,
   jan: 0, feb: 1, apr: 3, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+  // Yandex Rusça arayüz ("28 сент.", "3 мая")
+  янв: 0, фев: 1, мар: 2, апр: 3, мая: 4, май: 4, июн: 5, июл: 6, авг: 7, сен: 8, окт: 9, ноя: 10, дек: 11,
 };
 
 /** "Çar 24.09.2026 14:32", "24.09.2026 14:32", "Wed 9/24/2026 2:32 PM", "24 Eyl 14:32", "Çar 14:32", "Dün 09:05", "14:32" */
+/**
+ * Yeniden eskiye sıralı liste satırlarının zamanları: okunamayan satır komşusundan türetilir (öncekinden 1 dk eski; baştakiler
+ * sonrakinden 1 dk yeni). Okunamayan tarih "şimdi" sayılınca her e-posta eşitleme anında gelmiş görünüyor, sıra bozuluyordu.
+ */
+/** Tarayıcı e-posta satırı/ileti zamanı: Outlook biçimleri + ISO/RFC (Date.parse NaN verirse undefined; eskiden NaN → "şimdi") */
+export function parseMailDate(s: string | undefined | null, now = new Date()): number | undefined {
+  const t = parseOutlookDate(s, now);
+  if (t !== undefined) return t;
+  if (!s || !/\d{4}/.test(s)) return undefined;
+  const p = Date.parse(s);
+  return Number.isFinite(p) ? p : undefined;
+}
+
+export function fillListTimes(times: Array<number | undefined>): Array<number | undefined> {
+  const out = [...times];
+  for (let i = 1; i < out.length; i++) if (out[i] === undefined && out[i - 1] !== undefined) out[i] = out[i - 1]! - 60_000;
+  for (let i = out.length - 2; i >= 0; i--) if (out[i] === undefined && out[i + 1] !== undefined) out[i] = out[i + 1]! + 60_000;
+  return out;
+}
+
 export function parseOutlookDate(s: string | undefined | null, now = new Date()): number | undefined {
   if (!s) return undefined;
   const t = s.replace(/[\u200e\u200f\u202a-\u202e]/g, '').replace(/\s+/g, ' ').trim();
@@ -119,11 +142,12 @@ export function parseOutlookDate(s: string | undefined | null, now = new Date())
     if (m[6]) h = (h % 12) + (m[6].toUpperCase() === 'PM' ? 12 : 0);
     return new Date(Number(m[3]), Number(m[1]) - 1, Number(m[2]), h, Number(m[5] ?? 0)).getTime();
   }
-  // "Dün 09:05" / "Yesterday 9:05 AM"
-  m = t.match(/^(Dün|Yesterday)\b\D*(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+  // "Dün 09:05" / "Yesterday 9:05 AM" / "Вчера в 9:05"; "Bugün 12:45" / "Today" / "Сегодня"
+  m = t.match(/^(Dün|Yesterday|Вчера|Bugün|Today|Сегодня)(?![\p{L}])\D*(\d{1,2}):(\d{2})\s*(AM|PM)?/iu);
   if (m) {
     const [h, min] = hm(m[2], m[3], m[4]);
-    return new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, h, min).getTime();
+    const back = /^(Dün|Yesterday|Вчера)/i.test(m[1]) ? 1 : 0;
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate() - back, h, min).getTime();
   }
   // "Çar 14:32" / "Wed 2:32 PM": bu haftanın (bugün dahil, geriye doğru) o günü
   m = t.match(/^([A-Za-zÇĞİÖŞÜçğıöşü]{3})[^\s\d]*\.?\s+(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
@@ -135,13 +159,15 @@ export function parseOutlookDate(s: string | undefined | null, now = new Date())
       return new Date(now.getFullYear(), now.getMonth(), now.getDate() - back, h, min).getTime();
     }
   }
+  // yalnız "Dün" / "Yesterday" / "Вчера" (saat yok): dünün ortası (sıra komşu satırlardan korunur)
+  if (/^(Dün|Yesterday|Вчера)$/i.test(t)) return new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 12).getTime();
   // "24.09" (yılsız): gelecekteyse geçen yıl
   m = t.match(/^(\d{1,2})\.(\d{1,2})\.?$/);
   if (m) {
     const d = new Date(now.getFullYear(), Number(m[2]) - 1, Number(m[1]));
     return d.getTime() > now.getTime() + 86400e3 ? new Date(now.getFullYear() - 1, Number(m[2]) - 1, Number(m[1])).getTime() : d.getTime();
   }
-  m = t.match(/(\d{1,2})\s+([A-Za-zÇĞİÖŞÜçğıöşü]{3})[^\s\d.,]*\.?(?:\s+(\d{4}))?(?:\D+(\d{1,2}):(\d{2}))?/);
+  m = t.match(/(\d{1,2})\s+(\p{L}{3})[^\s\d.,]*\.?(?:\s+(\d{4}))?(?:\D+(\d{1,2}):(\d{2}))?/u);
   if (m) {
     const mon = MONTHS[m[2].toLocaleLowerCase('tr')];
     if (mon !== undefined) {
@@ -453,7 +479,7 @@ export const outlook: Strategy = {
       if (!done) bus.log('info', `Outlook: okunmamış durumu geri alınamadı (${threadId.slice(0, 10)}…)`);
     };
     const rows = await page.evaluate((bodySel) => {
-      const out: Array<{ email: string; name: string; time: string; text: string; files: string[] }> = [];
+      const out: Array<{ email: string; name: string; time: string; text: string; html: string; files: string[] }> = [];
       for (const body of Array.from(document.querySelectorAll<HTMLElement>(bodySel))) {
         // ileti kapsayıcısı: gövdeden yukarı, gönderen adresi içeren en yakın kutu
         let box: HTMLElement | null = body;
@@ -477,7 +503,9 @@ export const outlook: Strategy = {
           const qt = q.innerText?.trim();
           if (qt) text = text.replace(qt, '');
         }
-        out.push({ email: email.toLowerCase(), name, time: timeTxt, text: text.trim(), files: Array.from(new Set(files)) });
+        const c = body.cloneNode(true) as HTMLElement;
+        for (const img of Array.from(c.querySelectorAll<HTMLImageElement>('img[src]'))) img.setAttribute('src', img.src);
+        out.push({ email: email.toLowerCase(), name, time: timeTxt, text: text.trim(), html: c.innerHTML, files: Array.from(new Set(files)) });
       }
       return out;
     }, BODY);
@@ -489,6 +517,7 @@ export const outlook: Strategy = {
         return {
           id: hashId(threadId + '|' + r.email + '|' + r.time + '|' + r.text.slice(0, 80)),
           text: r.text.slice(0, 20_000),
+          html: cleanMailHtml(r.html, 'https://outlook.live.com/'),
           // zaman okunamazsa listedeki satır zamanı (yoklama saati yazılırsa sohbet en üste fırlıyor ve liste zamanı bir daha kazanamıyordu)
           ts: parseOutlookDate(r.time) ?? (threadTs.get(threadId) || Date.now()) - (rows.length - 1 - i) * 60_000,
           fromMe,

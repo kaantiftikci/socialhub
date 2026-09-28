@@ -1,3 +1,4 @@
+import { MailFrame } from './MailFrame';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EmojiPicker } from './emoji';
 import { api, USE_STATIC } from './api';
@@ -976,7 +977,7 @@ export function Conversation({
                       </div>
                       <time>{fmtStamp(m.ts)}</time>
                     </header>
-                    <div className="mail-body">{m.text}</div>
+                    {m.hasHtml ? <MailFrame messageId={m.id} fallback={m.text} /> : <div className="mail-body">{m.text}</div>}
                     {m.attachments?.length ? (
                       <div className="mail-atts">
                         {m.attachments.map((a, i) => (

@@ -67,8 +67,10 @@ Dil: arayüz ve yorumlar Türkçe.
   `REMOVED_USERS` ile silinir). Giriş ekranında "Üyelik oluştur" (`Auth.tsx`, `authRegister`) → `action=register`: ad + soyad (ayrı alanlar; `firstName`/`lastName`, `name` birleşik), e-posta, kullanıcı adı
   (a-z0-9._-, 3-24), şifre ≥8 (iki kez; not alanı YOK); IP başına saatte 5 (`demo-signup.json`), gizli `website` bot tuzağı, ≤300 bekleyen. Kayıt users.json'da
   `status:'pending'` → giriş 403 "onaylanmadı" (şifre doğrulandıktan sonra söylenir); e-postayla da giriş olur. Admin → Demo: Onayla/Reddet/
-  E-posta/Sil (`demo_update`/`demo_mail`/`demo_delete`, u-admin korunur); onayda `send_approval_mail` (PHP mail(), From hello@mivelo.app,
-  şifre e-postada YOK), sonuç `mailed` rozetinde. Her kullanıcının bağladığı uygulamalar kendi kaydında (bağımsız); reddedilenin oturumu düşer.
+  E-posta/Sil (`demo_update`/`demo_mail`/`demo_delete`, u-admin korunur); onayda `send_approval_mail` → `apps/landing/api/lib-smtp.php`
+  `mv_send_mail` (kimlik doğrulamalı SMTP, bağımlılıksız; ayar `~/mivelo-data/smtp.json` 0600, Admin → Ayarlar → E-posta gönderimi + deneme
+  e-postası + sunucu konuşma dökümü, şifre dökümde gizli). SMTP yoksa mail() yedeği — cPanel'de "gönderildi" deyip ULAŞMIYORDU (SPF/DKIM).
+  Şifre e-postada YOK; sonuç `mailed`/`mailError` rozetinde. Her kullanıcının bağladığı uygulamalar kendi kaydında (bağımsız); reddedilenin oturumu düşer.
   Demoda örnek AI açık (`demo-ai.ts`: sohbete özel taslak/özet/aksiyon/olay, model çağrısı yok); pazaryeri sipariş kartı `Script.order`.
   Tek dosya demo (`npm run demo:html`) profil adı "Mivelo".
 - **Tanıtım videosu (reels 1080×1920, ~68 sn; TM() zaman eşlemesi: 5,5 sn sonrası ×1,25 + GAPS araları: AI özeti, sağ panel, takip/zamanlama hareketli grafikleri)** `scripts/promo/`: videodaki arayüz GERÇEK tek dosya demo (iframe, Playwright sanal saati
@@ -163,6 +165,15 @@ Dil: arayüz ve yorumlar Türkçe.
   zamanı. Slack/e-posta/pazaryeri alındı vermez → tek tik. WhatsApp alındısı LID/numara farklı sohbet kimliğiyle gelebilir →
   `store.findMessageByRemote` yedeği (eskiden atlanıyordu: aynı koşullu bir sohbette tek, ötekinde çift tik); grup alındıları
   `message-receipt.update` ile (grupta en çok "iletildi", birebirde okunma = görüldü).
+- **E-posta özgün HTML** (`MailFrame.tsx`): `Message.hasHtml`; gövde DB `messages.html` sütununda (listede TAŞINMAZ, `GET /api/messages/:id/html`).
+  Kaynaklar: IMAP `mailparser` html (gömülü `cid:` görseller yerel medya adresine, gövdede kullanılanlar ek listesinde yok; ilk yoklamada son 150
+  e-posta bir kez yeniden okunur `html-v1`), tarayıcı yolları (Gmail `div.a3s` alıntısız, Yahoo/Yandex gövde öğesi, iCloud article, Outlook gövde).
+  Hepsi `connectors/mail-html.ts` `cleanMailHtml` (betik/iframe/form/on*/javascript: atılır, `<base>` eklenir). Arayüz: sandbox'ta allow-scripts
+  YOK (yalnız same-origin: yükseklik ölçümü + popups), CSP, `<base target=_blank>`, beyaz "kağıt" (koyu temada da), ResizeObserver yüksekliği.
+- **Tarayıcı e-posta saatleri**: `parseMailDate` (outlook.ts; TR/EN/RU, Bugün/Dün/Сегодня/Вчера, ISO/RFC; okunamazsa undefined — ESKİDEN NaN →
+  Date.now(): her e-posta eşitleme anında gelmiş görünüyordu) + `fillListTimes` (okunamayan satır komşusundan) + ileti zamanı okunamazsa
+  liste satırı zamanı (`threadTs`). Sohbet zamanı MAX ile güncellendiği için bozuk kayıtlar Yahoo/Yandex/iCloud tarayıcı hesaplarında
+  bir kez silinip yeniden eşitlendi (`registry.resyncOnce` 'ts-v1'). Yahoo satırlarında ekran okuyucu etiketleri (`A11Y`) atlanır.
 - **Albüm + galeri** (Conversation.tsx `toUnits`/`AlbumView`): aynı kişiden art arda ≥3 metinsiz görsel/video mesajı (aralar ≤3 dk) tek
   balonda 2 sütun ızgara (≤4 kare, "+N"); tüm platformlarda arayüz tarafında. Medya penceresi `Lightbox` sohbetteki tüm medya
   (`mediaList`) arasında ←/→ ve `.lb-nav` okları, "i / n" sayacı. Medyalı balon iç boşluğu 2 px (ince mor çerçeve).

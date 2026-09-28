@@ -7,6 +7,7 @@ import { simpleParser, type AddressObject, type ParsedMail } from 'mailparser';
 import { type ComposeDraft, BaseConnector, type StartOptions } from './base.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
+import { cleanMailHtml } from './mail-html.js';
 import type { Attachment, Chat, Participant, Platform } from '../model.js';
 
 /**
@@ -495,6 +496,13 @@ export class MailConnector extends BaseConnector {
         uids = uids.filter((u) => u > this.lastUid);
         const { mails } = await this.fetchUids(client, uids, !first);
         if (mails) bus.log('info', `${this.account.platform}: ${mails} e-posta alındı`);
+        // HTML gövde eski sürümlerde saklanmıyordu: son e-postaları bir kez yeniden oku (özgün biçim görünsün)
+        const mark = path.join(sessionDir(this.account.id), 'html-v1');
+        if (first && !fs.existsSync(mark)) {
+          const recent = ((await client.search({ since: new Date(Date.now() - 30 * 86_400_000) }, { uid: true })) || []).slice(-150);
+          await this.fetchUids(client, recent, false).catch((e) => bus.log('warn', `${this.account.platform}: HTML yenileme: ${(e as Error).message}`));
+          fs.writeFileSync(mark, '');
+        }
         this.saveState();
       });
       // Gönderilenler / Gereksiz: her 8. yoklamada (ilk dahil) özel kullanım bayraklı kutulardan son 40 e-posta
@@ -626,8 +634,11 @@ export class MailConnector extends BaseConnector {
       // gelen kutusunda görülen dizi Gönderilenler/Gereksiz'de de çıksa gelen kutusunda kalır
       meta: existing?.meta?.folder === 'inbox' && folder !== 'inbox' ? existing.meta : { ...existing?.meta, folder },
     });
-    const text = (m.text ?? htmlToText(m.html || '')).replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim();
+    const text = (m.text ?? htmlToText(m.html || '')).replace(/\r/g, '').replace(/[ \t\u00a0]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim();
     const attachments: Attachment[] = [];
+    // gövdeye gömülü görseller (cid:) → yerel medya adresi; yalnız gövdede kullanılanlar ek listesine girmez
+    const rawHtml = typeof m.html === 'string' ? m.html : '';
+    const cidUrl = new Map<string, string>();
     for (const [i, a] of (m.attachments ?? []).entries()) {
       // UID yalnız kendi kutusunda tekil: Gönderilmiş/Gereksiz'in UID 5'i gelen kutusunun UID 5'inin ekini ezmesin
       // (gelen kutusu anahtarı eskisiyle aynı kalır; kayıtlı bağlantılar bozulmaz)
@@ -638,8 +649,12 @@ export class MailConnector extends BaseConnector {
       fs.writeFileSync(path.join(dir, key + '.type'), a.contentType || 'application/octet-stream');
       const url = `/api/media/${encodeURIComponent(this.account.id)}?u=${encodeURIComponent('mail:' + key)}`;
       const kind: Attachment['kind'] = a.contentType?.startsWith('image/') ? 'image' : a.contentType?.startsWith('video/') ? 'video' : a.contentType?.startsWith('audio/') ? 'audio' : 'file';
+      const cid = a.cid ? a.cid.replace(/^<|>$/g, '') : '';
+      if (cid) cidUrl.set(cid, url);
+      if (cid && rawHtml.includes(`cid:${cid}`)) continue;
       attachments.push({ kind, name: a.filename ?? 'ek', mime: a.contentType, size: a.size, url: kind === 'image' ? url : undefined, link: url });
     }
+    const html = cleanMailHtml(rawHtml ? rawHtml.replace(/cid:([^"'\s)>]+)/g, (all, id: string) => cidUrl.get(id) ?? all) : undefined);
     this.upsertMessage(
       {
         remoteChatId: remoteId,
@@ -651,6 +666,7 @@ export class MailConnector extends BaseConnector {
         ts: (m.date ?? new Date()).getTime(),
         status: fromMe ? 'sent' : seen ? 'read' : 'delivered',
         attachments: attachments.length ? attachments : undefined,
+        html,
       },
       { live },
     );

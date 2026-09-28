@@ -14,6 +14,8 @@ const DEFAULT_HASH = '$2y$12$RMRxM3ZcJ3.SI.MuYUail.aDr4/jJwL4o8FbSRhp9FJMrcyMHDs
 const IDLE = 12 * 3600;
 const STATUSES = ['waiting', 'invited', 'joined', 'spam'];
 
+require_once __DIR__ . '/../api/lib-smtp.php';
+
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 header('X-Content-Type-Options: nosniff');
@@ -461,6 +463,7 @@ if ($a === 'demo') {
         'requestedAt' => (int) ($u['requestedAt'] ?? 0),
         'approvedAt' => (int) ($u['approvedAt'] ?? 0),
         'mailed' => $u['mailed'] ?? null,
+        'mailError' => (string) ($u['mailError'] ?? ''),
         'logins' => (int) ($u['logins'] ?? 0),
         'lastLogin' => (int) ($u['lastLogin'] ?? 0),
         'apps' => array_values(array_map(fn ($x) => (string) ($x['platform'] ?? ''), is_array($u['accounts'] ?? null) ? $u['accounts'] : [])),
@@ -480,13 +483,9 @@ function str_ends_with_s(string $h, string $n): bool
     return $n === '' || substr($h, -strlen($n)) === $n;
 }
 
-/** Onay e-postası (sunucunun mail() işlevi; From hello@mivelo.app). Başarısızsa false — panel uyarır. */
-function send_approval_mail(string $to, string $name, string $username): bool
+/** Onay e-postası: SMTP ayarlıysa kimlik doğrulamalı SMTP (Ayarlar → E-posta gönderimi), yoksa mail() yedeği. */
+function send_approval_mail(string $to, string $name, string $username): array
 {
-    if (!filter_var($to, FILTER_VALIDATE_EMAIL) || preg_match('/[\r\n]/', $to)) {
-        return false;
-    }
-    $subject = 'Mivelo demo üyeliğin onaylandı';
     $n = trim(preg_replace('/[\r\n]+/', ' ', $name) ?? '');
     $body = "Merhaba $n,\n\n"
         . "Mivelo demo üyelik talebin onaylandı. Artık giriş yapabilirsin:\n\n"
@@ -494,17 +493,24 @@ function send_approval_mail(string $to, string $name, string $username): bool
         . "  Kullanıcı adı: $username\n"
         . "  Şifre: talep ederken belirlediğin şifre\n\n"
         . "Demo sana özel: bağladığın uygulamalar ve ayarların yalnız senin hesabında durur. Gördüğün mesajlar örnek veridir.\n"
-        . "Geri bildirimini bu e-postaya yanıt olarak yazabilirsin.\n\n"
+        . "Bir hata görürsen ya da önerin olursa sağ alttaki geri bildirim düğmesini kullanabilir veya bu e-postayı yanıtlayabilirsin.\n\n"
         . "Mivelo\nhello@mivelo.app\n";
-    $headers = implode("\r\n", [
-        'From: Mivelo <hello@mivelo.app>',
-        'Reply-To: hello@mivelo.app',
-        'MIME-Version: 1.0',
-        'Content-Type: text/plain; charset=UTF-8',
-        'Content-Transfer-Encoding: 8bit',
-    ]);
-    $subj = function_exists('mb_encode_mimeheader') ? mb_encode_mimeheader($subject, 'UTF-8', 'B') : '=?UTF-8?B?' . base64_encode($subject) . '?=';
-    return @mail($to, $subj, $body, $headers, '-fhello@mivelo.app');
+    return mv_send_mail($to, 'Mivelo demo üyeliğin onaylandı', $body);
+}
+
+/** Kullanıcı kaydına e-posta sonucunu yaz (panelde rozet + hata ipucu) */
+function record_mail(string $id, array $res): void
+{
+    with_json('users.json', ['users' => []], function (array &$d) use ($id, $res) {
+        foreach ($d['users'] as &$x) {
+            if (($x['id'] ?? '') === $id) {
+                $x['mailed'] = $res['ok'] && $res['via'] === 'smtp';
+                $x['mailError'] = $res['ok'] && $res['via'] === 'smtp' ? '' : (string) ($res['error'] ?? 'Bilinmeyen hata');
+                $x['mailedAt'] = time();
+            }
+        }
+        unset($x);
+    });
 }
 
 if ($a === 'demo_update' && $method === 'POST') {
@@ -537,19 +543,12 @@ if ($a === 'demo_update' && $method === 'POST') {
     if ($u === null) {
         fail(404, 'Kullanıcı yok');
     }
-    $mailed = null;
+    $res = null;
     if ($status === 'active' && $u['__prev'] !== 'active') {
-        $mailed = send_approval_mail((string) ($u['email'] ?? ''), (string) ($u['name'] ?? ''), (string) ($u['username'] ?? ''));
-        with_json('users.json', ['users' => []], function (array &$d) use ($id, $mailed) {
-            foreach ($d['users'] as &$x) {
-                if (($x['id'] ?? '') === $id) {
-                    $x['mailed'] = $mailed;
-                }
-            }
-            unset($x);
-        });
+        $res = send_approval_mail((string) ($u['email'] ?? ''), (string) ($u['name'] ?? ''), (string) ($u['username'] ?? ''));
+        record_mail($id, $res);
     }
-    out(['ok' => true, 'mailed' => $mailed]);
+    out(['ok' => true, 'mailed' => $res ? ($res['ok'] && $res['via'] === 'smtp') : null, 'mailError' => $res && !($res['ok'] && $res['via'] === 'smtp') ? ($res['error'] ?? '') : '']);
 }
 
 if ($a === 'demo_mail' && $method === 'POST') {
@@ -563,16 +562,9 @@ if ($a === 'demo_mail' && $method === 'POST') {
     if ($u === null || demo_status($u) !== 'active') {
         fail(404, 'Onaylı kullanıcı yok');
     }
-    $mailed = send_approval_mail((string) ($u['email'] ?? ''), (string) ($u['name'] ?? ''), (string) ($u['username'] ?? ''));
-    with_json('users.json', ['users' => []], function (array &$d) use ($id, $mailed) {
-        foreach ($d['users'] as &$x) {
-            if (($x['id'] ?? '') === $id) {
-                $x['mailed'] = $mailed;
-            }
-        }
-        unset($x);
-    });
-    out(['ok' => true, 'mailed' => $mailed]);
+    $res = send_approval_mail((string) ($u['email'] ?? ''), (string) ($u['name'] ?? ''), (string) ($u['username'] ?? ''));
+    record_mail($id, $res);
+    out(['ok' => true, 'mailed' => $res['ok'] && $res['via'] === 'smtp', 'mailError' => $res['ok'] && $res['via'] === 'smtp' ? '' : ($res['error'] ?? ''), 'log' => $res['log'] ?? []]);
 }
 
 if ($a === 'demo_delete' && $method === 'POST') {
@@ -649,6 +641,48 @@ if ($a === 'task_delete' && $method === 'POST') {
 }
 
 /* ---------------- ayarlar ---------------- */
+if ($a === 'smtp') {
+    $c = mv_smtp_config() ?? [];
+    out(['configured' => (bool) $c, 'host' => $c['host'] ?? '', 'port' => (int) ($c['port'] ?? 465), 'secure' => $c['secure'] ?? 'ssl', 'user' => $c['user'] ?? '', 'from' => $c['from'] ?? '', 'fromName' => $c['fromName'] ?? 'Mivelo', 'hasPass' => !empty($c['pass'])]);
+}
+
+if ($a === 'smtp_save' && $method === 'POST') {
+    $old = mv_smtp_config() ?? [];
+    $host = trim((string) ($body['host'] ?? ''));
+    $user = trim((string) ($body['user'] ?? ''));
+    $from = trim((string) ($body['from'] ?? '')) ?: $user;
+    $secure = in_array($body['secure'] ?? '', ['ssl', 'tls', 'none'], true) ? $body['secure'] : 'ssl';
+    $port = max(1, min(65535, (int) ($body['port'] ?? 465)));
+    if ($host === '' && $user === '') {
+        @unlink(mv_smtp_path());
+        out(['ok' => true, 'configured' => false]);
+    }
+    if (!preg_match('/^[a-z0-9.-]{3,253}$/i', $host)) {
+        fail(400, 'Sunucu adı geçersiz');
+    }
+    if (!filter_var($from, FILTER_VALIDATE_EMAIL) || $user === '') {
+        fail(400, 'Kullanıcı adı ve gönderen adresi gerekli');
+    }
+    $pass = (string) ($body['pass'] ?? '');
+    $cfg = ['host' => $host, 'port' => $port, 'secure' => $secure, 'user' => $user, 'pass' => $pass !== '' ? $pass : (string) ($old['pass'] ?? ''), 'from' => $from, 'fromName' => mb_substr(trim((string) ($body['fromName'] ?? 'Mivelo')), 0, 60) ?: 'Mivelo'];
+    if ($cfg['pass'] === '') {
+        fail(400, 'Şifre gerekli');
+    }
+    $path = mv_smtp_path();
+    $lh = store_lock($path);
+    store_write($path, $cfg, JSON_PRETTY_PRINT);
+    @chmod($path, 0600);
+    flock($lh, LOCK_UN);
+    fclose($lh);
+    out(['ok' => true, 'configured' => true]);
+}
+
+if ($a === 'smtp_test' && $method === 'POST') {
+    $to = trim((string) ($body['to'] ?? ''));
+    $res = mv_send_mail($to, 'Mivelo deneme e-postası', "Bu bir deneme e-postasıdır. Bunu aldıysan yönetim panelinin e-posta gönderimi çalışıyor.\n\nGönderim: " . date('d.m.Y H:i') . "\n");
+    out(['ok' => $res['ok'] && $res['via'] === 'smtp', 'via' => $res['via'], 'error' => $res['ok'] && $res['via'] === 'smtp' ? '' : ($res['error'] ?? ''), 'log' => $res['log'] ?? []]);
+}
+
 if ($a === 'password' && $method === 'POST') {
     $cur = (string) ($body['current'] ?? '');
     $next = (string) ($body['next'] ?? '');
