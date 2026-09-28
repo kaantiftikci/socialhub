@@ -68,6 +68,7 @@ async function ensureInbox(page: Page, timeout = 20_000): Promise<boolean> {
 }
 
 let diagDone = false;
+let listWarned = false;
 /** Bir kez: seçici sayıları ve sohbetle ilgili data-e2e adları (içerik yazılmaz) → seçiciler gerçek sayfaya göre ayarlanır */
 async function diagnose(page: Page): Promise<void> {
   if (diagDone) return;
@@ -377,8 +378,7 @@ export const tiktok: Strategy = {
   home: HOME,
   loginUrl: 'https://www.tiktok.com/login',
   loginHint: 'Açılan pencerede TikTok hesabınla giriş yap; mesajlar sayfası açılınca pencere kendiliğinden kapanır.',
-  // TikTok gizli sekmede listeyi geç çiziyor; görünür sayıl
-  keepVisible: true,
+  // keepVisible YOK: sayfa kendini gizli/odaksız tanıtır (köprü varsayılanı) → TikTok kullanıcıyı "aktif" sayıp telefona bildirimi kesmez
   watchSelector: LIST_ITEM,
   // sayfanın kendi IM soketi (ikili çerçeveler): büyük çerçeve = yeni mesaj olayı, küçükler kalp atışı
   watchSockets: [{ url: /\bim-ws[\w-]*\.tiktok|tiktok\.com\/ws\//i, minBytes: 160 }],
@@ -409,12 +409,16 @@ export const tiktok: Strategy = {
   },
 
   async threads(page) {
-    if (!(await ensureInbox(page))) {
-      await assertUsable(page);
-      if (/\/login/.test(page.url())) throw new Error('TikTok oturumu kapalı (authwall): Yeniden bağlan');
+    const ok = await ensureInbox(page);
+    await assertUsable(page);
+    if (/\/login/.test(page.url())) throw new Error('TikTok oturumu kapalı (authwall): Yeniden bağlan');
+    // tanı liste bulunamasa da yazılır: seçiciler tutmadığında asıl gereken durum bu
+    await diagnose(page);
+    if (!ok) {
+      if (!listWarned) bus.log('warn', 'TikTok: sohbet listesi okunamadı (sayfa düzeni değişmiş olabilir; "TikTok tanı" günlüğüne bak)');
+      listWarned = true;
       return [];
     }
-    await diagnose(page);
     return toThreads(await readList(page));
   },
 
