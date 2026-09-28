@@ -123,7 +123,9 @@ Dil: arayüz ve yorumlar Türkçe.
   Node gömülü (`KAVSAK_BUNDLE_NODE=1`), macOS ad-hoc imza (`signingIdentity "-"`; Apple Developer hesabı YOK → ilk açılışta sağ tık → Aç / "Yine de aç"),
   Windows imzasız (SmartScreen). Hepsi başarılıysa `publish`: `mivelo.app/indir/files/` (FTP; Mivelo-mac-arm64.dmg, Mivelo-mac-intel.dmg,
   Mivelo-windows-x64-setup.exe, latest.json {version,date,files}; `deploy/indir/.htaccess`: json'da CORS *, indirme başlığı, liste kapalı). İndirme sayfası
-  `apps/landing/indir/index.html` (latest.json'dan boyut/sürüm, işletim sistemine göre önerilen kart, ilk açılış adımları). Chromium pakette YOK:
+  `apps/landing/indir/index.html` (ana sayfanın görsel dili: cam üst çubuk, hareketli gradyan, kelime kelime açılan başlık + süpürülen alt metin,
+  kaydırınca beliren kartlar; işletim sistemine göre büyük indirme düğmesi + önerilen kart (telefonda en üstte), Mac/Windows kayan hap sekmeli
+  kurulum adımları, lisans bandı; latest.json'dan boyut/sürüm; `prefers-reduced-motion` uyar). Chromium pakette YOK:
   `packages/core/src/browser-install.ts` `ensureChromium` — köprü `launch` öncesi yoksa `playwright install --no-shell chromium` (gömülü node ile,
   tek uçuş, ilerleme hesap durumunda "Tarayıcı bileşeni indiriliyor… %N"); indirilemezse hata + "Yeniden bağlan". Uygulama içi yeni sürüm kartı
   `UpdateBanner.tsx` (yalnız Tauri + `VITE_APP_VERSION`; 6 sa'de bir latest.json; "İndir" → mivelo.app/indir, "Sonra" o sürümü atlar). Gerçek
