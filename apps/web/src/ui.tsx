@@ -216,9 +216,10 @@ export function Chip({ platform, size = 18, ring }: { platform: Platform; size?:
   }
   if (platform === 'imessage') {
     return (
-      <span className="plat" title={p.name} style={{ ...base, background: 'var(--green-bg)', color: 'var(--green-txt)' }}>
-        <svg width={Math.round(s * 0.62)} height={Math.round(s * 0.62)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M12 4c-4.4 0-8 2.9-8 6.5 0 2 1.1 3.8 2.8 5L6 19.5l3.9-1.6c.7.1 1.4.2 2.1.2 4.4 0 8-2.9 8-6.5S16.4 4 12 4z" />
+      // Apple Mesajlar simgesi gibi: yeşil degrade zemin + dolu beyaz balon (kuyruk sol altta)
+      <span className="plat" title={p.name} style={{ ...base, background: 'linear-gradient(180deg, #65f97c 0%, #0cc723 100%)' }}>
+        <svg width={Math.round(s * 0.72)} height={Math.round(s * 0.72)} viewBox="0 0 24 24" aria-hidden="true">
+          <path fill="#fff" d="M12 3.2c-5.3 0-9.6 3.55-9.6 7.95 0 2.55 1.45 4.8 3.7 6.25-.2 1.25-.85 2.4-1.9 3.3 2 .05 3.8-.6 5.15-1.8.85.15 1.75.25 2.65.25 5.3 0 9.6-3.55 9.6-7.95S17.3 3.2 12 3.2z" />
         </svg>
       </span>
     );
