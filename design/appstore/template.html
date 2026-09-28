@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Mivelo — App Store ekranları</title>
+<style>
+/* App Store ekran görüntüleri (iPhone 6,9" / 6,7": 1290×2796). Her .shot 430×932 CSS pikseli, render.mjs 3× ölçekle çeker.
+   Arayüz Mivelo masaüstü/web tasarım dilinin iOS uyarlaması: Inter, mor #6C47FF, lime #D4FF3F, açık zemin. */
+@font-face{font-family:Inter;src:url(fonts/inter-latin-wght-normal.woff2) format('woff2');font-weight:100 900;unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:Inter;src:url(fonts/inter-latin-ext-wght-normal.woff2) format('woff2');font-weight:100 900;unicode-range:U+0100-02AF,U+0304,U+0308,U+0329,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}
+:root{--ink:#16151B;--ink-2:#44424D;--ink-3:#6E6C78;--ink-4:#A3A1AC;--line:#ECEAF1;--bg:#F7F6FA;--brand:#6C47FF;--brand-ink:#4526C9;--brand-soft:#F0ECFF;--lime:#D4FF3F;--green:#1FA971}
+*{box-sizing:border-box}
+body{margin:0;background:#ddd;font-family:Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased;font-feature-settings:'cv11','ss01'}
+.shot{position:relative;width:430px;height:932px;overflow:hidden;margin:0 0 20px}
+svg{flex-shrink:0}
+
+/* ---------- zemin + başlık ---------- */
+.bg{position:absolute;inset:0;background:
+  radial-gradient(60% 40% at 15% 18%,rgba(196,206,255,.95),transparent 70%),
+  radial-gradient(55% 45% at 90% 10%,rgba(226,214,255,.95),transparent 70%),
+  radial-gradient(70% 50% at 75% 80%,rgba(206,232,255,.9),transparent 70%),
+  radial-gradient(60% 50% at 10% 90%,rgba(245,222,255,.85),transparent 70%),
+  linear-gradient(180deg,#EEF0FF,#F4EFFF)}
+.shot.dark .bg{background:
+  radial-gradient(60% 40% at 20% 12%,rgba(108,71,255,.55),transparent 70%),
+  radial-gradient(50% 40% at 95% 30%,rgba(226,107,184,.35),transparent 70%),
+  radial-gradient(60% 50% at 70% 95%,rgba(212,255,63,.16),transparent 70%),
+  linear-gradient(180deg,#17132B,#231A47)}
+.head{position:absolute;left:0;right:0;top:62px;text-align:center;padding:0 30px;z-index:2}
+.kick{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 11px;border-radius:999px;background:rgba(255,255,255,.7);color:var(--brand-ink);font-size:12px;font-weight:600;letter-spacing:.2px;box-shadow:0 0 0 1px rgba(108,71,255,.15)}
+.kick svg{width:13px;height:13px}
+.shot.dark .kick{background:rgba(255,255,255,.1);color:#fff;box-shadow:0 0 0 1px rgba(255,255,255,.18)}
+.h{margin:14px 0 0;font-size:33px;line-height:1.08;letter-spacing:-1.1px;font-weight:700;color:var(--ink)}
+.h em{font-style:normal;background:linear-gradient(92deg,#6C47FF,#A06BFF 50%,#E26BB8);-webkit-background-clip:text;background-clip:text;color:transparent}
+.shot.dark .h{color:#fff}
+.shot.dark .h em{background:linear-gradient(92deg,#D4FF3F,#9DF5C8);-webkit-background-clip:text;background-clip:text}
+.sub{margin:10px auto 0;max-width:330px;font-size:14.5px;line-height:1.45;color:var(--ink-3)}
+.shot.dark .sub{color:rgba(255,255,255,.7)}
+
+/* ---------- iPhone çerçevesi ---------- */
+.phone{position:absolute;left:50%;top:246px;width:417px;height:876px;margin-left:-208.5px;transform:scale(.8);transform-origin:50% 0;z-index:1;
+  border-radius:66px;background:#0E0E12;padding:12px;box-shadow:0 0 0 2px #2A2A31,0 0 0 3.5px #0B0B0E,0 60px 110px -40px rgba(40,24,120,.55),0 30px 60px -30px rgba(0,0,0,.35)}
+.shot.dark .phone{box-shadow:0 0 0 2px #3A3A44,0 0 0 3.5px #0B0B0E,0 60px 120px -30px rgba(0,0,0,.8),0 0 80px -10px rgba(108,71,255,.45)}
+.scr{position:relative;width:393px;height:852px;border-radius:55px;overflow:hidden;background:var(--bg);color:var(--ink)}
+.island{position:absolute;left:50%;top:11px;width:124px;height:36px;margin-left:-62px;border-radius:20px;background:#000;z-index:30}
+.sb{position:absolute;left:0;right:0;top:0;height:54px;display:flex;align-items:center;justify-content:space-between;padding:4px 34px 0 50px;font-size:16.5px;font-weight:600;z-index:25}
+.sb .r{display:flex;gap:6px;align-items:center}
+.homeind{position:absolute;left:50%;bottom:8px;width:136px;height:5px;margin-left:-68px;border-radius:3px;background:#111;z-index:30}
+
+/* ---------- uygulama ortak ---------- */
+.ic{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.body{position:absolute;left:0;right:0;top:54px;bottom:0;overflow:hidden}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:6px 18px 0}
+.round{width:36px;height:36px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;color:var(--ink);box-shadow:0 0 0 1px var(--line)}
+.round.brand{background:var(--brand);color:#fff;box-shadow:0 6px 14px -6px rgba(108,71,255,.7)}
+.lt{font-size:33px;font-weight:700;letter-spacing:-.9px;margin:4px 18px 0}
+.lt-sub{margin:2px 18px 0;font-size:13.5px;color:var(--ink-3)}
+.search{margin:12px 16px 0;height:38px;border-radius:12px;background:#ECEBF1;display:flex;align-items:center;gap:8px;padding:0 11px;color:var(--ink-4);font-size:15.5px}
+.search .ic{width:18px;height:18px}
+.chips{display:flex;gap:7px;padding:12px 16px 4px;overflow:hidden}
+.chip{height:31px;padding:0 12px;border-radius:999px;background:#fff;box-shadow:0 0 0 1px var(--line);display:inline-flex;align-items:center;gap:6px;font-size:13.5px;font-weight:500;color:var(--ink-2);white-space:nowrap}
+.chip b{font-weight:600;color:var(--ink-4);font-size:12px}
+.chip.on{background:var(--ink);color:#fff;box-shadow:none}
+.chip.on b{color:rgba(255,255,255,.6)}
+.av{position:relative;width:50px;height:50px;flex-shrink:0}
+.av img,.av .ini{width:50px;height:50px;border-radius:50%;object-fit:cover;display:flex;align-items:center;justify-content:center;font-weight:600;color:#fff;font-size:17px}
+.av .bd{position:absolute;right:-3px;bottom:-3px;border:2.5px solid var(--bg);border-radius:8px}
+.brand-ic{display:flex;align-items:center;justify-content:center;border-radius:7px;overflow:hidden}
+.brand-ic svg{fill:#fff}
+.brand-ic img{width:100%;height:100%;object-fit:cover}
+.list{margin-top:6px}
+.row{display:flex;gap:12px;align-items:center;padding:9px 16px}
+.row .mid{flex:1;min-width:0;border-bottom:1px solid var(--line);padding:4px 0 13px}
+.row:last-child .mid{border-bottom:0}
+.row .t{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.row .n{font-size:16px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .tm{font-size:12.5px;color:var(--ink-4);flex-shrink:0}
+.row.un .tm{color:var(--brand);font-weight:600}
+.row .p{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:3px}
+.row .p span{font-size:14px;color:var(--ink-3);line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.row.un .p span{color:var(--ink-2)}
+.cnt{font-style:normal;min-width:21px;height:21px;border-radius:11px;background:var(--brand);color:#fff;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;padding:0 6px;flex-shrink:0}
+.tabbar{position:absolute;left:0;right:0;bottom:0;height:86px;padding:8px 10px 0;display:flex;justify-content:space-around;background:rgba(250,250,252,.86);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:1px solid rgba(0,0,0,.06);z-index:20}
+.tab{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10.5px;font-weight:500;color:var(--ink-4);width:66px;position:relative}
+.tab .ic{width:25px;height:25px}
+.tab.on{color:var(--brand)}
+.tab .dotn{position:absolute;top:-2px;left:38px;min-width:17px;height:17px;border-radius:9px;background:#FF3B30;color:#fff;font-size:10.5px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px;border:2px solid #FAFAFC}
+.focus-banner{margin:10px 16px 2px;padding:11px 13px;border-radius:16px;background:linear-gradient(120deg,#6C47FF,#8B63FF);color:#fff;display:flex;align-items:center;gap:11px;box-shadow:0 12px 24px -14px rgba(108,71,255,.9)}
+.focus-banner .ico{width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center}
+.focus-banner b{display:block;font-size:14.5px;font-weight:600}
+.focus-banner small{font-size:12.5px;opacity:.8}
+.focus-banner .go{margin-left:auto;height:28px;padding:0 11px;border-radius:9px;background:var(--lime);color:#1A2300;font-size:12.5px;font-weight:700;display:flex;align-items:center}
+.ticks{color:#34B7F1;display:inline-flex;vertical-align:-2px;margin-right:2px}
+.ticks .ic{width:16px;height:16px;stroke-width:2.2}
+
+/* ---------- sohbet ---------- */
+.chat-h{display:flex;align-items:center;gap:10px;padding:4px 14px 10px;border-bottom:1px solid var(--line);background:rgba(250,250,252,.9)}
+.chat-h .back{color:var(--brand);display:flex;align-items:center;font-size:16px;gap:0}
+.chat-h .back .ic{width:26px;height:26px}
+.chat-h .who{flex:1;min-width:0}
+.chat-h .who b{display:block;font-size:16px;font-weight:600}
+.chat-h .who small{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--ink-3)}
+.chat-h .who small i{width:7px;height:7px;border-radius:50%;background:#25D366;display:inline-block}
+.chat-h .acts{display:flex;gap:16px;color:var(--brand)}
+.chat-h .av,.chat-h .av img{width:38px;height:38px}
+.msgs{padding:12px 12px 0;display:flex;flex-direction:column;gap:6px}
+.day{align-self:center;font-size:11.5px;font-weight:600;color:var(--ink-3);background:#ECEBF1;border-radius:8px;padding:3px 9px;margin:4px 0}
+.bub{max-width:78%;padding:8px 12px 7px;border-radius:19px;font-size:15px;line-height:1.38;background:#fff;box-shadow:0 1px 1px rgba(0,0,0,.04),0 0 0 1px rgba(20,18,40,.04);align-self:flex-start;border-bottom-left-radius:6px}
+.bub .m{display:block;text-align:right;font-size:11px;color:var(--ink-4);margin-top:2px}
+.bub.me{align-self:flex-end;background:var(--brand);color:#fff;border-bottom-left-radius:19px;border-bottom-right-radius:6px}
+.bub.me .m{color:rgba(255,255,255,.72)}
+.bub.me .ticks{color:var(--lime)}
+.file{display:flex;align-items:center;gap:10px;padding:4px 2px}
+.file .fi{width:38px;height:44px;border-radius:8px;background:#FFE8E6;color:#E0412F;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800}
+.file b{display:block;font-size:14px;font-weight:600}
+.file small{font-size:12px;color:var(--ink-3)}
+.sum{margin:12px 12px 4px;border-radius:18px;background:#fff;box-shadow:0 0 0 1px rgba(108,71,255,.18),0 16px 30px -18px rgba(108,71,255,.55);padding:13px 14px 12px}
+.sum .hd{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700;color:var(--brand-ink);letter-spacing:.1px}
+.sum .hd .ic{width:17px;height:17px;color:var(--brand)}
+.sum .hd span{margin-left:auto;font-size:11.5px;font-weight:500;color:var(--ink-4)}
+.sum ul{margin:8px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
+.sum li{display:flex;gap:8px;font-size:14px;line-height:1.38;color:var(--ink-2)}
+.sum li::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--brand);margin-top:7px;flex-shrink:0}
+.sum .act{margin-top:11px;display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:12px;background:var(--brand-soft)}
+.sum .act .ic{width:18px;height:18px;color:var(--brand)}
+.sum .act div{flex:1;font-size:13.5px;line-height:1.3}
+.sum .act div b{font-weight:600}
+.sum .act small{display:block;font-size:12px;color:var(--ink-3)}
+.pbtn{height:30px;padding:0 12px;border-radius:9px;background:var(--brand);color:#fff;font-size:12.5px;font-weight:600;display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.pbtn.dark{background:var(--ink)}
+.pbtn.ghost{background:#fff;color:var(--ink);box-shadow:0 0 0 1px var(--line)}
+.pbtn.lime{background:var(--lime);color:#1A2300}
+.comp{position:absolute;left:0;right:0;bottom:0;padding:8px 10px 30px;background:rgba(250,250,252,.94);backdrop-filter:blur(20px);border-top:1px solid rgba(0,0,0,.05)}
+.draft{margin:0 2px 8px;padding:10px 11px;border-radius:15px;background:linear-gradient(135deg,#F3EFFF,#FBF9FF);box-shadow:0 0 0 1px rgba(108,71,255,.2)}
+.draft .hd{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--brand-ink)}
+.draft .hd .ic{width:15px;height:15px;color:var(--brand)}
+.draft .hd span{font-weight:500;color:var(--ink-4)}
+.draft p{margin:6px 0 9px;font-size:14.5px;line-height:1.4;color:var(--ink)}
+.draft .bt{display:flex;gap:7px}
+.inrow{display:flex;align-items:center;gap:8px}
+.inrow .plus{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--ink-3)}
+.inrow .field{flex:1;height:38px;border-radius:19px;background:#fff;box-shadow:0 0 0 1px var(--line);display:flex;align-items:center;padding:0 14px;color:var(--ink-4);font-size:15px}
+.inrow .send{width:36px;height:36px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center}
+.inrow .send .ic{width:19px;height:19px;stroke-width:2.4}
+
+/* ---------- odak ---------- */
+.fcard{margin:12px 14px 0;border-radius:20px;background:#fff;box-shadow:0 0 0 1px rgba(20,18,40,.05),0 14px 30px -20px rgba(40,30,110,.35);padding:14px}
+.fcard .top{display:flex;align-items:center;gap:10px}
+.fcard .top .av,.fcard .top .av img{width:40px;height:40px}
+.fcard .top b{font-size:15px;font-weight:600;display:block}
+.fcard .top small{font-size:12px;color:#D9480F;display:flex;align-items:center;gap:4px;font-weight:500}
+.fcard .top small .ic{width:13px;height:13px}
+.fcard .q{margin:10px 0 0;font-size:14.5px;line-height:1.4;color:var(--ink-2);padding-left:11px;border-left:3px solid var(--line)}
+.fcard .draft{margin:11px 0 0}
+.promise{margin:14px 14px 0;border-radius:20px;background:#fff;box-shadow:0 0 0 1px rgba(20,18,40,.05);padding:6px 14px}
+.promise h4{margin:8px 0 4px;font-size:13px;font-weight:700;color:var(--ink-3);letter-spacing:.3px;text-transform:uppercase}
+.pr{display:flex;align-items:center;gap:11px;padding:9px 0;border-top:1px solid var(--line)}
+.pr:first-of-type{border-top:0}
+.pr .cb{width:22px;height:22px;border-radius:7px;box-shadow:inset 0 0 0 2px #CFCCDA;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.pr .cb.on{background:var(--brand);box-shadow:none;color:#fff}
+.pr .cb .ic{width:14px;height:14px;stroke-width:3}
+.pr div{flex:1;font-size:14.5px;line-height:1.3}
+.pr div small{display:block;font-size:12px;color:var(--ink-3);margin-top:1px}
+.pr.done div{color:var(--ink-4);text-decoration:line-through}
+.pr .due{font-size:12px;font-weight:600;color:var(--brand);background:var(--brand-soft);padding:3px 8px;border-radius:7px}
+
+/* ---------- pazaryeri ---------- */
+.seg{margin:12px 16px 0;display:flex;padding:3px;border-radius:11px;background:#ECEBF1}
+.seg span{flex:1;height:31px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:500;color:var(--ink-2);gap:5px}
+.seg span.on{background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.08);font-weight:600;color:var(--ink)}
+.seg span b{font-size:11px;min-width:18px;height:18px;border-radius:9px;background:var(--brand);color:#fff;display:inline-flex;align-items:center;justify-content:center;padding:0 5px}
+.ocard{margin:12px 14px 0;border-radius:20px;background:#fff;box-shadow:0 0 0 1px rgba(20,18,40,.05),0 14px 30px -20px rgba(40,30,110,.35);padding:14px}
+.ocard .oh{display:flex;align-items:center;gap:10px}
+.ocard .oh .pic{width:52px;height:60px;border-radius:12px;background:linear-gradient(160deg,#EFE6D8,#D9C7AE);position:relative;overflow:hidden;flex-shrink:0}
+.ocard .oh .pic::after{content:"";position:absolute;left:14px;top:12px;width:24px;height:36px;border-radius:8px 8px 4px 4px;background:#F7F1E6;box-shadow:0 2px 4px rgba(0,0,0,.08)}
+.ocard .oh b{display:block;font-size:15px;font-weight:600}
+.ocard .oh small{display:block;font-size:12.5px;color:var(--ink-3);margin-top:1px}
+.ocard .oh .pr2{margin-left:auto;text-align:right;font-size:15px;font-weight:700}
+.ocard .oh .pr2 small{font-weight:500}
+.tl{margin:14px 2px 2px;display:flex;align-items:flex-start}
+.tl .st{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;position:relative;font-size:11.5px;color:var(--ink-3);text-align:center;font-weight:500}
+.tl .st::before{content:"";position:absolute;top:11px;left:-50%;width:100%;height:3px;background:var(--line);z-index:0}
+.tl .st:first-child::before{display:none}
+.tl .st.ok::before{background:var(--green)}
+.tl .st .d{width:25px;height:25px;border-radius:50%;background:#fff;box-shadow:inset 0 0 0 2.5px var(--line);display:flex;align-items:center;justify-content:center;z-index:1;position:relative}
+.tl .st.ok .d{background:var(--green);box-shadow:none;color:#fff}
+.tl .st.now .d{background:#fff;box-shadow:inset 0 0 0 2.5px var(--green)}
+.tl .st.now .d::after{content:"";width:9px;height:9px;border-radius:50%;background:var(--green)}
+.tl .st .d .ic{width:14px;height:14px;stroke-width:3}
+.tl .st.ok,.tl .st.now{color:var(--ink)}
+.ship{margin-top:12px;display:flex;align-items:center;gap:8px;padding:9px 11px;border-radius:12px;background:#F4F3F8;font-size:13px;color:var(--ink-2)}
+.ship .ic{width:18px;height:18px;color:var(--ink-3)}
+.ship b{font-weight:600}
+.qcard{margin:12px 14px 0;border-radius:20px;background:#fff;box-shadow:0 0 0 1px rgba(20,18,40,.05),0 14px 30px -20px rgba(40,30,110,.35);padding:14px}
+.qcard .qh{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink-3)}
+.qcard .qh .tag{height:22px;padding:0 8px;border-radius:7px;background:#FFF3E0;color:#B45309;font-weight:600;display:inline-flex;align-items:center;gap:4px;font-size:11.5px}
+.qcard .qh .tag .ic{width:13px;height:13px}
+.qcard .qq{margin:9px 0 0;font-size:15px;font-weight:600;line-height:1.35}
+.qcard .qp{font-size:12.5px;color:var(--ink-3);margin-top:3px}
+.mini{display:flex;align-items:center;gap:11px;padding:10px 16px}
+.mini .mid{flex:1;min-width:0}
+.mini b{display:block;font-size:14.5px;font-weight:600}
+.mini small{font-size:12.5px;color:var(--ink-3)}
+.pill{height:24px;padding:0 9px;border-radius:8px;font-size:11.5px;font-weight:600;display:inline-flex;align-items:center;gap:4px}
+.pill.y{background:#FFF6DB;color:#9A6700}.pill.g{background:#E3F7EC;color:#137A47}.pill.b{background:#E8F0FF;color:#1E4FD8}
+.sec-t{margin:16px 18px 2px;font-size:13px;font-weight:700;color:var(--ink-3);letter-spacing:.3px;text-transform:uppercase}
+
+/* ---------- takvim ---------- */
+.cal{margin:12px 14px 0;border-radius:20px;background:#fff;box-shadow:0 0 0 1px rgba(20,18,40,.05);padding:12px 12px 10px}
+.cal .mh{display:flex;align-items:center;justify-content:space-between;padding:0 4px 8px;font-size:16px;font-weight:700}
+.cal .mh span{display:flex;gap:14px;color:var(--brand)}
+.cal .mh .ic{width:20px;height:20px}
+.cal .g{display:grid;grid-template-columns:repeat(7,1fr);row-gap:4px;text-align:center}
+.cal .g .w{font-size:11px;font-weight:600;color:var(--ink-4);padding-bottom:4px}
+.cal .g .d{height:36px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:14.5px;font-weight:500;position:relative;border-radius:11px}
+.cal .g .d.o{color:#C9C7D2}
+.cal .g .d.t{background:var(--brand);color:#fff;font-weight:700}
+.cal .g .d.s{background:var(--brand-soft);color:var(--brand-ink);font-weight:600}
+.cal .g .d i{position:absolute;bottom:3px;width:5px;height:5px;border-radius:50%;background:var(--brand)}
+.cal .g .d i.l{background:#9ACD00}
+.cal .g .d.t i{background:var(--lime)}
+.ev{margin:10px 14px 0;display:flex;gap:12px;padding:12px 13px;border-radius:18px;background:#fff;box-shadow:0 0 0 1px rgba(20,18,40,.05),0 10px 24px -18px rgba(40,30,110,.35)}
+.ev .tm{width:52px;flex-shrink:0;font-size:15px;font-weight:700;line-height:1.2}
+.ev .tm small{display:block;font-size:11.5px;font-weight:500;color:var(--ink-4)}
+.ev .bar{width:4px;border-radius:2px;background:var(--brand);flex-shrink:0}
+.ev .bar.l{background:#9ACD00}
+.ev .bar.o{background:#F59E0B}
+.ev .c{flex:1;min-width:0}
+.ev .c b{display:block;font-size:15px;font-weight:600}
+.ev .c .src{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12.5px;color:var(--ink-3)}
+.ev .c .src .ic{width:14px;height:14px}
+.ev .bell{color:var(--ink-4);align-self:center}
+.ev .bell .ic{width:19px;height:19px}
+
+/* ---------- kanallar ---------- */
+.apps{margin:14px 14px 0;display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.app{border-radius:18px;background:#fff;box-shadow:0 0 0 1px rgba(20,18,40,.05);padding:12px 4px 10px;display:flex;flex-direction:column;align-items:center;gap:7px;font-size:11.5px;font-weight:600;color:var(--ink-2);position:relative}
+.app .brand-ic{border-radius:12px}
+.app .ok{position:absolute;top:8px;right:10px;width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 2px #fff}
+.app small{font-size:10.5px;font-weight:500;color:var(--ink-4);margin-top:-5px}
+.app.add{background:transparent;box-shadow:inset 0 0 0 1.5px #D5D2E0;color:var(--brand)}
+.app.add .pl{width:40px;height:40px;border-radius:12px;background:var(--brand-soft);display:flex;align-items:center;justify-content:center}
+.safe{margin:16px 14px 0;border-radius:20px;padding:15px 15px;background:linear-gradient(135deg,#1B1530,#2E2266);color:#fff;display:flex;gap:12px;align-items:flex-start;position:relative;overflow:hidden}
+.safe::after{content:"";position:absolute;right:-40px;top:-50px;width:160px;height:160px;border-radius:50%;background:radial-gradient(circle,rgba(212,255,63,.35),transparent 65%)}
+.safe .ico{width:38px;height:38px;border-radius:11px;background:rgba(212,255,63,.16);color:var(--lime);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.safe b{display:block;font-size:15px;font-weight:600}
+.safe p{margin:3px 0 0;font-size:13px;line-height:1.45;color:rgba(255,255,255,.72)}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+/* Marka simgeleri (render.mjs doldurur: simple-icons + Font Awesome brands — web arayüzündeki ui.tsx ile aynı kaynak ve renkler) */
+const BRANDS = /*BRANDS*/{};
+const AV = n => `../../apps/web/public/demo/avatars/${n}.jpg`;
+const SHOPIMG = n => `../../apps/web/public/brands/${n}.png`;
+
+const I = {
+  search:'<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  inbox:'<path d="M3 13h5l2 3h4l2-3h5"/><path d="M5.5 5h13L21 13v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-6z"/>',
+  spark:'<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/>',
+  cal:'<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+  grid:'<rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/>',
+  sliders:'<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
+  back:'<path d="M15 5l-7 7 7 7"/>',
+  phone:'<path d="M21 16.4v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 3.1 3.7 2 2 0 0 1 5.1 1.5h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L9 9.4a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/>',
+  video:'<rect x="2.5" y="6" width="13" height="12" rx="3"/><path d="M15.5 10.5 21 7v10l-5.5-3.5"/>',
+  plus:'<path d="M12 5v14M5 12h14"/>',
+  up:'<path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/>',
+  check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  checks:'<path d="M2 12.5l4.5 4.5L16 7.5"/><path d="M12.5 16l1 1L23 7.5"/>',
+  clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  pkg:'<path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>',
+  help:'<circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 1 1 3.4 2.3c-.6.3-1 .8-1 1.5v.5M12 17h.01"/>',
+  bell:'<path d="M6 9a6 6 0 0 1 12 0c0 6.5 2.5 8 2.5 8h-17S6 15.5 6 9"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
+  lock:'<rect x="4" y="10.5" width="16" height="10.5" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>',
+  truck:'<path d="M2.5 6h11v10h-11zM13.5 10h4l3.5 3.5V16h-7.5"/><circle cx="6.5" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
+  edit:'<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+  compose:'<path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/><path d="M17.5 3.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4z"/>',
+  chev:'<path d="M9 5l7 7-7 7"/>', chevl:'<path d="M15 5l-7 7 7 7"/>',
+  flag:'<path d="M5 21V4h12l-2.5 4.5L17 13H5"/>',
+  send:'<path d="M4 12l16-8-6 16-3-7z"/>',
+  mic:'<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>',
+  shield:'<path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
+  sig:'', wifi:'', bat:''
+};
+const ic = (n, cls='ic') => `<svg class="${cls}" viewBox="0 0 24 24">${I[n]}</svg>`;
+
+/** Marka rozeti: renkli kare + beyaz glif (ui.tsx Chip ile aynı kurallar) ya da pazaryeri PNG'si */
+function brand(p, size=20, radius){
+  const r = radius ?? Math.round(size*.28);
+  if (['trendyol','hepsiburada','n11','amazon','etsy','shopier'].includes(p))
+    return `<span class="brand-ic" style="width:${size}px;height:${size}px;border-radius:${r}px"><img src="${SHOPIMG(p)}" alt=""></span>`;
+  const b = BRANDS[p]; if(!b) return '';
+  const g = Math.round(size*b.ratio);
+  return `<span class="brand-ic" style="width:${size}px;height:${size}px;border-radius:${r}px;background:${b.bg}"><svg viewBox="${b.vb||'0 0 24 24'}" width="${g}" height="${g}"><path d="${b.path}"/></svg></span>`;
+}
+function avatar(img, p, size=50, ini, col){
+  const face = img ? `<img src="${AV(img)}" alt="" style="width:${size}px;height:${size}px">`
+    : `<span class="ini" style="width:${size}px;height:${size}px;background:${col||'#8B7CF6'}">${ini}</span>`;
+  return `<span class="av" style="width:${size}px;height:${size}px">${face}${p?`<span class="bd">${brand(p, Math.round(size*.42))}</span>`:''}</span>`;
+}
+const statusBar = (dark) => `<div class="island"></div><div class="sb" style="color:${dark?'#fff':'#000'}"><span>9:41</span><span class="r">
+  <svg width="18" height="12" viewBox="0 0 18 12"><rect x="0" y="8" width="3" height="4" rx="1" fill="currentColor"/><rect x="5" y="5.5" width="3" height="6.5" rx="1" fill="currentColor"/><rect x="10" y="3" width="3" height="9" rx="1" fill="currentColor"/><rect x="15" y="0" width="3" height="12" rx="1" fill="currentColor"/></svg>
+  <svg width="16" height="12" viewBox="0 0 16 12"><path d="M8 2.2c2.4 0 4.6.9 6.2 2.5l1.2-1.2A10.4 10.4 0 0 0 8 .5 10.4 10.4 0 0 0 .6 3.5l1.2 1.2A8.7 8.7 0 0 1 8 2.2zm0 3.4c1.5 0 2.9.6 4 1.6l1.2-1.2A7.3 7.3 0 0 0 8 3.9 7.3 7.3 0 0 0 2.8 6l1.2 1.2c1.1-1 2.5-1.6 4-1.6zm0 3.4c.7 0 1.3.3 1.8.7L8 11.5 6.2 9.7c.5-.4 1.1-.7 1.8-.7z" fill="currentColor"/></svg>
+  <svg width="27" height="13" viewBox="0 0 27 13"><rect x=".5" y=".5" width="23" height="12" rx="3.5" fill="none" stroke="currentColor" opacity=".4"/><rect x="2" y="2" width="18" height="9" rx="2" fill="currentColor"/><path d="M25 4.5v4a2 2 0 0 0 0-4z" fill="currentColor" opacity=".45"/></svg></span></div>`;
+const tabbar = (on) => `<div class="tabbar">${[['inbox','Gelen kutusu'],['spark','Odak'],['cal','Takvim'],['grid','Kanallar'],['sliders','Ayarlar']]
+  .map(([i,t])=>`<span class="tab${on===i?' on':''}">${ic(i)}${t}${i==='spark'?'<span class="dotn">4</span>':''}</span>`).join('')}</div>`;
+const phone = (inner, opts={}) => `<div class="phone"><div class="scr" style="${opts.bg?`background:${opts.bg}`:''}">${statusBar(opts.darkBar)}<div class="body">${inner}</div><div class="homeind"></div></div></div>`;
+const shot = (o) => `<section class="shot${o.dark?' dark':''}" id="${o.id}"><div class="bg"></div><div class="head"><span class="kick">${ic(o.kicon)}${o.kick}</span><h1 class="h">${o.h}</h1>${o.sub?`<p class="sub">${o.sub}</p>`:''}</div>${phone(o.screen,o.phoneOpts)}</section>`;
+
+/* ================= 1. Gelen kutusu ================= */
+const rows = [
+  {img:'ayse',p:'whatsapp',n:'Ayşe Kaya',t:'09:41',m:'Toplantıyı perşembe 14:00\'e alabilir miyiz? Sunumu da o gün konuşuruz.',c:2},
+  {img:'mert',p:'instagram',n:'Mert Demir',t:'09:32',m:'Ürün hâlâ stokta mı? M beden lazım, bugün sipariş vermek istiyorum.',c:1},
+  {shop:'trendyol',n:'Trendyol · #10482193',t:'09:15',m:'Kargoya verildi · Yurtiçi Kargo · Oversize Keten Gömlek'},
+  {img:'selin',p:'gmail',n:'Selin Aydın',t:'08:58',m:'Teklif dosyası ekte — Q4 bütçe revizyonunu da ekledim.',c:1},
+  {img:'ekip',p:'slack',n:'#urun-ekibi',t:'08:40',m:'Kerem: Yayın notları hazır, onayını bekliyoruz.'},
+  {img:'can',p:'linkedin',n:'Can Yıldız',t:'Dün',m:'Tanıştığımıza memnun oldum! Haftaya bir kahve?'},
+  {img:'deniz',p:'telegram',n:'Deniz Arslan',t:'Dün',m:'<span class="ticks">'+ic('checks','ic')+'</span>Sen: Tamamdır, akşam hallederim',read:1},
+];
+const s1 = `<div class="topbar"><span class="round">${ic('sliders')}</span><span class="round brand">${ic('compose')}</span></div>
+<div class="lt">Gelen kutusu</div>
+<div class="search">${ic('search')}Tüm uygulamalarda ara</div>
+<div class="chips"><span class="chip on">Tümü <b>128</b></span><span class="chip">Okunmamış <b>12</b></span><span class="chip">Bekleyen <b>4</b></span><span class="chip">Takip <b>2</b></span></div>
+<div class="list">${rows.map(r=>`<div class="row${r.c?' un':''}">${r.shop?`<span class="av" style="width:50px;height:50px">${brand(r.shop,50,25)}</span>`:avatar(r.img,r.p)}
+  <div class="mid"><div class="t"><span class="n">${r.n}</span><span class="tm">${r.t}</span></div><div class="p"><span>${r.m}</span>${r.c?`<i class="cnt">${r.c}</i>`:''}</div></div></div>`).join('')}</div>
+${tabbar('inbox')}`;
+
+/* ================= 2. Sohbet + AI özeti ================= */
+const s2 = `<div class="chat-h"><span class="back">${ic('back')}</span>${avatar('ayse',null,38)}<div class="who"><b>Ayşe Kaya</b><small>${brand('whatsapp',14,4)} WhatsApp · <i></i> çevrimiçi</small></div><span class="acts">${ic('video')}${ic('phone')}</span></div>
+<div class="sum"><div class="hd">${ic('spark')}Sohbet özeti<span>32 mesaj · 3 gün</span></div>
+<ul><li>Lansman sunumu cuma gününe kadar hazır olmalı.</li><li>Bütçe onayı Selin'den bekleniyor.</li><li>Ayşe toplantıyı perşembe 14:00'e almayı öneriyor.</li></ul>
+<div class="act">${ic('cal')}<div><b>Lansman toplantısı</b><small>Perşembe, 14:00 · mesajdan bulundu</small></div><span class="pbtn">Takvime ekle</span></div></div>
+<div class="msgs"><span class="day">Bugün</span>
+<div class="bub"><div class="file"><span class="fi">PDF</span><span><b>Lansman_sunum_v3.pdf</b><small>2,4 MB · 18 sayfa</small></span></div><span class="m">09:12</span></div>
+<div class="bub me">Harika, öğlene kadar dönüyorum<span class="m"><span class="ticks">${ic('checks')}</span>09:20</span></div>
+<div class="bub">Toplantıyı perşembe 14:00'e alabilir miyiz? Sunumu da o gün konuşuruz.<span class="m">09:41</span></div></div>
+<div class="comp"><div class="draft"><div class="hd">${ic('spark')}Yanıt taslağı <span>· senin tarzında</span></div><p>Perşembe 14:00 bana uyar, takvime ekliyorum. Sunumdaki notlarımı da o zamana hazırlarım!</p><div class="bt"><span class="pbtn">${ic('up','ic" style="width:14px;height:14px;stroke-width:2.4')} Gönder</span><span class="pbtn ghost">Düzenle</span><span class="pbtn ghost">Daha kısa</span></div></div>
+<div class="inrow"><span class="plus">${ic('plus')}</span><span class="field">Mesaj yaz…</span><span class="send">${ic('mic')}</span></div></div>`;
+
+/* ================= 3. Odak ================= */
+const fc = (img,p,n,wait,q,d) => `<div class="fcard"><div class="top">${avatar(img,p,40)}<div><b>${n}</b><small>${ic('clock')}${wait}</small></div></div>
+<p class="q">${q}</p><div class="draft"><div class="hd">${ic('spark')}Taslak <span>· senin tarzında</span></div><p>${d}</p><div class="bt"><span class="pbtn dark">Gönder</span><span class="pbtn ghost">Düzenle</span></div></div></div>`;
+const s3 = `<div class="topbar"><span></span><span class="round">${ic('sliders')}</span></div>
+<div class="lt">Odak</div><div class="lt-sub">Bugün 4 konuşma yanıtını bekliyor</div>
+${fc('mert','instagram','Mert Demir','2 saattir bekliyor','Ürün hâlâ stokta mı? M beden lazım, bugün sipariş vermek istiyorum.','Merhaba Mert, M beden stokta var! Bugün saat 16:00\'ya kadar verilen siparişler aynı gün kargoda.')}
+${fc('selin','gmail','Selin Aydın','5 saattir bekliyor','Teklif dosyası ekte — Q4 bütçe revizyonunu da ekledim. Yarın öğlene kadar dönebilir misin?','Selin merhaba, teklifi aldım, teşekkürler. Yarın 12:00\'ye kadar revizyon notlarımla dönüyorum.')}
+<div class="promise"><h4>Verdiğin sözler</h4>
+<div class="pr"><span class="cb"></span><div>Deniz'e fatura kopyasını gönder<small>Telegram · "akşam hallederim"</small></div><span class="due">Bugün</span></div>
+<div class="pr done"><span class="cb on">${ic('check')}</span><div>Ayşe'ye sunuma dönüş yap<small>WhatsApp</small></div></div></div>
+${tabbar('spark')}`;
+
+/* ================= 4. Pazaryeri ================= */
+const s4 = `<div class="topbar"><span class="round">${ic('chevl')}</span><span class="round">${ic('search')}</span></div>
+<div class="lt" style="display:flex;align-items:center;gap:10px">${brand('trendyol',34,10)}Trendyol</div>
+<div class="seg"><span>Tümü</span><span class="on">Siparişler <b>6</b></span><span>Sorular <b>3</b></span></div>
+<div class="ocard"><div class="oh"><span class="pic"></span><div><b>Oversize Keten Gömlek</b><small>Bej · M · 1 adet</small><small>#10482193 · Ayşe Y.</small></div><div class="pr2">₺749,90<small style="display:block;color:var(--ink-3);font-size:12px">Bugün 08:12</small></div></div>
+<div class="tl"><span class="st ok"><span class="d">${ic('check')}</span>Oluşturuldu</span><span class="st ok"><span class="d">${ic('check')}</span>Hazırlandı</span><span class="st now"><span class="d"></span>Kargoda</span><span class="st"><span class="d"></span>Teslim</span></div>
+<div class="ship">${ic('truck')}<span><b>Yurtiçi Kargo</b> · 3284 1190 5521 · Tahmini teslim yarın</span></div></div>
+<div class="qcard"><div class="qh"><span class="tag">${ic('help')}Ürün sorusu</span>Keten Gömlek · 12 dk önce</div>
+<p class="qq">Bu gömleğin kumaşı yazın terletir mi? Boyum 1,80, L mi almalıyım?</p>
+<div class="draft" style="margin:10px 0 0"><div class="hd">${ic('spark')}Önerilen yanıt</div><p>%100 keten, nefes alan bir kumaş; yazın rahatlıkla giyilir. Oversize kalıp olduğu için 1,80 boyda M beden önerilir.</p><div class="bt"><span class="pbtn dark">Yanıtla</span><span class="pbtn ghost">Düzenle</span></div></div></div>
+<div class="sec-t">Diğer siparişler</div>
+<div class="mini">${brand('hepsiburada',40,11)}<div class="mid"><b>Hepsiburada · #HB88213</b><small>Deri Kartlık · Siyah</small></div><span class="pill y">Hazırlanıyor</span></div>
+${tabbar('inbox')}`;
+
+/* ================= 5. Takvim + takip ================= */
+const days = [];
+const start = 3; // Ekim 2026 perşembe başlar: Pzt başlangıçlı ızgarada 3 boş hücre (Eylül sonu)
+[28,29,30].forEach(d=>days.push(`<span class="d o">${d}</span>`));
+for (let d=1; d<=31 && days.length<35; d++) {
+  const cls = d===1?'t':(d===2?'s':'');
+  const dot = {1:'<i></i>',2:'<i class="l"></i>',6:'<i></i>',9:'<i class="l"></i>',14:'<i></i>',20:'<i></i>',23:'<i class="l"></i>',28:'<i></i>'}[d]||'';
+  days.push(`<span class="d ${cls}">${d}${dot}</span>`);
+}
+const s5 = `<div class="topbar"><span></span><span class="round brand">${ic('plus')}</span></div>
+<div class="lt">Takvim</div>
+<div class="cal"><div class="mh">Ekim 2026<span>${ic('chevl')}${ic('chev')}</span></div>
+<div class="g">${['Pzt','Sal','Çar','Per','Cum','Cmt','Paz'].map(w=>`<span class="w">${w}</span>`).join('')}${days.join('')}</div></div>
+<div class="sec-t">Bugün · Perşembe</div>
+<div class="ev"><span class="tm">14:00<small>1 sa</small></span><span class="bar"></span><div class="c"><b>Lansman toplantısı</b><span class="src">${brand('whatsapp',16,4)}Ayşe Kaya ile sohbetten eklendi</span></div><span class="bell">${ic('bell')}</span></div>
+<div class="ev"><span class="tm">16:30<small>30 dk</small></span><span class="bar o"></span><div class="c"><b>Tedarikçi görüşmesi</b><span class="src">${brand('gmail',16,4)}Selin Aydın · e-postadan</span></div><span class="bell">${ic('bell')}</span></div>
+<div class="sec-t">Takip hatırlatıcıları</div>
+<div class="ev"><span class="tm">Yarın<small>10:00</small></span><span class="bar l"></span><div class="c"><b>Can Yıldız yanıt vermezse hatırlat</b><span class="src">${brand('linkedin',16,4)}Yanıt gelirse kendiliğinden kapanır</span></div><span class="bell">${ic('flag')}</span></div>
+${tabbar('cal')}`;
+
+/* ================= 6. Kanallar + gizlilik ================= */
+const apps = [['whatsapp','WhatsApp'],['instagram','Instagram'],['telegram','Telegram'],['gmail','Gmail'],['outlook','Outlook'],['icloud','iCloud'],['slack','Slack'],['linkedin','LinkedIn'],
+  ['x','X'],['messenger','Messenger'],['trendyol','Trendyol'],['hepsiburada','Hepsiburada'],['n11','n11'],['shopify','Shopify'],['etsy','Etsy']];
+const s6 = `<div class="topbar"><span></span><span class="round">${ic('search')}</span></div>
+<div class="lt">Kanallar</div><div class="lt-sub">15 hesap bağlı · hepsi eşitlendi</div>
+<div class="apps">${apps.map(([p,n])=>`<div class="app"><span class="ok"></span>${brand(p,40,12)}${n}</div>`).join('')}<div class="app add"><span class="pl">${ic('plus')}</span>Ekle</div></div>
+<div class="safe"><span class="ico">${ic('lock')}</span><div><b>Verilerin yalnız sende</b><p>Mesajların ve oturumların cihazında kalır; hesapların kendi internetinden bağlanır. Mivelo sunucularına mesaj gitmez.</p></div></div>
+${tabbar('grid')}`;
+
+document.getElementById('root').innerHTML = [
+  shot({id:'s1',kicon:'inbox',kick:'Birleşik gelen kutusu',h:'Tüm mesajların,<br><em>tek bir yerde</em>',sub:'WhatsApp, Instagram, Gmail, Slack ve pazaryerleri tek listede.',screen:s1}),
+  shot({id:'s2',dark:1,kicon:'spark',kick:'Yapay zekâ özetleri',h:'Uzun sohbetler,<br><em>tek bakışta</em>',sub:'Özetler, yapılacaklar ve tarihler mesajların içinden çıkar.',screen:s2}),
+  shot({id:'s3',kicon:'spark',kick:'Odak',h:'Senin tarzında<br><em>yanıt taslakları</em>',sub:'Bekleyenler öne çıkar, verdiğin sözler unutulmaz.',screen:s3}),
+  shot({id:'s4',kicon:'pkg',kick:'Pazaryerleri',h:'Siparişler ve<br><em>müşteri soruları</em>',sub:'Trendyol, Hepsiburada, n11 ve daha fazlası aynı gelen kutusunda.',screen:s4}),
+  shot({id:'s5',kicon:'cal',kick:'Takvim ve takip',h:'Hiçbir dönüşü<br><em>kaçırma</em>',sub:'Mesajdan etkinliğe tek dokunuş; yanıt gelmezse hatırlatır.',screen:s5}),
+  shot({id:'s6',dark:1,kicon:'shield',kick:'Gizlilik',h:'20+ uygulama.<br><em>Verin sende.</em>',sub:'Mesajların ve oturumların yalnız kendi cihazında kalır.',screen:s6}),
+].join('');
+</script>
+</body>
+</html>

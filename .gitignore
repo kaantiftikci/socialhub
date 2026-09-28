@@ -8,3 +8,5 @@ apps/desktop/src-tauri/gen/
 apps/desktop/src-tauri/core-bundle/
 .claude/
 dist-single/
+design/appstore/out/
+design/appstore/.build.html

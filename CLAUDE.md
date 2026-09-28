@@ -116,6 +116,8 @@ Dil: arayüz ve yorumlar Türkçe.
   bulanıklıktan açılan başlıklar; logolar yalnız ilk iki sahnede), `render.mjs` (--scale 2, --stills), `audio.mjs` (kodla üretilen 120 BPM
   müzik + tık/tuş/gönder/bildirim efektleri, -14 LUFS). Başlık fontu -apple-system/SF Pro (Mac'te), yoksa Inter Display. Demo kancası
   `window.__miveloDemo.incoming(ad, metin)` (static-demo.ts). Ayrıntı `scripts/promo/README.md`; MP4 depoya konmaz.
+- **App Store tasarımı (mobil, henüz uygulama YOK)** `design/appstore/`: `template.html` 6 ekran (gelen kutusu, AI özet, Odak, pazaryeri,
+  takvim, kanallar/gizlilik) iOS uyarlaması; `node design/appstore/render.mjs` → `out/` 1290×2796 PNG (git dışı). Ayrıntı README.
 - **Masaüstü paketleri (DMG + EXE, gerçek kullanım yolu — demo sunucusu değil; ban/gizlilik: kullanıcının kendi IP'si ve cihazı)**:
   `.github/workflows/build-desktop.yml` (eski build-windows.yml'in yerine): YALNIZ elle (Actions → Run workflow) ya da v* etiketi — main'e itme
   sürüm YAYINLAMAZ (Kaan: küçük değişiklikler birikip Kaan "yeni sürüm yayınla" deyince çıkar; o zaman Claude `v0.1.N` etiketi iter ya da iş akışını tetikler). Sürüm 0.1.<run> (etikette
