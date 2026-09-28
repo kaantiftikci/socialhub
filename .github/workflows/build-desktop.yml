@@ -1,5 +1,6 @@
 # Masaüstü paketleri: macOS DMG (Apple Silicon + Intel) ve Windows kurulum dosyası (NSIS .exe), sonra mivelo.app/indir/files/'a yüklenir.
-# Tetik: elle (Actions → build-desktop → Run workflow), v* etiketi ya da main'e çekirdek/arayüz/kabuk değişikliği.
+# Tetik YALNIZ elle (Actions → build-desktop → Run workflow) ya da v* etiketi: main'e her itme yeni sürüm YAYINLAMAZ (Kaan'ın kararı;
+# küçük değişiklikler birikir, sürüm istenince çıkar — kullanıcılar her buton kaymasında "yeni sürüm" kartı görmesin).
 # Sürüm: tauri.conf.json'daki ana sürüm + çalıştırma numarası (0.1.<n>); etiketle çalışınca etiketin sürümü (v0.2.0 → 0.2.0).
 # Node çalışma zamanı pakete gömülür (KAVSAK_BUNDLE_NODE=1): kullanıcının Node kurmasına gerek yok. Chromium pakete KONMAZ,
 # tarayıcıyla bağlanan ilk kanalda uygulama kendisi indirir (packages/core/src/browser-install.ts).
@@ -9,8 +10,6 @@ on:
   workflow_dispatch:
   push:
     tags: ['v*']
-    branches: [main]
-    paths: ['packages/core/**', 'apps/web/**', 'apps/desktop/**', 'scripts/bundle-core.mjs', 'package-lock.json', '.github/workflows/build-desktop.yml']
 concurrency:
   group: build-desktop-${{ github.ref }}
   # süren derleme iptal edilmez (yarım kalan paket yüklenmez); yeni itme sıraya girer

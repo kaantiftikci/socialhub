@@ -117,7 +117,8 @@ Dil: arayüz ve yorumlar Türkçe.
   müzik + tık/tuş/gönder/bildirim efektleri, -14 LUFS). Başlık fontu -apple-system/SF Pro (Mac'te), yoksa Inter Display. Demo kancası
   `window.__miveloDemo.incoming(ad, metin)` (static-demo.ts). Ayrıntı `scripts/promo/README.md`; MP4 depoya konmaz.
 - **Masaüstü paketleri (DMG + EXE, gerçek kullanım yolu — demo sunucusu değil; ban/gizlilik: kullanıcının kendi IP'si ve cihazı)**:
-  `.github/workflows/build-desktop.yml` (eski build-windows.yml'in yerine): elle / v* etiketi / main'de core·web·desktop değişince. Sürüm 0.1.<run> (etikette
+  `.github/workflows/build-desktop.yml` (eski build-windows.yml'in yerine): YALNIZ elle (Actions → Run workflow) ya da v* etiketi — main'e itme
+  sürüm YAYINLAMAZ (Kaan: küçük değişiklikler birikip Kaan "yeni sürüm yayınla" deyince çıkar; o zaman Claude `v0.1.N` etiketi iter ya da iş akışını tetikler). Sürüm 0.1.<run> (etikette
   etiketinki), `--config {"version"}` ile. Matris: mac-arm64 (macos-14), mac-intel (macos-14 + x64 Node/Rosetta + x86_64-apple-darwin), windows-x64 (NSIS).
   Node gömülü (`KAVSAK_BUNDLE_NODE=1`), macOS ad-hoc imza (`signingIdentity "-"`; Apple Developer hesabı YOK → ilk açılışta sağ tık → Aç / "Yine de aç"),
   Windows imzasız (SmartScreen). Hepsi başarılıysa `publish`: `mivelo.app/indir/files/` (FTP; Mivelo-mac-arm64.dmg, Mivelo-mac-intel.dmg,
