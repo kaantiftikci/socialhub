@@ -4,10 +4,14 @@ import { PLATFORMS, type Account } from './types';
 import { Chip, Icon, PasswordInput } from './ui';
 import { SOUNDS, getPlatformSound, getPlatformTone, getPlatformVolume, getVolume, groupsNotify, bannersEnabled, soundsEnabled, playNotifySound, playPing, setBannersEnabled, setGroupsNotify, setPlatformSound, setPlatformTone, setPlatformVolume, setSoundsEnabled, setVolume, webNotifyPermission, requestWebNotify, testNotify } from './desktop';
 import { setAiPrefs, useAiPrefs } from './ai-prefs';
-import { DEMO_OFFLINE, STATIC_DEMO } from './profile';
+import { DEMO_OFFLINE, PROFILE_NAME, STATIC_DEMO } from './profile';
 import { leaveDemoPanel } from './demo-session';
+import { isTauri } from './desktop';
+import { signOut } from './LicenseGate';
+import { PermissionSettings } from './Onboarding';
+import type { LicenseStatus } from './api';
 
-type Tab = 'notify' | 'apps' | 'ai' | 'phone';
+type Tab = 'notify' | 'apps' | 'ai' | 'phone' | 'perms' | 'account' | 'logout';
 type Lan = { enabled: boolean; urls: string[]; qr?: string } | null;
 
 /** Açma/kapama anahtarı (checkbox yerine; tüm ayarlarda aynı görünüm) */
@@ -85,7 +89,12 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
     ['apps', 'Uygulama sesleri', 'volume'],
     ['ai', 'AI özellikleri', 'sparkle'],
     ['phone', 'Telefondan erişim', 'link'],
+    // masaüstü: ilk kurulumdaki izinler (verilmeyenler buradan yeniden istenir)
+    ...(isTauri ? ([['perms', 'İzinler', 'shield']] as Array<[Tab, string, string]>) : []),
+    // yerel / masaüstü: profil + lisans (web demoda hesap = demo oturumu, çıkış doğrudan menüde)
+    ...(!STATIC_DEMO ? ([['account', 'Hesap', 'user']] as Array<[Tab, string, string]>) : []),
   ];
+  const heading = tab === 'logout' ? 'Çıkış yap' : TABS.find(([k]) => k === tab)?.[1];
 
   return (
     <div className={`overlay set-ov ${closing ? 'closing' : ''}`} onClick={onClose}>
@@ -98,9 +107,9 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
               <span>{l}</span>
             </button>
           ))}
-          {/* web demo: çıkış doğrudan menüde (eskiden Hesap bölümünün içindeydi); basınca hemen çıkar */}
-          {STATIC_DEMO && !DEMO_OFFLINE && (
-            <button type="button" className="set-tab set-logout b" onClick={() => leaveDemoPanel()}>
+          {/* web demo: çıkış doğrudan menüde, basınca hemen çıkar. Yerel / masaüstü: önce ne olacağını anlatan onay */}
+          {!DEMO_OFFLINE && (
+            <button type="button" className={`set-tab set-logout b ${tab === 'logout' ? 'on' : ''}`} onClick={() => (STATIC_DEMO ? leaveDemoPanel() : setTab('logout'))}>
               <Icon name="logout" size={16} />
               <span>Çıkış yap</span>
             </button>
@@ -108,7 +117,7 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
         </aside>
         <section className="set-body">
           <header className="set-head">
-            <h3>{TABS.find(([k]) => k === tab)?.[1]}</h3>
+            <h3>{heading}</h3>
             <button className="btn icon b b2" onClick={onClose} aria-label="Kapat">
               <Icon name="x" size={15} sw={2} />
             </button>
@@ -244,6 +253,10 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
             </>
           )}
 
+          {tab === 'perms' && <PermissionSettings />}
+
+          {(tab === 'account' || tab === 'logout') && <AccountPane logout={tab === 'logout'} onLogout={() => setTab('logout')} onCancel={() => setTab('account')} notify={notify} />}
+
           {tab === 'phone' && (
             <>
               <div className="set-group">
@@ -322,5 +335,88 @@ function AiKeyRow({ ai, onChange, notify }: { ai: boolean; onChange: (on: boolea
         </button>
       )}
     </Row>
+  );
+}
+
+const APP_VERSION = (import.meta.env.VITE_APP_VERSION as string | undefined) || '';
+
+/** Kalan gün: "12 gün kaldı · 10 Ekim 2026" */
+function licenseLeft(exp?: string | null): string {
+  if (!exp) return 'Süresiz';
+  const t = Date.parse(exp);
+  if (!Number.isFinite(t)) return '';
+  const days = Math.max(0, Math.ceil((t - Date.now()) / 86_400_000));
+  return `${days} gün kaldı · ${new Date(t).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })}`;
+}
+
+/**
+ * Ayarlar → Hesap (yerel / masaüstü): profil adı (lisans sahibi ya da bilgisayardaki ad), lisans anahtarı (maskeli) ve süresi,
+ * sürüm; altta kırmızı "Çıkış yap". logout=true: çıkışın ne yapacağını anlatan onay (Tauri'de confirm() çalışmaz).
+ */
+function AccountPane({ logout, onLogout, onCancel, notify }: { logout: boolean; onLogout: () => void; onCancel: () => void; notify: (t: string, err?: boolean) => void }) {
+  const [lic, setLic] = useState<LicenseStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api.license().then(setLic).catch(() => setLic(null));
+  }, []);
+  const required = !!lic?.required;
+  const doLogout = () => {
+    setBusy(true);
+    signOut().catch((e) => {
+      setBusy(false);
+      notify((e as Error).message, true);
+    });
+  };
+  if (logout)
+    return (
+      <div className="set-logout-card">
+        <span className="ic">
+          <Icon name="logout" size={20} sw={2} />
+        </span>
+        <b>Mivelo'dan çıkılsın mı?</b>
+        <p>
+          {required
+            ? 'Bu bilgisayardaki lisans oturumu kapanır ve bağlı uygulamalar eşitlemeyi durdurur; cihaz hakkın boşalır. Mesajların ve bağlı uygulamaların silinmez — lisans anahtarınla yeniden girdiğinde kaldığın yerden sürer.'
+            : 'Mivelo arayüzünden çıkarsın. Mesajların ve bağlı uygulamaların bu bilgisayarda kalır; yeniden girdiğinde kaldığın yerden sürer.'}
+        </p>
+        <div className="row">
+          <button type="button" className="btn ghost b b2" onClick={onCancel} disabled={busy}>
+            Vazgeç
+          </button>
+          <button type="button" className="btn danger-solid b" onClick={doLogout} disabled={busy}>
+            <Icon name="logout" size={14} sw={2} /> {busy ? 'Çıkılıyor…' : 'Çıkış yap'}
+          </button>
+        </div>
+      </div>
+    );
+  return (
+    <>
+      <div className="set-group">
+        <Row title="Ad" hint={lic?.owner?.name ? 'Lisans kaydındaki ad' : 'Bu bilgisayardaki kullanıcı adı'}>
+          <span className="set-val">{PROFILE_NAME || '—'}</span>
+        </Row>
+        {lic?.owner?.email && (
+          <Row title="E-posta" hint="Lisansın gönderildiği adres">
+            <span className="set-val">{lic.owner.email}</span>
+          </Row>
+        )}
+        <Row title="Lisans" hint={required ? (lic?.valid ? licenseLeft(lic.expiresAt) : 'Geçersiz') : 'Bu sürümde lisans gerekmiyor (yerel / geliştirme)'}>
+          <span className="set-val mono">{required ? (lic?.key ?? '—') : 'Yerel sürüm'}</span>
+        </Row>
+        {APP_VERSION && (
+          <Row title="Sürüm" hint="Yeni sürüm çıkınca uygulama içinde haber verilir">
+            <span className="set-val">{APP_VERSION}</span>
+          </Row>
+        )}
+      </div>
+      <div className="set-group">
+        <Row title="Çıkış yap" hint={required ? 'Lisans bu bilgisayardan kaldırılır; anahtarınla yeniden girebilirsin' : 'Arayüzden çık; veriler bu bilgisayarda kalır'}>
+          <button type="button" className="btn danger-solid xs b" onClick={onLogout}>
+            Çıkış yap
+          </button>
+        </Row>
+      </div>
+      <p className="set-note">Mesajların ve oturumların yalnız bu bilgisayarda saklanır; Mivelo sunucularına gitmez.</p>
+    </>
   );
 }

@@ -14,7 +14,7 @@ import { SettingsModal } from './Settings';
 import { SearchPalette } from './SearchPalette';
 import { CalendarView, ymd } from './CalendarView';
 import { MOD_KEY, isTauri, notify as desktopNotify, requestWebNotify, onDesktopEvent, playPing, setBadge, windowFocused, coreInfo, playNotifySound, platformNotifyOn, soundsEnabled, bannersEnabled, groupsNotify, unlockAudio } from './desktop';
-import { PROFILE_NAME, STATIC_DEMO } from './profile';
+import { PROFILE_NAME, STATIC_DEMO, setFallbackProfileName } from './profile';
 
 export type View = 'inbox' | 'focus' | 'calendar' | 'archived' | 'muted' | 'hidden';
 const FLAG_VIEWS: Array<{ view: View; flag: 'archived' | 'muted' | 'hidden'; label: string; icon: string; empty: string }> = [
@@ -301,6 +301,7 @@ export default function App() {
       for (const acc of a) if (acc.qrDataUrl) next[acc.id] = acc.qrDataUrl;
       return next;
     });
+    setFallbackProfileName(h.user);
     setChats(new Map(c.map((x) => [x.id, x])));
     setAi(h.ai);
   }, []);
@@ -1140,9 +1141,9 @@ export default function App() {
           </div>
         )}
         <div className="me">
-          <Avatar name={PROFILE_NAME} size={32} />
-          <span style={{ flexGrow: 1 }}>
-            <span className="n">{PROFILE_NAME}</span>
+          <Avatar name={PROFILE_NAME || 'Mivelo'} size={32} />
+          <span style={{ flexGrow: 1, minWidth: 0 }}>
+            <span className="n">{PROFILE_NAME || 'Mivelo'}</span>
             <span className="s">{accounts.length} uygulama{STATIC_DEMO ? '' : ' · Pro'}</span>
           </span>
           <button

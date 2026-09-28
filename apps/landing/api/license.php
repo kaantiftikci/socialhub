@@ -6,8 +6,10 @@ declare(strict_types=1);
  * kayıtlar web kökü dışında ~/mivelo-data/licenses.json (admin/api.php ile aynı kilit + atomik yazım düzeni).
  *
  * POST JSON {action, …} — çağıran Mivelo çekirdeği (Node, Origin yok):
- *   activate {key, device, name, os, version} → {ok, activation, expiresAt}   (aynı cihaz yeniden etkinleştirirse aynı kayıt)
- *   check    {key, activation, device}         → {ok, expiresAt}               (uygulama 12 saatte bir; iptal/süre sonu burada anlaşılır)
+ *   activate {key, device, name, os, version} → {ok, activation, expiresAt, owner?}   (aynı cihaz yeniden etkinleştirirse aynı kayıt)
+ *   check    {key, activation, device}         → {ok, expiresAt, owner?}               (uygulama 12 saatte bir; iptal/süre sonu burada anlaşılır)
+ *   owner {name?, email?}: anahtarın e-postası (Admin → Lisanslar) + o e-postanın üye kaydındaki ad soyad → uygulamada profil adı.
+ *   Yalnız anahtarı bilen (80 bit) cihaza döner.
  *   release  {key, activation}                 → {ok}                          (uygulamada "Lisansı kaldır": cihaz yeri boşalır)
  * Hata: {error, invalid?:true}. invalid = anahtar/etkinleştirme artık geçersiz (uygulama kilitlenir); ağ/sunucu hatasında
  * uygulama çevrimdışı payını (14 gün) kullanır. Hatalı anahtar denemeleri IP başına saatte 20 ile sınırlı.
@@ -136,12 +138,14 @@ if ($key === '' || strlen($key) > 40) {
 }
 rate_guard(false);
 
-$res = with_store('licenses.json', ['keys' => []], function (array &$d) use ($key, $norm, $action, $device, $activation, $body, $clip) {
+$ownerEmail = '';
+$res = with_store('licenses.json', ['keys' => []], function (array &$d) use ($key, $norm, $action, $device, $activation, $body, $clip, &$ownerEmail) {
     $now = time();
     foreach ($d['keys'] as &$k) {
         if ($norm($k['key'] ?? '') !== $key) {
             continue;
         }
+        $ownerEmail = strtolower(trim((string) (($k['email'] ?? '') !== '' ? $k['email'] : ($k['sentTo'] ?? ''))));
         if (($k['status'] ?? 'active') !== 'active') {
             return ['code' => 403, 'error' => 'Bu lisans anahtarı iptal edilmiş', 'invalid' => true];
         }
@@ -204,5 +208,27 @@ if (!empty($res['unknown'])) {
 }
 if (isset($res['code'])) {
     fail((int) $res['code'], (string) $res['error'], !empty($res['invalid']));
+}
+// Lisans sahibi: uygulamada profil adı (eskiden her kurulumda sabit bir ad görünüyordu)
+if (!empty($res['ok']) && $action !== 'release' && filter_var($ownerEmail, FILTER_VALIDATE_EMAIL)) {
+    $owner = ['email' => $ownerEmail];
+    try {
+        require_once __DIR__ . '/lib-members.php';
+        foreach (mv_members_read() as $m) {
+            if (strtolower(trim((string) ($m['email'] ?? ''))) === $ownerEmail) {
+                $nm = trim(mv_member_name($m['firstName'] ?? '') . ' ' . mv_member_name($m['lastName'] ?? ''));
+                if ($nm === '') {
+                    $nm = mv_member_name($m['name'] ?? '');
+                }
+                if ($nm !== '') {
+                    $owner['name'] = $nm;
+                }
+                break;
+            }
+        }
+    } catch (Throwable $e) {
+        // üye kaydı okunamadı: yalnız e-posta
+    }
+    $res['owner'] = $owner;
 }
 out($res);

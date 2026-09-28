@@ -38,10 +38,12 @@ export interface LicenseStatus {
   key?: string;
   expiresAt?: string | null;
   reason?: string;
+  /** Lisans sahibi (profil adı) */
+  owner?: { name?: string; email?: string };
 }
 
 const liveApi = {
-  health: () => call<{ ok: boolean; ai: boolean; stats: { unread: number; chats: number }; os?: CoreOs }>('GET', '/health'),
+  health: () => call<{ ok: boolean; ai: boolean; stats: { unread: number; chats: number }; os?: CoreOs; user?: string }>('GET', '/health'),
   /** Pencere açık ve odakta mı (uyarlamalı yoklama için; ağ hatası sessizce yutulur) */
   license: (check = false) => call<LicenseStatus>('GET', check ? '/license?check=1' : '/license'),
   activateLicense: (key: string) => call<LicenseStatus>('POST', '/license', { key }),
@@ -89,6 +91,10 @@ const liveApi = {
   deleteEvent: (id: string) => call<{ ok: boolean }>('DELETE', `/events/${enc(id)}`),
   calendars: (probe = false) => call<DeviceCalendars>('GET', `/calendars${probe ? '?probe=1' : ''}`),
   calendarPermission: () => call<{ ok: boolean }>('POST', '/calendars/permission'),
+  // ilk açılış kurulumu (Onboarding): izin durumu, Sistem Ayarları bölmesi, Mesajlar otomasyon istemi (macOS)
+  permissions: () => call<{ os: string; fullDisk: boolean | null }>('GET', '/permissions'),
+  openPermissionPane: (pane: 'fulldisk' | 'automation' | 'microphone' | 'notifications') => call<{ ok: boolean }>('POST', '/permissions/open', { pane }),
+  messagesPermission: () => call<{ result: 'granted' | 'denied' | 'error' }>('POST', '/permissions/messages'),
   style: (platform?: string) => call<{ lines: string[] }>('GET', `/style${platform ? `?platform=${enc(platform)}` : ''}`),
   search: (q: string, limit = 50) => call<Array<{ message: Message; chat: Chat }>>('GET', `/search?q=${enc(q)}&limit=${limit}`),
   // zamanlanmış gönderim (çekirdekte; arayüz kapalıyken de gider)

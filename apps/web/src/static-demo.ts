@@ -477,7 +477,7 @@ export const staticApi = {
   activateLicense: async (_key: string) => ({ required: false, valid: true }),
   releaseLicense: async () => ({ required: false, valid: true }),
   activity: async (_active: boolean) => undefined,
-  health: async () => ({ ok: true, ai: true, stats: { unread: chats.reduce((n, c) => n + c.unread, 0), chats: chats.length }, os: undefined as CoreOs | undefined }),
+  health: async () => ({ ok: true, ai: true, stats: { unread: chats.reduce((n, c) => n + c.unread, 0), chats: chats.length }, os: undefined as CoreOs | undefined, user: undefined as string | undefined }),
   accounts: async () => accounts.map(withDemoAttention),
   addAccount: async (platform: Platform, token?: string): Promise<Account> => {
     let account: Account = {
@@ -700,6 +700,9 @@ export const staticApi = {
     setTimeout(() => emit({ type: 'events.update' }), 0);
     return { ok: true };
   },
+  permissions: async () => ({ os: 'demo', fullDisk: true as boolean | null }),
+  openPermissionPane: async (_pane: 'fulldisk' | 'automation' | 'microphone' | 'notifications') => ({ ok: true }),
+  messagesPermission: async () => ({ result: 'granted' as 'granted' | 'denied' | 'error' }),
   calendars: async (probe = false): Promise<DeviceCalendars> => ({ supported: true, app: 'Takvim', calendars: probe ? ['Kişisel', 'İş', 'Aile'] : undefined }),
   calendarPermission: async () => ({ ok: true }),
   style: async () => ({ lines: DEMO_STYLE }),

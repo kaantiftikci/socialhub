@@ -1,4 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
+import os from 'node:os';
 import { bus } from './bus.js';
 
 /**
@@ -49,4 +50,32 @@ export function killProcessesMatching(fragment: string): Promise<void> {
       execFile('pkill', ['-f', fragment], () => resolve());
     }
   });
+}
+
+/**
+ * Arayüzdeki profil adı için işletim sistemindeki tam ad (lisans sahibinin adı bilinmiyorsa kullanılır; eskiden her kurulumda
+ * sabit "Kaan" yazıyordu). İlk çağrıda arka planda bir kez sorulur (macOS `id -F`, Linux GECOS); o gelene dek kullanıcı adı.
+ */
+let fullName: string | undefined;
+let askedName = false;
+export function userDisplayName(): string {
+  if (!askedName) {
+    askedName = true;
+    const take = (v: string | undefined) => {
+      const n = (v ?? '').replace(/[\u0000-\u001f]/g, '').trim();
+      if (n) fullName = n.slice(0, 80);
+    };
+    try {
+      if (process.platform === 'darwin') execFile('id', ['-F'], { timeout: 3000 }, (e, out) => !e && take(String(out).split('\n')[0]));
+      else if (process.platform === 'linux') execFile('getent', ['passwd', os.userInfo().username], { timeout: 3000 }, (e, out) => !e && take(String(out).split(':')[4]?.split(',')[0]));
+    } catch {
+      /* ad yok: kullanıcı adı */
+    }
+  }
+  if (fullName) return fullName;
+  try {
+    return os.userInfo().username;
+  } catch {
+    return '';
+  }
 }

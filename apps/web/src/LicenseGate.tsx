@@ -1,24 +1,75 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { api, type LicenseStatus } from './api';
 import { isTauri, openExternal } from './desktop';
+import { SetupScreen, Splash, SplashMark, setupDone } from './Onboarding';
+import { setProfileName } from './profile';
 import { Icon, Logo } from './ui';
+
+const SIGNED_OUT = 'mivelo.signedOut';
+function readSignedOut(): boolean {
+  try {
+    return localStorage.getItem(SIGNED_OUT) === '1';
+  } catch {
+    return false;
+  }
+}
+function writeSignedOut(on: boolean): void {
+  try {
+    if (on) localStorage.setItem(SIGNED_OUT, '1');
+    else localStorage.removeItem(SIGNED_OUT);
+  } catch {
+    /* depolama yok */
+  }
+}
+
+/**
+ * Ayarlar → Çıkış yap. Masaüstü (lisans zorunlu): lisans bu bilgisayardan kaldırılır (cihaz hakkı boşalır, kanallar durur),
+ * yeniden girmek için anahtar istenir. Lisans istenmeyen yerel sürümde (npm run dev / localhost) yalnız arayüzden çıkılır:
+ * aynı veri klasörünü paylaşan masaüstü uygulamasının lisansına DOKUNULMAZ. Mesajlar ve bağlı uygulamalar silinmez.
+ */
+export async function signOut(): Promise<void> {
+  const st = await api.license().catch(() => null);
+  if (st?.required) await api.releaseLicense();
+  writeSignedOut(true);
+  window.dispatchEvent(new Event('mivelo:signout'));
+}
+
+/** Lisans sahibinin adı profil adı olur (yoksa App işletim sistemindeki adı kullanır) */
+function applyOwner(s: LicenseStatus): LicenseStatus {
+  const o = s.owner;
+  if (o?.name || o?.email) setProfileName(o.name || o.email!.split('@')[0], true);
+  return s;
+}
 
 /**
  * Paketli masaüstü uygulaması (DMG/EXE): çekirdek lisans istiyorsa (MIVELO_REQUIRE_LICENSE) uygulama açılır açılmaz anahtar
  * ekranı. Anahtarı Kaan yönetim panelinde (Lisanslar) üretip iletiyor; doğrulama çekirdek → mivelo.app/api/license.php.
  * Açıkken 10 dakikada bir ve pencere öne gelince yeniden sorulur: iptal edilen lisans bu ekrana döner.
+ *
+ * Masaüstünde sıra: açılış animasyonu (lisans durumu gelene dek) → [lisans ekranı] → [ilk kurulum: izinler, bir kez] →
+ * açılış animasyonu → uygulama. Etkinleştirme / kurulumdan sonra uzun animasyon (≈2,8 sn), sonraki açılışlarda kısa (≈1 sn).
+ * Uygulama animasyonun ALTINDA hemen çizilir (veriler bu sırada yüklenir); katman saydamlaşınca görünür.
+ * Çıkış yapılmışsa (Ayarlar → Çıkış yap) giriş ekranı; yeniden girişte uzun animasyon.
  */
 export function LicenseGate({ children }: { children: ReactNode }) {
   const [st, setSt] = useState<LicenseStatus | null>(isTauri ? null : { required: false, valid: true });
+  const [setup, setSetup] = useState(() => isTauri && !setupDone());
+  const [splash, setSplash] = useState<'full' | 'quick' | null>(isTauri ? 'quick' : null);
+  const [signedOut, setSignedOut] = useState(readSignedOut);
   const refresh = useCallback((check = false) => {
     api
       .license(check)
-      .then(setSt)
+      .then((s) => setSt(applyOwner(s)))
       // çekirdek henüz kalkmadıysa ya da eski çekirdekte uç yoksa uygulamayı engelleme (App kendi "başlatılıyor" ekranını gösterir)
       .catch(() => setSt((s) => s ?? { required: false, valid: true }));
   }, []);
   useEffect(() => {
-    if (!isTauri) return;
+    const onOut = () => {
+      setSignedOut(true);
+      if (isTauri) refresh();
+    };
+    window.addEventListener('mivelo:signout', onOut);
+    if (!isTauri) return () => window.removeEventListener('mivelo:signout', onOut);
     refresh(true);
     // çekirdek açılırken ilk istek düşebilir: birkaç kez dene
     const t1 = window.setTimeout(refresh, 2500);
@@ -26,18 +77,68 @@ export function LicenseGate({ children }: { children: ReactNode }) {
     const iv = window.setInterval(() => refresh(true), 10 * 60_000);
     const onFocus = () => refresh(true);
     window.addEventListener('focus', onFocus);
-    return () => (window.clearTimeout(t1), window.clearTimeout(t2), window.clearInterval(iv), window.removeEventListener('focus', onFocus));
+    return () => (window.clearTimeout(t1), window.clearTimeout(t2), window.clearInterval(iv), window.removeEventListener('focus', onFocus), window.removeEventListener('mivelo:signout', onOut));
   }, [refresh]);
 
-  if (!st) return <div className="auth-screen" />;
-  if (!st.required || st.valid) return <>{children}</>;
-  return <LicenseScreen status={st} onDone={setSt} />;
+  const enter = () => {
+    writeSignedOut(false);
+    setSignedOut(false);
+    setSplash('full');
+  };
+  const ok = !!st && (!st.required || st.valid);
+  if (st && !ok)
+    return (
+      <LicenseScreen
+        status={st}
+        signedOut={signedOut}
+        onDone={(s) => {
+          // etkinleşti: düz arayüz yerine logolu açılış (kurulum gerekiyorsa ondan sonra)
+          if (!s.required || s.valid) enter();
+          setSt(applyOwner(s));
+        }}
+      />
+    );
+  if (ok && signedOut) return <SignedOutScreen onEnter={enter} />;
+  if (ok && setup)
+    return (
+      <SetupScreen
+        onDone={() => {
+          setSetup(false);
+          setSplash('full');
+        }}
+      />
+    );
+  return (
+    <>
+      {ok && children}
+      {splash && <Splash key={splash} mode={splash} ready={ok} onDone={() => setSplash(null)} />}
+    </>
+  );
 }
 
-function LicenseScreen({ status, onDone }: { status: LicenseStatus; onDone: (s: LicenseStatus) => void }) {
+/** Lisans istenmeyen yerel sürümde çıkıştan sonra: yalnız "Yeniden giriş yap" (çekirdek ve kanallar çalışmayı sürdürür) */
+function SignedOutScreen({ onEnter }: { onEnter: () => void }) {
+  return (
+    <div className="auth-screen">
+      <div className="auth-card signed-out">
+        <div className="setup-hero" aria-hidden="true">
+          <SplashMark size={56} animate />
+        </div>
+        <h1>Çıkış yaptın</h1>
+        <p>Mesajların ve bağlı uygulamaların bu bilgisayarda duruyor; Mivelo arka planda eşitlemeyi sürdürür.</p>
+        <button className="btn primary b" type="button" autoFocus onClick={onEnter}>
+          Yeniden giriş yap
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function LicenseScreen({ status, signedOut, onDone }: { status: LicenseStatus; signedOut?: boolean; onDone: (s: LicenseStatus) => void }) {
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState(status.reason ?? '');
+  // kendi isteğiyle çıkan kullanıcıya "lisans kaldırıldı" hatası gösterilmez
+  const [err, setErr] = useState(signedOut ? '' : (status.reason ?? ''));
   const submit = async () => {
     if (!key.trim() || busy) return;
     setBusy(true);
@@ -68,8 +169,12 @@ function LicenseScreen({ status, onDone }: { status: LicenseStatus; onDone: (s: 
           <Logo size={36} />
           <span>mivelo</span>
         </div>
-        <h1>Lisans anahtarın</h1>
-        <p>Mivelo'yu kullanmak için sana iletilen lisans anahtarını gir. Anahtar bir kez girilir; bu bilgisayarda hatırlanır.</p>
+        <h1>{signedOut ? 'Çıkış yaptın' : 'Lisans anahtarın'}</h1>
+        <p>
+          {signedOut
+            ? 'Mesajların ve bağlı uygulamaların bu bilgisayarda duruyor. Yeniden girmek için lisans anahtarını gir.'
+            : "Mivelo'yu kullanmak için sana iletilen lisans anahtarını gir. Anahtar bir kez girilir; bu bilgisayarda hatırlanır."}
+        </p>
         <input
           className="lic-input"
           value={key}
@@ -86,7 +191,7 @@ function LicenseScreen({ status, onDone }: { status: LicenseStatus; onDone: (s: 
           </div>
         )}
         <button className="btn primary b" type="submit" disabled={busy || key.replace(/[^A-Z0-9]/g, '').length < 19}>
-          {busy ? 'Doğrulanıyor…' : 'Etkinleştir'}
+          {busy ? 'Doğrulanıyor…' : signedOut ? 'Giriş yap' : 'Etkinleştir'}
         </button>
         <p className="lic-help">
           Anahtarın, uygulamayı{' '}

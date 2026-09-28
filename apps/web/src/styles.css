@@ -202,7 +202,7 @@ button:focus-visible, a:focus-visible, .sw:focus-visible { outline: 2px solid va
 .privacy .t { font-size: 12px; font-weight: 600; display: block; }
 .privacy .s { font-size: 11px; color: var(--text3); }
 .me { display: flex; align-items: center; gap: 10px; padding: 0 4px; flex-shrink: 0; }
-.me .n { font-size: 13px; font-weight: 600; display: block; }
+.me .n { font-size: 13px; font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .me .s { font-size: 11.5px; color: var(--text3); }
 /* .me (kenar çubuğu profil satırı) posta kartındaki kendi iletimize (article.mail-card.me) sızmasın */
 .mail-card.me { display: block; padding: 14px 16px; }
@@ -1597,3 +1597,82 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .lic-input:focus { outline: none; border-color: var(--v); box-shadow: 0 0 0 3px color-mix(in srgb, var(--v) 22%, transparent); }
 .lic-help { font-size: 12.5px !important; color: var(--text3) !important; margin-top: 4px !important; }
 .lic-help a { color: var(--v-txt, var(--v)); font-weight: 600; }
+
+/* İlk açılış kurulumu: izinler (Onboarding.tsx SetupScreen) */
+.setup-card { width: min(540px, 100%); gap: 10px; }
+.setup-hero { display: flex; justify-content: center; margin: 2px 0 2px; }
+.setup-card h1 { text-align: center; }
+.setup-card > p { text-align: center; }
+.perm-list { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 6px; }
+.perm-row { display: flex; align-items: flex-start; gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 16px; background: var(--card); transition: border-color .2s ease, background .2s ease; }
+.perm-row.done { border-color: color-mix(in srgb, var(--green-txt) 30%, var(--line)); background: color-mix(in srgb, var(--green-bg) 45%, var(--card)); }
+.perm-ic { width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center; flex: none; background: var(--v-soft); color: var(--v-txt); }
+.perm-row.done .perm-ic { background: var(--green-bg); color: var(--green-txt); }
+.perm-body { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.perm-body b { font-size: 13.5px; font-weight: 650; }
+.perm-body b em { font-style: normal; font-weight: 500; color: var(--text3); font-size: 12px; }
+.perm-body > span { font-size: 12.5px; color: var(--text2); line-height: 1.45; }
+.perm-body .perm-hint { color: var(--warn-txt); background: var(--warn-bg); border-radius: 9px; padding: 6px 8px; margin-top: 4px; font-size: 12px; }
+.perm-body .perm-hint a { color: inherit; font-weight: 650; }
+.perm-row > .btn { align-self: center; }
+.perm-st { align-self: center; font-size: 12px; font-weight: 600; white-space: nowrap; padding: 4px 9px; border-radius: 999px; }
+.perm-st.ok { color: var(--green-txt); background: var(--green-bg); }
+.perm-st.bad { color: var(--danger-txt); background: var(--danger-bg); }
+.perm-st.wait { color: var(--text2); background: var(--bg2); }
+.setup-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.setup-actions .btn { height: 42px; padding: 0 18px; font-weight: 650; margin-top: 0 !important; }
+@media (max-width: 560px) {
+  .perm-row { flex-wrap: wrap; }
+  .perm-row > .btn, .perm-st { margin-left: 46px; }
+  .setup-actions .btn { flex: 1; }
+}
+
+/* Açılış animasyonu (Onboarding.tsx Splash): logo çizilir, "mivelo" belirir, katman büyüyüp saydamlaşırken uygulama görünür */
+.splash { position: fixed; inset: 0; z-index: 10000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; background: radial-gradient(760px 420px at 50% 42%, color-mix(in srgb, var(--v) 16%, transparent), transparent 70%), var(--bg); transition: opacity .7s cubic-bezier(.4,0,.2,1), backdrop-filter .7s ease; }
+.splash.quick { transition-duration: .42s; }
+.splash.out { opacity: 0; pointer-events: none; }
+.sp-stage { position: relative; display: grid; place-items: center; transition: transform .7s cubic-bezier(.4,0,.2,1); }
+.splash.out .sp-stage { transform: scale(1.35); }
+.splash.quick.out .sp-stage { transform: scale(1.15); transition-duration: .42s; }
+.sp-mark { display: block; overflow: visible; filter: drop-shadow(0 18px 34px color-mix(in srgb, var(--v) 45%, transparent)); }
+.sp-mark .sp-sq, .sp-mark .sp-dot { transform-box: fill-box; transform-origin: center; }
+.sp-mark.anim .sp-sq { animation: spSq .62s cubic-bezier(.2,.9,.3,1.25) both; }
+.sp-mark.anim .sp-path { stroke-dasharray: 1; stroke-dashoffset: 1; animation: spDraw .62s cubic-bezier(.6,0,.3,1) .32s forwards; }
+.sp-mark.anim .sp-dot { animation: spDot .42s cubic-bezier(.2,.9,.3,1.6) .82s both; }
+.sp-ring { position: absolute; inset: -14px; border-radius: 36px; border: 2px solid color-mix(in srgb, var(--v) 55%, transparent); opacity: 0; animation: spRing 1.5s cubic-bezier(.2,.7,.2,1) .95s infinite; }
+.splash.quick .sp-ring { display: none; }
+.sp-word { font-size: 30px; font-weight: 650; letter-spacing: -1px; color: var(--text); animation: spUp .55s cubic-bezier(.2,.8,.2,1) .9s both; }
+.splash.quick .sp-word { font-size: 24px; animation-delay: .3s; animation-duration: .35s; }
+.sp-sub { font-size: 13px; color: var(--text3); animation: spUp .55s cubic-bezier(.2,.8,.2,1) 1.15s both; }
+.sp-sub::after { content: ''; display: block; width: 132px; height: 3px; margin: 12px auto 0; border-radius: 99px; background: linear-gradient(90deg, var(--v), var(--lime)) 0 0 / 0% 100% no-repeat, var(--line); animation: spBar 1.5s cubic-bezier(.4,0,.2,1) 1.1s forwards; }
+.splash.quick .sp-mark.anim .sp-sq { animation-duration: .38s; }
+.splash.quick .sp-mark.anim .sp-path { animation-duration: .36s; animation-delay: .12s; }
+.splash.quick .sp-mark.anim .sp-dot { animation-delay: .38s; }
+@keyframes spSq { from { transform: scale(.35) rotate(-14deg); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes spDraw { to { stroke-dashoffset: 0; } }
+@keyframes spDot { from { transform: scale(0); } to { transform: scale(1); } }
+@keyframes spRing { 0% { transform: scale(.82); opacity: 0; } 25% { opacity: .9; } 100% { transform: scale(1.45); opacity: 0; } }
+@keyframes spUp { from { opacity: 0; transform: translateY(10px); filter: blur(6px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes spBar { to { background-size: 100% 100%; } }
+@media (prefers-reduced-motion: reduce) {
+  .sp-mark.anim .sp-sq, .sp-mark.anim .sp-dot, .sp-word, .sp-sub, .sp-sub::after { animation: none; }
+  .sp-mark.anim .sp-path { animation: none; stroke-dashoffset: 0; }
+  .sp-sub::after { background-size: 100% 100%; }
+  .sp-ring { display: none; }
+  .splash.out .sp-stage { transform: none; }
+}
+.perm-act { display: flex; align-items: center; gap: 8px; align-self: center; flex: none; }
+.set-body .perm-list { margin: 0; }
+.auth-card.signed-out h1, .auth-card.signed-out > p { text-align: center; }
+
+/* Ayarlar → Hesap / Çıkış yap (Settings.tsx AccountPane) */
+.set-val { font-size: 13px; color: var(--text); font-weight: 600; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.set-val.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; letter-spacing: .3px; }
+.set-tab.set-logout.on { background: var(--danger); color: #fff; box-shadow: none; }
+.set-tab.set-logout.on svg { color: #fff; }
+.set-logout-card { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 20px; border: 1px solid var(--danger-line); border-radius: 18px; background: var(--danger-bg); }
+.set-logout-card .ic { width: 42px; height: 42px; border-radius: 13px; display: grid; place-items: center; background: var(--danger-txt); color: #fff; }
+.set-logout-card b { font-size: 16px; }
+.set-logout-card p { margin: 0; font-size: 13px; line-height: 1.55; color: var(--text2); }
+.set-logout-card .row { display: flex; gap: 8px; align-self: flex-end; margin-top: 6px; }
+.set-logout-card .btn { height: 38px; padding: 0 16px; }

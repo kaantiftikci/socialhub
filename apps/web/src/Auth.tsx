@@ -7,10 +7,13 @@ import { clearDemoAccounts, loadDemoAccounts } from './static-demo';
 import { Logo, PasswordInput } from './ui';
 import { REMOTE_CORE, clearRemoteCore } from './desktop';
 import App from './App';
+import { Splash } from './Onboarding';
 
 export function DemoGate() {
   const [user, setUser] = useState<SessionUser | null | undefined>(undefined);
   const [error, setError] = useState('');
+  // giriş yapınca düz arayüz yerine logolu açılış (masaüstündeki lisans etkinleştirmesiyle aynı)
+  const [splash, setSplash] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,6 +56,7 @@ export function DemoGate() {
     setProfileName(u.name);
     setProfileUser(u.username);
     loadDemoAccounts(await authLoadAccounts().catch(() => []), { fresh: u.fresh });
+    setSplash(true);
     setUser(u);
   }
 
@@ -64,7 +68,12 @@ export function DemoGate() {
     );
   }
   if (!user) return <AuthScreen error={error} onClearError={() => setError('')} onEnter={enter} />;
-  return <App key={user.id} />;
+  return (
+    <>
+      <App key={user.id} />
+      {splash && <Splash mode="full" onDone={() => setSplash(false)} />}
+    </>
+  );
 }
 
 function AuthScreen({

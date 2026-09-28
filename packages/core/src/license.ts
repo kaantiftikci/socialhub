@@ -20,12 +20,18 @@ const FILE = path.join(DATA_DIR, 'license.json');
 const GRACE_MS = 14 * 86_400_000;
 const CHECK_MS = 30 * 60_000;
 
+/** Lisans sahibi (sunucu anahtarın e-postası + üye kaydındaki ad soyad ile döner; arayüzde profil adı) */
+export interface LicenseOwner {
+  name?: string;
+  email?: string;
+}
 interface Saved {
   key: string;
   activation: string;
   device: string;
   lastOk: number;
   expiresAt?: string | null;
+  owner?: LicenseOwner;
 }
 export interface LicenseStatus {
   required: boolean;
@@ -33,6 +39,7 @@ export interface LicenseStatus {
   key?: string;
   expiresAt?: string | null;
   reason?: string;
+  owner?: LicenseOwner;
 }
 
 /** Cihaz kimliği: ana bilgisayar adı + kullanıcı + işletim sistemi + ilk fiziksel ağ kartı (MAC); özet, ham değer gitmez */
@@ -78,7 +85,7 @@ export function licenseStatus(): LicenseStatus {
   if (!LICENSE_REQUIRED) return { required: false, valid: true };
   const s = read();
   const valid = !!s && s.device === deviceId() && Date.now() - s.lastOk < GRACE_MS && (!s.expiresAt || Date.parse(s.expiresAt) > Date.now());
-  return { required: true, valid, key: s ? mask(s.key) : undefined, expiresAt: s?.expiresAt, reason: valid ? undefined : reason ?? (s && Date.now() - s.lastOk >= GRACE_MS ? 'Lisans 14 gündür doğrulanamadı; internete bağlanıp yeniden dene' : undefined) };
+  return { required: true, valid, key: s ? mask(s.key) : undefined, expiresAt: s?.expiresAt, owner: valid ? s?.owner : undefined, reason: valid ? undefined : reason ?? (s && Date.now() - s.lastOk >= GRACE_MS ? 'Lisans 14 gündür doğrulanamadı; internete bağlanıp yeniden dene' : undefined) };
 }
 export const licensed = () => licenseStatus().valid;
 
@@ -97,14 +104,23 @@ class LicenseError extends Error {
   }
 }
 
-async function call(action: string, body: Record<string, unknown>): Promise<{ activation?: string; expiresAt?: string | null }> {
+/** Sunucunun döndürdüğü sahip bilgisi: yalnız kısa düz metin alanlar */
+function cleanOwner(o: unknown): LicenseOwner | undefined {
+  if (!o || typeof o !== 'object') return undefined;
+  const pick = (v: unknown, n: number) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f]/g, '').trim().slice(0, n) : '');
+  const name = pick((o as LicenseOwner).name, 80);
+  const email = pick((o as LicenseOwner).email, 120);
+  return name || email ? { ...(name ? { name } : {}), ...(email ? { email } : {}) } : undefined;
+}
+
+async function call(action: string, body: Record<string, unknown>): Promise<{ activation?: string; expiresAt?: string | null; owner?: unknown }> {
   let res: Response;
   try {
     res = await fetch(API, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, ...body }), signal: AbortSignal.timeout(20_000) });
   } catch {
     throw new LicenseError('Lisans sunucusuna ulaşılamadı; internet bağlantını kontrol et', false);
   }
-  const j = (await res.json().catch(() => ({}))) as { error?: string; invalid?: boolean; ok?: boolean; activation?: string; expiresAt?: string | null };
+  const j = (await res.json().catch(() => ({}))) as { error?: string; invalid?: boolean; ok?: boolean; activation?: string; expiresAt?: string | null; owner?: unknown };
   if (!res.ok || !j.ok) throw new LicenseError(j.error || `Lisans sunucusu hatası (${res.status})`, !!j.invalid, res.status);
   return j;
 }
@@ -118,7 +134,7 @@ export async function activateLicense(rawKey: string): Promise<LicenseStatus> {
   const key = `MVL-${raw.match(/.{4}/g)!.join('-')}`;
   const device = deviceId();
   const r = await call('activate', { key, device, name: os.hostname().slice(0, 60), os: `${process.platform} ${os.release()}`, version: version() });
-  write({ key, activation: String(r.activation), device, lastOk: Date.now(), expiresAt: r.expiresAt ?? null });
+  write({ key, activation: String(r.activation), device, lastOk: Date.now(), expiresAt: r.expiresAt ?? null, owner: cleanOwner(r.owner) });
   reason = undefined;
   bus.log('info', 'Lisans etkinleştirildi');
   onChange();
@@ -147,7 +163,10 @@ export async function checkLicense(): Promise<void> {
   if (!LICENSE_REQUIRED || !s) return;
   try {
     const r = await call('check', { key: s.key, activation: s.activation, device: deviceId(), version: version() });
-    write({ ...s, lastOk: Date.now(), expiresAt: r.expiresAt ?? null });
+    const owner = cleanOwner(r.owner) ?? s.owner;
+    const changed = JSON.stringify(owner) !== JSON.stringify(s.owner);
+    write({ ...s, lastOk: Date.now(), expiresAt: r.expiresAt ?? null, owner });
+    if (changed) bus.emit({ type: 'license.update', license: licenseStatus() });
   } catch (e) {
     if (e instanceof LicenseError && e.invalid) {
       write(null);

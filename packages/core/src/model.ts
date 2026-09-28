@@ -166,7 +166,7 @@ export type CoreEvent =
   | { type: 'chat.followup'; chat: Chat }
   /** Zamanlanmış gönderim listesi değişti (eklendi/iptal/gönderildi) */
   | { type: 'scheduled.update' }
-  | { type: 'license.update'; license: { required: boolean; valid: boolean; key?: string; expiresAt?: string | null; reason?: string } }
+  | { type: 'license.update'; license: { required: boolean; valid: boolean; key?: string; expiresAt?: string | null; reason?: string; owner?: { name?: string; email?: string } } }
   /** Mivelo takvimi değişti / etkinlik hatırlatması */
   | { type: 'events.update' }
   | { type: 'event.reminder'; event: CalEvent }

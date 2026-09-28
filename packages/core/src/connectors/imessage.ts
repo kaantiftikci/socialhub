@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import Database from 'better-sqlite3';
-import { BaseConnector } from './base.js';
+import { BaseConnector, type StartOptions } from './base.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
 import { openExternal } from '../platform.js';
@@ -149,7 +149,7 @@ export class IMessageConnector extends BaseConnector {
   /** stop() çağrıldı: dilimli açılış yüklemesi yarıda bırakılır */
   private stopped = false;
 
-  async start(): Promise<void> {
+  async start(opts: StartOptions = {}): Promise<void> {
     this.stopped = false;
     if (process.platform !== 'darwin') {
       this.setStatus('error', 'iMessage yalnızca macOS üzerinde çalışır');
@@ -192,8 +192,9 @@ export class IMessageConnector extends BaseConnector {
           );
       }
     } catch (e) {
-      // Sistem Ayarları → Gizlilik ve Güvenlik → Tam Disk Erişimi bölmesini doğrudan aç
-      openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles');
+      // Sistem Ayarları → Gizlilik ve Güvenlik → Tam Disk Erişimi bölmesi yalnız kullanıcı istediğinde (Bağlan / Yeniden dene)
+      // açılır; eskiden her açılışta kendiliğinden açılıyordu (izin artık ilk açılış kurulumunda baştan istenir)
+      if (opts.interactive !== false) openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles');
       bus.log('error', `iMessage: chat.db açılamadı (${(e as Error).message}); Mivelo’da görünen iMessage verisi son başarılı okumadan kalma, yeni mesajlar gelmez`);
       // Arka plan servisi (launchd, `npm run autodeploy -- install`): izin Terminal'e değil doğrudan node ikilisine verilmeli
       let who = 'Mivelo’yu (geliştirme modunda Terminal’i)';

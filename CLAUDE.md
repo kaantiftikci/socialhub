@@ -177,6 +177,22 @@ Dil: arayüz ve yorumlar Türkçe.
   (`mv_send_mail(..., $html, $inline)` → multipart/related, `cid:mivelo-logo`; önizlemede data: adresi) — uzaktan görsel engelleyen istemcide de görünür.
   Gönderim SMTP'ye bağlı: Türkticaret giden SMTP'yi açmadıkça "Gönderilemedi" (anahtar yine üretilir). Yerelde sahte SMTP ile sınandı.
   İstemci tarafı denetimdir (paket değiştirilerek aşılabilir); amaç anahtarsız dağıtımı engellemek. Yerel uçtan uca sınandı (php -S + çekirdek).
+- **İlk açılış, açılış animasyonu, çıkış** (`Onboarding.tsx`, `LicenseGate.tsx`; yalnız Tauri, çıkış her yerde): sıra kısa açılış animasyonu (lisans
+  durumu gelene dek) → lisans ekranı → **ilk kurulum** (izinler bir kez: `mivelo.setup`='1', durumlar `mivelo.setupPerms`; Bildirimler = deneme bildirimi
+  macOS izin penceresini şimdi çıkarır, Mikrofon = getUserMedia, Mac: Tam Disk Erişimi = Sistem Ayarları bölmesi + 1,5 sn'de bir `GET /api/permissions`
+  (`permissions.ts fullDiskAccess`: chat.db/TCC.db/Safari açılabiliyor mu, EPERM = yok; "Çık ve Yeniden Aç" sonrası kurulum kaldığı yerden sürer),
+  Mesajlar otomasyonu `POST /api/permissions/messages` (osascript, -1743 = red), Takvim isteğe bağlı (calendars probe); "Hepsine izin ver" FDA'yı en sona
+  koyar) → **uzun açılış animasyonu** (`Splash` full ≈2,8 sn: kare büyür, kıvrım çizilir, lime nokta, "mivelo", ilerleme çubuğu; App ALTTA hemen çizilir,
+  katman büyüyüp saydamlaşır) → uygulama; sonraki açılışlarda kısa (≈1 sn); `prefers-reduced-motion` uyar. Demoda da girişten sonra uzun animasyon.
+  iMessage açılışta FDA bölmesini artık kendiliğinden AÇMAZ (yalnız interactive start). Ayarlar → İzinler (Tauri) aynı satırlar + "Yeniden iste".
+  `Entitlements.plist` (tauri.conf macOS.entitlements; hardened runtime'da audio-input/apple-events/addressbook/calendars yoksa macOS izni SORMADAN
+  reddeder → sesli mesaj kaydı çalışmıyordu). Gerçek Mac'te DENENMEDİ (Playwright + sahte Tauri iç API'siyle sınandı).
+  **Çıkış yap** (Ayarlar menüsünün altındaki kırmızı düğme; web demoda hemen çıkar): yerel/masaüstünde önce onay kartı (`AccountPane`). Masaüstü (lisans
+  zorunlu) → `DELETE /api/license` (cihaz hakkı boşalır, kanallar durur) → lisans ekranı "Çıkış yaptın" + "Giriş yap" → uzun animasyon. Lisans istenmeyen
+  yerel sürümde (localhost) yalnız arayüzden çıkış (`mivelo.signedOut`, "Yeniden giriş yap"); aynı ~/.mivelo'yu paylaşan masaüstü lisansına DOKUNMAZ.
+  Ayarlar → Hesap: ad, e-posta, maskeli anahtar + kalan gün, sürüm. **Profil adı** artık sabit "Kaan" DEĞİL: lisans sahibi (license.php activate/check
+  `owner {name,email}` = anahtarın email'i ya da sentTo + members.json ad soyad; çekirdek license.json'da saklar, `licenseStatus().owner`, test:
+  license-owner.test.ts), yoksa işletim sistemi tam adı (`/api/health` `user`, `platform.ts userDisplayName`: macOS `id -F`, Linux GECOS). Odak'ta ilk ad.
 - **Windows**: `tauri.windows.conf.json` (NSIS, currentUser, yerel başlık çubuğu) Tauri'nin platform yapılandırma birleştirmesiyle
   uygulanır; paket yalnız CI'da üretilir (`.github/workflows/build-desktop.yml` windows-x64 işi, windows-latest,
   `KAVSAK_BUNDLE_NODE=1` ile node.exe `core-bundle/bin/`e gömülür, kabuk önce onu dener). `lib.rs`: kısayol Ctrl+Shift+K,

@@ -19,13 +19,14 @@ import { bus } from './bus.js';
 import { AiError, aiEnabled, aiKey, aiKeySource, draftReply, isAiTone, setAiKey } from './ai.js';
 import { analyzeStyle, describeStyle } from './style.js';
 import { buildIcs, formatStart, parseStart } from './calendar.js';
-import { openExternal } from './platform.js';
+import { openExternal, userDisplayName } from './platform.js';
 import { activateLicense, checkLicenseSoon, LicenseError, licenseStatus, releaseLicense } from './license.js';
 import { ALL_PLATFORMS } from './model.js';
 import { MEDIA_HOSTS, PLATFORM_MEDIA_HOSTS, MEDIA_MAX } from './media-hosts.js';
 import { fetchPreview } from './link-preview.js';
 import { checkSend, persistSendGuard, SendBlocked } from './send-guard.js';
 import { EventBatcher } from './ws-batch.js';
+import { fullDiskAccess, messagesAutomation, PRIVACY_PANES } from './permissions.js';
 import type { Platform } from './model.js';
 
 /**
@@ -88,6 +89,7 @@ const hasForwarded = (req: http.IncomingMessage) => !!(req.headers['x-forwarded-
 const mediaFailures = new Map<string, { at: number; code: number }>();
 
 export function createServer(store: Store, registry: Registry, port: number): http.Server {
+  userDisplayName(); // tam ad arka planda şimdiden sorulsun (ilk /api/health'te hazır olsun)
   persistSendGuard(path.join(DATA_DIR, 'send-guard.json'));
   const scheduled = new ScheduledQueue(path.join(DATA_DIR, 'scheduled.json'));
   const token = loadToken();
@@ -196,7 +198,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   // ---------- routes ----------
   route('GET', '/api/health', () => {
     const m = process.memoryUsage();
-    return { ok: true, ai: aiEnabled(), stats: store.stats(), os: process.platform, pid: process.pid, uptimeSec: Math.round(process.uptime()), memoryMb: { rss: Math.round(m.rss / 1048576), heapUsed: Math.round(m.heapUsed / 1048576), heapTotal: Math.round(m.heapTotal / 1048576), external: Math.round(m.external / 1048576) } };
+    return { ok: true, ai: aiEnabled(), stats: store.stats(), os: process.platform, user: userDisplayName(), pid: process.pid, uptimeSec: Math.round(process.uptime()), memoryMb: { rss: Math.round(m.rss / 1048576), heapUsed: Math.round(m.heapUsed / 1048576), heapTotal: Math.round(m.heapTotal / 1048576), external: Math.round(m.external / 1048576) } };
   });
 
   route('GET', '/api/license', async (r) => {
@@ -644,6 +646,22 @@ export function createServer(store: Store, registry: Registry, port: number): ht
       const ce = e as DeviceCalendarError;
       return { supported: true, app, calendars: [], denied: ce.code === 'denied', error: ce.message };
     }
+  });
+  // İlk açılış kurulumu (arayüz Onboarding): izin durumları ve ilgili Sistem Ayarları bölmeleri
+  route('GET', '/api/permissions', (req) => {
+    localOnly(req);
+    return { os: process.platform, fullDisk: fullDiskAccess() };
+  });
+  route('POST', '/api/permissions/open', (req, _s, _p, body) => {
+    localOnly(req);
+    const pane = PRIVACY_PANES[String((body as { pane?: unknown }).pane ?? '')];
+    if (!pane || process.platform !== 'darwin') throw new HttpError(400, 'Geçersiz ayar bölmesi');
+    openExternal(pane);
+    return { ok: true };
+  });
+  route('POST', '/api/permissions/messages', async (req) => {
+    localOnly(req);
+    return { result: await messagesAutomation() };
   });
   // macOS: Takvim iznini yeniden açmak için Gizlilik → Otomasyon bölmesi
   route('POST', '/api/calendars/permission', (req) => {
