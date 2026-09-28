@@ -7,8 +7,8 @@ import { IS_MAC, IS_WINDOWS } from './platform.js';
 
 /**
  * Uygulama gizli değerleri (ör. kullanıcının Anthropic API anahtarı). Veritabanı anahtarıyla aynı depolar:
- * macOS Anahtar Zinciri ("mivelo-<ad>" hizmeti), Windows DPAPI (CurrentUser, ~/.kavsak/<ad>.dpapi), diğerlerinde
- * ~/.kavsak/<ad>.secret (0600). dbkey.ts'ten farkı: değer güncellenebilir ve silinebilir.
+ * macOS Anahtar Zinciri ("mivelo-<ad>" hizmeti), Windows DPAPI (CurrentUser, ~/.mivelo/<ad>.dpapi), diğerlerinde
+ * ~/.mivelo/<ad>.secret (0600). dbkey.ts'ten farkı: değer güncellenebilir ve silinebilir.
  */
 const safeName = (name: string) => name.replace(/[^a-z0-9-]/gi, '');
 

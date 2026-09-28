@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Tarayıcı stratejisini (slack/instagram/linkedin/x/messenger) gerçek oturumla, uygulamaya dokunmadan doğrular:
- *   node scripts/verify-strategy.mjs slack            # ~/.kavsak/sessions/<platform>:<id>/profile'ı /tmp'ye kopyalar
+ *   node scripts/verify-strategy.mjs slack            # ~/.mivelo/sessions/<platform>:<id>/profile'ı /tmp'ye kopyalar
  *   node scripts/verify-strategy.mjs slack /yol/profil # verilen profil kopyasını kullanır
  * Çıktı: sohbet sayısı, ilk 8 sohbet (ad, tür, okunmamış, son etkinlik), ilk 3 sohbette mesajlar (zaman, gönderen, metin, ek),
  * bir sohbette "before" ile daha eski sayfa. Önce `npm run build -w packages/core`.
@@ -22,9 +22,10 @@ if (!strategy) throw new Error('strateji bulunamadı: ' + platform);
 
 let profile = given;
 if (!profile) {
-  const sessions = path.join(os.homedir(), '.kavsak', 'sessions');
+  const home = fs.existsSync(path.join(os.homedir(), '.mivelo')) ? '.mivelo' : '.kavsak';
+  const sessions = path.join(os.homedir(), home, 'sessions');
   const dir = fs.readdirSync(sessions).find((d) => d.startsWith(platform + ':'));
-  if (!dir) throw new Error(`${platform} hesabı yok (~/.kavsak/sessions)`);
+  if (!dir) throw new Error(`${platform} hesabı yok (~/.mivelo/sessions)`);
   profile = path.join(os.tmpdir(), `kavsak-verify-${platform}`);
   fs.rmSync(profile, { recursive: true, force: true });
   fs.cpSync(path.join(sessions, dir, 'profile'), profile, { recursive: true });

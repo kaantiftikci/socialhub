@@ -2,14 +2,16 @@
 /**
  * Trendyol soru tanısı (salt okunur GET istekleri): sipariş sorularının API'de hangi alanla / hangi uçtan geldiğini bulmak için.
  *   node scripts/trendyol-probe.mjs
- * Mivelo'ya bağlı Trendyol hesabının kimliğini ~/.kavsak/sessions/trendyol*\/token dosyasından okur. Çıktıda YALNIZ alan adları,
+ * Mivelo'ya bağlı Trendyol hesabının kimliğini ~/.mivelo/sessions/trendyol*\/token dosyasından okur. Çıktıda YALNIZ alan adları,
  * türler, sayılar ve HTTP durum kodları var — müşteri adı, soru metni, anahtar gibi değerler yazdırılmaz. Çıktıyı Claude'a yapıştır.
  */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const SESS = path.join(process.env.KAVSAK_DATA_DIR ?? path.join(os.homedir(), '.kavsak'), 'sessions');
+// veri klasörü: ~/.mivelo (eski adı ~/.mivelo; çekirdek ilk açılışta taşır, eski yol bağ olarak kalır)
+const DATA_ROOT = process.env.MIVELO_DATA_DIR ?? process.env.KAVSAK_DATA_DIR ?? (fs.existsSync(path.join(os.homedir(), '.mivelo')) || !fs.existsSync(path.join(os.homedir(), '.kavsak')) ? path.join(os.homedir(), '.mivelo') : path.join(os.homedir(), '.kavsak'));
+const SESS = path.join(DATA_ROOT, 'sessions');
 const dir = fs.existsSync(SESS) ? fs.readdirSync(SESS).find((d) => /^trendyol[:_]/.test(d)) : undefined;
 if (!dir) {
   console.error(`Trendyol hesabı bulunamadı (${SESS}). Önce Mivelo'da Trendyol'u bağla.`);

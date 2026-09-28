@@ -3,15 +3,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { DATA_DIR } from './config.js';
+import { DATA_DIR, DB_PATH } from './config.js';
 import { IS_MAC, IS_WINDOWS } from './platform.js';
 
 /**
  * Veritabanı şifreleme anahtarı (SQLCipher, 32 bayt hex).
  * macOS: Anahtar Zinciri'nde ("mivelo-db" hizmeti) tutulur; diskte anahtar dosyası yok.
- * Windows: DPAPI (CurrentUser) ile şifrelenip ~/.kavsak/db.key.dpapi'ye yazılır; yalnızca aynı Windows kullanıcısı çözebilir
+ * Windows: DPAPI (CurrentUser) ile şifrelenip ~/.mivelo/db.key.dpapi'ye yazılır; yalnızca aynı Windows kullanıcısı çözebilir
  * (PowerShell + System.Security.Cryptography.ProtectedData; ek bağımlılık yok).
- * Güvenli depo kullanılamazsa (Linux, security/powershell yok) ~/.kavsak/db.key (0600) yedek. Anahtar kaybolursa veritabanı açılamaz.
+ * Güvenli depo kullanılamazsa (Linux, security/powershell yok) ~/.mivelo/db.key (0600) yedek. Anahtar kaybolursa veritabanı açılamaz.
  */
 const SERVICE = 'mivelo-db';
 const KEY_FILE = path.join(DATA_DIR, 'db.key');
@@ -120,7 +120,7 @@ function encryptedDbExists(dbPath: string): boolean {
   }
 }
 
-export function getDbKey(dbPath = path.join(DATA_DIR, 'kavsak.db')): string {
+export function getDbKey(dbPath = DB_PATH): string {
   if (process.env.KAVSAK_DB_KEY && /^[0-9a-f]{64}$/i.test(process.env.KAVSAK_DB_KEY)) return process.env.KAVSAK_DB_KEY;
   const kc = IS_WINDOWS ? fromDpapi() : fromKeychain();
   if (kc !== 'missing' && kc !== 'denied' && kc !== 'none') return kc;

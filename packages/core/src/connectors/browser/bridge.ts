@@ -17,7 +17,7 @@ import type { Store } from '../../store.js';
  * Tarayıcı köprüsü: resmi mesaj API'si olmayan platformlar (LinkedIn, X, Instagram, Messenger)
  * için kalıcı profilli bir Chromium penceresi açılır; kullanıcı bir kez giriş yapar.
  * Sonrasında platformun kendi web istemcisinin kullandığı iç uçlar sayfa bağlamında
- * (çerezlerle) çağrılır ya da DOM okunur. Oturum ~/.kavsak/sessions/<hesap>/profile altında kalır.
+ * (çerezlerle) çağrılır ya da DOM okunur. Oturum ~/.mivelo/sessions/<hesap>/profile altında kalır.
  *
  * Bu yollar platformların kullanım koşullarına aykırı olabilir; test hesabı kullan.
  */
@@ -1014,7 +1014,7 @@ export class BrowserConnector extends BaseConnector {
 
   /**
    * Oturum çerezleriyle medya indir (X'in DM görselleri, Instagram CDN'i vb. arayüzden doğrudan açılamaz).
-   * Disk önbelleği: ~/.kavsak/sessions/<hesap>/media/<sha1>. CDN bağlantıları süreli olduğundan
+   * Disk önbelleği: ~/.mivelo/sessions/<hesap>/media/<sha1>. CDN bağlantıları süreli olduğundan
    * bir kez inen dosya sonra da gösterilebilir.
    */
   async fetchMedia(url: string): Promise<{ body: Buffer; type: string } | undefined> {

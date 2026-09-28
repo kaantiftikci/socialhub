@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 
 /**
  * Zamanlanmış gönderim (çekirdekte): arayüz kapalıyken de gider (masaüstü uygulaması tepside çalışırken çekirdek açık kalır).
- * ~/.kavsak/scheduled.json'da kalıcı. Çekirdek kapalıyken zamanı 15 dk'dan fazla geçenler gönderilmez ("kaçırıldı"):
+ * ~/.mivelo/scheduled.json'da kalıcı. Çekirdek kapalıyken zamanı 15 dk'dan fazla geçenler gönderilmez ("kaçırıldı"):
  * gece yarısı sürpriz mesaj gitmesin; arayüz bildirir, kullanıcı isterse yeniden zamanlar.
  */
 export interface ScheduledSend {

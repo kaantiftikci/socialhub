@@ -336,7 +336,7 @@ export class TelegramConnector extends BaseConnector {
 
   /**
    * u biçimleri: "tg:<sohbet>/<mesaj>" tam medya, "tg-thumb:<sohbet>/<mesaj>" belge/video küçük önizlemesi.
-   * Mesaj yeniden alınır (file_reference tazelenir), indirilir ve ~/.kavsak/sessions/<hesap>/media altına önbelleklenir.
+   * Mesaj yeniden alınır (file_reference tazelenir), indirilir ve ~/.mivelo/sessions/<hesap>/media altına önbelleklenir.
    * Sesli mesajlar (ogg/opus) ffmpeg varsa mp3'e çevrilir (WebKit ogg oynatamaz).
    */
   async fetchMedia(u: string): Promise<{ body: Buffer; type: string } | undefined> {

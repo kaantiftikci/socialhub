@@ -106,7 +106,7 @@ export async function setBadge(count: number): Promise<void> {
   }
 }
 
-/** Paketli uygulamada çekirdek başlatma günlüğü (~/.kavsak/desktop.log + core.log son satırları) */
+/** Paketli uygulamada çekirdek başlatma günlüğü (~/.mivelo/desktop.log + core.log son satırları) */
 export async function coreInfo(): Promise<string> {
   if (!isTauri) return '';
   try {

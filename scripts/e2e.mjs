@@ -5,7 +5,7 @@
  * Fikir: her platform için ANA hesabın ve bir TEST hesabının ikisi de Mivelo'ya bağlıdır. Araç ana hesaptan test hesabına
  * mesaj atar, test hesabının Mivelo'da onu ne zaman gördüğünü ölçer, sonra test hesabından cevap atıp geri dönüşü ölçer.
  * Bu sırada çekirdeğin günlüklerini ve hesap durumlarını canlı izler, bilinen hataları sınıflandırır; isteğe bağlı olarak
- * arayüzü (localhost:5173) Chromium'da açıp konsol/sayfa hatalarını yakalar. Sonunda ~/.kavsak/e2e/ altına rapor yazar.
+ * arayüzü (localhost:5173) Chromium'da açıp konsol/sayfa hatalarını yakalar. Sonunda ~/.mivelo/e2e/ altına rapor yazar.
  *
  *   node scripts/e2e.mjs setup            # eşleştirme: hangi hesap → hangi test hesabı, hangi sohbet
  *   node scripts/e2e.mjs run [--ui] [wa ig …]   # tur(lar)ı çalıştır (platform süzgeci isteğe bağlı), raporla
@@ -23,7 +23,9 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = process.env.KAVSAK_DATA_DIR ?? path.join(os.homedir(), '.kavsak');
+// veri klasörü: ~/.mivelo (eski adı ~/.mivelo; çekirdek ilk açılışta taşır, eski yol bağ olarak kalır)
+const DATA_ROOT = process.env.MIVELO_DATA_DIR ?? process.env.KAVSAK_DATA_DIR ?? (fs.existsSync(path.join(os.homedir(), '.mivelo')) || !fs.existsSync(path.join(os.homedir(), '.kavsak')) ? path.join(os.homedir(), '.mivelo') : path.join(os.homedir(), '.kavsak'));
+const DATA_DIR = DATA_ROOT;
 const CORE = process.env.MIVELO_CORE ?? 'http://127.0.0.1:7788';
 const UI = process.env.MIVELO_UI ?? 'http://localhost:5173';
 const CFG = path.join(DATA_DIR, 'e2e.json');

@@ -13,7 +13,7 @@ Dil: arayüz ve yorumlar Türkçe.
   (demo.mivelo.app + mivelo.app). Yerel (Mac): `npm run autodeploy -- install` (`scripts/auto-deploy.mjs`) iki LaunchAgent kurar:
   `app.mivelo.autodeploy` 2 dk'da bir origin/main'i çeker (yalnız main + temiz ağaç, ff-only; yalnız package-lock.json kirliyse geri alır),
   package*.json değiştiyse npm install + web servisini yeniden başlatır, çekirdek değiştiyse core build; macOS bildirimi, günlük
-  `~/.kavsak/autodeploy.log`. `app.mivelo.web` = `npm run dev` arka planda (KeepAlive, oturum açılınca; günlük `~/.kavsak/web.log`
+  `~/.mivelo/autodeploy.log`. `app.mivelo.web` = `npm run dev` arka planda (KeepAlive, oturum açılınca; günlük `~/.mivelo/web.log`
   5 MB'ta kırpılır) → Kaan Mivelo'yu http://localhost:5173 adresinde web olarak kullanıyor (masaüstü uygulaması şimdilik YOK;
   `--app` ile paketleme açılır). tsx watch/Vite kod değişikliğini kendisi alır. `-- status | restart | run | uninstall`.
 - Değişiklik sonrası: `npm run typecheck`, `npm run build -w packages/core`, `npm run build -w apps/web`; mümkünse demo
@@ -21,11 +21,11 @@ Dil: arayüz ve yorumlar Türkçe.
 
 ## Test ve doğrulama
 - **Canlı E2E** (`npm run e2e -- <komut>`, `scripts/e2e.mjs`; kullanıcının Mac'inde, `npm run dev` açıkken): `setup` ana ⇄ test hesap/sohbet
-  eşleştirmesi (`~/.kavsak/e2e.json`; ikisi de Mivelo'ya bağlı; tek hesapta "elle" mod), `run [--ui] [wa ig …]` gidiş (`#e2e-ID-g`) /
+  eşleştirmesi (`~/.mivelo/e2e.json`; ikisi de Mivelo'ya bağlı; tek hesapta "elle" mod), `run [--ui] [wa ig …]` gidiş (`#e2e-ID-g`) /
   dönüş (`-d`) turu: gönderim API ms, karşı tarafta görülme ve platform zamanından gecikme, kendi kaydı, kopya, Türkçe/emoji bütünlüğü;
   canlı günlük sınıflandırma (`RULES`: derleme/port/hız sınırı/doğrulama/PIN/oturum/API→HTML/medya…) + hesap durum değişimleri;
   `--ui` Chromium'da duman testi (⌘K, mesaja gidiş, Takvim, konsol/sayfa/istek hataları). `watch` yalnız izleme. Rapor
-  `~/.kavsak/e2e/rapor-*.md` → Claude'a yapıştırılır. Bekleyiciler gönderimden ÖNCE kurulur (çekirdek kendi kaydını HTTP yanıtından önce yayar).
+  `~/.mivelo/e2e/rapor-*.md` → Claude'a yapıştırılır. Bekleyiciler gönderimden ÖNCE kurulur (çekirdek kendi kaydını HTTP yanıtından önce yayar).
   Demo çekirdeği `#e2e-` etiketli mesaja 2 sn'de yankı verir (aracın kendisi demo ile sınanır).
 - `npm test -w packages/core` — sahte sayfa nesnesiyle strateji birim testleri (Slack: client.counts/conversations.list/history biçimlendirme,
   before, conversations.mark). Yeni strateji mantığı için buraya test ekle.
@@ -45,8 +45,12 @@ Dil: arayüz ve yorumlar Türkçe.
   threads/messages/before doğrulaması. Önce `npm run build -w packages/core`.
 
 ## Yapı
-- `packages/core` — Node 22, TypeScript ESM. SQLite (better-sqlite3 + FTS5) `~/.kavsak/kavsak.db`; oturumlar
-  `~/.kavsak/sessions/<hesapId>/`. REST + WS sunucu 127.0.0.1:7788 (`server.ts`). `registry.ts` hesap↔connector.
+- **Veri klasörü `~/.mivelo`** (eski adı `~/.kavsak`): `config.ts` `migrateDataDir` ilk açılışta öğe öğe taşır (aynı adlı öğe varsa eski
+  yerinde kalır, günlük/kilit dosyası ise atılır; sonraki açılışta yeniden denenir), eski yol `~/.mivelo`'ya sembolik bağ olur; veritabanı
+  `kavsak.db` → `mivelo.db` (WAL/SHM ile). Ortam: `MIVELO_DATA_DIR` (eski `KAVSAK_DATA_DIR` de geçerli). Betikler ~/.mivelo yoksa ~/.kavsak'a bakar.
+  Anahtar Zinciri hizmet adları, localStorage `kavsak.*` anahtarları ve Tauri kimliği `app.kavsak.desktop` DEĞİŞMEDİ (izinler/ayarlar kaybolmasın).
+- `packages/core` — Node 22, TypeScript ESM. SQLite (better-sqlite3 + FTS5) `~/.mivelo/mivelo.db`; oturumlar
+  `~/.mivelo/sessions/<hesapId>/`. REST + WS sunucu 127.0.0.1:7788 (`server.ts`). `registry.ts` hesap↔connector.
   Ortak model `model.ts` (Account/Chat/Message/Participant/Attachment; Chat.handle/link/participants/meta).
   Connector arayüzü `connectors/base.ts` (start(opts)/stop/sendText, isteğe bağlı fetchMedia/openDirect/logout/action/loadHistory).
 - `apps/web` — Vite + React 19, açık + gece modu (Inter, mor #6c47ff, lime #d4ff3f). Tema `theme.ts` (kenar çubuğu altındaki ay/güneş düğmesi `.theme-tg` açık⇄koyu; seçim yoksa sistem teması,
@@ -57,7 +61,7 @@ Dil: arayüz ve yorumlar Türkçe.
   (kanal bağlama, formlar), `ui.tsx` (marka ikonları: simple-icons + Font Awesome brands), `desktop.ts` (Tauri köprüsü, sesler).
 - `apps/desktop` — Tauri 2 kabuğu (`src-tauri/src/lib.rs`): tray, Dock rozeti, ⌘⇧K, çekirdeği `node` ile başlatır ve bekçiyle
   izler; paketli sürümde `scripts/bundle-core.mjs` çekirdeği kendi `node_modules`'üyle `core-bundle/`e koyar
-  (Resources/core). Günlükler: `~/.kavsak/desktop.log`, `~/.kavsak/core.log`. Release'te devtools açık.
+  (Resources/core). Günlükler: `~/.mivelo/desktop.log`, `~/.mivelo/core.log`. Release'te devtools açık.
 - Komutlar: `npm run dev` (çekirdek+Vite), `npm run demo`, `npm run desktop` (Tauri dev), `npm run app` (paketle + aç; `scripts/open-app.mjs`).
 - **Herkese açık demo** (`VITE_STATIC_DEMO=1`, `static-demo.ts`): main'e push → `.github/workflows/deploy-demo.yml` FTP ile
   `demo.mivelo.app/` klasörüne (cPanel hesabı kaantiftikci.com; demo hesapları `~/mivelo-data`, `public/api/index.php`). Aynı iş akışı
@@ -111,7 +115,7 @@ Dil: arayüz ve yorumlar Türkçe.
   `KAVSAK_BUNDLE_NODE=1` ile node.exe `core-bundle/bin/`e gömülür, kabuk önce onu dener). `lib.rs`: kısayol Ctrl+Shift+K,
   rozet yok (okunmamış sayısı tepsi ipucunda), tepside renkli simge, node `CREATE_NO_WINDOW`. Çekirdekte OS farkları
   `packages/core/src/platform.ts` (`openExternal`, `killProcessesMatching`, `IS_WINDOWS`…). DB anahtarı Windows'ta DPAPI
-  (PowerShell ProtectedData, CurrentUser) → `~/.kavsak/db.key.dpapi`; Linux'ta `db.key` dosyası. Oturum klasörlerinde `:` → `_`
+  (PowerShell ProtectedData, CurrentUser) → `~/.mivelo/db.key.dpapi`; Linux'ta `db.key` dosyası. Oturum klasörlerinde `:` → `_`
   (yalnız Windows). Mac'e özgü kalanlar: iMessage (arayüzde "Yalnız Mac"), macOS Kişiler, Anahtar Zinciri, Dock rozeti.
   Linux'ta `cargo check --target x86_64-pc-windows-msvc` çalışır (webkit gerekmez; `src-tauri/core-bundle/` klasörü var olmalı);
   gerçek Windows cihaz testi yapılmadı.
@@ -129,7 +133,7 @@ Dil: arayüz ve yorumlar Türkçe.
   `slack.ts` (localStorage `localConfig_v2` xoxc + `d` çerezi, `client.counts`), `messenger.ts` (DOM okuma; en kırılgan; iki adres:
   önce facebook.com/messages, olmazsa messenger.com — Nisan 2026'da kapandı; seçilen adres günlüğe yazılır, `verify-strategy.mjs messenger`
   hangisinin çalıştığını basar; facebook.com düzeni gerçek hesapla henüz doğrulanmadı).
-  Çerezli medya `fetchMedia` ile vekilden geçer, `~/.kavsak/sessions/<hesap>/media` önbelleği.
+  Çerezli medya `fetchMedia` ile vekilden geçer, `~/.mivelo/sessions/<hesap>/media` önbelleği.
 - **Telegram** (teleproto — bakımı süren GramJS fork'u; GramJS Temmuz 2026'da arşivlendi): api_id/api_hash Bağlan formundan (token dosyası JSON); giriş QR ile (`tg://login?token`), 2FA parolası prompt.
 - **iMessage**: `~/Library/Messages/chat.db` salt okunur + AppleScript gönderim; Tam Disk Erişimi yoksa Sistem Ayarları bölmesini açar.
 - **E-posta** (`connectors/mail.ts`): imapflow + nodemailer + mailparser; thread = sohbet. Gmail: uygulama şifresi ya da
@@ -256,7 +260,7 @@ Dil: arayüz ve yorumlar Türkçe.
 - **Odak**: "Yanıtla" satır içi yanıt kutusu (Enter gönderir; kart listeden çıkar, "X ile gönderildi"). Taslak yalnız "Taslak yaz" ile
   (SSS sözü: içerik ancak istenince Anthropic'e gider); `aiPrefs.focusAuto` (Ayarlar, varsayılan kapalı) ilk 3'ü önceden hazırlar.
   Söz onayları `mivelo.promisesDone`.
-- **Zamanlanmış gönderim çekirdekte** (`scheduled.ts`, `~/.kavsak/scheduled.json`, 15 sn'de bir; `/api/scheduled` GET/POST/DELETE;
+- **Zamanlanmış gönderim çekirdekte** (`scheduled.ts`, `~/.mivelo/scheduled.json`, 15 sn'de bir; `/api/scheduled` GET/POST/DELETE;
   olaylar `scheduled.update`/`scheduled.missed`). Çekirdek kapalıyken 15 dk'dan fazla geçen gönderilmez (kaçırıldı, 7 gün listede,
   Düzenle/Kaldır). Geçici hata 1 dk sonra yeniden (≤3), 400/404/429 kalıcı. Statik demoda tarayıcı kuyruğu (eski localStorage yolu).
 - Mesaj üstü düğmeler (`.rpos.p0/p1/p2`): tepki · takvim · takip (2 gün; `.act` açıkken). Bildirim: "Grup ve kanal bildirimleri" anahtarı.
@@ -301,7 +305,7 @@ Dil: arayüz ve yorumlar Türkçe.
 - `send-guard.ts` (server /send ve /send-file): aynı metin (≥16 kr.) 30 dk'da >5 farklı sohbete → 429. İki günlük sınır: `NEW_LIMIT`
   ilk temas (karşı taraf sohbette hiç yazmamış; server `isNew`) — LinkedIn/Telegram 50, X/Instagram/Messenger 80, WhatsApp 100,
   iMessage 150, Slack 300 farklı sohbet; `DAILY_LIMIT` tüm gönderimler için güvenlik ağı — LinkedIn 350, X 450 (X'in tavanı 500),
-  Instagram/Messenger 600, iMessage 1500, WhatsApp/Telegram 2500, Slack 5000. Gün yerel gece yarısında döner; sayaçlar `~/.kavsak/send-guard.json`'da kalıcı. E-posta/pazaryeri muaf.
+  Instagram/Messenger 600, iMessage 1500, WhatsApp/Telegram 2500, Slack 5000. Gün yerel gece yarısında döner; sayaçlar `~/.mivelo/send-guard.json`'da kalıcı. E-posta/pazaryeri muaf.
 - WhatsApp arka plan boşluk doldurma varsayılan KAPALI (`MIVELO_WA_GAPFILL=1` ile açılır): her fetchMessageHistory telefonda "… senkronize ediliyor / durduruldu"
   bildirimi çıkarıyor (canlı testte arka arkaya). Eski mesajlar yalnız kullanıcı yukarı kaydırınca (loadHistory). İçeriksiz mesaj için yeniden gönderim
   isteği mesaj başına bir kez (`resend.json`). X: `/i/chat/pin/recovery` = XChat PIN bekleniyor → uyarı, needsWindow/afterLogin ile Yeniden bağlan'da PIN.
@@ -453,6 +457,6 @@ Dil: arayüz ve yorumlar Türkçe.
 - X: Kasım 2025 sonrası sohbetler uçtan uca şifreli "XChat" (/i/chat); 1.1 DM uçlarında görünmez. Strateji sohbet listesini ve
   mesajları /i/chat DOM'undan (`dm-conversation-item-*`, `message-*`/`message-text-*`) okur, API ile birleştirir; gönderim API
   reddederse `dm-composer-textarea`. WhatsApp rehber adları `resyncAppState(['critical_unblock_low',…])` ile geliyor.
-- Yerel API belirteci: ~/.kavsak/token; Tauri `core_token` komutu → `x-kavsak-token` başlığı / ws `?token=`. Yerel origin'ler
+- Yerel API belirteci: ~/.mivelo/token; Tauri `core_token` komutu → `x-kavsak-token` başlığı / ws `?token=`. Yerel origin'ler
   (localhost/tauri) belirteçsiz; `null` ve yabancı origin belirteç ister.
 - LinkedIn: Rest.li `variables=(...)` içinde URN'deki parantezler %28/%29 olmalı (encodeURIComponent bunları kodlamaz → 400).

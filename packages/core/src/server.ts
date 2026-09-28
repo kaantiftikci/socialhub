@@ -64,7 +64,7 @@ function loadToken(): string {
  * (Jupyter, başka dev sunucu, kötücül paket) artık belirteçsiz geçemez. */
 const localOriginRe = (port: number) => new RegExp(`^(https?://(localhost|127\\.0\\.0\\.1):(5173|${port})|https?://tauri\\.localhost(:\\d+)?|tauri://localhost|asset://localhost)$`);
 let LOCAL_ORIGIN = localOriginRe(7788);
-/** ~/.kavsak/settings.json: { lan: boolean } — telefondan (aynı Wi‑Fi) erişim */
+/** ~/.mivelo/settings.json: { lan: boolean } — telefondan (aynı Wi‑Fi) erişim */
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 function readSettings(): { lan?: boolean } {
   try {
@@ -305,7 +305,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
       throw e;
     }
   };
-  // Dosya gönderme: JSON {name, mime, data(base64), caption} → ~/.kavsak/outbox/<zaman>-<ad> → connector.sendMedia
+  // Dosya gönderme: JSON {name, mime, data(base64), caption} → ~/.mivelo/outbox/<zaman>-<ad> → connector.sendMedia
   route('POST', '/api/chats/:id/send-file', async (_r, _s, p, body) => {
     const id = dec(p.id);
     const chat = store.getChat(id);

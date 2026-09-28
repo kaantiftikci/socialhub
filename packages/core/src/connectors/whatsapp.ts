@@ -240,7 +240,7 @@ export class WhatsAppConnector extends BaseConnector {
     return { sock, state };
   }
 
-  /** Öğrenilen lid↔numara eşlemeleri ve adlar oturumlar arasında kaybolmasın (~/.kavsak/sessions/<hesap>/names.json) */
+  /** Öğrenilen lid↔numara eşlemeleri ve adlar oturumlar arasında kaybolmasın (~/.mivelo/sessions/<hesap>/names.json) */
   private namesFile(): string {
     return path.join(sessionDir(this.account.id), 'names.json');
   }

@@ -15,7 +15,7 @@
  * Masaüstü paketleme yalnız `--app` ile kurulduysa.
  * Güvenlik: main dışındaki dalda ya da izlenen dosyalarda kaydedilmemiş değişiklik varken DOKUNMAZ (yalnız günlüğe yazar);
  * yerel npm'in yeniden yazdığı package-lock.json istisna.
- * Günlükler: ~/.kavsak/autodeploy.log (güncelleyici), ~/.kavsak/web.log (web servisi, 5 MB'ta kırpılır)
+ * Günlükler: ~/.mivelo/autodeploy.log (güncelleyici), ~/.mivelo/web.log (web servisi, 5 MB'ta kırpılır)
  */
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -25,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SELF = fileURLToPath(import.meta.url);
-const DATA = path.join(os.homedir(), '.kavsak');
+const DATA = path.join(os.homedir(), '.mivelo'); // eski adı ~/.mivelo (çekirdek taşır; eski yol bağ olarak kalır)
 const LOG = path.join(DATA, 'autodeploy.log');
 const WEB_LOG = path.join(DATA, 'web.log');
 const LOCK = path.join(DATA, 'autodeploy.lock');
@@ -135,7 +135,7 @@ function runOnce() {
     const changed = git('diff', '--name-only', head, remote).split('\n').filter(Boolean);
     const subjects = git('log', '--format=%s', `${head}..${remote}`).split('\n').filter(Boolean);
     log(`${subjects.length} yeni commit: ${subjects.join(' | ')}`);
-    if (!sh('git', ['pull', '--ff-only', '--quiet', 'origin', BRANCH])) return notify('Mivelo güncellenemedi', 'git pull başarısız — ~/.kavsak/autodeploy.log');
+    if (!sh('git', ['pull', '--ff-only', '--quiet', 'origin', BRANCH])) return notify('Mivelo güncellenemedi', 'git pull başarısız — ~/.mivelo/autodeploy.log');
 
     const any = (re) => changed.some((f) => re.test(f));
     const deps = lockReset || any(/(^|\/)package(-lock)?\.json$/);
@@ -151,7 +151,7 @@ function runOnce() {
     // paketli masaüstü uygulaması yalnız `install --app` ile istendiyse
     if (readConf().app && process.platform === 'darwin' && fs.existsSync(APP) && any(/^(apps\/(web|desktop)|packages\/core)\//)) {
       const wasRunning = appRunning();
-      if (!sh('npm', ['run', 'desktop:build'], 40 * 60_000)) return notify('Mivelo güncellenemedi', 'Uygulama paketlenemedi — ~/.kavsak/autodeploy.log');
+      if (!sh('npm', ['run', 'desktop:build'], 40 * 60_000)) return notify('Mivelo güncellenemedi', 'Uygulama paketlenemedi — ~/.mivelo/autodeploy.log');
       if (wasRunning) {
         spawnSync('osascript', ['-e', 'quit app "Mivelo"']);
         for (let i = 0; i < 20 && appRunning(); i++) spawnSync('sleep', ['0.5']);
@@ -170,7 +170,7 @@ function runOnce() {
 
 /**
  * Web servisi (LaunchAgent içinden çağrılır): `npm run dev` (çekirdek tsx watch + Vite) çalıştırır, çıktıyı
- * ~/.kavsak/web.log'a yazar (5 MB'ı geçince son 1 MB kalır). Süreç biterse çıkar; launchd yeniden başlatır.
+ * ~/.mivelo/web.log'a yazar (5 MB'ı geçince son 1 MB kalır). Süreç biterse çıkar; launchd yeniden başlatır.
  */
 function serve() {
   const out = fs.openSync(WEB_LOG, 'a');

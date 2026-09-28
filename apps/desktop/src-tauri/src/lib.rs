@@ -34,7 +34,7 @@ const NODE_BIN: &str = "node.exe";
 #[cfg(not(windows))]
 const NODE_BIN: &str = "node";
 
-/// Ev dizini: Unix'te HOME, Windows'ta USERPROFILE (Node'un os.homedir() ile aynı; ~/.kavsak ikisinde de aynı yer)
+/// Ev dizini: Unix'te HOME, Windows'ta USERPROFILE (Node'un os.homedir() ile aynı; ~/.mivelo ikisinde de aynı yer)
 fn home_dir() -> std::path::PathBuf {
     #[cfg(windows)]
     let home = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME"));
@@ -306,7 +306,7 @@ fn spawn_core(app: &AppHandle) -> Option<Child> {
             )),
         }
     }
-    // çekirdek çıktısı ~/.kavsak/core.log'a (Finder'dan açılınca terminal yok)
+    // çekirdek çıktısı ~/.mivelo/core.log'a (Finder'dan açılınca terminal yok)
     let logfile = std::fs::OpenOptions::new().create(true).append(true).open(kavsak_dir().join("core.log")).ok();
     let (out, err) = match logfile.and_then(|f| f.try_clone().ok().map(|c| (c, f))) {
         Some((c, f)) => (Stdio::from(c), Stdio::from(f)),
@@ -339,12 +339,12 @@ fn spawn_core(app: &AppHandle) -> Option<Child> {
 }
 
 fn kavsak_dir() -> std::path::PathBuf {
-    let d = home_dir().join(".kavsak");
+    let d = home_dir().join(".mivelo"); // eski adı .kavsak (çekirdek ilk açılışta taşır)
     let _ = std::fs::create_dir_all(&d);
     d
 }
 
-/// Finder'dan açılan uygulamanın stderr'i görünmez: ~/.kavsak/desktop.log'a da yaz.
+/// Finder'dan açılan uygulamanın stderr'i görünmez: ~/.mivelo/desktop.log'a da yaz.
 fn log(app: &AppHandle, text: &str) {
     eprintln!("[kavsak-desktop] {text}");
     use std::io::Write;
@@ -424,7 +424,7 @@ fn focus_window(app: AppHandle) {
     show_main(&app);
 }
 
-/// Çekirdeğin yerel API belirteci (~/.kavsak/token); WKWebView "null" kaynaklı olduğundan her istekte gönderilir
+/// Çekirdeğin yerel API belirteci (~/.mivelo/token); WKWebView "null" kaynaklı olduğundan her istekte gönderilir
 /// (Windows WebView2 kaynağı http://tauri.localhost: yerel sayılır, yine de gönderilir).
 #[tauri::command]
 fn core_token() -> String {
