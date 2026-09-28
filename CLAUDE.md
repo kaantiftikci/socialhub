@@ -34,7 +34,8 @@ Dil: arayüz ve yorumlar Türkçe.
   soru alan adlarını günlüğe bir kez yazar (`Trendyol soru alanları: …`); `questionOrderNo` adında order geçen alanı sipariş bağı sayar.
   Ölçüm (28.09): qna/questions/filter sipariş bağı alanı DÖNDÜRMÜYOR (answer, creationDate, customerId, id, imageUrl, productName, public,
   showUserName, status, text, userName, webUrl, productMainId). Araştırma (28.09): Trendyol'da SİPARİŞ SORUSU API'si YOK; 556 = ağ geçidinde
-  yönlendirilmemiş yol (order-questions var olmayan uç). Trendyol `ORDER_Q_PLATFORMS`'tan çıkarıldı (sekme yalnız içerik varsa). Panel verisi
+  yönlendirilmemiş yol (order-questions var olmayan uç). Yeniden ölçüm (28.09, Kaan tüm API rollerini açtıktan sonra): DEĞİŞMEDİ — order-questions hâlâ 556, questionType=ORDER yok sayılıyor
+  (aynı 4 soru), orders/questions 404, order/…/questions 401. Rol sorunu değil. Trendyol `ORDER_Q_PLATFORMS`'tan çıkarıldı (sekme yalnız içerik varsa). Panel verisi
   ancak satıcı paneli tarayıcı köprüsüyle okunabilir (yapılmadı).
 - **Trendyol sipariş API v2** (v1 `/orders` 15 Ekim 2026'da kapanıyor): `GATEWAYS[0].ordersV2` = `/integration/order/sellers/{id}/v2/orders`
   önce denenir; 404/410/556 → bir kez `noOrdersV2`, v1 (günlükte uyarı). v2 yalnız son 1 ay + 10.000 kayıt → ilk eşitleme 2×2 hafta (v1'de 6).

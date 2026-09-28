@@ -50,7 +50,7 @@ async function get(label, url) {
       const list = Array.isArray(j.content) ? j.content : Array.isArray(j) ? j : null;
       console.log(`üst alanlar: ${Object.keys(j).join(', ')}${j.totalElements != null ? ` · toplam ${j.totalElements}` : ''}`);
       // hata yanıtı: sunucunun açıklaması (kişisel veri içermez) — uç var mı / hangi parametre bekleniyor anlamak için
-      if (!r.ok) for (const k of ['message', 'title', 'exception', 'errors', 'error']) if (j[k]) console.log(`${k}: ${JSON.stringify(j[k]).slice(0, 300)}`);
+      if (!r.ok) for (const k of ['message', 'title', 'exception', 'errors', 'error']) if (j[k]) console.log(`${k}: ${JSON.stringify(j[k]).split(s).join('<satıcı>').slice(0, 300)}`);
       if (list?.length) {
         const keys = new Map();
         for (const q of list) for (const [k, v] of Object.entries(q)) keys.set(k, (keys.get(k) ?? 0) + (v !== null && v !== undefined && v !== '' ? 1 : 0));
