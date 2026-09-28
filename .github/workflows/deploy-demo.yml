@@ -41,6 +41,8 @@ jobs:
           # Sentry yalnızca demoda (secret yoksa SDK hiç başlamaz); release = commit
           VITE_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           VITE_COMMIT: ${{ github.sha }}
+      # demo API'si geri bildirimi ve e-postayı mivelo.app ile ortak PHP kütüphaneleriyle işler
+      - run: cp apps/landing/api/lib-smtp.php apps/landing/api/lib-feedback.php apps/web/dist/api/
       - name: FTP (TLS) ile yükle — demo.mivelo.app
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:

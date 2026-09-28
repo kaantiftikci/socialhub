@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { PROFILE_NAME, PROFILE_USER, STATIC_DEMO } from './profile';
+import { STATIC_DEMO } from './profile';
 import { Icon } from './ui';
 
 /**
@@ -29,7 +29,6 @@ export function FeedbackButton() {
   const [open, setOpen] = useState(false);
   const [type, setType] = useState<(typeof TYPES)[number][0]>('bug');
   const [message, setMessage] = useState('');
-  const [email, setEmail] = useState('');
   const [atts, setAtts] = useState<Att[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -76,16 +75,13 @@ export function FeedbackButton() {
       const fd = new FormData();
       fd.set('type', type);
       fd.set('message', message.trim());
-      fd.set('email', email.trim());
-      fd.set('name', PROFILE_NAME);
-      fd.set('user', PROFILE_USER);
       fd.set('page', location.href.replace(/([?&#])token=[^&#]*/g, '$1'));
-      fd.set('app', STATIC_DEMO ? 'demo' : 'local');
       fd.set('website', website.current);
       for (const a of atts) fd.append('files[]', a.file, a.file.name);
       let res: Response;
       try {
-        res = await fetch(FEEDBACK_URL, { method: 'POST', body: fd });
+        // demo: kendi API'sine (üye kimliğini sunucu oturumdan yazar); yerel uygulama: mivelo.app
+        res = await fetch(STATIC_DEMO ? '/api/index.php?action=feedback' : FEEDBACK_URL, { method: 'POST', body: fd, credentials: STATIC_DEMO ? 'same-origin' : 'omit' });
       } catch {
         throw new Error('Gönderilemedi: internet bağlantını kontrol et');
       }
@@ -161,7 +157,6 @@ export function FeedbackButton() {
                   }
                 }}
               />
-              <input className="fb-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="E-postan (isteğe bağlı, yanıt için)" maxLength={120} />
               <input className="fb-hp" tabIndex={-1} autoComplete="off" aria-hidden="true" onChange={(e) => (website.current = e.target.value)} />
               {atts.length > 0 && (
                 <div className="fb-atts">

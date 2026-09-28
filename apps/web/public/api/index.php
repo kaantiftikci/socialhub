@@ -63,6 +63,15 @@ function seed_users(array &$data): bool
     if (count($data['users']) !== $before) {
         $changed = true;
     }
+    // Kayıtla gelen üyeler ASLA demo verisi görmez: boş panel özelliğinden önce kaydedilmiş varsayılan uygulamaları sil (bir kez)
+    foreach ($data['users'] as &$u) {
+        if (!empty($u['requestedAt']) && (int) ($u['dataReset'] ?? 0) < 2) {
+            $u['accounts'] = [];
+            $u['dataReset'] = 2;
+            $changed = true;
+        }
+    }
+    unset($u);
     foreach (SEED_USERS as $i => $su) {
         $found = false;
         foreach ($data['users'] as &$u) {
@@ -105,6 +114,11 @@ function seed_users(array &$data): bool
         $changed = true;
     }
     return $changed;
+}
+
+function str_ends_with_demo(string $email): bool
+{
+    return substr($email, -5) === '@demo';
 }
 
 /** Hesap durumu: eski kayıtlarda alan yok → etkin */
@@ -467,22 +481,41 @@ if ($action === 'me' && $method === 'GET') {
     exit;
 }
 
+/**
+ * Geri bildirim (uygulamadaki sağ alt düğme): üye kimliği OTURUMDAN yazılır (istemcinin gönderdiği ad/e-posta yok sayılır).
+ * Kayıt mantığı mivelo.app ile ortak lib-feedback.php (yayında demo klasörüne de kopyalanır).
+ */
+if ($action === 'feedback' && $method === 'POST') {
+    $me = with_users(function (array &$data) {
+        return ['write' => false, 'out' => current_user($data)];
+    });
+    if ($me === null) {
+        fail(401, 'Giriş gerekli');
+    }
+    foreach (['lib-smtp.php', 'lib-feedback.php'] as $lib) {
+        $p = is_file(__DIR__ . '/' . $lib) ? __DIR__ . '/' . $lib : dirname(__DIR__, 2) . '/mivelo.app/api/' . $lib;
+        if (!is_file($p)) {
+            fail(500, 'Geri bildirim şu an alınamıyor');
+        }
+        require_once $p;
+    }
+    $id = mv_feedback_store('demo', [
+        'userId' => (string) $me['id'],
+        'user' => (string) ($me['username'] ?? ''),
+        'name' => (string) ($me['name'] ?? ''),
+        'email' => str_ends_with_demo((string) ($me['email'] ?? '')) ? '' : (string) ($me['email'] ?? ''),
+    ]);
+    echo json_encode(['ok' => true, 'id' => $id]);
+    if (function_exists('fastcgi_finish_request')) {
+        fastcgi_finish_request();
+    }
+    mv_feedback_notify($id);
+    exit;
+}
+
 if ($action === 'accounts' && $method === 'GET') {
     $user = with_users(function (array &$data) {
-        $cur = current_user($data);
-        // kayıtla gelen kullanıcı: boş panel özelliğinden önceki girişte kaydedilen varsayılan demo uygulamaları bir kez sıfırla
-        if ($cur && !empty($cur['requestedAt']) && empty($cur['accountsReset'])) {
-            foreach ($data['users'] as &$u) {
-                if (($u['id'] ?? '') === $cur['id']) {
-                    $u['accounts'] = [];
-                    $u['accountsReset'] = 1;
-                    $cur = $u;
-                }
-            }
-            unset($u);
-            return ['write' => true, 'out' => $cur];
-        }
-        return ['write' => false, 'out' => $cur];
+        return ['write' => false, 'out' => current_user($data)];
     });
     if ($user === null) {
         fail(401, 'Giriş gerekli');
@@ -496,7 +529,8 @@ if ($action === 'accounts' && $method === 'PUT') {
     $saved = with_users(function (array &$data) use ($clean) {
         $id = $_SESSION['uid'] ?? '';
         foreach ($data['users'] as &$u) {
-            if (($u['id'] ?? '') === $id) {
+            // yalnız etkin üye yazabilir (reddedilen/bekleyen hesabın eski oturumu yazamaz)
+            if (($u['id'] ?? '') === $id && is_string($id) && $id !== '' && user_status($u) === 'active') {
                 $u['accounts'] = $clean;
                 return ['write' => true, 'out' => $clean];
             }

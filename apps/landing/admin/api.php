@@ -451,7 +451,17 @@ if ($a === 'wl_delete' && $method === 'POST') {
 }
 
 if ($a === 'demo') {
-    $users = read_json('users.json', ['users' => []])['users'] ?? [];
+    // kayıtla gelen üyelerin eski demo verisi (varsayılan uygulamalar) bir kez silinir — demo API'si ile aynı kural
+    $users = with_json('users.json', ['users' => []], function (array &$d) {
+        foreach ($d['users'] as &$u) {
+            if (!empty($u['requestedAt']) && (int) ($u['dataReset'] ?? 0) < 2) {
+                $u['accounts'] = [];
+                $u['dataReset'] = 2;
+            }
+        }
+        unset($u);
+        return $d['users'];
+    });
     $rank = ['pending' => 0, 'active' => 1, 'rejected' => 2];
     $list = array_map(fn ($u) => [
         'id' => (string) ($u['id'] ?? ''),
@@ -567,6 +577,23 @@ if ($a === 'demo_mail' && $method === 'POST') {
     out(['ok' => true, 'mailed' => $res['ok'] && $res['via'] === 'smtp', 'mailError' => $res['ok'] && $res['via'] === 'smtp' ? '' : ($res['error'] ?? ''), 'log' => $res['log'] ?? []]);
 }
 
+// üyenin demo verisini (bağladığı uygulamalar) sil; hesap kalır
+if ($a === 'demo_reset' && $method === 'POST') {
+    $id = (string) ($body['id'] ?? '');
+    $n = with_json('users.json', ['users' => []], function (array &$d) use ($id) {
+        foreach ($d['users'] as &$u) {
+            if (($u['id'] ?? '') === $id) {
+                $u['accounts'] = [];
+                $u['dataReset'] = max(2, (int) ($u['dataReset'] ?? 0));
+                return 1;
+            }
+        }
+        unset($u);
+        return 0;
+    });
+    out(['reset' => $n]);
+}
+
 if ($a === 'demo_delete' && $method === 'POST') {
     $id = (string) ($body['id'] ?? '');
     if ($id === 'u-admin') {
@@ -594,6 +621,7 @@ if ($a === 'fb_list') {
         'email' => (string) ($x['email'] ?? ''), 'name' => (string) ($x['name'] ?? ''), 'user' => (string) ($x['user'] ?? ''),
         'page' => (string) ($x['page'] ?? ''), 'app' => (string) ($x['app'] ?? ''), 'ua' => (string) ($x['ua'] ?? ''),
         'files' => is_array($x['files'] ?? null) ? $x['files'] : [], 'status' => (string) ($x['status'] ?? 'new'), 'note' => (string) ($x['note'] ?? ''),
+        'verified' => !empty($x['verified']),
     ], $items)]);
 }
 

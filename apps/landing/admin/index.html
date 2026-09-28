@@ -614,6 +614,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
         if(u.status!=='active') acts+='<button class="btn sm soft" data-dm="'+esc(u.id)+'" data-to="active">Onayla</button> ';
         if(u.status==='pending') acts+='<button class="btn sm danger" data-dm="'+esc(u.id)+'" data-to="rejected">Reddet</button> ';
         if(u.status==='active' && u.email) acts+='<button class="btn sm" data-dmail="'+esc(u.id)+'" title="Onay e-postasını yeniden gönder">E-posta</button> ';
+        if(u.apps.length) acts+='<button class="btn sm" data-dreset="'+esc(u.id)+'" data-name="'+esc(u.username)+'" title="Bağladığı uygulamaları ve demo verisini sil">Verileri sil</button> ';
         acts+='<button class="icon-btn" data-ddel="'+esc(u.id)+'" data-name="'+esc(u.username)+'" title="Sil" aria-label="Sil">'+I.trash+'</button>';
       }
       var mail=u.mailed===false?' <span class="chip st-spam" title="'+esc(u.mailError||'Sunucu e-postayı gönderemedi')+'">e-posta gitmedi</span>':u.mailed===true?' <span class="chip st-joined">e-posta gitti</span>':'';
@@ -621,7 +622,11 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
         '<td style="white-space:nowrap"><span class="chip '+st[1]+'"><i></i>'+st[0]+'</span>'+mail+'</td><td class="r num">'+fmt(u.logins)+'</td><td style="white-space:nowrap">'+ago(u.lastLogin)+'</td><td>'+(u.apps.length?u.apps.map(function(a){ return '<span class="chip" style="margin:2px 4px 2px 0">'+esc(a)+'</span>'; }).join(''):'<span class="muted">—</span>')+'</td><td style="white-space:nowrap;text-align:right">'+acts+'</td></tr>'; }).join('')+'</tbody></table>':'<div class="empty">Demo henüz hiç açılmamış.</div>';
   }).catch(function(e){ toast(e.message,true); }); }
   document.addEventListener('click',function(e){
-    var b=e.target.closest('[data-dm],[data-dmail],[data-ddel]'); if(!b) return;
+    var b=e.target.closest('[data-dm],[data-dmail],[data-ddel],[data-dreset]'); if(!b) return;
+    if(b.dataset.dreset){
+      if(b.dataset.armed!=='1'){ b.dataset.armed='1'; toast('Verileri silmek için tekrar tıkla ('+b.dataset.name+')'); setTimeout(function(){ b.dataset.armed=''; },3000); return; }
+      api('demo_reset',{id:b.dataset.dreset}).then(function(){ toast('Veriler silindi'); loadDemo(); }).catch(function(err){ toast(err.message,true); }); return;
+    }
     var done=function(d){ if(d&&d.mailed===false) toast('Kaydedildi ama e-posta gönderilemedi: '+(d.mailError||'')+' — Ayarlar → E-posta gönderimi',true); else toast(d&&d.mailed?'Onaylandı, e-posta gönderildi':'Kaydedildi'); loadDemo(); };
     if(b.dataset.dm){ b.disabled=true; api('demo_update',{id:b.dataset.dm,status:b.dataset.to}).then(done).catch(function(err){ toast(err.message,true); b.disabled=false; }); }
     else if(b.dataset.dmail){ b.disabled=true; api('demo_mail',{id:b.dataset.dmail}).then(done).catch(function(err){ toast(err.message,true); b.disabled=false; }); }

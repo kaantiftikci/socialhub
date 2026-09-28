@@ -1,3 +1,4 @@
+import { claimUserLocalData, wipeUserLocalData } from './demo-isolation';
 import { useEffect, useState } from 'react';
 import { authLoadAccounts, authLogin, authLogout, authMe, authRegister, type SessionUser } from './auth-api';
 import { setLeaveDemoPanel } from './demo-session';
@@ -17,6 +18,7 @@ export function DemoGate() {
       .then(async (u) => {
         if (cancelled) return;
         if (u) {
+          claimUserLocalData(u.id);
           setProfileName(u.name);
           setProfileUser(u.username);
           // kayıtlı kanallar okunamazsa oturum geçerli kalır (giriş ekranına atılmaz), demo varsayılan kanallarla açılır
@@ -39,6 +41,7 @@ export function DemoGate() {
     setLeaveDemoPanel(() => {
       void authLogout().catch(() => undefined);
       clearDemoAccounts();
+      wipeUserLocalData();
       setProfileName('');
       setUser(null);
     });
@@ -46,6 +49,7 @@ export function DemoGate() {
   }, []);
 
   async function enter(u: SessionUser) {
+    claimUserLocalData(u.id);
     setProfileName(u.name);
     setProfileUser(u.username);
     loadDemoAccounts(await authLoadAccounts().catch(() => []), { fresh: u.fresh });

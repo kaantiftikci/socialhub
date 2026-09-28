@@ -77,6 +77,8 @@ function seed(): void {
   chats = [];
   messages = [];
   seedK = 0;
+  // yeni üye: ASLA örnek veri yok (bağladığı uygulamalar boş kanal olarak görünür)
+  if (freshUser) return;
   for (const acc of accounts) seedAccount(acc, now);
 }
 
@@ -358,7 +360,7 @@ export const staticApi = {
     }
     emit({ type: 'account.status', account: withDemoAttention(account) });
     // yalnız yeni hesabın sohbetleri eklenir: seed() tüm demoyu sıfırlıyordu (okunanlar yeniden okunmamış, gönderilenler/etiketler kayıp)
-    seedAccount(account);
+    if (!freshUser) seedAccount(account);
     for (const c of chats.filter((x) => x.accountId === account.id)) emit({ type: 'chat.upsert', chat: c });
     return account;
   },
