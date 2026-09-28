@@ -1,3 +1,4 @@
+import './boot-env.js';
 import { Store } from './store.js';
 import { Registry } from './registry.js';
 import { createServer } from './server.js';

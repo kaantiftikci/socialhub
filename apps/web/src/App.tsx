@@ -419,8 +419,41 @@ export default function App() {
             return { ...prev, [ev.chatId]: { name: ev.name, until: Date.now() + 6000 } };
           });
           break;
-        case 'messages.read':
+        case 'messages.read': {
           if (ev.chatId === selectedRef.current) setMessages((prev) => prev.map((m) => (m.fromMe && m.ts <= ev.before && m.status !== 'read' ? { ...m, status: 'read' } : m)));
+          // listedeki son mesaj tiki (çekirdek de chat.upsert gönderir; eski olay sırası için yerelde de işlenir)
+          const c = chatsRef.current.get(ev.chatId);
+          if (c?.lastFromMe && c.lastMessageAt <= ev.before && c.lastStatus !== 'read') queueChat({ ...c, lastStatus: 'read' });
+          break;
+        }
+        case 'messages.refetch':
+          // geçmiş eşitlemesinde çok sayıda mesaj yazıldı (tek tek gönderilmedi): açık sohbetse depodan yeniden oku
+          if (selectedRef.current && ev.chatIds.includes(selectedRef.current)) {
+            const sel = selectedRef.current;
+            void api
+              .messages(sel)
+              .then((m) => {
+                if (selectedRef.current !== sel) return;
+                setMessages((prev) => {
+                  const ids = new Set(m.map((x) => x.id));
+                  return [...prev.filter((x) => x.chatId === sel && !ids.has(x.id)), ...m].sort((x, y) => x.ts - y.ts);
+                });
+              })
+              .catch(() => undefined);
+          }
+          break;
+        case 'account.removed':
+          setAccounts((prev) => prev.filter((a) => a.id !== ev.accountId));
+          setChats((prev) => {
+            if (![...prev.values()].some((c) => c.accountId === ev.accountId)) return prev;
+            return new Map([...prev].filter(([, c]) => c.accountId !== ev.accountId));
+          });
+          setQr((q) => {
+            if (!(ev.accountId in q)) return q;
+            const next = { ...q };
+            delete next[ev.accountId];
+            return next;
+          });
           break;
         case 'events.update':
           setCalTick((x) => x + 1);
@@ -458,19 +491,21 @@ export default function App() {
         case 'message.delete':
           if (ev.chatId === selectedRef.current) setMessages((prev) => prev.filter((m) => m.id !== ev.messageId));
           break;
-        case 'message.upsert':
-          queueChat(ev.chat);
+        case 'message.upsert': {
+          // demette sohbet aynı çerçevede gelir; sohbet bu arada silindiyse (birleştirme) listedeki kopyası kullanılır
+          const chat = ev.chat ?? chatsRef.current.get(ev.message.chatId);
+          if (ev.chat) queueChat(ev.chat);
           // yalnızca canlı gelen (eşitleme/geçmiş değil) ve yeni mesajlar bildirim çalsın
-          if (ev.live && !ev.message.fromMe && !ev.chat.muted && !ev.chat.hidden && !ev.chat.archived && Date.now() - bootTs > 60_000 && Date.now() - ev.message.ts < 120_000) {
+          if (chat && ev.live && !ev.message.fromMe && !chat.muted && !chat.hidden && !chat.archived && Date.now() - bootTs > 60_000 && Date.now() - ev.message.ts < 120_000) {
             void windowFocused().then((focused) => {
               // uygulamanın bildirimi kapalıysa ne kart ne ses
-              if ((!focused || ev.message.chatId !== visibleChatRef.current) && platformNotifyOn(ev.chat.platform) && (ev.chat.kind === 'direct' || groupsNotify())) {
+              if ((!focused || ev.message.chatId !== visibleChatRef.current) && platformNotifyOn(chat.platform) && (chat.kind === 'direct' || groupsNotify())) {
                 const body = (ev.message.text || ev.message.attachments?.[0]?.name || 'Yeni mesaj').slice(0, 140);
                 // pencere öndeyse sistem bildirimi yerine uygulama içi kart (hangi platformdan geldiği belli olsun)
-                if (focused) pushInToast(ev.chat, body);
-                else if (bannersEnabled()) desktopNotify(ev.chat.name, stripLeadIcon(body));
+                if (focused) pushInToast(chat, body);
+                else if (bannersEnabled()) desktopNotify(chat.name, stripLeadIcon(body));
                 // genel anahtar + uygulama zil sesi + ses düzeyleri
-                playNotifySound(ev.chat.platform);
+                playNotifySound(chat.platform);
               }
             });
           }
@@ -488,6 +523,7 @@ export default function App() {
             if (!ev.message.fromMe && ev.message.chatId === visibleChatRef.current) void windowFocused().then((f) => f && api.markRead(ev.message.chatId)).catch(() => undefined);
           }
           break;
+        }
       }
     };
     const stop = connectEvents(onEvent, (open) => {
@@ -1366,28 +1402,40 @@ export default function App() {
                   if (olderBusy) return;
                   setOlderBusy(true);
                   try {
+                    // platform yanıt vermediyse / bağlı değilse "daha eski yok" denmez: kullanıcı yeniden deneyebilsin
+                    const why = (r: { timedOut?: boolean; unavailable?: string } | undefined) =>
+                      r?.unavailable ?? (r?.timedOut ? `${PLATFORMS[current.platform]?.name ?? 'Platform'} zamanında yanıt vermedi${current.platform === 'whatsapp' ? ' — telefonda WhatsApp açıkken tekrar dene' : '; biraz sonra tekrar dene'}` : undefined);
                     if (!oldest) {
                       // hiç mesaj yok: platformdan geçmişi iste ve depodan yeniden oku
-                      await api.loadHistory(current.id, undefined, 100);
+                      const r = await api.loadHistory(current.id, undefined, 100);
                       const m = await api.messages(current.id);
                       if (selectedRef.current !== current.id) return; // bu arada başka sohbete geçildi: eski sohbetin mesajları yeni seçime yazılmasın
                       if (m.length === 0) {
-                        setNoMoreOlder(current.id);
-                        notify('Platform bu sohbet için mesaj vermedi');
+                        const w = why(r);
+                        if (w) notify(w, true);
+                        else {
+                          setNoMoreOlder(current.id);
+                          notify('Platform bu sohbet için mesaj vermedi');
+                        }
                       }
                       setMessages(m);
                       return;
                     }
                     // önce depodaki daha eski mesajlar; depoda yoksa platformdan iste (WhatsApp/Telegram/Instagram/…)
                     let more = await api.messages(current.id, 300, oldest.ts);
+                    let r: { timedOut?: boolean; unavailable?: string } | undefined;
                     if (more.length === 0) {
-                      await api.loadHistory(current.id, oldest.ts, 100);
+                      r = await api.loadHistory(current.id, oldest.ts, 100);
                       more = await api.messages(current.id, 300, oldest.ts);
                     }
                     if (selectedRef.current !== current.id) return; // sohbet değişti: eski mesajlar yeni sohbete karışmasın
                     if (more.length === 0) {
-                      setNoMoreOlder(current.id);
-                      notify('Daha eski mesaj yok');
+                      const w = why(r);
+                      if (w) notify(w, true);
+                      else {
+                        setNoMoreOlder(current.id);
+                        notify('Daha eski mesaj yok');
+                      }
                     }
                     setMessages((prev) => {
                       const ids = new Set(prev.map((m) => m.id));

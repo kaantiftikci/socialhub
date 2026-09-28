@@ -28,14 +28,18 @@ export async function useAtomicAuthState(folder: string): Promise<{ state: Authe
     return next;
   };
 
+  // Süreç çökmesine karşı güvence geçici dosya + rename'den gelir (yarım dosya asla hedef adla kalmaz). fsync yalnız kimlik
+  // dosyasında (creds.json): geçmiş eşitlemesinde Baileys binlerce anahtar (tctoken, lid-mapping, oturum) yazıyor ve her
+  // birinde fsync Baileys'in mesaj kilidi altında saniyeler sürüyordu → canlı mesajlar geçmiş paketlerinin arkasında bekliyordu.
+  // (macOS'ta fsync zaten diske kalıcılık garantisi vermez; F_FULLFSYNC gerekir.)
   const writeData = (data: unknown, file: string) =>
     serial(file, async () => {
       const target = path.join(folder, fixFileName(file));
-      const tmp = `${target}.${process.pid}.${Date.now().toString(36)}.tmp`;
+      const tmp = `${target}.${process.pid}.${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}.tmp`;
       const fh = await fs.promises.open(tmp, 'w', 0o600);
       try {
         await fh.writeFile(JSON.stringify(data, BufferJSON.replacer));
-        await fh.sync();
+        if (file === 'creds.json') await fh.sync();
       } finally {
         await fh.close();
       }

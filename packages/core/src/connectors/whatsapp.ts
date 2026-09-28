@@ -173,6 +173,80 @@ export class WhatsAppConnector extends BaseConnector {
     return path.join(sessionDir(this.account.id), 'auth');
   }
 
+  /** Son geçmiş (INITIAL/RECENT/FULL) paketinin geldiği an: uygulama durumu tam eşitlemesi akış durunca yapılır */
+  private lastHistoryAt = 0;
+  /** Geçmiş paketlerinin mesajları: olay işleyicisinde değil, arka planda dilim dilim yazılır (queueHistory/pumpHistory) */
+  private histQueue: Array<{ msgs: WAMessage[]; onDone?: () => void }> = [];
+  private histPumping = false;
+  private histErrLogged = false;
+
+  /** Hesap satırındaki geçmiş aktarımı notu (" · …"); undefined = kaldır */
+  private setHistoryDetail(note: string | undefined): void {
+    if (this.account.status !== 'connected') return;
+    const base = (this.account.detail ?? '').replace(/ · (geçmiş|sohbetler|eski mesajlar).*$/, '');
+    const next = note ? `${base} · ${note}` : base || undefined;
+    if (next === this.account.detail) return;
+    this.account.detail = next;
+    this.store.upsertAccount(this.account);
+    bus.emit({ type: 'account.status', account: { ...this.account } });
+  }
+
+  private queueHistory(msgs: WAMessage[], onDone?: () => void): void {
+    if (!msgs.length && !this.histQueue.length) {
+      onDone?.();
+      return;
+    }
+    this.histQueue.push({ msgs: [...msgs], onDone });
+    if (!this.histPumping) {
+      this.histPumping = true;
+      setImmediate(() => this.pumpHistory());
+    }
+  }
+
+  /**
+   * Kuyruktaki geçmiş mesajlarını ≈25 ms'lik tek işlemli dilimlerle yaz, aralarda olay döngüsünü bırak. Bağlantı kopsa/yeniden
+   * kurulsa da sürer (telefon bu paketleri bir daha göndermez); hesap silindiyse kuyruk atılır.
+   */
+  private pumpHistory(): void {
+    if (!this.store.getAccount(this.account.id)) {
+      this.histQueue = [];
+      this.histPumping = false;
+      return;
+    }
+    const t0 = Date.now();
+    const done: Array<() => void> = [];
+    try {
+      this.store.transaction(() => {
+        while (this.histQueue.length && Date.now() - t0 < 25) {
+          const job = this.histQueue[0];
+          for (const m of job.msgs.splice(0, 150)) {
+            try {
+              this.ingest(m, false);
+            } catch (e) {
+              if (!this.histErrLogged) {
+                this.histErrLogged = true;
+                bus.log('warn', `WhatsApp geçmiş mesajı yazılamadı (tek sefer günlük): ${(e as Error).message}`);
+              }
+            }
+          }
+          if (!job.msgs.length) {
+            this.histQueue.shift();
+            if (job.onDone) done.push(job.onDone);
+          }
+        }
+      });
+    } catch (e) {
+      bus.log('warn', `WhatsApp geçmiş dilimi yazılamadı: ${(e as Error).message}`);
+    }
+    for (const f of done) f();
+    if (this.histQueue.length) {
+      setImmediate(() => this.pumpHistory());
+      return;
+    }
+    this.histPumping = false;
+    this.scheduleRefresh();
+  }
+
   /** Baileys soketi (start ve logout aynı kimlik/tarayıcı ayarlarıyla açar; history=false: telefondan geçmiş istenmez) */
   private versionRetried = false;
   /** Hesap "yeni sohbet başlatma" kilidinde mi (WhatsApp kısıtı; bu sürede yeni kişilere mesaj riskli) */
@@ -195,17 +269,35 @@ export class WhatsAppConnector extends BaseConnector {
     return path.join(sessionDir(this.account.id), 'waver.json');
   }
 
-  /** Son başarılı bağlantının sürümü; yenisi web.whatsapp.com → Baileys deposu sırasıyla, saklanandan eskisi asla */
+  /**
+   * Son başarılı bağlantının sürümü; yenisi web.whatsapp.com → Baileys deposu sırasıyla, saklanandan eskisi asla.
+   * Hız: kayıtlı sürüm son 3 günde başarıyla bağlandıysa ağ BEKLENMEZ (eskiden her yeniden bağlanmada 8-16 sn sürüm sorgusu
+   * bekleniyordu → uyku/ağ kopması sonrası mesajlar geç geliyordu); güncel sürüm arka planda sorulup bir sonraki bağlantıya
+   * yazılır. Sunucu sürümü reddederse (405) dosya silinir ve bu yol ağdan günceli alır.
+   */
   private async pickVersion(): Promise<number[] | undefined> {
     let saved: number[] | undefined;
+    let savedAt = 0;
     try {
       saved = JSON.parse(fs.readFileSync(this.versionFile(), 'utf8')) as number[];
+      savedAt = fs.statSync(this.versionFile()).mtimeMs;
     } catch {
       /* yok */
     }
     const timeout = <T>(p: Promise<T>) => Promise.race([p, new Promise<undefined>((r) => setTimeout(() => r(undefined), 8000).unref?.())]);
-    const web = await timeout(fetchLatestWaWebVersion({}).catch(() => undefined));
-    const repo = web?.isLatest ? undefined : await timeout(fetchLatestBaileysVersion().catch(() => undefined));
+    const latest = async () => {
+      const web = await timeout(fetchLatestWaWebVersion({}).catch(() => undefined));
+      const repo = web?.isLatest ? undefined : await timeout(fetchLatestBaileysVersion().catch(() => undefined));
+      return { web, repo };
+    };
+    if (saved && Date.now() - savedAt < 3 * 86_400_000) {
+      void latest().then(({ web, repo }) => {
+        const next = newerVersion(newerVersion(saved, web?.isLatest ? web.version : undefined), repo?.isLatest ? repo.version : undefined);
+        if (next && next !== saved) fs.promises.writeFile(this.versionFile(), JSON.stringify(next)).catch(() => undefined);
+      });
+      return saved;
+    }
+    const { web, repo } = await latest();
     return newerVersion(newerVersion(saved, web?.isLatest ? web.version : undefined), repo?.isLatest ? repo.version : undefined) ?? web?.version ?? repo?.version;
   }
 
@@ -423,7 +515,24 @@ export class WhatsAppConnector extends BaseConnector {
             bus.log('warn', `WhatsApp uygulama durumu eşitlenemedi: ${(e as Error).message}`);
           }
         };
-        if (this.needsFullResync(pairKey)) this.later(sock, 8_000, () => void resync(1));
+        if (this.needsFullResync(pairKey)) {
+          // Baileys ilk eşleşmede uygulama durumunu (rehber dahil) zaten baştan eşitliyor; ikinci tam anlık görüntü aynı anda
+          // inen geçmiş paketleriyle yarışıp ilk eşitlemeyi yavaşlatıyordu. Geçmiş akışı 20 sn durana dek (en çok 10 dk)
+          // beklenir; rehber adları bu arada geldiyse hiç yapılmaz.
+          const tryResync = (waited: number) => {
+            if (this.savedNames.size > 0) {
+              this.writeResyncFlag(pairKey);
+              bus.log('info', `WhatsApp: rehber adları ilk eşitlemeyle geldi (${this.savedNames.size}); ek uygulama durumu eşitlemesi gerekmedi`);
+              return;
+            }
+            if (Date.now() - this.lastHistoryAt < 20_000 && waited < 600_000) {
+              this.later(sock, 15_000, () => tryResync(waited + 15_000));
+              return;
+            }
+            void resync(1);
+          };
+          this.later(sock, 30_000, () => tryResync(30_000));
+        }
         this.later(sock, 90_000, () => {
           // geçmiş yalnızca ilk eşleşmede gelir; depoda sohbet varsa uyarı gereksiz
           if (!this.historySeen && !this.stopping && this.sock === sock && this.store.listChatsOf(this.account.id).length === 0)
@@ -494,19 +603,18 @@ export class WhatsAppConnector extends BaseConnector {
       }
     });
 
-    sock.ev.on('messaging-history.set', ({ chats, contacts, messages, isLatest, progress, syncType, lidPnMappings }) => {
-      // Baileys 7: geçmiş paketi LID↔numara eşlemelerini de taşır
-      for (const mp of lidPnMappings ?? []) if (mp.lid && mp.pn) this.link(jidNormalizedUser(mp.lid), jidNormalizedUser(mp.pn));
+    sock.ev.on('messaging-history.set', ({ chats, contacts, messages, progress, syncType, lidPnMappings }) => {
       this.historySeen = true;
-      // Kullanıcı görsün: geçmiş alınırken uygulama kapatılırsa kalan paketler bir daha gelmez
-      if (syncType !== WAProto.HistorySync.HistorySyncType.ON_DEMAND && typeof progress === 'number' && this.account.status === 'connected') {
-        this.account.detail = progress >= 100 || isLatest ? this.account.detail?.replace(/ · geçmiş.*$/, '') : `${(this.account.detail ?? '').replace(/ · geçmiş.*$/, '')} · geçmiş alınıyor %${progress} — uygulamayı kapatma`;
-        this.store.upsertAccount(this.account);
-        bus.emit({ type: 'account.status', account: { ...this.account } });
-      }
       // ON_DEMAND (6): loadHistory ile telefondan istenen eski dilim; ilk eşleşmedeki INITIAL_BOOTSTRAP/RECENT/FULL paketleriyle aynı yoldan işlenir
       const onDemand = syncType === WAProto.HistorySync.HistorySyncType.ON_DEMAND;
-      bus.log('info', `WhatsApp geçmiş paketi: ${chats?.length ?? 0} sohbet, ${messages?.length ?? 0} mesaj (tür ${onDemand ? 'istek üzerine' : String(syncType)}, %${progress ?? '?'}${isLatest ? ', son' : ''})`);
+      if (!onDemand) this.lastHistoryAt = Date.now();
+      // Kullanıcı görsün: geçmiş alınırken uygulama kapatılırsa kalan paketler bir daha gelmez. FULL = eski mesajlar (arka planda;
+      // sohbetler ve son mesajlar INITIAL_BOOTSTRAP/RECENT ile zaten gelmiş olur)
+      if (!onDemand && typeof progress === 'number' && this.account.status === 'connected') {
+        const full = syncType === WAProto.HistorySync.HistorySyncType.FULL;
+        this.setHistoryDetail(progress >= 100 ? undefined : `${full ? 'eski mesajlar arka planda alınıyor' : 'sohbetler alınıyor'} %${progress} — telefonda WhatsApp açık kalsın`);
+      }
+      bus.log('info', `WhatsApp geçmiş paketi: ${chats?.length ?? 0} sohbet, ${messages?.length ?? 0} mesaj (tür ${onDemand ? 'istek üzerine' : String(syncType)}, %${progress ?? '?'}; kuyrukta ${this.histQueue.reduce((n, j) => n + j.msgs.length, 0)} mesaj)`);
       let named = 0;
       for (const c of contacts ?? []) {
         if (c.name ?? c.notify ?? c.verifiedName) named++;
@@ -516,6 +624,8 @@ export class WhatsAppConnector extends BaseConnector {
       // Binlerce satır tek işlemde: her satırda ayrı commit/fsync olmasın (olay döngüsü dakikalarca kilitleniyordu)
       const t0 = Date.now();
       this.store.transaction(() => {
+        // Baileys 7: geçmiş paketi LID↔numara eşlemelerini de taşır (her yeni eşleme gönderen/sohbet birleştirmesi yazar → işlemde)
+        for (const mp of lidPnMappings ?? []) if (mp.lid && mp.pn) this.link(jidNormalizedUser(mp.lid), jidNormalizedUser(mp.pn));
         for (const c of chats ?? []) {
           if (!c.id || !isChatJid(c.id)) continue;
           const cc = c as typeof c & { lidJid?: string | null; pnJid?: string | null };
@@ -550,20 +660,21 @@ export class WhatsAppConnector extends BaseConnector {
             meta: typeof c.archived === 'boolean' && c.archived !== !!existing?.meta?.archived ? { ...(existing?.meta ?? {}), archived: c.archived } : undefined,
           });
         }
-        for (const m of messages ?? []) this.ingest(m, false);
       });
-      if (Date.now() - t0 > 1500) bus.log('info', `WhatsApp geçmiş paketi işlendi (${Date.now() - t0} ms)`);
-      // loadHistory bekleyicileri: istek üzerine paket ya da bu sohbete mesaj getiren herhangi bir paket
-      if (this.historyWaiters.size) {
-        const touched = new Set((messages ?? []).map((m) => (m.key.remoteJid ? this.canon(m.key.remoteJid) : '')));
+      if (Date.now() - t0 > 1500) bus.log('info', `WhatsApp geçmiş paketi (sohbetler) işlendi (${Date.now() - t0} ms)`);
+      // Mesajlar arka plan kuyruğunda ≈25 ms'lik dilimlerle yazılır: büyük paket (on binlerce mesaj) olay döngüsünü kilitleyip
+      // canlı mesajları, arayüz isteklerini ve Baileys'in bağlantı yoklamasını (keep-alive → kopma) bekletmesin.
+      // loadHistory bekleyicileri paket yazıldıktan SONRA çözülür (istek üzerine paket ya da bu sohbete mesaj getiren paket).
+      const touched = new Set((messages ?? []).map((m) => (m.key.remoteJid ? this.canon(m.key.remoteJid) : '')));
+      this.queueHistory(messages ?? [], () => {
         for (const [jid, resolvers] of [...this.historyWaiters]) {
           if (!onDemand && !touched.has(jid)) continue;
           this.historyWaiters.delete(jid);
           resolvers.forEach((r) => r());
         }
-      }
+      });
       this.scheduleRefresh();
-      if (!onDemand && (isLatest || (progress ?? 0) >= 100)) this.scheduleGapFill(20_000);
+      if (!onDemand && (progress ?? 0) >= 100) this.scheduleGapFill(20_000);
       this.enqueueAvatars((chats ?? []).map((c) => c.id).filter((id): id is string => !!id && isChatJid(id)).map((id) => this.canon(id)).slice(0, 60), true);
     });
 
@@ -571,9 +682,13 @@ export class WhatsAppConnector extends BaseConnector {
     // olabilir, karşılığı phoneNumber / lid alanında. Günlüğe tek özet satırı yazılır.
     // Baileys 7: geçmiş eşitlemesi bitti / durdu (telefon 2 dk yeni parça göndermedi)
     sock.ev.on('messaging-history.status', ({ syncType, status, explicit }) => {
-      if (status === 'paused')
+      if (status === 'paused') {
         bus.log('warn', `WhatsApp: telefon geçmiş göndermeyi durdurdu (tür ${syncType}); telefonda WhatsApp'ı açık tutup bekle — eksik kalırsa cihazı kaldırıp yeniden eşleştir`);
-      else bus.log('info', `WhatsApp: geçmiş eşitlemesi tamamlandı (tür ${syncType}${explicit ? '' : ', zaman aşımıyla'})`);
+        this.setHistoryDetail('geçmiş aktarımı duraksadı — telefonda WhatsApp\'ı açık tut, kaldığı yerden sürer');
+      } else {
+        bus.log('info', `WhatsApp: geçmiş eşitlemesi tamamlandı (tür ${syncType}${explicit ? '' : ', zaman aşımıyla'})`);
+        if (syncType !== WAProto.HistorySync.HistorySyncType.FULL) this.setHistoryDetail(undefined);
+      }
       if (syncType !== WAProto.HistorySync.HistorySyncType.ON_DEMAND) this.scheduleGapFill(20_000);
     });
     sock.ev.on('contacts.upsert', (cs) => {
@@ -826,13 +941,15 @@ export class WhatsAppConnector extends BaseConnector {
    * Yanıt 'messaging-history.set' (syncType ON_DEMAND) olarak gelir; yukarıdaki işleyici mesajları live:false ile yazar.
    * Telefon çevrimdışıysa yanıt gelmez: en çok 25 sn beklenir, sonra sessizce dönülür.
    */
-  async loadHistory(remoteChatId: string, limit: number, before?: number): Promise<void> {
+  async loadHistory(remoteChatId: string, limit: number, before?: number): Promise<{ unavailable?: string; timedOut?: boolean } | void> {
     const sock = this.sock;
-    if (!sock || !this.opened || !sock.ws.isOpen) return;
+    if (!sock || !this.opened || !sock.ws.isOpen) return { unavailable: 'WhatsApp şu an bağlı değil; bağlanınca eski mesajlar istenebilir' };
     const cid = chatIdOf(this.account.id, remoteChatId);
     const oldest = this.oldestMessage(cid, before);
     if (!oldest) return;
-    await this.requestHistory(remoteChatId, limit, oldest);
+    const arrived = await this.requestHistory(remoteChatId, limit, oldest);
+    // telefon 45 sn içinde yanıt vermedi (çevrimdışı / WhatsApp arka planda / ilk eşitleme sürüyor): "daha eski yok" DEĞİL
+    if (!arrived) return { timedOut: true };
   }
 
   /** Verilen mesajdan öncesini telefondan iste; paket geldiyse true (25 sn içinde yanıt yoksa false) */
@@ -972,16 +1089,8 @@ export class WhatsAppConnector extends BaseConnector {
 
   /** Depodaki en eski gerçek (sunucu kimlikli) mesaj; `before` verildiyse ondan yeni olmayanlar arasında */
   private oldestMessage(cid: string, before?: number): Message | undefined {
-    let cursor = before ? before + 1 : undefined;
-    let page: Message[] = [];
-    for (let i = 0; i < 40; i++) {
-      const next = this.store.listMessages(cid, 500, cursor);
-      if (!next.length) break;
-      page = next;
-      if (next.length < 500) break; // kısa sayfa = en eski dilim
-      cursor = next[0].ts;
-    }
-    return page.find((m) => !m.remoteId.startsWith('local-'));
+    // tek dizinli sorgu (eskiden 500'lük sayfalarla 40 tura dek tüm sohbet taranıyordu)
+    return this.store.oldestRealMessage(cid, before ? before + 1 : undefined);
   }
 
   async stop(): Promise<void> {
@@ -1695,10 +1804,39 @@ export class WhatsAppConnector extends BaseConnector {
   }
 
   // ---------- medya ----------
+  private mediaDirMade = false;
   private mediaIndexDir(): string {
     const d = path.join(sessionDir(this.account.id), 'media-index');
-    fs.mkdirSync(d, { recursive: true });
+    if (!this.mediaDirMade) {
+      fs.mkdirSync(d, { recursive: true });
+      this.mediaDirMade = true;
+    }
     return d;
+  }
+  /** Yazılmayı bekleyen medya kayıtları (dosya → JSON): geçmiş eşitlemesinde binlerce eşzamanlı dosya yazımı olay döngüsünü kilitliyordu */
+  private mediaPending = new Map<string, string>();
+  private mediaWriting = false;
+  private async flushMediaIndex(): Promise<void> {
+    if (this.mediaWriting) return;
+    this.mediaWriting = true;
+    try {
+      while (this.mediaPending.size) {
+        const batch = [...this.mediaPending.entries()].slice(0, 16);
+        await Promise.all(
+          batch.map(async ([file, json]) => {
+            try {
+              await fs.promises.writeFile(file, json);
+            } catch {
+              /* diske yazılamadı */
+            } finally {
+              if (this.mediaPending.get(file) === json) this.mediaPending.delete(file);
+            }
+          }),
+        );
+      }
+    } finally {
+      this.mediaWriting = false;
+    }
   }
 
   private mediaKey(jid: string, id: string): string {
@@ -1708,9 +1846,10 @@ export class WhatsAppConnector extends BaseConnector {
   /** Medya taşıyan mesajın protokol nesnesini sakla; sonra istek üzerine indirmek için gerekir */
   private rememberMedia(m: WAMessage, jid: string): void {
     try {
-      fs.writeFileSync(path.join(this.mediaIndexDir(), this.mediaKey(jid, m.key.id!) + '.json'), JSON.stringify(m, BufferJSON.replacer));
+      this.mediaPending.set(path.join(this.mediaIndexDir(), this.mediaKey(jid, m.key.id!) + '.json'), JSON.stringify(m, BufferJSON.replacer));
+      void this.flushMediaIndex();
     } catch {
-      /* diske yazılamadı */
+      /* kodlanamadı */
     }
   }
 
@@ -1737,8 +1876,9 @@ export class WhatsAppConnector extends BaseConnector {
     if (!m) throw new Error('geçersiz WhatsApp medya adresi');
     const [, kind, jid, id] = m;
     const idx = path.join(this.mediaIndexDir(), this.mediaKey(jid, id) + '.json');
-    if (!fs.existsSync(idx)) throw new Error('medya kaydı yok (mesaj eski olabilir)');
-    const msg = JSON.parse(fs.readFileSync(idx, 'utf8'), BufferJSON.reviver) as WAMessage;
+    const pending = this.mediaPending.get(idx);
+    if (!pending && !fs.existsSync(idx)) throw new Error('medya kaydı yok (mesaj eski olabilir)');
+    const msg = JSON.parse(pending ?? fs.readFileSync(idx, 'utf8'), BufferJSON.reviver) as WAMessage;
     const content = unwrap(msg.message);
     // ptvMessage (yuvarlak video notu) videoMessage ile aynı yapıdadır; Baileys indirmede 'ptv' medya türünü tanır
     const media = content?.imageMessage ?? content?.videoMessage ?? content?.ptvMessage ?? content?.audioMessage ?? content?.documentMessage ?? content?.stickerMessage;
@@ -1775,6 +1915,7 @@ export class WhatsAppConnector extends BaseConnector {
         this.reuploadDone();
       });
       try {
+        this.mediaPending.delete(idx);
         fs.writeFileSync(idx, JSON.stringify(updated, BufferJSON.replacer));
       } catch {
         /* diske yazılamadı */
@@ -1964,7 +2105,7 @@ export class WhatsAppConnector extends BaseConnector {
   }
 
   private ensureWaChat(jid: string): void {
-    if (this.store.getChat(chatIdOf(this.account.id, jid))) return;
+    if (this.store.hasChat(chatIdOf(this.account.id, jid))) return;
     this.upsertChat({ remoteId: jid, name: this.nameOf(jid), kind: jid.endsWith('@g.us') ? 'group' : 'direct', handle: jid.endsWith('@s.whatsapp.net') ? '+' + jid.split('@')[0] : undefined });
   }
 

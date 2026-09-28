@@ -520,6 +520,29 @@ Dil: arayüz ve yorumlar Türkçe.
   platformlarda), Trendyol/Hepsiburada/Etsy/Shopify connector'ları, Shopier panel mesajları (DOM üzerinden).
 
 ## Performans notları (Eylül 2026'da öğrenildi)
+- **Eşitleme hızı (29.09, Kaan: WhatsApp 25 dk'da bitmiyor, mesajlar geç geliyor, "sürekli kendini eşitliyor")** kök nedenleri ve çözümler:
+  - WS: her `message.upsert` sohbetin TAMAMINI taşıyordu (300 üyeli grupta 20 bin mesaj ≈ 877 MB) → tampon 8 MB'ı aşıp arayüz bağlantısı
+    düşüyor, arayüz yeniden bağlanıp tüm listeyi çekiyordu. Şimdi `ws-batch.ts` `EventBatcher`: ≈40 ms demet `{type:'batch', chats, deletes,
+    events, refetch}`; sohbet demette bir kez (tam hali yayın anında `store.getChat`), mesaj olayı sohbetsiz, hesap durumu/ilerleme/yazıyor
+    birleşik, demet başına ≤150 geçmiş mesajı (fazlası `refetch` → açık sohbet depodan yeniden okunur); `login.frame` demetsiz. Arayüz
+    `api.ts unpackBatch` eski tek tek olaylara açar (message.upsert'e sohbeti ekler). Aynı ölçüde 1,8 MB. Kopma eşiği 32 MB.
+  - Depo: hazır sorgu önbelleği (`Store.stmt`), `hasChat`, `getChatLite` (katılımcı sütunsuz; o sütunu okumak ~45 µs), mesaj yazımında
+    yalnız özet sütunları, `rowToChat` katılımcıları okununca çözer (getter; JSON/yayılımda tam), `lastStatus` (son mesaj durumu, alt sorgu).
+  - WhatsApp: geçmiş paketi sohbetleri hemen, MESAJLARI arka plan kuyruğunda (`queueHistory/pumpHistory`, ≈25 ms'lik tek işlemli dilimler,
+    `setImmediate`) — eskiden büyük paket olay döngüsünü kilitleyip canlı mesajları ve Baileys keep-alive'ını bekletiyordu (→ kopma →
+    yeniden eşitleme görüntüsü). loadHistory bekleyicileri paket yazılınca çözülür. `wa-auth` fsync YALNIZ creds.json (Baileys geçmişte binlerce
+    tctoken/lid-mapping anahtarı yazıyor, mesaj kilidi altında). Medya dizini (`media-index`) eşzamansız toplu yazım (`mediaPending`).
+    `pickVersion`: kayıtlı sürüm 3 günden yeniyse ağ beklenmez (eskiden her yeniden bağlanmada 8-16 sn), günceli arka planda; 405'te sıfırlanır.
+    Ek uygulama durumu tam eşitlemesi ilk eşleşmede geçmiş akışı 20 sn durunca ve yalnız rehber adı gelmediyse. Hesap satırında
+    "sohbetler / eski mesajlar arka planda alınıyor %N — telefonda WhatsApp açık kalsın", duraksamada uyarı. loadHistory `{timedOut|unavailable}`
+    → arayüz "daha eski mesaj yok" DEMEZ, yeniden denenebilir. `oldestRealMessage` tek sorgu.
+  - `base.everSynced`: bir kez eşitlenen connector'ın kopma/yeniden bağlanmasında eşitleme çubuğu yeniden gösterilmez.
+  - Tarayıcı köprüsü: değişen sohbetler okunmamış → en yeni sırasıyla; mesajı alınmamış önemli sohbet kaldıkça (son 30 gün/okunmamış)
+    sonraki tur `backfillMs` (Instagram/Slack 8 sn, Messenger 10, X 20, LinkedIn 25; ±%30) — eskiden 8 sohbet/tur × 30-60 sn.
+  - Telegram açılışı: okunmamışlar önce, ilk 25 sohbetin son 30 mesajı. iMessage açılış yüklemesi 800'lük dilimler (yeniden eskiye).
+  - Masaüstü: pencere kapatılınca (tepsi) WebKit ~5 dk sonra arayüzü askıya alıyordu → bildirimler/rozet pencere açılınca geliyordu:
+    `tauri.conf.json` `backgroundThrottling: "disabled"` (macOS 14+), Info.plist `LSAppNapIsDisabled`. Çekirdek `boot-env.ts` UV_THREADPOOL_SIZE=16.
+  - Test: `test/sync-perf.test.ts`.
 - `messages` tablosu 150 bin+ satır: gönderen bazlı UPDATE'ler için `messages_sender` indeksi şart; toplu yazımlar
   `store.transaction()` içinde. WhatsApp `refreshNames` debounce'lu (1.5 sn) ve gönderen imzası önbellekli; her olayda
   anında tam tarama olay döngüsünü dakikalarca kilitliyordu (REST yanıt vermiyordu, arayüz "Load failed").

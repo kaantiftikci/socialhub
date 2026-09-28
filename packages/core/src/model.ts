@@ -35,6 +35,8 @@ export interface Chat {
   lastPreview: string;
   /** Son mesaj benden mi (Odak → "Senin beklediklerin") */
   lastFromMe?: boolean;
+  /** Son mesajın durumu (listede kendi mesajımın tiki: gönderildi / iletildi / görüldü) */
+  lastStatus?: 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
   /** Mivelo'da okunan nokta (ms): bu zamana kadar olan mesajlar kalıcı olarak okundu */
   readUpto?: number;
   avatarUrl?: string;
@@ -147,6 +149,10 @@ export type CoreEvent =
   | { type: 'chat.upsert'; chat: Chat }
   | { type: 'chat.delete'; chatId: string }
   | { type: 'message.upsert'; message: Message; chat: Chat; live?: boolean }
+  /** Hesap kaldırıldı (ör. hiç bağlanmamış yeni hesabın giriş penceresi kapatıldı → bağlanma iptal) */
+  | { type: 'account.removed'; accountId: string }
+  /** Kullanıcı giriş penceresini girişsiz kapattı: bağlanma iptal (arayüz "Bağlan"a döner) */
+  | { type: 'account.login-cancelled'; accountId: string }
   | { type: 'message.delete'; chatId: string; messageId: string }
   /** Karşı taraf yazıyor / yazmayı bıraktı */
   | { type: 'chat.typing'; chatId: string; typing: boolean; name?: string }

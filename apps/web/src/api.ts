@@ -70,7 +70,8 @@ const liveApi = {
   setTags: (chatId: string, tags: string[]) => call<Chat>('POST', `/chats/${enc(chatId)}/tags`, { tags }),
   sendFile: (chatId: string, file: { name: string; mime: string; data: string; caption?: string; voice?: boolean }) => call<{ remoteId: string }>('POST', `/chats/${enc(chatId)}/send-file`, file),
   moreChats: (accountId: string) => call<{ added: number; supported: boolean }>('POST', `/accounts/${enc(accountId)}/more`),
-  loadHistory: (chatId: string, before?: number, limit = 50) => call('POST', `/chats/${enc(chatId)}/history`, { limit, before }),
+  /** timedOut: telefon/platform yanıt vermedi; unavailable: kanal bağlı değil (ikisi de "daha eski yok" anlamına gelmez) */
+  loadHistory: (chatId: string, before?: number, limit = 50) => call<{ ok?: boolean; timedOut?: boolean; unavailable?: string } | undefined>('POST', `/chats/${enc(chatId)}/history`, { limit, before }),
   draft: (chatId: string, tone?: string) => call<DraftResult>('POST', `/chats/${enc(chatId)}/draft`, { tone }),
   openChat: (accountId: string, participant: { id: string; name: string; handle?: string; avatarUrl?: string }) => call<Chat>('POST', '/chats/open', { accountId, participant }),
   action: (chatId: string, payload: Record<string, unknown>) => call<Chat>('POST', `/chats/${enc(chatId)}/action`, payload),
@@ -126,6 +127,35 @@ export interface ScheduledItem {
 export const USE_STATIC = STATIC_DEMO && !REMOTE_CORE;
 export const api = USE_STATIC ? staticApi : liveApi;
 
+/** Çekirdeğin olay demeti (packages/core/src/ws-batch.ts): sohbetler bir kez, mesaj olayları sohbetsiz */
+interface WsBatch {
+  type: 'batch';
+  chats: Chat[];
+  deletes: string[];
+  events: Array<CoreEvent | { type: 'message.upsert'; message: Message; live?: boolean }>;
+  refetch?: string[];
+}
+
+function safeEmit(onEvent: (ev: CoreEvent) => void, ev: CoreEvent): void {
+  try {
+    onEvent(ev);
+  } catch (e) {
+    console.error('olay işlenemedi', ev.type, e);
+  }
+}
+
+/** Demeti eski tek tek olaylara aç: silinenler, sohbetler (son hali), sıralı olaylar (mesaja sohbeti eklenir), yeniden okuma */
+function unpackBatch(b: WsBatch, onEvent: (ev: CoreEvent) => void): void {
+  const chats = new Map(b.chats.map((c) => [c.id, c]));
+  for (const id of b.deletes) safeEmit(onEvent, { type: 'chat.delete', chatId: id });
+  for (const c of b.chats) safeEmit(onEvent, { type: 'chat.upsert', chat: c });
+  for (const e of b.events) {
+    if (e.type === 'message.upsert') safeEmit(onEvent, { type: 'message.upsert', message: e.message, live: e.live, chat: chats.get(e.message.chatId) });
+    else safeEmit(onEvent, e);
+  }
+  if (b.refetch?.length) safeEmit(onEvent, { type: 'messages.refetch', chatIds: b.refetch });
+}
+
 /** Sunucudan gelen olay akışı; kopunca kendini yeniden bağlar. */
 export function connectEvents(onEvent: (ev: CoreEvent) => void, onState?: (open: boolean) => void): () => void {
   if (USE_STATIC) return connectStaticEvents(onEvent, onState);
@@ -140,11 +170,14 @@ export function connectEvents(onEvent: (ev: CoreEvent) => void, onState?: (open:
     ws = new WebSocket(url);
     ws.onopen = () => onState?.(true);
     ws.onmessage = (m) => {
+      let data: CoreEvent | WsBatch;
       try {
-        onEvent(JSON.parse(String(m.data)) as CoreEvent);
+        data = JSON.parse(String(m.data)) as CoreEvent | WsBatch;
       } catch {
-        /* yok say */
+        return;
       }
+      if (data.type === 'batch') unpackBatch(data, onEvent);
+      else safeEmit(onEvent, data);
     };
     ws.onclose = () => {
       onState?.(false);

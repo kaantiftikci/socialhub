@@ -120,7 +120,11 @@ export class IMessageConnector extends BaseConnector {
   /** açılışta tamamı yüklenecek en çok mesaj (üstü: en yeniler + sohbet başına son 20) */
   private static readonly FULL_LIMIT = 60_000;
 
+  /** stop() çağrıldı: dilimli açılış yüklemesi yarıda bırakılır */
+  private stopped = false;
+
   async start(): Promise<void> {
+    this.stopped = false;
     if (process.platform !== 'darwin') {
       this.setStatus('error', 'iMessage yalnızca macOS üzerinde çalışır');
       return;
@@ -180,7 +184,8 @@ export class IMessageConnector extends BaseConnector {
     this.account.label = os.userInfo().username;
     this.setStatus('connected');
     this.loadContacts();
-    this.backfill();
+    await this.backfill();
+    if (this.stopped) return;
     this.syncUnread();
     this.scanRecoverable();
     this.watchDb();
@@ -213,6 +218,7 @@ export class IMessageConnector extends BaseConnector {
   }
 
   async stop(): Promise<void> {
+    this.stopped = true;
     this.watcher?.close();
     this.watcher = undefined;
     if (this.watchDebounce) clearTimeout(this.watchDebounce);
@@ -587,17 +593,32 @@ export class IMessageConnector extends BaseConnector {
     for (const r of this.query(Math.max(0, this.lastRowId - 5000), 500, true)) this.ingest(r, false);
   }
 
-  private backfill(): void {
+  /**
+   * Satırları 800'lük tek işlemli dilimlerle yaz, aralarda olay döngüsünü bırak: 60 bin satırlık açılış yüklemesi tek parça
+   * çalışınca çekirdek saniyelerce yanıt vermiyordu (arayüz "Çekirdek başlatılıyor", diğer kanalların bağlantı yoklamaları).
+   */
+  private async ingestChunked(rows: Row[]): Promise<void> {
+    for (let i = 0; i < rows.length; i += 800) {
+      if (this.stopped || !this.db) return;
+      const part = rows.slice(i, i + 800);
+      this.store.transaction(() => part.forEach((r) => this.ingest(r, false)));
+      if (i + 800 < rows.length) await new Promise((r) => setImmediate(r));
+    }
+  }
+
+  private async backfill(): Promise<void> {
     if (!this.db) return;
     const t0 = Date.now();
     const max = (this.db.prepare('SELECT MAX(ROWID) AS m FROM message').get() as { m: number | null }).m ?? 0;
+    // imleç baştan: dilimli yükleme sürerken gelen yeni satırlar yoklamada tekrar işlenmesin
+    this.lastRowId = max;
     // Tarih sırası (ROWID değil): iCloud eşitlemesi eski sohbetleri yeni ROWID'lerle yazar. cmj.message_date indeksli, sıralama ucuz.
     // Sohbete bağlı mesajların HEPSİ (tipik chat.db 10–50 bin satır, birkaç saniye). Eskiden yalnız en yeni 2000 + sohbet başına 20
     // yükleniyordu → sohbetlerde eski mesajlar eksik görünüyordu. Çok büyük arşivde en yeni FULL_LIMIT, kalan sohbetler son 20'yle.
-    const rows = (this.db.prepare(`${this.selectSql} ORDER BY ${this.dateCol} DESC LIMIT ?`).all(IMessageConnector.FULL_LIMIT) as Row[]).reverse();
-    this.store.transaction(() => rows.forEach((r) => this.ingest(r, false)));
-    this.lastRowId = max;
-    const oldest = rows[0]?.date ?? 0;
+    // Yeniden eskiye yazılır: kullanıcının bakacağı son sohbetler ilk dilimlerde gelir.
+    const rows = this.db.prepare(`${this.selectSql} ORDER BY ${this.dateCol} DESC LIMIT ?`).all(IMessageConnector.FULL_LIMIT) as Row[];
+    await this.ingestChunked(rows);
+    const oldest = rows[rows.length - 1]?.date ?? 0;
     // FULL_LIMIT'in dışında kalan sohbetler (eski, filtrelenmiş SMS'ler, bilinmeyen gönderenler…) de son 20 mesajıyla gelsin —
     // klasör bilgisi (is_filtered) ancak mesajla birlikte öğreniliyor
     let extra = 0;
@@ -610,12 +631,10 @@ export class IMessageConnector extends BaseConnector {
       // Mesajı olan tüm sohbetler (eskiden ROWID'ye göre ilk 1500 → ~400 eski sohbet hiç görünmüyordu)
       const chatRows = this.db.prepare('SELECT DISTINCT chat_id AS id FROM chat_message_join').all() as Array<{ id: number }>;
       const perChat = this.db.prepare(`${this.selectSql} WHERE cmj.chat_id = ? AND ${this.dateCol} < ? ORDER BY ${this.dateCol} DESC LIMIT 20`);
-      this.store.transaction(() => {
-        for (const c of chatRows) for (const r of (perChat.all(c.id, oldest) as Row[]).reverse()) {
-          this.ingest(r, false);
-          extra++;
-        }
-      });
+      const older: Row[] = [];
+      for (const c of chatRows) for (const r of (perChat.all(c.id, oldest) as Row[]).reverse()) older.push(r);
+      extra = older.length;
+      await this.ingestChunked(older);
     } catch (e) {
       bus.log('warn', `iMessage sohbet geçmişi: ${(e as Error).message}`);
     }

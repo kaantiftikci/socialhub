@@ -233,6 +233,12 @@ export interface BridgeOptions {
    * (saat; varsayılan 6–10). Dinleyiciler (init betikleri, page.on) yenilemeden sonra da geçerli. Instagram 12–20 (mautrix-meta 20 sa).
    */
   softReloadHours?: [number, number];
+  /**
+   * İlk eşitlemede mesajları henüz alınmamış (son 30 günde etkin ya da okunmamış) sohbet kaldıkça sıradaki tur bu aralıkla
+   * (±%30) gelir; bitince olağan aralığa döner. Eskiden tur başına 8 sohbet × 30-60 sn → 200 sohbetin mesajları ~20 dk sürüyordu.
+   * Verilmezse hızlandırma yok (DOM'u tıklayarak okuyan e-posta yolları gibi ağır kanallar).
+   */
+  backfillMs?: number;
 }
 
 export class BrowserConnector extends BaseConnector {
@@ -254,6 +260,8 @@ export class BrowserConnector extends BaseConnector {
   /** unloadWhenIdle: yoklamalar arasında tarayıcı kapalı (bellek); bir sonraki yoklama/işlem yeniden açar */
   private idleClosed = false;
   private known = new Map<string, number>(); // threadId → son görülen ts
+  /** Mesajları henüz alınmamış önemli sohbet sayısı (ilk eşitleme sürüyor): sıradaki tur backfillMs ile öne çekilir */
+  private backlogLeft = 0;
 
   constructor(
     account: Account,
@@ -1123,6 +1131,8 @@ export class BrowserConnector extends BaseConnector {
    * akıştan haber verir; yoklama yalnız yedek), üstüne ±%30 sapma.
    */
   private nextDelay(): number {
+    // ilk eşitleme: mesajları alınmamış sohbetler bitene dek kısa aralık (istek hızı yine sınırlı: tur başına 8 sohbet)
+    if (this.backlogLeft > 0 && this.opts.backfillMs && Date.now() >= this.backoffUntil) return Math.min(this.opts.backfillMs, this.pollMs) * (0.7 + Math.random() * 0.6);
     const base = this.opts.idlePollMs && !isUiActive() ? this.opts.idlePollMs : this.pollMs;
     // tarayıcı boşta kapalıysa (unloadWhenIdle) izleyici çalışmıyor: seyrekleştirme yok
     const live = !this.idleClosed && !this.pageless && this.rtEventAt > 0 && Date.now() - this.rtAliveAt < 5 * 60_000;
@@ -1247,7 +1257,11 @@ export class BrowserConnector extends BaseConnector {
           bus.log('warn', `${this.account.platform}: okundu yinelenemedi: ${(e as Error).message.split('\n')[0].slice(0, 120)}`);
         }
       }
+      // öncelik: okunmamış, sonra en yeni etkinlik (kullanıcının bakacağı sohbetler önce dolsun)
+      changed.sort((a, b) => Number(b.unread > 0) - Number(a.unread > 0) || (b.lastTs || 0) - (a.lastTs || 0));
       const batch = changed.slice(0, first ? 16 : 8);
+      const monthAgo = Date.now() - 30 * 86_400_000;
+      this.backlogLeft = changed.slice(batch.length).filter((t) => t.unread > 0 || !t.lastTs || t.lastTs > monthAgo).length;
       const failed: string[] = [];
       let firstErr = '';
       /** sohbet mesajlarında doğrulama/hız sınırı: tur sonunda yeniden fırlatılır → aşağıdaki catch durdurur/geri çekilir */

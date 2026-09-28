@@ -25,6 +25,8 @@ export interface Chat {
   lastMessageAt: number;
   lastPreview: string;
   lastFromMe?: boolean;
+  /** Son mesajın durumu: kendi mesajımsa listede tik (gönderildi / iletildi / görüldü) */
+  lastStatus?: Message['status'];
   avatarUrl?: string;
   tags: string[];
   handle?: string;
@@ -120,7 +122,12 @@ export type CoreEvent =
   | { type: 'account.prompt'; accountId: string; prompt: 'phone' | 'code' | 'password'; message: string }
   | { type: 'chat.upsert'; chat: Chat }
   | { type: 'chat.delete'; chatId: string }
-  | { type: 'message.upsert'; message: Message; chat: Chat; live?: boolean }
+  /** chat: demet açılırken eklenir; sohbet aynı demette silindiyse boş olabilir */
+  | { type: 'message.upsert'; message: Message; chat?: Chat; live?: boolean }
+  /** Çok sayıda geçmiş mesajı yazılan sohbetler (demette tek tek gönderilmedi): açık olan depodan yeniden okunur */
+  | { type: 'messages.refetch'; chatIds: string[] }
+  | { type: 'account.removed'; accountId: string }
+  | { type: 'account.login-cancelled'; accountId: string }
   | { type: 'message.delete'; chatId: string; messageId: string }
   | { type: 'chat.typing'; chatId: string; typing: boolean; name?: string }
   | { type: 'account.sync'; accountId: string; progress: number; label?: string }

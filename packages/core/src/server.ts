@@ -25,6 +25,7 @@ import { ALL_PLATFORMS } from './model.js';
 import { MEDIA_HOSTS, PLATFORM_MEDIA_HOSTS, MEDIA_MAX } from './media-hosts.js';
 import { fetchPreview } from './link-preview.js';
 import { checkSend, persistSendGuard, SendBlocked } from './send-guard.js';
+import { EventBatcher } from './ws-batch.js';
 import type { Platform } from './model.js';
 
 /**
@@ -512,11 +513,11 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     const b = body as { limit?: number; before?: number };
     const before = Number(b.before);
     try {
-      if (c?.loadHistory) await c.loadHistory(chat.remoteId, Math.min(500, Math.max(1, Number(b.limit) || 50)), Number.isFinite(before) && before > 0 ? before : undefined);
+      const r = c?.loadHistory ? await c.loadHistory(chat.remoteId, Math.min(500, Math.max(1, Number(b.limit) || 50)), Number.isFinite(before) && before > 0 ? before : undefined) : undefined;
+      return { ok: true, ...(r ?? {}) };
     } catch (e) {
       throw new HttpError(502, `Geçmiş yüklenemedi: ${(e as Error).message.split('\n')[0].slice(0, 160)}`);
     }
-    return { ok: true };
   });
   route('POST', '/api/chats/:id/draft', async (_r, _s, p, body) => {
     const id = dec(p.id);
@@ -830,17 +831,35 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     // Yeni bağlanan arayüze bekleyen QR'ları hemen gönder
     for (const [accountId, qrDataUrl] of pendingQr) client.send(JSON.stringify({ type: 'account.qr', accountId, qrDataUrl }));
   });
-  const unsub = bus.on((ev) => {
-    const payload = JSON.stringify(ev);
+  const sendAll = (payload: string) => {
     for (const client of wss.clients) {
       if (client.readyState !== WebSocket.OPEN) continue;
-      // yavaş/ölü istemcide tampon şişmesin (geçmiş eşitlemesinde binlerce olay)
-      if (client.bufferedAmount > 8_000_000) {
+      // ölü/asılı istemcide tampon sınırsız şişmesin. Olaylar artık demetlenip birleştirildiği için (ws-batch.ts) bu sınıra
+      // ancak gerçekten yanıt vermeyen istemci ulaşır; eskiden 8 MB'ta her eşitlemede kopuyordu.
+      if (client.bufferedAmount > 32_000_000) {
         client.terminate();
         continue;
       }
       client.send(payload);
     }
+  };
+  // Olaylar ≈40 ms'lik demetlerde (sohbet başına tek kopya, hesap durumu/ilerleme birleştirilmiş); canlı mesaj gecikmesi fark edilmez
+  const batcher = new EventBatcher();
+  let batchTimer: NodeJS.Timeout | undefined;
+  const flushBatch = () => {
+    batchTimer = undefined;
+    const b = batcher.take();
+    if (!b || !wss.clients.size) return;
+    // mesaj olayları sohbeti katılımcısız (hafif) taşır: demetteki her sohbetin tam hali burada bir kez okunur
+    b.chats = b.chats.map((c) => store.getChat(c.id) ?? c);
+    sendAll(JSON.stringify(b));
+  };
+  const unsub = bus.on((ev) => {
+    if (!wss.clients.size) return; // arayüz bağlı değil: boşuna JSON üretme (bağlanınca listeyi kendisi çeker)
+    // giriş ekranı kareleri büyük ve sürekli: demetlenmez, hemen gider
+    if (ev.type === 'login.frame') return sendAll(JSON.stringify(ev));
+    batcher.push(ev);
+    batchTimer ??= setTimeout(flushBatch, 40);
   });
   const alive = new WeakSet<WebSocket>();
   wss.on('connection', (client) => {
@@ -898,6 +917,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   followTimer.unref();
   server.on('close', () => {
     unsub();
+    if (batchTimer) clearTimeout(batchTimer);
     clearInterval(pingTimer);
     clearInterval(followTimer);
     clearInterval(schedTimer);

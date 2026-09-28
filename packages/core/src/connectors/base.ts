@@ -66,7 +66,8 @@ export interface Connector {
   provideInput?(kind: 'phone' | 'code' | 'password', value: string): void;
   /** Belirli bir sohbetin geçmişini (daha eski mesajları) ister. */
   /** `before`: yüklü en eski mesajın zaman damgası (ms); platformdan bundan eski mesajlar istenir */
-  loadHistory?(remoteChatId: string, limit: number, before?: number): Promise<void>;
+  /** Dönüş: telefon/platform yanıt vermediyse `timedOut`, bağlı değilse `unavailable` (arayüz "daha eski yok" demesin) */
+  loadHistory?(remoteChatId: string, limit: number, before?: number): Promise<void | { unavailable?: string; timedOut?: boolean }>;
   /** Oturum çerezleri gerektiren medyayı (DM fotoğrafı/videosu) platformdan indirir. */
   fetchMedia?(url: string): Promise<{ body: Buffer; type: string } | undefined>;
   /** Bir grup üyesiyle birebir sohbet aç/bul; sohbetin remoteId'sini döndürür. */
@@ -107,16 +108,30 @@ export abstract class BaseConnector implements Connector {
   /** Gönderdiğim mesajlar `before` (ms) zamanına kadar görüldü: depoyu güncelle, arayüze bildir */
   protected outgoingRead(remoteChatId: string, before: number): void {
     const cid = chatId(this.account.id, remoteChatId);
-    if (this.store.markOutgoingRead(cid, before) > 0) bus.emit({ type: 'messages.read', chatId: cid, before });
+    if (this.store.markOutgoingRead(cid, before) > 0) {
+      bus.emit({ type: 'messages.read', chatId: cid, before });
+      // listedeki son mesaj tiki (lastStatus) da güncellensin
+      const chat = this.store.getChat(cid);
+      if (chat) bus.emit({ type: 'chat.upsert', chat });
+    }
   }
 
   private syncDone = false;
   private syncTimer?: NodeJS.Timeout;
   private syncLast = 0;
+  /**
+   * Bu connector bir kez eşitlemeyi bitirdi: sonraki kopma/yeniden bağlanmalarda (WhatsApp ağ kopması, uyku) eşitleme çubuğu
+   * baştan gösterilmez — kullanıcı "sürekli kendini eşitliyor" görüyordu. Hesap satırındaki durum ("Bağlantı koptu, … sn sonra
+   * yeniden deneniyor") yine görünür.
+   */
+  private everSynced = false;
   /** Bağlanma/eşitleme ilerlemesi (0-100). Connector kilometre taşlarını bildirir; bağlandıktan sonra 6 sn sohbet gelmezse 100 sayılır. */
   protected syncProgress(progress: number, label?: string): void {
     if (this.syncDone && progress < 100) this.syncDone = false;
-    if (progress >= 100) this.syncDone = true;
+    if (progress >= 100) {
+      this.syncDone = true;
+      this.everSynced = true;
+    }
     if (progress < this.syncLast && progress > 0) return; // geriye gitmesin
     this.syncLast = progress >= 100 ? 0 : progress;
     bus.emit({ type: 'account.sync', accountId: this.account.id, progress: Math.max(0, Math.min(100, Math.round(progress))), label });
@@ -144,10 +159,13 @@ export abstract class BaseConnector implements Connector {
     this.account.detail = detail;
     this.store.upsertAccount(this.account);
     bus.emit({ type: 'account.status', account: { ...this.account } });
-    if (status === 'connecting') this.syncProgress(5, 'bağlanıyor');
-    else if (status === 'connected') {
-      this.syncProgress(this.syncLast >= 60 ? this.syncLast : 60, 'sohbetler alınıyor');
-      this.touchSync();
+    if (status === 'connecting') {
+      if (!this.everSynced) this.syncProgress(5, 'bağlanıyor');
+    } else if (status === 'connected') {
+      if (!this.everSynced) {
+        this.syncProgress(this.syncLast >= 60 ? this.syncLast : 60, 'sohbetler alınıyor');
+        this.touchSync();
+      }
     } else this.syncProgress(0);
     bus.log(status === 'error' ? 'error' : 'info', `${this.account.platform}/${this.account.label}: ${status}${detail ? ' — ' + detail : ''}`);
   }
@@ -215,7 +233,7 @@ export abstract class BaseConnector implements Connector {
     opts: { live?: boolean; bump?: boolean } = {},
   ): Message | undefined {
     const cid = chatId(this.account.id, input.remoteChatId);
-    if (!this.store.getChat(cid)) {
+    if (!this.store.hasChat(cid)) {
       this.upsertChat({ remoteId: input.remoteChatId, name: input.fromMe ? input.remoteChatId : input.senderName });
     }
     const { remoteChatId: _drop, html, ...rest } = input;
@@ -230,7 +248,8 @@ export abstract class BaseConnector implements Connector {
     if (inserted && input.fromMe && !input.remoteId.startsWith('local-')) {
       for (const id of this.store.dropLocalDuplicates(cid)) bus.emit({ type: 'message.delete', chatId: cid, messageId: id });
     }
-    const chat = this.store.getChat(cid)!;
+    // katılımcılar olmadan (mesaj başına en sık yol); arayüze giden demette sohbetin tam hali bir kez okunur
+    const chat = this.store.getChatLite(cid)!;
     // Depodaki satırı yayınla (durum güncellemesi gibi kısmi girdiler metni/zamanı ezmesin)
     const stored = this.store.getMessage(message.id) ?? message;
     if (inserted || opts.live) bus.emit({ type: 'message.upsert', message: stored, chat, live: !!opts.live });

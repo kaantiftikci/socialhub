@@ -423,7 +423,7 @@ export class TelegramConnector extends BaseConnector {
       if (rid) {
         const cid = `${this.account.id}/${rid}`;
         const t = this.store.markOutgoingReadUpToId(cid, u.maxId);
-        if (t) bus.emit({ type: 'messages.read', chatId: cid, before: t });
+        if (t) this.emitRead(cid, t);
       }
       return;
     }
@@ -498,8 +498,10 @@ export class TelegramConnector extends BaseConnector {
       });
       if (last) this.ingest(last, rid, name, false);
     }
-    // En yeni 15 sohbetin son 30 mesajı: 5'li gruplar halinde paralel; hata (flood-wait vb.) gelirse seri devam
-    const top = dialogs.filter((d) => !(d.archived || d.folderId === 1)).slice(0, 15);
+    // Önce okunmamış sohbetler, sonra en yeniler: ilk 25 sohbetin son 30 mesajı (5'li paralel; flood-wait gelirse seri devam).
+    // Eskiden yalnız en yeni 15 → listede okunmamış görünen daha eski sohbetler açılınca boş kalıyordu.
+    const active = dialogs.filter((d) => !(d.archived || d.folderId === 1));
+    const top = [...active.filter((d) => (d.unreadCount ?? 0) > 0), ...active.filter((d) => !(d.unreadCount ?? 0))].slice(0, 25);
     const recent = async (d: Dialog): Promise<void> => {
       const rid = String(d.id);
       const msgs = await client.getMessages(d.entity, { limit: 30 });
@@ -531,7 +533,14 @@ export class TelegramConnector extends BaseConnector {
     if (!d.id || !max) return;
     const cid = `${this.account.id}/${String(d.id)}`;
     const t = this.store.markOutgoingReadUpToId(cid, max);
-    if (t) bus.emit({ type: 'messages.read', chatId: cid, before: t });
+    if (t) this.emitRead(cid, t);
+  }
+
+  /** Gönderdiklerim görüldü: açık sohbetteki balonlar + listedeki son mesaj tiki */
+  private emitRead(cid: string, before: number): void {
+    bus.emit({ type: 'messages.read', chatId: cid, before });
+    const chat = this.store.getChat(cid);
+    if (chat) bus.emit({ type: 'chat.upsert', chat });
   }
 
   private async onNew(ev: NewMessageEvent): Promise<void> {

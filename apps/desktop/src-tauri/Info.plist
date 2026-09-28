@@ -6,6 +6,8 @@
 	<string>Mivelo, sohbetlere sesli mesaj kaydedip göndermek için mikrofonu kullanır.</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Mivelo, iMessage yanıtlarını Mesajlar uygulaması üzerinden göndermek için Mesajlar'ı kullanır.</string>
+	<key>LSAppNapIsDisabled</key>
+	<true/>
 	<key>NSContactsUsageDescription</key>
 	<string>Mivelo, sohbetlerde numaralar yerine rehberindeki adları göstermek için Kişiler'i okur.</string>
 </dict>

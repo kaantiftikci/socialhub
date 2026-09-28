@@ -227,7 +227,7 @@ export class Registry {
         const tokenFile = path.join(sessionDir(account.id), 'token');
         // belirteç dosyası: düz xoxp (eski) ya da {token, appToken} (Bağlan → Slack uygulaması; appToken varsa Socket Mode)
         const tok = fs.existsSync(tokenFile) ? parseSlackToken(fs.readFileSync(tokenFile, 'utf8')) : undefined;
-        c = tok ? new SlackConnector(account, this.store, tok.token, tok.appToken) : new BrowserConnector(account, this.store, slackStrategy, 30_000, { keepOpen: 'whileActive', rtSlowdown: 3 }); // Mivelo öndeyken web istemcisi açık + kendi soketi dinlenir (anlık), boşta sayfasız 30 sn
+        c = tok ? new SlackConnector(account, this.store, tok.token, tok.appToken) : new BrowserConnector(account, this.store, slackStrategy, 30_000, { keepOpen: 'whileActive', rtSlowdown: 3, backfillMs: 8_000 }); // Mivelo öndeyken web istemcisi açık + kendi soketi dinlenir (anlık), boşta sayfasız 30 sn
         break;
       }
       case 'demo':
@@ -238,16 +238,16 @@ export class Registry {
         break;
       // Resmi olmayan kanallarda yoklama aralıkları ban riskine göre (±%30 sapmayla, bridge.schedule): LinkedIn/X seyrek
       case 'linkedin':
-        c = new BrowserConnector(account, this.store, linkedin, 60_000, { rtSlowdown: 5 }); // anlık akış canlıyken yedek 5 dk
+        c = new BrowserConnector(account, this.store, linkedin, 60_000, { rtSlowdown: 5, backfillMs: 25_000 }); // anlık akış canlıyken yedek 5 dk
         break;
       case 'instagram':
-        c = new BrowserConnector(account, this.store, instagram, 30_000, { idlePollMs: 120_000, keepOpen: 'always', rtSlowdown: 10, softReloadHours: [12, 20] }); // sayfa açık + soket dinleme; soket yoksa odakta 30 sn / boşta 2 dk, canlıyken yedek 5 dk
+        c = new BrowserConnector(account, this.store, instagram, 30_000, { idlePollMs: 120_000, keepOpen: 'always', rtSlowdown: 10, softReloadHours: [12, 20], backfillMs: 8_000 }); // sayfa açık + soket dinleme; soket yoksa odakta 30 sn / boşta 2 dk, canlıyken yedek 5 dk
         break;
       case 'x':
-        c = new BrowserConnector(account, this.store, x, 60_000, { rtSlowdown: 3 }); // soket canlıyken yedek 3 dk
+        c = new BrowserConnector(account, this.store, x, 60_000, { rtSlowdown: 3, backfillMs: 20_000 }); // soket canlıyken yedek 3 dk
         break;
       case 'messenger':
-        c = new BrowserConnector(account, this.store, messenger, 30_000, { rtSlowdown: 5 }); // soket/liste canlıyken yedek 2,5 dk
+        c = new BrowserConnector(account, this.store, messenger, 30_000, { rtSlowdown: 5, backfillMs: 10_000 }); // soket/liste canlıyken yedek 2,5 dk
         break;
       case 'shopier': {
         const tokenFile = path.join(sessionDir(account.id), 'token');
