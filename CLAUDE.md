@@ -102,8 +102,8 @@ Dil: arayüz ve yorumlar Türkçe.
   tür finfo ile içerikten; IP başına saatte 10; `~/mivelo-data/feedback/index.json` + `<id>/<n>.<ext>`; `.user.ini` yükleme sınırları;
   SMTP ayarlıysa sahibine e-posta). Başarı yalnız `{ok:true}` (yanlış adres 200+HTML döndürebilir). Admin → Geri bildirim (Açık/Tümü/Çözülen,
   durum Yeni/İnceleniyor/Çözüldü/Yapılmayacak, not, Yanıtla=mailto, ekler `fb_file` yalnız oturumla, CSP sandbox).
-  **Demoda bağlanma gerçek akışla**: WhatsApp/Telegram `addAccount` → 'pairing' + taranamaz örnek QR (`demoQr`), 6,5 sn sonra okutulmuş
-  sayılır (`completeDemoLogin`; yenilemede yarım QR yeniden başlar); tarayıcıyla girilenler (mode 'browser') 'pairing' → Connect.tsx `DemoLogin`
+  **Demoda bağlanma gerçek akışla**: WhatsApp/Telegram `addAccount` → 'pairing' + taranamaz örnek QR (`demoQr`); KENDİLİĞİNDEN bağlanmaz
+  (Kaan: "eşleşme bekleniyor derken bir anda bağlı"), "Kodu okuttum" (`DemoQrDone`) → `completeDemoLogin` (yenilemede yarım QR yeniden gösterilir); tarayıcıyla girilenler (mode 'browser') 'pairing' → Connect.tsx `DemoLogin`
   formu (bilgiler gönderilmez/saklanmaz) → `staticApi.demoLogin`. Form doldurulan yollar (e-posta şifresi, pazaryeri, Slack belirteci) `demo-form`
   ile doğrudan bağlanır. Eskiden her şey anında "Bağlı" oluyordu.
   Demoda örnek AI açık (`demo-ai.ts`: sohbete özel taslak/özet/aksiyon/olay, model çağrısı yok); pazaryeri sipariş kartı `Script.order`.
@@ -328,7 +328,8 @@ Dil: arayüz ve yorumlar Türkçe.
   `idlePollMs` (Instagram: odakta 30 sn, boşta 2 dk); boştan etkine geçişte bekleyen tur öne çekilir (`pollSoon`).
 - LinkedIn anlık akış: `Strategy.watch` → sayfaya init betiği, istemcinin kendi `/realtime/connect` akışının kopyası okunur (fetch/XHR/
   EventSource; kendi bağlantımız YOK). Mesaj konuları → birkaç sn içinde yoklama (≥10 sn arayla); akış canlıyken aralık 3 kat (60→180 sn).
-- Slack: Bağlan formu önce resmi yol — manifest bağlantısı (`SLACK_MANIFEST`, Connect.tsx'teki kopyayla aynı; test denetler) ile kendi
+- Slack: Bağlan → VARSAYILAN kullanıcı adı + şifreyle tarayıcı girişi (Kaan isteğiyle, eskisi gibi); belirteç formu (`slack:new`, `add('slack',{token:true})`)
+  yalnız "Gelişmiş: Slack uygulama belirteciyle bağlan" bağlantısından. Eski not — Bağlan formu önce resmi yol — manifest bağlantısı (`SLACK_MANIFEST`, Connect.tsx'teki kopyayla aynı; test denetler) ile kendi
   dahili uygulaması, xoxp + isteğe bağlı xapp (Socket Mode: olay gelen sohbet hemen çekilir, yoklama ~5 dk). Belirteç dosyası düz xoxp
   ya da JSON {token, appToken} (`parseSlackToken`). Tarayıcı girişi formdaki "yedek" bağlantısıyla.
   xoxp yolu tarayıcı yoluyla eşit: tepki (reactions.add/remove + Socket Mode reaction_added/removed olayı), okundu (conversations.mark),

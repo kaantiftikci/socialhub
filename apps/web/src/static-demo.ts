@@ -62,12 +62,11 @@ function withDemoAttention(a: Account): Account {
 }
 
 /**
- * Demoda bağlanma akışı gerçek uygulamadaki gibi: WhatsApp/Telegram önce QR gösterir (okutma birkaç sn sonra yapılmış sayılır),
+ * Demoda bağlanma akışı gerçek uygulamadaki gibi: WhatsApp/Telegram önce QR gösterir ("Kodu okuttum" ile bağlanır; kendiliğinden DEĞİL),
  * tarayıcıyla girilen uygulamalar giriş formu ister (Connect.tsx DemoLogin; girilen bilgiler hiçbir yere gönderilmez/saklanmaz).
  * Eskiden "Bağlan" hesabı anında "bağlı" yapıyordu → QR / giriş adımı hiç görünmüyordu.
  */
 const QR_PLATFORMS = new Set<Platform>(['whatsapp', 'telegram']);
-const QR_DELAY_MS = 6500;
 
 /** Taranamayan, gerçekçi görünümlü QR (köşe hedefleri + sözde rastgele modüller) */
 function demoQr(seedText: string): string {
@@ -104,11 +103,9 @@ async function completeDemoLogin(id: string): Promise<void> {
   for (const c of chats.filter((x) => x.accountId === id)) emit({ type: 'chat.upsert', chat: c });
 }
 
-/** QR bekleyen hesap: kodu göster, birkaç sn sonra okutulmuş say */
+/** QR bekleyen hesap: kod gösterilir; kendiliğinden bağlanmaz (kullanıcı "Kodu okuttum"a basınca, Connect.tsx) */
 function startDemoQr(a: Account): Account {
-  const q: Account = { ...a, status: 'pairing', qrDataUrl: demoQr(a.id), detail: 'Demo: kod birkaç saniye içinde okutulmuş sayılır' };
-  setTimeout(() => void completeDemoLogin(a.id), QR_DELAY_MS);
-  return q;
+  return { ...a, status: 'pairing', qrDataUrl: demoQr(a.id), detail: undefined };
 }
 
 function demoAccount(platform: Platform): Account {
@@ -286,7 +283,7 @@ export function loadDemoAccounts(list: Array<Record<string, unknown>>, opts: { f
   const changed = next.length !== accounts.length || next.some((a, i) => a.id !== accounts[i]?.id);
   accounts = next;
   if (changed) void saveAccounts().catch(() => undefined);
-  // yarım kalmış QR eşleştirmesi (sayfa yenilendi): kod yeniden gösterilir ve birkaç sn sonra okutulmuş sayılır
+  // yarım kalmış QR eşleştirmesi (sayfa yenilendi): kod yeniden gösterilir
   accounts = accounts.map((a) => (a.status === 'pairing' && QR_PLATFORMS.has(a.platform) ? startDemoQr(a) : a));
   seed();
 }

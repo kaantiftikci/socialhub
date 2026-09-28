@@ -124,11 +124,11 @@ export function ConnectModal({
   }, []);
   const macOnlyOff = (p: Platform) => MAC_ONLY.has(p) && !!coreOs && coreOs !== 'darwin';
 
-  /** opts.browser: Slack'i resmi uygulama yerine tarayıcı oturumuyla bağla (yedek yol) */
-  async function add(platform: Platform, opts: { browser?: boolean; form?: boolean } = {}) {
+  /** Slack varsayılanı kullanıcı adı + şifreyle tarayıcı girişi (Kaan'ın isteği); opts.token: Slack uygulama belirteci yolu ("Gelişmiş") */
+  async function add(platform: Platform, opts: { browser?: boolean; form?: boolean; token?: boolean } = {}) {
     setBusy(true);
     try {
-      if (platform === 'slack' && !opts.browser && (active !== 'slack:new' || !slackTok.user.trim())) {
+      if (platform === 'slack' && opts.token && (active !== 'slack:new' || !slackTok.user.trim())) {
         setActive('slack:new');
         return;
       }
@@ -159,7 +159,7 @@ export function ConnectModal({
       // Demo sitesi: formlar gerçek uygulamadaki gibi açılır, doldurulunca hesap örnek veriyle bağlanır (girilenler saklanmaz)
       if (STATIC_DEMO) {
         // form doldurulduysa (e-posta uygulama şifresi, pazaryeri, Slack belirteci) doğrudan bağlanır; yoksa QR / giriş formu gösterilir
-        const filled = isMail || !!shopFields || platform === 'shopier' || (platform === 'slack' && !opts.browser);
+        const filled = isMail || !!shopFields || platform === 'shopier' || (platform === 'slack' && !!opts.token);
         const a = await api.addAccount(platform, filled ? 'demo-form' : undefined);
         setActive(a.id);
         setShop({});
@@ -170,7 +170,7 @@ export function ConnectModal({
       let token: string | undefined;
       if (platform === 'telegram' && tg.apiId.trim() && tg.apiHash.trim()) token = JSON.stringify({ apiId: Number(tg.apiId.trim()), apiHash: tg.apiHash.trim() });
       if (platform === 'shopier') token = pat.trim();
-      if (platform === 'slack' && !opts.browser) token = JSON.stringify({ token: slackTok.user.trim(), appToken: slackTok.app.trim() || undefined });
+      if (platform === 'slack' && opts.token) token = JSON.stringify({ token: slackTok.user.trim(), appToken: slackTok.app.trim() || undefined });
       if (shopFields) {
         const cfg: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(shop)) if (v.trim()) cfg[k] = v.trim();
@@ -501,7 +501,7 @@ export function ConnectModal({
               <div className="field" style={{ marginTop: 12, gap: 8 }}>
                 <PasswordInput value={slackTok.user} onChange={(e) => setSlackTok({ ...slackTok, user: e.target.value })} placeholder="User OAuth Token" autoComplete="off" />
                 <PasswordInput value={slackTok.app} onChange={(e) => setSlackTok({ ...slackTok, app: e.target.value })} placeholder="App-Level Token (isteğe bağlı)" autoComplete="off" />
-                <button className="btn lime b" onClick={() => add('slack')} disabled={busy || !slackTok.user.trim().startsWith('xoxp-') || (!!slackTok.app.trim() && !slackTok.app.trim().startsWith('xapp-'))}>
+                <button className="btn lime b" onClick={() => add('slack', { token: true })} disabled={busy || !slackTok.user.trim().startsWith('xoxp-') || (!!slackTok.app.trim() && !slackTok.app.trim().startsWith('xapp-'))}>
                   Bağlan
                 </button>
               </div>
@@ -572,6 +572,10 @@ export function ConnectModal({
                 </ol>
               )}
 
+              {STATIC_DEMO && (activeAccount.platform === 'whatsapp' || activeAccount.platform === 'telegram') && activeAccount.status === 'pairing' && (
+                <DemoQrDone account={activeAccount} onDone={onChanged} />
+              )}
+
               {activeAccount.platform === 'telegram' && activeAccount.status === 'pairing' && !prompts[activeAccount.id] && (
                 <ol>
                   <li>Telefonunda Telegram’ı aç</li>
@@ -606,6 +610,13 @@ export function ConnectModal({
                     <li>Açılan giriş ekranında {PLATFORMS[activeAccount.platform].name} hesabına giriş yap</li>
                     <li>Giriş tamamlanınca ekran kendiliğinden kapanır</li>
                   </ol>
+                  {activeAccount.platform === 'slack' && (
+                    <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--text3)' }}>
+                      <a href="#slack-token" onClick={(e) => (e.preventDefault(), setActive('slack:new'))} style={{ color: 'var(--text3)' }}>
+                        Gelişmiş: Slack uygulama belirteciyle bağlan
+                      </a>
+                    </p>
+                  )}
                 </>
               )}
               {activeAccount.platform === 'imessage' && activeAccount.status === 'error' && !macOnlyOff('imessage') && (
@@ -833,5 +844,30 @@ function DemoLogin({ account, onDone }: { account: Account; onDone: () => Promis
       </button>
       <p className="demo-login-note">Demo: girdiğin bilgiler hiçbir yere gönderilmez ve saklanmaz.</p>
     </form>
+  );
+}
+
+/** Demo QR: örnek kod telefonla okutulamaz; eşleşme kullanıcı onaylayınca tamamlanır (kendiliğinden bağlanmaz) */
+function DemoQrDone({ account, onDone }: { account: Account; onDone: () => Promise<void> | void }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="demo-qr-done">
+      <button
+        className="btn primary sm b"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await (staticApi as { demoLogin: (id: string) => Promise<void> }).demoLogin(account.id);
+            await onDone();
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        {busy ? <span className="spin" /> : 'Kodu okuttum'}
+      </button>
+      <span>Demo: bu örnek kod telefonla okutulamaz; eşleştirmeyi tamamlamak için bas.</span>
+    </div>
   );
 }
