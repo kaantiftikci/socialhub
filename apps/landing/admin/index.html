@@ -238,13 +238,17 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   .bulk{top:70px}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
-.lic-form{display:grid;grid-template-columns:2fr 2fr 1fr 1fr 80px auto;gap:10px;align-items:end}
+.lic-form{display:grid;grid-template-columns:2fr 2fr 1fr 1.5fr 80px auto;gap:10px;align-items:end}
 .lic-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-3)}
 @media (max-width:900px){.lic-form{grid-template-columns:1fr 1fr}.lic-form .btn{grid-column:1/-1}}
 .lic-key{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px;letter-spacing:.3px}
 .lic-made{margin-top:14px;padding:12px;border-radius:12px;background:var(--brand-soft);display:flex;flex-direction:column;gap:8px}
 .lic-made .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .lic-dev{display:flex;align-items:center;gap:8px;padding:4px 0}
+.days-row{display:flex;gap:6px}.days-row select{flex:1;min-width:0}
+.days-c{width:84px!important;flex:none}
+.days-end{font-style:normal;font-size:11.5px;color:var(--ink-4);white-space:nowrap}
+#ppDaysC{height:34px}
 .pp-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
 .pp-bar .input{height:34px}
 .pp-bar #ppQ{flex:1;min-width:180px}
@@ -415,7 +419,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
         <div class="pp-foot">
           <label style="display:flex;align-items:center;gap:8px;font-size:13px"><input type="checkbox" id="ppAll"> Görünenleri seç</label>
           <select class="input" id="ppMax" style="width:auto;height:34px" aria-label="Cihaz sınırı"><option value="1">1 cihaz</option><option value="2" selected>2 cihaz</option><option value="3">3 cihaz</option><option value="5">5 cihaz</option></select>
-          <select class="input" id="ppDays" style="width:auto;height:34px" aria-label="Süre"><option value="0" selected>Süresiz</option><option value="30">30 gün</option><option value="90">90 gün</option><option value="365">1 yıl</option></select>
+          <select class="input" id="ppDays" style="width:auto;height:34px" aria-label="Süre"><option value="7">7 gün</option><option value="14">14 gün</option><option value="30" selected>30 gün</option><option value="60">60 gün</option><option value="90">90 gün</option><option value="180">6 ay</option><option value="365">1 yıl</option><option value="0">Süresiz</option><option value="c">Özel…</option></select><input class="input days-c" id="ppDaysC" type="number" min="1" max="3650" placeholder="gün" aria-label="Gün sayısı" hidden><span class="muted days-end" id="ppDaysEnd"></span>
           <span class="sp"></span>
           <button class="btn dark" id="ppSend" type="button" disabled>Seçilenlere gönder</button>
         </div>
@@ -440,7 +444,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
           <label><span>Kime / not</span><input class="input" id="licNote" maxlength="120" placeholder="ör. Ahmet — beta"></label>
           <label><span>E-posta (isteğe bağlı)</span><input class="input" id="licEmail" type="email" list="licMails" placeholder="bekleme listesinden seç ya da yaz"></label>
           <label><span>Cihaz sınırı</span><select class="input" id="licMax"><option value="1">1 cihaz</option><option value="2" selected>2 cihaz</option><option value="3">3 cihaz</option><option value="5">5 cihaz</option></select></label>
-          <label><span>Süre</span><select class="input" id="licDays"><option value="0" selected>Süresiz</option><option value="30">30 gün</option><option value="90">90 gün</option><option value="365">1 yıl</option></select></label>
+          <label><span>Süre <em class="days-end" id="licDaysEnd"></em></span><span class="days-row"><select class="input" id="licDays"><option value="7">7 gün</option><option value="14">14 gün</option><option value="30" selected>30 gün</option><option value="60">60 gün</option><option value="90">90 gün</option><option value="180">6 ay</option><option value="365">1 yıl</option><option value="0">Süresiz</option><option value="c">Özel…</option></select><input class="input days-c" id="licDaysC" type="number" min="1" max="3650" placeholder="gün" aria-label="Gün sayısı" hidden></span></label>
           <label><span>Adet</span><input class="input" id="licCount" type="number" min="1" max="50" value="1"></label>
           <button class="btn dark" type="submit">Oluştur</button>
           <datalist id="licMails"></datalist>
@@ -767,7 +771,8 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   }
   function licUpdate(body,msg){ return api('license_update',body).then(function(k){ LIC=LIC.map(function(x){ return x.id===k.id?k:x; }); renderLic(); if(msg) toast(msg); }).catch(function(e){ toast(e.message,true); }); }
   $('#licForm').addEventListener('submit',function(e){ e.preventDefault();
-    api('license_create',{note:$('#licNote').value.trim(),email:$('#licEmail').value.trim(),send:$('#licSend').checked,maxDevices:+$('#licMax').value,days:+$('#licDays').value,count:+$('#licCount').value||1}).then(function(d){
+    if(daysOf('licDays')<0){ toast('Süre için 1–3650 arasında gün sayısı yaz',true); $('#licDaysC').focus(); return; }
+    api('license_create',{note:$('#licNote').value.trim(),email:$('#licEmail').value.trim(),send:$('#licSend').checked,maxDevices:+$('#licMax').value,days:daysOf('licDays'),count:+$('#licCount').value||1}).then(function(d){
       if(d.mail) toast(d.mail.ok?'Anahtar '+d.mail.email+' adresine gönderildi':'Anahtar üretildi ama e-posta gönderilemedi: '+d.mail.error,!d.mail.ok);
       if(d.mail) loadPeople();
       LIC=d.created.slice().reverse().concat(LIC); renderLic(); $('#licNote').value=''; $('#licEmail').value=''; $('#licCount').value=1;
@@ -791,6 +796,16 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     if(b.dataset.armed!=='1'){ b.dataset.armed='1'; var t=b.innerHTML; b.textContent='Emin misin?'; setTimeout(function(){ b.dataset.armed=''; b.innerHTML=t; },3000); return; }
     if(b.dataset.lreset) return licUpdate({id:b.dataset.lreset,resetDevices:true},'Cihazlar sıfırlandı');
     if(b.dataset.ldel) api('license_delete',{id:b.dataset.ldel}).then(function(){ LIC=LIC.filter(function(k){ return k.id!==b.dataset.ldel; }); renderLic(); toast('Silindi'); }).catch(function(x){ toast(x.message,true); });
+  });
+  /* ---------- lisans süresi: hazır seçenek (varsayılan 30 gün) ya da "Özel…" gün sayısı ---------- */
+  function daysOf(id){ var v=$('#'+id).value; if(v!=='c') return +v; var n=Math.round(+$('#'+id+'C').value); return n>=1&&n<=3650?n:-1; }
+  function daysHint(id){ var n=daysOf(id), el=$('#'+id+'End'); if(!el) return;
+    var d=new Date(Date.now()+n*864e5).toLocaleDateString('tr-TR'), short=id==='licDays';
+    el.textContent=n===0?'· süresiz':n<0?(short?'· 1–3650 gün':'· gün sayısını yaz (1–3650)'):short?'· bitiş '+d:'· '+d+' tarihine kadar'; }
+  ['licDays','ppDays'].forEach(function(id){
+    $('#'+id).addEventListener('change',function(){ var c=this.value==='c'; $('#'+id+'C').hidden=!c; if(c) $('#'+id+'C').focus(); daysHint(id); });
+    $('#'+id+'C').addEventListener('input',function(){ daysHint(id); });
+    daysHint(id);
   });
   /* ---------- üyelere anahtar gönder + e-posta taslağı ---------- */
   var PP=[], PP_F='nokey', PP_SEL={};
@@ -827,8 +842,9 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     var b=this, em=Object.keys(PP_SEL).filter(function(k){ return PP_SEL[k]; });
     if(!em.length) return;
     if(em.length>50){ toast('Tek seferde en çok 50 kişi',true); return; }
+    if(daysOf('ppDays')<0){ toast('Süre için 1–3650 arasında gün sayısı yaz',true); $('#ppDaysC').focus(); return; }
     b.disabled=true; b.textContent='Gönderiliyor… ('+em.length+')';
-    api('license_issue',{emails:em,maxDevices:+$('#ppMax').value,days:+$('#ppDays').value}).then(function(d){
+    api('license_issue',{emails:em,maxDevices:+$('#ppMax').value,days:daysOf('ppDays')}).then(function(d){
       var bad=d.results.filter(function(r){ return !r.ok; });
       PP_SEL={}; loadPeople(); loadLicKeys();
       $('#ppRes').innerHTML='<div class="pp-res"><b>'+d.sent+' / '+d.results.length+' e-posta gönderildi</b>'+

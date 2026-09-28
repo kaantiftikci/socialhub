@@ -667,7 +667,7 @@ if ($a === 'license_create' && $method === 'POST') {
         fail(400, 'E-posta geçersiz');
     }
     $max = max(1, min(10, (int) ($body['maxDevices'] ?? 2)));
-    $days = (int) ($body['days'] ?? 0);
+    $days = (int) ($body['days'] ?? 30);
     $exp = $days > 0 ? gmdate('c', time() + min($days, 3650) * 86400) : null;
     $made = with_json('licenses.json', ['keys' => []], function (array &$d) use ($n, $note, $email, $max, $exp) {
         $out = [];
@@ -960,7 +960,7 @@ if ($a === 'license_issue' && $method === 'POST') {
         fail(400, 'Kişi seçilmedi');
     }
     $max = max(1, min(10, (int) ($body['maxDevices'] ?? 2)));
-    $days = (int) ($body['days'] ?? 0);
+    $days = (int) ($body['days'] ?? 30);
     $exp = $days > 0 ? gmdate('c', time() + min($days, 3650) * 86400) : null;
     $newKey = !empty($body['newKey']);
     $people = lic_people();
