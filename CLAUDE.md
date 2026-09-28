@@ -32,6 +32,8 @@ Dil: arayüz ve yorumlar Türkçe.
 - Tanı betikleri (Mac'te, değer yazdırmaz; çıktı Claude'a): `node scripts/imessage-probe.mjs` (chat.db ↔ Mivelo sayıları, en yeni mesaj,
   klasörler, node ikilisi FDA yolu), `node scripts/trendyol-probe.mjs` (soru alan adları + aday sipariş sorusu uçları). Trendyol connector'ı
   soru alan adlarını günlüğe bir kez yazar (`Trendyol soru alanları: …`); `questionOrderNo` adında order geçen alanı sipariş bağı sayar.
+  Ölçüm (28.09): qna/questions/filter sipariş bağı alanı DÖNDÜRMÜYOR (answer, creationDate, customerId, id, imageUrl, productName, public,
+  showUserName, status, text, userName, webUrl, productMainId); `qna/sellers/{id}/order-questions/filter` 404 değil 556 → aday uç, araştırılıyor.
 - `node scripts/verify-strategy.mjs <slack|instagram|linkedin|x|messenger>` — canlı oturumun profil KOPYASIYLA (uygulamaya dokunmadan)
   threads/messages/before doğrulaması. Önce `npm run build -w packages/core`.
 
@@ -141,7 +143,10 @@ Dil: arayüz ve yorumlar Türkçe.
   eski/klasördeki sohbetlerini atıyordu) + okunmamış/bayraklı/takipte/iMessage klasör-silinen her zaman. Arayüz 300'lük parçalarla çizer
   (`rowLimit`, `.list-more` IntersectionObserver). Gezinme durumu (görünüm/kanal/sekme/klasör/açık sohbet) sessionStorage `mivelo.nav`
   → yenilemede aynı yer.
-- **iMessage**: poll birikmişi 500'lük parçalarla boşaltır (≤10/tur); `chat_message_join` henüz yazılmamış yeni satırlar `unjoined`da 2 dk
+- **iMessage**: açılışta sohbete bağlı mesajların TAMAMI yüklenir (`FULL_LIMIT` 60 bin; eskiden en yeni 2000 + sohbet başına 20 → eski
+  mesajlar eksikti). chat.db'ye 36 saattir mesaj düşmüyorsa `warnIfStale` → kanal satırında uyarı (Apple eşitlemesi durmuş; Mivelo yalnız
+  Mac'tekini görür). Kaan'ın ölçümü (28.09): chat.db 12.192 bağlı / 828 bağsız mesaj, 1963 mesajlı sohbet — Mivelo sayıları tutarlı.
+  poll birikmişi 500'lük parçalarla boşaltır (≤10/tur); `chat_message_join` henüz yazılmamış yeni satırlar `unjoined`da 2 dk
   yeniden denenir (eskiden atlanıyordu → "son gelenler görünmüyor"). Bilinmeyen klasörü: is_filtered 0 olsa da rehberde yok + hiç yanıtlanmamış
   birebir sohbet (`unknownSender`; rehber okunamazsa uygulanmaz).
 - **Mesaj tikleri** (her kendi balonunda, `statusIcon` Conversation.tsx): read = yeşil çift tik (`--tick-read`), delivered = çift tik,

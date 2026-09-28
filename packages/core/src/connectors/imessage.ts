@@ -117,6 +117,8 @@ export class IMessageConnector extends BaseConnector {
   /** Tarih sıralama/filtre sütunu: chat_message_join.message_date (indeksli); eski macOS'ta sütun yoksa m.date */
   private dateCol = 'cmj.message_date';
   private attStmt?: Database.Statement;
+  /** açılışta tamamı yüklenecek en çok mesaj (üstü: en yeniler + sohbet başına son 20) */
+  private static readonly FULL_LIMIT = 60_000;
 
   async start(): Promise<void> {
     if (process.platform !== 'darwin') {
@@ -589,16 +591,21 @@ export class IMessageConnector extends BaseConnector {
     if (!this.db) return;
     const t0 = Date.now();
     const max = (this.db.prepare('SELECT MAX(ROWID) AS m FROM message').get() as { m: number | null }).m ?? 0;
-    // Tarihe göre en yeni 2000 mesaj. ROWID sırası tarih sırası DEĞİL: iCloud eşitlemesi eski sohbetleri yeni ROWID'lerle
-    // (yeniden eskiye) yazar; ROWID'ye göre alınsaydı bazı sohbetlerin en eski mesajları "son mesaj" sanılırdı.
-    // cmj.message_date = m.date (indeksli), sıralama bu sütunla ucuz.
-    const rows = (this.db.prepare(`${this.selectSql} ORDER BY ${this.dateCol} DESC LIMIT 2000`).all() as Row[]).reverse();
+    // Tarih sırası (ROWID değil): iCloud eşitlemesi eski sohbetleri yeni ROWID'lerle yazar. cmj.message_date indeksli, sıralama ucuz.
+    // Sohbete bağlı mesajların HEPSİ (tipik chat.db 10–50 bin satır, birkaç saniye). Eskiden yalnız en yeni 2000 + sohbet başına 20
+    // yükleniyordu → sohbetlerde eski mesajlar eksik görünüyordu. Çok büyük arşivde en yeni FULL_LIMIT, kalan sohbetler son 20'yle.
+    const rows = (this.db.prepare(`${this.selectSql} ORDER BY ${this.dateCol} DESC LIMIT ?`).all(IMessageConnector.FULL_LIMIT) as Row[]).reverse();
     this.store.transaction(() => rows.forEach((r) => this.ingest(r, false)));
     this.lastRowId = max;
     const oldest = rows[0]?.date ?? 0;
-    // Bu 2000'in dışında kalan sohbetler (eski, filtrelenmiş SMS'ler, bilinmeyen gönderenler…) de son 20 mesajıyla gelsin —
+    // FULL_LIMIT'in dışında kalan sohbetler (eski, filtrelenmiş SMS'ler, bilinmeyen gönderenler…) de son 20 mesajıyla gelsin —
     // klasör bilgisi (is_filtered) ancak mesajla birlikte öğreniliyor
     let extra = 0;
+    if (rows.length < IMessageConnector.FULL_LIMIT) {
+      bus.log('info', `iMessage geçmişi: ${rows.length} mesajın tamamı yüklendi (${Date.now() - t0} ms)`);
+      this.warnIfStale();
+      return;
+    }
     try {
       // Mesajı olan tüm sohbetler (eskiden ROWID'ye göre ilk 1500 → ~400 eski sohbet hiç görünmüyordu)
       const chatRows = this.db.prepare('SELECT DISTINCT chat_id AS id FROM chat_message_join').all() as Array<{ id: number }>;
@@ -613,12 +620,20 @@ export class IMessageConnector extends BaseConnector {
       bus.log('warn', `iMessage sohbet geçmişi: ${(e as Error).message}`);
     }
     bus.log('info', `iMessage geçmişi: ${rows.length} mesaj + ${extra} eski sohbet mesajı yüklendi (${Date.now() - t0} ms)`);
+    this.warnIfStale();
+  }
+
+  /** chat.db'ye günlerdir yeni mesaj düşmüyorsa (Apple eşitlemesi durmuş) durum satırında söyle */
+  private warnIfStale(): void {
+    if (!this.db) return;
     try {
       const newest = (this.db.prepare('SELECT MAX(date) AS d FROM message').get() as { d: number | null }).d ?? 0;
       const ms = newest > 1e12 ? Math.floor(newest / 1e6) + APPLE_EPOCH_MS : newest * 1000 + APPLE_EPOCH_MS;
-      if (ms && Date.now() - ms > 7 * 86400e3) {
-        const days = Math.round((Date.now() - ms) / 86400e3);
-        this.setStatus('connected', `Mesajlar uygulamasına ${days} gündür yeni mesaj düşmüyor — iPhone: Ayarlar → Mesajlar → Metin Mesajı Yönlendirme'de bu Mac'i aç; Mac: Mesajlar → Ayarlar → iMessage → iCloud'da Mesajlar → Şimdi Eşzamanla`);
+      // 36 sa: sessiz bir gün yanlış alarm vermesin ama "dünden beri gelmiyor" fark edilsin (eskiden 7 gün → hiç görülmüyordu)
+      if (ms && Date.now() - ms > 36 * 3600e3) {
+        const h = Math.round((Date.now() - ms) / 3600e3);
+        const since = h < 72 ? `${h} saattir` : `${Math.round(h / 24)} gündür`;
+        this.setStatus('connected', `Bu Mac'in Mesajlar uygulamasına ${since} yeni mesaj düşmüyor (Mivelo yalnız Mac'teki mesajları görebilir) — Mac'te Mesajlar'ı aç; Mesajlar → Ayarlar → iMessage → "iCloud'da Mesajlar" açık olsun → Şimdi Eşzamanla. SMS için iPhone: Ayarlar → Mesajlar → Metin Mesajı Yönlendirme → bu Mac`);
       }
     } catch {
       /* tarih okunamadı */

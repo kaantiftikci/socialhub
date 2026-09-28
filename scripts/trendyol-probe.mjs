@@ -49,6 +49,8 @@ async function get(label, url) {
     if (j && typeof j === 'object') {
       const list = Array.isArray(j.content) ? j.content : Array.isArray(j) ? j : null;
       console.log(`üst alanlar: ${Object.keys(j).join(', ')}${j.totalElements != null ? ` · toplam ${j.totalElements}` : ''}`);
+      // hata yanıtı: sunucunun açıklaması (kişisel veri içermez) — uç var mı / hangi parametre bekleniyor anlamak için
+      if (!r.ok) for (const k of ['message', 'title', 'exception', 'errors', 'error']) if (j[k]) console.log(`${k}: ${JSON.stringify(j[k]).slice(0, 300)}`);
       if (list?.length) {
         const keys = new Map();
         for (const q of list) for (const [k, v] of Object.entries(q)) keys.set(k, (keys.get(k) ?? 0) + (v !== null && v !== undefined && v !== '' ? 1 : 0));
@@ -69,8 +71,15 @@ console.log(`Trendyol soru tanısı · hesap ${dir.replace(/[:_].*/, '')} · son
 await get('Sorular (tümü)', `${Q}/questions/filter?${win}`);
 await get('Sorular (cevap bekleyen)', `${Q}/questions/filter?${win}&status=WAITING_FOR_ANSWER`);
 // Belgesiz aday uçlar: 404 = yok. 200/400 dönen varsa sipariş soruları oradan geliyor olabilir.
+const winS = `startDate=${now - 14 * 86400e3 + 60e3}&endDate=${now}`;
 for (const [label, url] of [
   ['Aday: order-questions', `${Q}/order-questions/filter?${win}`],
+  ['order-questions (parametresiz)', `${Q}/order-questions/filter`],
+  ['order-questions (yalnız tarih)', `${Q}/order-questions/filter?${winS}`],
+  ['order-questions (sayfa 0, boyut 10)', `${Q}/order-questions/filter?page=0&size=10`],
+  ['order-questions (kök)', `${Q}/order-questions`],
+  ['order-questions (cevap bekleyen)', `${Q}/order-questions/filter?${win}&status=WAITING_FOR_ANSWER`],
+  ['sapigw order-questions', `https://api.trendyol.com/sapigw/suppliers/${s}/order-questions/filter?${win}`],
   ['Aday: questions/filter?questionType=ORDER', `${Q}/questions/filter?${win}&questionType=ORDER`],
   ['Aday: orders/questions', `${Q}/orders/questions/filter?${win}`],
   ['Aday: order entegrasyonu sorular', `https://apigw.trendyol.com/integration/order/sellers/${s}/questions?${win}`],

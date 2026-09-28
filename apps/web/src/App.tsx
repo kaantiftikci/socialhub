@@ -1750,6 +1750,9 @@ function accountIssue(a: Account): { title: string; how: string; label: string; 
       action: 'reconnect',
       done: `${name} penceresi açılıyor — PIN'ini gir`,
     };
+  // iMessage bağlı ama Mac'e günlerdir mesaj düşmüyor (Apple eşitlemesi durmuş): kanal satırında uyar, panelde ne yapılacağı yazar
+  if (a.status === 'connected' && a.platform === 'imessage' && /yeni mesaj düşmüyor/.test(detail))
+    return { title: detail.split(' — ')[0], how: detail.split(' — ').slice(1).join(' — ') || 'Mac’te Mesajlar uygulamasını açıp eşzamanla.', label: 'Ayrıntı', action: 'panel', done: 'Kontrol ediliyor' };
   if (a.status === 'pairing') {
     if (a.platform === 'whatsapp' || a.platform === 'telegram')
       return { title: 'Telefonla eşleştirme bekleniyor', how: `"Uygulama bağla"da ${name} kanalını aç ve ekrandaki QR kodu telefonundaki ${name} ile okut.`, label: "QR'ı göster", action: 'connect', done: '' };
