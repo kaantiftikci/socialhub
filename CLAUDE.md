@@ -145,7 +145,7 @@ Dil: arayüz ve yorumlar Türkçe.
   (`~/mivelo-data/license-mail.json`, varsayılan `LIC_MAIL_DEFAULT`: kurumsal "siz" dili, konu "Mivelo Masaüstü Uygulaması | Lisans Anahtarınız";
   eski samimi varsayılan kayıtlıysa `LIC_MAIL_OLD` ile yenisine döner): yer tutucular {ad} (ad soyad; bilinmiyorsa "Sayın {ad}" → "Değerli
   kullanıcımız") {ilkad} {anahtar} (tek satırda büyük kutu) {indir} {cihaz} {gecerlilik}; canlı önizleme (`lic_mail_preview`, sandbox iframe) +
-  deneme gönderimi. HTML tablo düzeni, üst şeritte logo + "Mivelo", altta küçük logo; logo (`apple-touch-icon.png`) e-postaya GÖMÜLÜ gider
+  deneme gönderimi. Kurulum 1. adımında {indir} (mivelo.app/indir) + düğmenin altında açık adres. HTML tablo düzeni, üst şeritte logo + "Mivelo", altta küçük logo; logo (`apple-touch-icon.png`) e-postaya GÖMÜLÜ gider
   (`mv_send_mail(..., $html, $inline)` → multipart/related, `cid:mivelo-logo`; önizlemede data: adresi) — uzaktan görsel engelleyen istemcide de görünür.
   Gönderim SMTP'ye bağlı: Türkticaret giden SMTP'yi açmadıkça "Gönderilemedi" (anahtar yine üretilir). Yerelde sahte SMTP ile sınandı.
   İstemci tarafı denetimdir (paket değiştirilerek aşılabilir); amaç anahtarsız dağıtımı engellemek. Yerel uçtan uca sınandı (php -S + çekirdek).

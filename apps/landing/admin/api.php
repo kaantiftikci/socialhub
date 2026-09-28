@@ -17,7 +17,7 @@ const STATUSES = ['waiting', 'invited', 'joined', 'spam'];
 const LIC_MAIL_DEFAULT = [
     'subject' => 'Mivelo Masaüstü Uygulaması | Lisans Anahtarınız',
     'body' => "Sayın {ad},\n\nMivelo erken erişim programına katılımınız onaylanmıştır. Masaüstü uygulaması için size özel lisans anahtarınız aşağıdadır:\n\n{anahtar}\n\n"
-        . "Kurulum adımları:\n1. Aşağıdaki bağlantıdan işletim sisteminize uygun sürümü (macOS veya Windows) indirin.\n2. Uygulamayı ilk kez açtığınızda lisans anahtarınızı girin.\n3. Hesaplarınızı bağlayarak tüm mesajlarınızı tek bir gelen kutusundan yönetmeye başlayın.\n\n"
+        . "Kurulum adımları:\n1. {indir} adresindeki indirme sayfasından işletim sisteminize uygun sürümü (macOS veya Windows) indirin.\n2. Uygulamayı ilk kez açtığınızda lisans anahtarınızı girin.\n3. Hesaplarınızı bağlayarak tüm mesajlarınızı tek bir gelen kutusundan yönetmeye başlayın.\n\n"
         . "Lisans anahtarınız en fazla {cihaz} cihazda kullanılabilir ve {gecerlilik}.\n\nHerhangi bir sorunuz olursa bu e-postayı yanıtlayarak ekibimize ulaşabilirsiniz.\n\nSaygılarımızla,\nMivelo Ekibi",
 ];
 // İlk sürümün varsayılanları: panelden bunlar kaydedildiyse yeni (kurumsal) varsayılan geçerli olur
@@ -742,6 +742,8 @@ function lic_mail_tpl(): array
     $sub = trim((string) ($t['subject'] ?? ''));
     $body = trim((string) ($t['body'] ?? ''));
     $oldDefault = in_array($sub, LIC_MAIL_OLD, true) && strpos($body, "Mivelo'ya erken erişimin açıldı!") !== false;
+    // önceki kurumsal varsayılanda indirme sayfası bağlantısı yoktu: kayıtlıysa o cümle bağlantılı hâliyle değişir
+    $body = str_replace('1. Aşağıdaki bağlantıdan işletim sisteminize uygun sürümü', '1. {indir} adresindeki indirme sayfasından işletim sisteminize uygun sürümü', $body);
     return [
         'subject' => $sub !== '' && !in_array($sub, LIC_MAIL_OLD, true) ? $sub : LIC_MAIL_DEFAULT['subject'],
         'body' => $body !== '' && !$oldDefault ? $body : LIC_MAIL_DEFAULT['body'],
@@ -785,7 +787,7 @@ function lic_mail_render(array $tpl, array $k, string $name, ?string $logoSrc = 
     $subject = strtr($tpl['subject'], $vars);
     $text = strtr($body, $vars);
     if (strpos($body, '{indir}') === false) {
-        $text .= "\n\nİndirme bağlantısı: https://mivelo.app/indir/";
+        $text .= "\n\nİndirme sayfası: https://mivelo.app/indir/";
     }
     $e = fn ($v) => htmlspecialchars((string) $v, ENT_QUOTES, 'UTF-8');
     $font = "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Helvetica,Arial,sans-serif";
@@ -795,7 +797,7 @@ function lic_mail_render(array $tpl, array $k, string $name, ?string $logoSrc = 
     $inline = function (string $line) use ($e, $vars): string {
         $h = $e(strtr($line, array_diff_key($vars, ['{anahtar}' => 1, '{indir}' => 1])));
         $h = str_replace('{anahtar}', '<b style="font-family:ui-monospace,Menlo,Consolas,monospace">' . $e($vars['{anahtar}']) . '</b>', $h);
-        return str_replace('{indir}', '<a href="https://mivelo.app/indir/" style="color:#6c47ff">mivelo.app/indir</a>', $h);
+        return str_replace('{indir}', '<a href="https://mivelo.app/indir/" style="color:#6c47ff;font-weight:600">mivelo.app/indir</a>', $h);
     };
     $html = '';
     foreach (preg_split("/\n{2,}/", trim($body)) as $para) {
@@ -810,6 +812,8 @@ function lic_mail_render(array $tpl, array $k, string $name, ?string $logoSrc = 
     }
     $btn = '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 6px"><tr><td style="border-radius:12px;background:#6c47ff">'
         . '<a href="https://mivelo.app/indir/" style="display:inline-block;padding:13px 26px;' . $font . ';font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:12px">Mivelo\'yu İndir</a></td></tr></table>';
+    $btn .= '<p style="margin:12px 0 0;font-size:12.5px;line-height:1.6;color:#8a85a0">Düğme çalışmazsa indirme sayfasını tarayıcınızda açın:<br>'
+        . '<a href="https://mivelo.app/indir/" style="color:#6c47ff;word-break:break-all">https://mivelo.app/indir/</a></p>';
     $logo = $logoSrc ?? 'https://mivelo.app/apple-touch-icon.png';
     $full = '<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>' . $e($subject) . '</title></head>'
         . '<body style="margin:0;padding:0;background:#f4f2fa;' . $font . '">'
