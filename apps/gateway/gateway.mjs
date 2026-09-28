@@ -615,7 +615,7 @@ async function deleteUser(req, res) {
 const server = http.createServer(async (req, res) => {
   try {
     const { pathname, query } = splitUrl(req.url ?? '/');
-    if (pathname === '/gw/health' && (req.method === 'GET' || req.method === 'HEAD')) return sendJson(req, res, 200, { ok: true, cores: readyCount() });
+    if (pathname === '/gw/health' && (req.method === 'GET' || req.method === 'HEAD')) return sendJson(req, res, 200, { ok: true, cores: readyCount() }, { 'access-control-allow-origin': '*' }); // herkese açık bilgi: yönetim paneli (mivelo.app) de dener
     if (pathname === '/gw/delete-user' && req.method === 'POST') return await deleteUser(req, res);
     if (!pathname.startsWith('/api/')) return sendJson(req, res, 404, { error: MSG.notFound });
     // tarayıcı isteği yalnız izinli kaynaklardan (CORS'un yanında savunma derinliği)
