@@ -33,7 +33,12 @@ Dil: arayüz ve yorumlar Türkçe.
   klasörler, node ikilisi FDA yolu), `node scripts/trendyol-probe.mjs` (soru alan adları + aday sipariş sorusu uçları). Trendyol connector'ı
   soru alan adlarını günlüğe bir kez yazar (`Trendyol soru alanları: …`); `questionOrderNo` adında order geçen alanı sipariş bağı sayar.
   Ölçüm (28.09): qna/questions/filter sipariş bağı alanı DÖNDÜRMÜYOR (answer, creationDate, customerId, id, imageUrl, productName, public,
-  showUserName, status, text, userName, webUrl, productMainId); `qna/sellers/{id}/order-questions/filter` 404 değil 556 → aday uç, araştırılıyor.
+  showUserName, status, text, userName, webUrl, productMainId). Araştırma (28.09): Trendyol'da SİPARİŞ SORUSU API'si YOK; 556 = ağ geçidinde
+  yönlendirilmemiş yol (order-questions var olmayan uç). Trendyol `ORDER_Q_PLATFORMS`'tan çıkarıldı (sekme yalnız içerik varsa). Panel verisi
+  ancak satıcı paneli tarayıcı köprüsüyle okunabilir (yapılmadı).
+- **Trendyol sipariş API v2** (v1 `/orders` 15 Ekim 2026'da kapanıyor): `GATEWAYS[0].ordersV2` = `/integration/order/sellers/{id}/v2/orders`
+  önce denenir; 404/410/556 → bir kez `noOrdersV2`, v1 (günlükte uyarı). v2 yalnız son 1 ay + 10.000 kayıt → ilk eşitleme 2×2 hafta (v1'de 6).
+  Geçmiş için `orders/stream` (nextCursor, 3 ay) var — kullanılmadı. Test: trendyol.test.ts.
 - `node scripts/verify-strategy.mjs <slack|instagram|linkedin|x|messenger>` — canlı oturumun profil KOPYASIYLA (uygulamaya dokunmadan)
   threads/messages/before doğrulaması. Önce `npm run build -w packages/core`.
 

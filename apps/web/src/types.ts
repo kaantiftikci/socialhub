@@ -280,7 +280,8 @@ export function shopTabOf(c: Pick<Chat, 'platform' | 'meta' | 'handle'>): ShopTa
   return questionOrderRef(c) ? 'orderQ' : 'productQ';
 }
 /** Sipariş soruları sekmesi olan pazaryerleri (sipariş sorusu yoksa da sekme görünür) */
-export const ORDER_Q_PLATFORMS = new Set<Platform>(['trendyol', 'hepsiburada', 'amazon']);
+// Trendyol'da sipariş sorusu API'si YOK (qna yanıtında sipariş bağı yok; order-questions ucu 556 = yönlendirilmemiş yol): sekme yalnız içerik varsa
+export const ORDER_Q_PLATFORMS = new Set<Platform>(['hepsiburada', 'amazon']);
 /** Kapanmış sipariş durumları (gönderildi/teslim/iptal/iade): bunlar "bekleyen" sayılmaz */
 export const ORDER_CLOSED = /^(fulfilled|delivered|shipped|cancelled|canceled|returned|completed|closed)$/i;
 /** Satıcıdan bir şey bekleyen pazaryeri sohbeti: açık sipariş ya da yanıt bekleyen soru */

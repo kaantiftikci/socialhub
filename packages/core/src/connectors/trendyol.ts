@@ -27,6 +27,8 @@ export interface TrendyolConfig {
 interface Gateway {
   name: string;
   orders(sellerId: string): string;
+  /** Sipariş API v2 (v1 /orders 15 Ekim 2026'da kapanıyor; v2 yalnız son 1 ay, en çok 10.000 kayıt) */
+  ordersV2?(sellerId: string): string;
   questions(sellerId: string): string;
   answer(sellerId: string, questionId: string): string;
 }
@@ -36,6 +38,7 @@ export const GATEWAYS: Gateway[] = [
   {
     name: 'apigw',
     orders: (s) => `https://apigw.trendyol.com/integration/order/sellers/${s}/orders`,
+    ordersV2: (s) => `https://apigw.trendyol.com/integration/order/sellers/${s}/v2/orders`,
     questions: (s) => `https://apigw.trendyol.com/integration/qna/sellers/${s}/questions/filter`,
     answer: (s, q) => `https://apigw.trendyol.com/integration/qna/sellers/${s}/questions/${q}/answers`,
   },
@@ -195,18 +198,29 @@ export class TrendyolConnector extends BaseConnector {
   /**
    * `kind` ucunu geçerli ağ geçidinde çağırır; 404/410 gelirse öteki geçide düşüp bir kez daha dener ve seçimi kalıcı yapar.
    */
+  /** Sipariş v2 ucu bu hesapta/geçitte yoksa v1 (bir kez öğrenilir) */
+  private noOrdersV2 = false;
+
   private async api(method: string, kind: 'orders' | 'questions' | 'answer', query?: Record<string, string | number>, body?: unknown, questionId?: string): Promise<J> {
     // Geçit dizini çağrı yerelinde ilerler: eşzamanlı iki çağrı 404 alınca birbirini geri çevirmesin
     let gi = this.gw;
     for (let attempt = 0; attempt < GATEWAYS.length; attempt++) {
       const g = GATEWAYS[gi];
-      let url = kind === 'answer' ? g.answer(this.sellerId, encodeURIComponent(questionId ?? '')) : g[kind](this.sellerId);
+      const v2 = kind === 'orders' && !!g.ordersV2 && !this.noOrdersV2;
+      let url = kind === 'answer' ? g.answer(this.sellerId, encodeURIComponent(questionId ?? '')) : v2 ? g.ordersV2!(this.sellerId) : g[kind](this.sellerId);
       if (query) url += '?' + new URLSearchParams(Object.entries(query).map(([k, v]) => [k, String(v)])).toString();
       const r = await fetch(url, { method, headers: this.headers(body), body: body ? JSON.stringify(body) : undefined });
       const text = await r.text();
       if (r.status === 401 || r.status === 403) throw new TrendyolAuthError('Trendyol kimlik bilgileri reddedildi');
       if (r.status === 429) this.timer?.backoff(retryAfterSec(r.headers.get('retry-after')));
       if (r.status === 429) throw new TrendyolRateLimit(`Trendyol istek limiti (429); ${r.headers.get('retry-after') ?? '60'} sn sonra`);
+      // v2 henüz yoksa (556 = ağ geçidinde yönlendirilmemiş yol) v1'e düş; aynı geçitte yeniden dene
+      if (v2 && [404, 410, 556].includes(r.status)) {
+        this.noOrdersV2 = true;
+        bus.log('warn', `Trendyol: sipariş API v2 ${r.status} döndü; v1 kullanılıyor (v1 15 Ekim 2026'da kapanacak)`);
+        attempt--;
+        continue;
+      }
       if ((r.status === 404 || r.status === 410) && attempt < GATEWAYS.length - 1) {
         gi = (gi + 1) % GATEWAYS.length;
         if (this.gw !== gi) bus.log('warn', `Trendyol: ${g.name} ${r.status} döndü, ${GATEWAYS[gi].name} geçidine geçiliyor`);
@@ -259,7 +273,8 @@ export class TrendyolConnector extends BaseConnector {
       const allOrders = async () => {
         const m = new Map<string, J[]>();
         // dilimler birleşir (aynı siparişin paketleri farklı dilimlere düşebilir); önce görülen (daha yeni dilim) kazanır
-        for (const [a, b] of spans(6)) for (const [k, v] of await this.fetchOrders(a, b, first ? 50 : 5)) m.set(k, mergePackages(m.get(k) ?? [], v));
+        // v2 yalnız son 1 ayı veriyor: ilk eşitleme 2 dilim (≈4 hafta); v1'e düşüldüyse eskisi gibi 6 dilim (≈3 ay)
+        for (const [a, b] of spans(this.noOrdersV2 ? 6 : 2)) for (const [k, v] of await this.fetchOrders(a, b, first ? 50 : 5)) m.set(k, mergePackages(m.get(k) ?? [], v));
         return m;
       };
       const allQuestions = async () => {

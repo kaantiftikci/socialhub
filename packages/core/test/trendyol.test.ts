@@ -100,7 +100,7 @@ test('bozuk yapılandırma → error durumu, ağ isteği yok', async () => {
 
 test('ilk yoklama: sipariş sohbeti + yeni sipariş mesajı; soru sohbeti unread=1; kimlik başlıkları ve güncel geçit', async () => {
   const calls = fakeFetch((url) => {
-    if (url.includes('/order/sellers/123/orders')) return { body: page([PACKAGE()]) };
+    if (url.includes('/order/sellers/123/v2/orders')) return { body: page([PACKAGE()]) };
     if (url.includes('/qna/sellers/123/questions/filter')) return { body: page([QUESTION()]) };
     return undefined;
   });
@@ -111,7 +111,9 @@ test('ilk yoklama: sipariş sohbeti + yeni sipariş mesajı; soru sohbeti unread
 
   // istekler: apigw + Basic auth + User-Agent
   const orderCall = calls.find((x) => x.url.includes('/orders'))!;
-  assert.ok(orderCall.url.startsWith('https://apigw.trendyol.com/integration/order/sellers/123/orders?'), orderCall.url);
+  // sipariş API v2 (v1 15 Ekim 2026'da kapanıyor)
+  assert.ok(orderCall.url.startsWith('https://apigw.trendyol.com/integration/order/sellers/123/v2/orders?'), orderCall.url);
+  assert.ok(!calls.some((x) => x.url.includes('/sellers/123/orders?')), 'v2 varken v1 çağrılmaz');
   assert.equal(orderCall.headers.authorization, `Basic ${Buffer.from('key:secret').toString('base64')}`);
   assert.equal(orderCall.headers['user-agent'], '123 - SelfIntegration');
   const u = new URL(orderCall.url);
@@ -229,5 +231,21 @@ test('429 ilk yoklamada bağlantıyı düşürmez; 404 gelirse eski sapigw geçi
   assert.equal(account.status, 'connected', account.detail);
   assert.ok(calls.some((x) => x.url.startsWith('https://api.trendyol.com/sapigw/suppliers/123/orders')), 'yedek geçit denendi');
   assert.ok(store.getChat(qChat), 'yedek geçitten gelen soru işlendi');
+  await c.stop();
+});
+
+test('sipariş API v2 yoksa (556) v1 ucuna düşer ve bir daha v2 denemez', async () => {
+  const calls = fakeFetch((url) => {
+    if (url.includes('/v2/orders')) return { status: 556, body: '' };
+    if (url.includes('/order/sellers/123/orders')) return { body: page([PACKAGE()]) };
+    if (url.includes('/qna/sellers/123/questions/filter')) return { body: page([QUESTION()]) };
+    return undefined;
+  });
+  const { c, store, account, orderChat } = setup();
+  await c.start();
+  assert.equal(account.status, 'connected', account.detail);
+  assert.ok(store.getChat(orderChat), 'sipariş v1 ile geldi');
+  assert.equal(calls.filter((x) => x.url.includes('/v2/orders')).length, 1, 'v2 yalnız bir kez denenir');
+  assert.ok(calls.some((x) => x.url.includes('/order/sellers/123/orders?')));
   await c.stop();
 });
