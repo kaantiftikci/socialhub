@@ -37,7 +37,8 @@ jobs:
           - { name: mac-arm64, os: macos-14, arch: arm64, target: aarch64-apple-darwin, bundle: dmg }
           # Intel: Apple Silicon makinesinde x64 Node (Rosetta) + x86_64 Rust hedefi → yerel modüller x64 kurulur
           - { name: mac-intel, os: macos-14, arch: x64, target: x86_64-apple-darwin, bundle: dmg }
-          - { name: windows-x64, os: windows-latest, arch: x64, target: x86_64-pc-windows-msvc, bundle: nsis }
+          # windows-latest (VS 2026) npm'in node-gyp'inde tanınmıyor → yerel modül derlenemiyor; VS 2022'li imaj
+          - { name: windows-x64, os: windows-2022, arch: x64, target: x86_64-pc-windows-msvc, bundle: nsis }
     runs-on: ${{ matrix.os }}
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
