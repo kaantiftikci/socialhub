@@ -78,7 +78,7 @@ curl -fsSL https://raw.githubusercontent.com/kaantiftikci/socialhub/main/deploy/
 önceki ayarları korur. Sırrı değiştirmek için yalnız `--secret` ile yeniden çalıştır (panelde de aynısı olmalı).
 
 Ek seçenekler: `--origins https://demo.mivelo.app` (virgülle birden çok, boşluksuz), `--max-cores 8`,
-`--idle-minutes 720`, `--branch main`. Ayarlar `/etc/mivelo/gateway.env` dosyasında (yalnız root okur).
+`--idle-minutes 120`, `--branch main`. Ayarlar `/etc/mivelo/gateway.env` dosyasında (yalnız root okur).
 
 ## 4. Kontrol
 

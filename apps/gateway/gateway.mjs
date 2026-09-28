@@ -13,7 +13,7 @@
 //
 // Ortam: CORE_SECRET (≥32, zorunlu), ALLOWED_ORIGINS (virgüllü; varsayılan https://demo.mivelo.app), USERS_DIR
 // (/var/lib/mivelo/users), GATEWAY_HOST (127.0.0.1), GATEWAY_PORT (8787), CORE_PORT_BASE (17000), CORE_PORT_COUNT (1000),
-// MAX_CORES (12), IDLE_MINUTES (720), DISPLAY (Xvfb, ör. :99), PLAYWRIGHT_BROWSERS_PATH, CORE_ENTRY, NODE_BIN,
+// MAX_CORES (12), IDLE_MINUTES (120), DISPLAY (Xvfb, ör. :99), PLAYWRIGHT_BROWSERS_PATH, CORE_ENTRY, NODE_BIN,
 // CORE_EXTRA_ENV (çekirdeğe ayrıca geçirilecek değişken adları, virgüllü).
 import http from 'node:http';
 import net from 'node:net';
@@ -23,6 +23,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { UID_RE, verify, verifyDelete } from './token.mjs';
+import { nextScheduled, dueForWake, holdForSend } from './wake.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(here, '../..');
@@ -39,7 +40,7 @@ const CFG = {
   portBase: num(env.CORE_PORT_BASE, 17000),
   portCount: Math.max(1, num(env.CORE_PORT_COUNT, 1000)),
   maxCores: Math.max(1, num(env.MAX_CORES, 12)),
-  idleMs: Math.max(0.05, num(env.IDLE_MINUTES, 720)) * 60_000,
+  idleMs: Math.max(0.05, num(env.IDLE_MINUTES, 120)) * 60_000,
   origins: new Set((env.ALLOWED_ORIGINS ?? 'https://demo.mivelo.app').split(',').map((s) => s.trim().replace(/\/+$/, '')).filter(Boolean)),
   startTimeoutMs: 60_000,
   stopGraceMs: 10_000,
@@ -404,7 +405,7 @@ function stopCore(c, reason) {
 setInterval(() => {
   const now = Date.now();
   for (const c of cores.values()) {
-    if (c.state === 'ready' && c.ws === 0 && c.inflight === 0 && now - c.lastActive > CFG.idleMs) void stopCore(c, `${+(CFG.idleMs / 60_000).toFixed(1)} dk boşta`);
+    if (c.state === 'ready' && c.ws === 0 && c.inflight === 0 && now - c.lastActive > CFG.idleMs && !holdForSend(nextScheduled(c.dir), now)) void stopCore(c, `${+(CFG.idleMs / 60_000).toFixed(1)} dk boşta`);
   }
   // eski çöküş kayıtları
   for (const [uid, cr] of crashes) if (cr.until < now - 3_600_000) crashes.delete(uid);
@@ -412,6 +413,36 @@ setInterval(() => {
 setInterval(() => {
   for (const c of cores.values()) rotateLog(c.dir);
 }, 30_000).unref();
+
+/**
+ * Zamanlanmış gönderim uyandırması (wake.mjs): durdurulmuş üyenin kuyruğunda zamanı yaklaşan mesaj varsa çekirdeği başlat;
+ * çekirdek 15 sn'lik kendi döngüsünde gönderir, sonra yine IDLE_MINUTES boşta kalınca durur. Aynı zaman için bir kez
+ * (sunucu doluysa bir sonraki dakika yeniden denenir). Dakikada bir; üye başına tek küçük dosya okunur.
+ */
+const woken = new Map();
+setInterval(() => {
+  if (closing) return;
+  let uids;
+  try {
+    uids = fs.readdirSync(CFG.usersDir).filter((u) => UID_RE.test(u));
+  } catch {
+    return;
+  }
+  const now = Date.now();
+  for (const uid of uids) {
+    if (cores.has(uid) || deleting.has(uid)) continue;
+    const at = nextScheduled(path.join(CFG.usersDir, uid));
+    if (!dueForWake(at, now) || woken.get(uid) === at) continue;
+    ensureCore(uid).then(
+      () => {
+        woken.set(uid, at);
+        log(`${uid}: zamanlanmış gönderim için çekirdek uyandırıldı`);
+      },
+      (e) => log(`${uid}: zamanlanmış gönderim için uyandırılamadı (${e.message}); bir dakika sonra yeniden`),
+    );
+  }
+  for (const [uid, at] of woken) if (now - at > 3_600_000) woken.delete(uid);
+}, 60_000).unref();
 
 /* ---------------- HTTP ---------------- */
 

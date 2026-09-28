@@ -3,7 +3,7 @@
 # sürüme getirir, ayarları korur). Kullanım:
 #   curl -fsSL https://raw.githubusercontent.com/kaantiftikci/socialhub/main/deploy/server/setup.sh | sudo bash -s -- --domain core.mivelo.app --secret <SIR>
 # Seçenekler: --domain <alan adı>  --secret <CORE_SECRET, ≥32>  [--origins https://demo.mivelo.app]  [--max-cores N]
-#             [--idle-minutes 720]  [--branch main]  [--repo https://github.com/kaantiftikci/socialhub]
+#             [--idle-minutes 120]  [--branch main]  [--repo https://github.com/kaantiftikci/socialhub]
 # Ortam değişkeni olarak da verilebilir: DOMAIN, CORE_SECRET, ALLOWED_ORIGINS, MAX_CORES, IDLE_MINUTES, BRANCH, REPO_URL.
 # Ayrıntı: deploy/server/README.md
 
@@ -47,7 +47,7 @@ main() {
   [ -n "$MAX" ] || MAX=$(envget MAX_CORES "$ENV_FILE")
   [ -n "$IDLE" ] || IDLE=$(envget IDLE_MINUTES "$ENV_FILE")
   ORIGINS=${ORIGINS:-https://demo.mivelo.app}
-  IDLE=${IDLE:-720}
+  IDLE=${IDLE:-120}
   local MEM_MB
   MEM_MB=$(awk '/^MemTotal:/ {print int($2/1024)}' /proc/meminfo)
   if [ -z "$MAX" ]; then
@@ -207,7 +207,7 @@ usage() {
   cat <<'USAGE'
 Mivelo sunucu çekirdeği kurulumu (Ubuntu 24.04, root):
   curl -fsSL https://raw.githubusercontent.com/kaantiftikci/socialhub/main/deploy/server/setup.sh | sudo bash -s -- --domain core.mivelo.app --secret <SIR>
-Seçenekler: --domain  --secret  [--origins https://demo.mivelo.app]  [--max-cores N]  [--idle-minutes 720]  [--branch main]  [--repo URL]
+Seçenekler: --domain  --secret  [--origins https://demo.mivelo.app]  [--max-cores N]  [--idle-minutes 120]  [--branch main]  [--repo URL]
 USAGE
 }
 
