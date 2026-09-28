@@ -1,0 +1,7 @@
+# İndirme sayfası: tarayıcı eski tasarımı önbellekten göstermesin (her açılışta sunucuya sorar, değişmediyse 304).
+# Kök .htaccess'e konmadı: sunucudaki cPanel'in kendi kök .htaccess'ini (PHP işleyicisi) ezerdi. indir/files/ kendi .htaccess'iyle.
+<IfModule mod_headers.c>
+  <FilesMatch "\.html?$">
+    Header set Cache-Control "no-cache, must-revalidate"
+  </FilesMatch>
+</IfModule>

@@ -127,7 +127,8 @@ Dil: arayüz ve yorumlar Türkçe.
   Mivelo-windows-x64-setup.exe, latest.json {version,date,files}; `deploy/indir/.htaccess`: json'da CORS *, indirme başlığı, liste kapalı). İndirme sayfası
   `apps/landing/indir/index.html` (ana sayfanın görsel dili: cam üst çubuk, hareketli gradyan, kelime kelime açılan başlık + süpürülen alt metin,
   kaydırınca beliren kartlar; işletim sistemine göre büyük indirme düğmesi + önerilen kart (telefonda en üstte), Mac/Windows kayan hap sekmeli
-  kurulum adımları, lisans bandı; latest.json'dan boyut/sürüm; `prefers-reduced-motion` uyar). Chromium pakette YOK:
+  kurulum adımları, lisans bandı; latest.json'dan boyut/sürüm; `prefers-reduced-motion` uyar). `indir/.htaccess` HTML'e `no-cache` (tarayıcı eski
+  tasarımı gösteriyordu; admin/ ile aynı kural). Kök `.htaccess` YAZILMAZ (sunucudaki cPanel PHP işleyicisini ezer). Chromium pakette YOK:
   `packages/core/src/browser-install.ts` `ensureChromium` — köprü `launch` öncesi yoksa `playwright install --no-shell chromium` (gömülü node ile,
   tek uçuş, ilerleme hesap durumunda "Tarayıcı bileşeni indiriliyor… %N"); indirilemezse hata + "Yeniden bağlan". Uygulama içi yeni sürüm kartı
   `UpdateBanner.tsx` (yalnız Tauri + `VITE_APP_VERSION`; 6 sa'de bir latest.json; "İndir" → mivelo.app/indir, "Sonra" o sürümü atlar). Gerçek
