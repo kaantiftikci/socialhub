@@ -1437,6 +1437,11 @@ export default function App() {
                     // Bağlan: bu hesabın formu, e-posta adresi dolu gelir; kaydedince var olan hesap güncellenip yeniden bağlanır
                     setConnectFocus(`edit:${a.id}`);
                     setConnectOpen(true);
+                  } else if (is.action === 'panel') {
+                    setConnectFocus(a.id);
+                    setConnectOpen(true);
+                    notify(is.done);
+                    api.restartAccount(a.id).catch((e) => notify(e.message, true));
                   } else if (is.action === 'connect') {
                     setConnectFocus(a.id);
                     setConnectOpen(true);
@@ -1717,14 +1722,14 @@ function statusText(s: Account['status']): string {
  * Geçici 'connecting' uyarı sayılmaz. attention (bağlı ama PIN vb. bekliyor) önce gelir.
  */
 /** Giriş bilgisi reddi (yanlış/süresi dolmuş şifre, geçersiz API anahtarı): aynı bilgiyle yeniden denemek işe yaramaz */
-const AUTH_FAIL = /giriş reddedildi|uygulama şifresi|şifre|parola|kimlik doğrulama|yetkisiz|unauthori[sz]ed|invalid (credentials|api ?key|token)|\b40[13]\b|api anahtar/i;
+const AUTH_FAIL = /giriş reddedildi|uygulama şifresi|şifre|parola|kimlik doğrulama|yetkisiz|unauthori[sz]ed|invalid (credentials|api ?key|token)|authenticationfailed|login failed|auth(entication)? failed|\b40[13]\b|api anahtar/i;
 /** Bilgileri Bağlan formundan yeniden girilebilen (şifre/API anahtarıyla bağlanan) kanallar */
 const credentialForm = (a: Account) => {
   const p = PLATFORMS[a.platform];
   return p.mode === 'mail' || p.category === 'shop' || ((a.platform === 'gmail' || a.platform === 'icloud') && /uygulama şifresi|giriş reddedildi/i.test(a.detail ?? ''));
 };
 
-function accountIssue(a: Account): { title: string; how: string; label: string; action: 'reconnect' | 'connect' | 'credentials'; done: string } | null {
+function accountIssue(a: Account): { title: string; how: string; label: string; action: 'reconnect' | 'connect' | 'credentials' | 'panel'; done: string } | null {
   const name = PLATFORMS[a.platform].name;
   const browser = PLATFORMS[a.platform].mode === 'browser';
   const detail = (a.detail ?? '').replace(/\s+/g, ' ').trim();
@@ -1757,6 +1762,10 @@ function accountIssue(a: Account): { title: string; how: string; label: string; 
       done: `${name} giriş penceresi açılıyor`,
     };
   }
+  // Şifre/API anahtarıyla bağlanan kanallarda (e-posta, pazaryeri) sessiz yeniden deneme yetmez: hata ne olursa olsun hesabın
+  // Bağlan paneli açılır (tam hata metni + "Şifreyi güncelle" + "Yeniden dene"), yeniden deneme de arka planda başlar
+  if ((a.status === 'error' || a.status === 'disconnected') && credentialForm(a))
+    return { title: detail || (a.status === 'error' ? 'Bağlantı hatası' : 'Bağlantı kesildi'), how: 'Yeniden deneniyor; açılan panelde hatanın ayrıntısını görürsün. Şifre/anahtar değiştiyse oradan güncelle.', label: 'Yeniden bağlan', action: 'panel', done: 'Yeniden bağlanılıyor' };
   if (a.status === 'error')
     return { title: detail || 'Bağlantı hatası', how: 'Yeniden bağlanmayı dene. Sorun sürerse kanalın ayrıntısına (Uygulama bağla) bak.', label: 'Yeniden bağlan', action: 'reconnect', done: 'Yeniden bağlanılıyor' };
   if (a.status === 'disconnected')

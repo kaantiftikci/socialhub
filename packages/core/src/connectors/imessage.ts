@@ -147,10 +147,18 @@ export class IMessageConnector extends BaseConnector {
       // Sistem Ayarları → Gizlilik ve Güvenlik → Tam Disk Erişimi bölmesini doğrudan aç
       openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles');
       bus.log('error', `iMessage: chat.db açılamadı (${(e as Error).message}); Mivelo’da görünen iMessage verisi son başarılı okumadan kalma, yeni mesajlar gelmez`);
-      this.setStatus(
-        'error',
-        'Tam Disk Erişimi gerekli — açılan Sistem Ayarları penceresinde listeye Mivelo’yu (geliştirme modunda Terminal’i) ekleyip anahtarı aç, sonra “Yeniden dene” de',
-      );
+      // Arka plan servisi (launchd, `npm run autodeploy -- install`): izin Terminal'e değil doğrudan node ikilisine verilmeli
+      let who = 'Mivelo’yu (geliştirme modunda Terminal’i)';
+      if (process.env.XPC_SERVICE_NAME?.includes('mivelo') || !process.env.TERM_PROGRAM) {
+        let node = process.execPath;
+        try {
+          node = fs.realpathSync(process.execPath);
+        } catch {
+          /* yol çözülemedi */
+        }
+        who = `şu dosyayı (+ düğmesi, ⌘⇧G ile yolu yapıştır): ${node}`;
+      }
+      this.setStatus('error', `Tam Disk Erişimi gerekli — açılan Sistem Ayarları penceresinde listeye ${who} ekleyip anahtarı aç, sonra “Yeniden dene” de`);
       return;
     }
     this.account.label = os.userInfo().username;

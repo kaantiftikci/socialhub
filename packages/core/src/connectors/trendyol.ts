@@ -47,6 +47,18 @@ export const GATEWAYS: Gateway[] = [
   },
 ];
 
+/**
+ * Soru bir siparişe bağlıysa sipariş numarası. Trendyol belgelerinde alan adı yok: bilinen adlar, sonra adında "order"
+ * geçen (orderNumber, orderId, shipmentPackageId…) ilk dolu ilkel alan ya da `order` nesnesinin numarası.
+ */
+export function questionOrderNo(q: J): string | undefined {
+  const ok = (v: unknown) => (typeof v === 'string' || typeof v === 'number') && String(v).trim() && String(v).trim() !== '0';
+  for (const k of ['orderNumber', 'orderNo', 'orderId', 'customerOrderNumber']) if (ok(q[k])) return String(q[k]).trim();
+  if (q.order && typeof q.order === 'object') for (const k of ['orderNumber', 'number', 'id']) if (ok(q.order[k])) return String(q.order[k]).trim();
+  for (const [k, v] of Object.entries(q)) if (/order|siparis|shipmentpackage/i.test(k) && ok(v)) return String(v).trim();
+  return undefined;
+}
+
 const DAY = 86_400_000;
 /** İlk yoklama penceresi: doküman en fazla 2 hafta aralığa izin veriyor; sınırın hemen altında kal. */
 const FIRST_WINDOW = 14 * DAY - 60_000;
@@ -143,6 +155,7 @@ export class TrendyolConnector extends BaseConnector {
   private gw = 0;
   /** sohbet remoteId (order-…/q-…) → son görülen imza */
   private seen = new Map<string, string>();
+  private fieldsLogged = false;
   /**
    * siparişNo → bilinen paketler (yalnız ingestOrder'ın kullandığı alanlar). Yoklama penceresi yalnız son değişen paketleri
    * döndürdüğü için çok paketli siparişte gelen paketler bunlarla birleştirilir; yoksa sohbet meta'sı eksik paketle ezilirdi.
@@ -276,6 +289,14 @@ export class TrendyolConnector extends BaseConnector {
         if (this.ingestOrder(merged, !first)) changedOrders++;
       }
       let changedQuestions = 0;
+      // Tanı (bir kez): sorularda gelen alan ADLARI (değer yok) — sipariş sorusu bağının hangi alanla geldiğini görmek için
+      if (!this.fieldsLogged && questions.length) {
+        this.fieldsLogged = true;
+        const keys = new Set<string>();
+        for (const q of questions.slice(0, 200)) for (const k of Object.keys(q)) keys.add(k);
+        const withOrder = questions.filter((q) => questionOrderNo(q)).length;
+        bus.log('info', `Trendyol soru alanları: ${[...keys].sort().join(', ')} · siparişe bağlı: ${withOrder}/${questions.length}`);
+      }
       for (const q of questions.reverse()) if (this.ingestQuestion(q, !first)) changedQuestions++;
       if (changedOrders || changedQuestions || first) {
         bus.log('info', `Trendyol: ${orders.size} sipariş (${changedOrders} güncellendi), ${questions.length} soru (${changedQuestions} güncellendi)`);
@@ -431,7 +452,7 @@ export class TrendyolConnector extends BaseConnector {
   private ingestQuestion(q: J, live: boolean): boolean {
     const id = String(q.id);
     const rid = `q-${id}`;
-    const sig = JSON.stringify([q.status, q.answer?.text, q.answer?.creationDate, q.rejectedAnswer?.text, q.reportReason]);
+    const sig = JSON.stringify([q.status, q.answer?.text, q.answer?.creationDate, q.rejectedAnswer?.text, q.reportReason, questionOrderNo(q) ?? null]);
     const prev = this.seen.get(rid);
     if (prev === sig) return false;
     const status = String(q.status ?? 'WAITING_FOR_ANSWER');
@@ -445,7 +466,7 @@ export class TrendyolConnector extends BaseConnector {
     const waiting = status === 'WAITING_FOR_ANSWER';
     const product = String(q.productName ?? 'Ürün');
     // sipariş sorusu: soru bir siparişe bağlıysa numarası (alan adı belgede yok; olası adlar denenir) → arayüzde "Sipariş soruları" sekmesi
-    const orderRaw = q.orderNumber ?? q.orderId ?? q.order?.orderNumber ?? q.order?.id;
+    const orderRaw = questionOrderNo(q);
     const orderNumber = orderRaw != null && String(orderRaw).trim() ? String(orderRaw).trim() : undefined;
     this.upsertChat({
       remoteId: rid,

@@ -234,11 +234,10 @@ button:focus-visible, a:focus-visible, .sw:focus-visible { outline: 2px solid va
 .tabs .c { color: var(--v); font-size: 11px; font-variant-numeric: tabular-nums; }
 .tabs .c.amber { color: var(--amber-txt); }
 .tabs button.fol { flex: 0 0 auto; padding: 0 10px; }
-/* pazaryeri: Tümü · Siparişler · Ürün soruları · Sipariş soruları dar listeye sığmıyordu (Tümü taşıyordu) → 2×2 ızgara */
-.tabs.shop { display: grid; overflow: visible; }
-.tabs.shop.n4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.tabs.shop.n3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.tabs.shop button { min-width: 0; }
+/* pazaryeri: dört sekme tek satır (iMessage klasörleri gibi); sığsın diye iç boşluk dar, sayı rozeti yakın */
+.tabs.shop { gap: 2px; }
+.tabs.shop button { flex: 1 1 auto; min-width: 0; padding: 0 3px; font-size: 11px; letter-spacing: -.1px; }
+.tabs.shop .c { font-size: 10.5px; }
 .tabs button.due .c { color: var(--amber-txt); font-weight: 600; }
 .brief { display: flex; align-items: center; gap: 11px; padding: 11px 11px 11px 12px; border-radius: 16px; background: var(--surface); border: 1px solid var(--line3); box-shadow: 0 10px 24px -14px rgba(17,16,22,.14); width: 100%; text-align: left; }
 .brief .ico { width: 34px; height: 34px; border-radius: 10px; background: var(--v); color: #fff; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }

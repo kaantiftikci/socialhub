@@ -630,7 +630,7 @@ export function ConnectModal({
                 </div>
               )}
 
-              {activeAccount.status === 'error' && (
+              {(activeAccount.status === 'error' || activeAccount.status === 'disconnected') && (
                 <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   {(PLATFORMS[activeAccount.platform].mode === 'mail' || PLATFORMS[activeAccount.platform].category === 'shop' || /uygulama şifresi|giriş reddedildi/i.test(activeAccount.detail ?? '')) && (
                     <button className="btn primary b" onClick={() => editCredentials(activeAccount)}>

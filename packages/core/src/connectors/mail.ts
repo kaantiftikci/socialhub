@@ -175,7 +175,14 @@ export class MailConnector extends BaseConnector {
       this.schedule();
       void this.startIdle();
     } catch (e) {
-      this.setStatus('error', (e as Error).message.split('\n')[0]);
+      // İlk girişteki hata da sınıflandırılsın: şifre reddi → "Giriş reddedildi…" (arayüz "Şifreyi güncelle" gösterir); imapflow'un
+      // genel "Command failed" metnine sunucunun asıl açıklaması (responseText) eklenir — eskiden yalnız "Command failed" görünüyordu
+      const err = e as { message?: string; responseText?: string; authenticationFailed?: boolean };
+      this.classify(e);
+      if (this.authFailed) return;
+      const msg = String(err.message ?? e).split('\n')[0];
+      const extra = err.responseText && !msg.includes(err.responseText) ? ` — ${err.responseText}` : '';
+      this.setStatus('error', `${msg}${extra}`.slice(0, 300));
     }
   }
 
@@ -279,13 +286,13 @@ export class MailConnector extends BaseConnector {
    * ETHROTTLE → throttleReset kadar bekle; [ALERT]/[LIMIT]/çok fazla eşzamanlı bağlantı → 15 dk bekle.
    */
   private classify(e: unknown): void {
-    const err = e as { authenticationFailed?: boolean; code?: string; throttleReset?: number; message?: string; response?: string };
-    const text = `${err.message ?? ''} ${err.response ?? ''}`;
-    if (err.authenticationFailed || /AUTHENTICATIONFAILED|Invalid credentials|Web login required/i.test(text)) {
+    const err = e as { authenticationFailed?: boolean; code?: string; throttleReset?: number; message?: string; response?: string; responseText?: string };
+    const text = `${err.message ?? ''} ${err.response ?? ''} ${err.responseText ?? ''}`;
+    if (err.authenticationFailed || /AUTHENTICATIONFAILED|Invalid credentials|Web login required|LOGIN failed|Authentication failed|incorrect (username|password)/i.test(text)) {
       this.authFailed = true;
       if (this.timer) clearTimeout(this.timer);
       if (this.idleRetry) clearTimeout(this.idleRetry);
-      this.setStatus('error', 'Giriş reddedildi: uygulama şifresini kontrol edip "Yeniden bağlan" de (tekrarlı deneme hesabı kilitleyebileceği için otomatik denenmiyor)');
+      this.setStatus('error', 'Giriş reddedildi: uygulama şifresini kontrol edip "Şifreyi güncelle" ile yeniden gir (tekrarlı deneme hesabı kilitleyebileceği için otomatik denenmiyor)');
       return;
     }
     if (err.code === 'ETHROTTLE') this.pauseUntil = Date.now() + Math.max(err.throttleReset ?? 60_000, 30_000);

@@ -153,3 +153,25 @@ test('registry: aynı e-posta adresi yeniden eklenince kopya açılmaz, var olan
   store.deleteAccount(a.id);
   store.deleteAccount(c.id);
 });
+
+test('mail: ilk girişte şifre reddi "Giriş reddedildi" olur; genel hata sunucu açıklamasıyla gösterilir', async () => {
+  const { MailConnector } = await import('../src/connectors/mail.js');
+  const acc = { id: 'yahoo:t1', platform: 'yahoo' as const, label: 'x@yahoo.com', status: 'disconnected' as const, createdAt: 1 };
+  store.upsertAccount(acc);
+  const run = async (err: unknown) => {
+    const c = new MailConnector({ ...acc }, store, { user: 'x@yahoo.com', pass: 'p', host: 'imap.mail.yahoo.com' });
+    (c as unknown as { poll: () => Promise<void> }).poll = async () => {
+      throw err;
+    };
+    await c.start();
+    const snap = { status: c.account.status, detail: c.account.detail };
+    await c.stop();
+    return snap;
+  };
+  const a1 = await run(Object.assign(new Error('Command failed'), { responseText: 'LOGIN failed' }));
+  assert.equal(a1?.status, 'error');
+  assert.match(a1?.detail ?? '', /Giriş reddedildi/);
+  const a2 = await run(Object.assign(new Error('Command failed'), { responseText: 'Server busy' }));
+  assert.match(a2?.detail ?? '', /Command failed — Server busy/);
+  store.deleteAccount(acc.id);
+});

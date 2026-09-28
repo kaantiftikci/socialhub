@@ -29,6 +29,9 @@ Dil: arayüz ve yorumlar Türkçe.
   Demo çekirdeği `#e2e-` etiketli mesaja 2 sn'de yankı verir (aracın kendisi demo ile sınanır).
 - `npm test -w packages/core` — sahte sayfa nesnesiyle strateji birim testleri (Slack: client.counts/conversations.list/history biçimlendirme,
   before, conversations.mark). Yeni strateji mantığı için buraya test ekle.
+- Tanı betikleri (Mac'te, değer yazdırmaz; çıktı Claude'a): `node scripts/imessage-probe.mjs` (chat.db ↔ Mivelo sayıları, en yeni mesaj,
+  klasörler, node ikilisi FDA yolu), `node scripts/trendyol-probe.mjs` (soru alan adları + aday sipariş sorusu uçları). Trendyol connector'ı
+  soru alan adlarını günlüğe bir kez yazar (`Trendyol soru alanları: …`); `questionOrderNo` adında order geçen alanı sipariş bağı sayar.
 - `node scripts/verify-strategy.mjs <slack|instagram|linkedin|x|messenger>` — canlı oturumun profil KOPYASIYLA (uygulamaya dokunmadan)
   threads/messages/before doğrulaması. Önce `npm run build -w packages/core`.
 
@@ -102,7 +105,7 @@ Dil: arayüz ve yorumlar Türkçe.
 - **Pazaryerleri**: `trendyol.ts` (resmi Satıcı API: soru-cevap + sipariş), `hepsiburada.ts` (Satıcıya Sor + OMS), `n11.ts` (REST sipariş + SOAP
   soru), `etsy.ts`/`shopify.ts`/`amazon.ts` (resmi API siparişler + tarayıcı köprüsüyle mesaj/inbox; deneysel). Pazaryeri yanıtları
   yalnız metin (arayüz dosya/ses düğmesini gizler). Shopier `available:false` ("Yakında").
-  Pazaryeri kanal listesi sekmeleri **Tümü · Siparişler · Ürün soruları · Sipariş soruları** (2×2 ızgara `.tabs.shop`; `types.ts` `shopTabOf`:
+  Pazaryeri kanal listesi sekmeleri **Tümü · Siparişler · Ürün soruları · Sipariş soruları** (tek satır `.tabs.shop`, 11 px, iMessage klasörleri gibi; `types.ts` `shopTabOf`:
   meta.order → sipariş; soru `questionOrderRef` varsa (meta.question.orderNumber — Trendyol'da alan adı belgesiz, orderNumber/orderId/order.*
   denenir; HB orderNumber; Amazon handle 123-1234567-1234567) sipariş sorusu, yoksa ürün sorusu; Sipariş soruları sekmesi `ORDER_Q_PLATFORMS`
   ya da içerik varsa; sayılar `shopPending`: açık sipariş / cevap bekleyen soru). Satırda 📦/❓ işareti (`.skind`); sağ panelde `OrderPanel` ya da `QuestionPanel` (meta.question).
@@ -130,7 +133,9 @@ Dil: arayüz ve yorumlar Türkçe.
   - PHP depoları: önce kodla, tmp+rename, ayrı `.lock`; bozuk dosya 500 (asla sıfırlama); admin varsayılan şifreye asla düşmez; IPv6 /64 sınırı.
     Deploy durum dosyası `api/.ftp-deploy-sync-state.json` (sunucu kökündeki eskisi elle silinmeli).
 - **Giriş bilgisi reddi** (`App.tsx` `AUTH_FAIL` + `credentialForm`): e-posta/pazaryeri hesabında şifre/anahtar reddedilince uyarı düğmesi
-  "Şifreyi/Bilgileri güncelle" → Bağlan `focus="edit:<hesap>"` formu (e-posta dolu). Çekirdek `registry.add`: aynı platform + aynı adresli
+  "Şifreyi/Bilgileri güncelle" → Bağlan `focus="edit:<hesap>"` formu (e-posta dolu). Diğer hata/kopma durumlarında bu kanallarda uyarı
+  düğmesi (`panel`) hesabın Bağlan panelini açar + yeniden dener (sessiz "Yeniden bağlanılıyor" yok). mail.ts ilk giriş hatası da
+  `classify`'dan geçer (LOGIN failed/Authentication failed → authFailed) ve imapflow `responseText` detail'e eklenir. Çekirdek `registry.add`: aynı platform + aynı adresli
   e-posta hesabı varsa kopya açmaz, token'ı birleştirip (formda olmayan alanlar korunur) yeniden başlatır (test: security-fixes).
 - **Sohbet listesi**: `/api/chats` HESAP BAŞINA en yeni 3000 (`store.listChats`; eskiden toplam 600 → çok sohbetli WhatsApp iMessage'ın
   eski/klasördeki sohbetlerini atıyordu) + okunmamış/bayraklı/takipte/iMessage klasör-silinen her zaman. Arayüz 300'lük parçalarla çizer
