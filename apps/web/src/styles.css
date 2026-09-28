@@ -507,7 +507,8 @@ a.att-card { cursor: pointer; }
 
 /* ---------- modal / connect ---------- */
 .overlay { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; padding: 28px; background: var(--scrim); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
-.modal { width: min(940px, 94vw); max-height: 90vh; overflow: hidden; background: var(--bg); border-radius: 28px; padding: 10px; display: flex; flex-direction: column; box-shadow: 0 40px 80px -30px rgba(0,0,0,.5); }
+.modal { position: relative; width: min(940px, 94vw); max-height: 90vh; overflow: hidden; background: var(--bg); border-radius: 28px; padding: 10px; display: flex; flex-direction: column; box-shadow: 0 40px 80px -30px rgba(0,0,0,.5); }
+.modal-x { position: absolute; top: 18px; right: 22px; z-index: 5; box-shadow: 0 6px 16px -8px rgba(0,0,0,.35); }
 .modal-scroll { overflow: auto; min-height: 0; max-height: calc(90vh - 20px); padding: 16px 6px 16px 16px; display: flex; flex-direction: column; gap: 20px; scrollbar-width: thin; scrollbar-color: var(--scroll) transparent; }
 .modal-scroll::-webkit-scrollbar { width: 10px; }
 .modal-scroll::-webkit-scrollbar-track { background: transparent; margin: 16px 0; }

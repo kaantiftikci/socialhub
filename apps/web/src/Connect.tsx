@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type InputHTMLAttributes } from 'react';
 import { clearOpening, markOpening } from './login-opening';
+import { bindLogin, preopenLogin } from './LoginView';
 import { api, USE_STATIC } from './api';
 import { DEMO_OFFLINE, STATIC_DEMO } from './profile';
 import { openDemoLoginWindow, staticApi } from './static-demo';
@@ -92,7 +93,6 @@ export function ConnectModal({
     setActive(`${a.platform}:new`);
   };
   const [tg, setTg] = useState({ apiId: '', apiHash: '' });
-  const [tgAdv, setTgAdv] = useState(false);
   /** Slack resmi uygulama: User OAuth Token (xoxp) + isteğe bağlı App-Level Token (xapp, Socket Mode) */
   const [slackTok, setSlackTok] = useState({ user: '', app: '' });
   const [pat, setPat] = useState('');
@@ -125,14 +125,15 @@ export function ConnectModal({
   const macOnlyOff = (p: Platform) => MAC_ONLY.has(p) && !!coreOs && coreOs !== 'darwin';
 
   /** Slack varsayılanı kullanıcı adı + şifreyle tarayıcı girişi (Kaan'ın isteği); opts.token: Slack uygulama belirteci yolu ("Gelişmiş") */
-  async function add(platform: Platform, opts: { browser?: boolean; form?: boolean; token?: boolean } = {}) {
+  async function add(platform: Platform, opts: { browser?: boolean; form?: boolean; token?: boolean; advanced?: boolean } = {}) {
     setBusy(true);
     try {
       if (platform === 'slack' && opts.token && (active !== 'slack:new' || !slackTok.user.trim())) {
         setActive('slack:new');
         return;
       }
-      if (platform === 'telegram' && active !== 'telegram:new') {
+      // Telegram WhatsApp gibi: Bağlan'a basınca doğrudan QR (ara form yok); kendi api_id'si yalnız "Gelişmiş"ten
+      if (platform === 'telegram' && opts.advanced && active !== 'telegram:new') {
         setActive('telegram:new');
         return;
       }
@@ -187,7 +188,16 @@ export function ConnectModal({
         }
         token = JSON.stringify(cfg);
       }
-      const a = await api.addAccount(platform, token);
+      // sunucu çekirdeği: giriş sekmesi tıklama anında açılır (await'ten sonra açılanı tarayıcı engeller)
+      const tab = !token ? preopenLogin(platform) : null;
+      let a: Account;
+      try {
+        a = await api.addAccount(platform, token);
+      } catch (e) {
+        tab?.close();
+        throw e;
+      }
+      bindLogin(tab, a.id);
       setActive(a.id);
       setMail(EMPTY_MAIL);
       await onChanged();
@@ -526,21 +536,14 @@ export function ConnectModal({
                 Bağlan deyince çıkan kodu telefondaki Telegram → <b>Ayarlar → Cihazlar → Masaüstü Cihazı Bağla</b> ile okut.
               </p>
               <div className="field" style={{ marginTop: 12, gap: 8 }}>
-                {tgAdv && <>
+                {<>
                 <input value={tg.apiId} onChange={(e) => setTg({ ...tg, apiId: e.target.value })} placeholder="api_id (isteğe bağlı)" style={{ flex: '0 0 160px' }} />
                 <PasswordInput value={tg.apiHash} onChange={(e) => setTg({ ...tg, apiHash: e.target.value })} placeholder="api_hash (isteğe bağlı)" autoComplete="off" />
                 </>}
-                <button className="btn lime b" onClick={() => add('telegram')} disabled={busy}>
+                <button className="btn lime b" onClick={() => add('telegram', { advanced: true })} disabled={busy}>
                   Bağlan
                 </button>
               </div>
-              {!tgAdv && (
-                <p style={{ margin: '8px 0 0', fontSize: 12.5 }}>
-                  <a href="#tg-adv" onClick={(e) => (e.preventDefault(), setTgAdv(true))} style={{ color: 'var(--text3)' }}>
-                    Gelişmiş
-                  </a>
-                </p>
-              )}
             </div>
           </div>
         )}
@@ -587,6 +590,13 @@ export function ConnectModal({
                   <li>Kamerayı bu koda tut</li>
                 </ol>
               )}
+              {!USE_STATIC && activeAccount.platform === 'telegram' && activeAccount.status === 'pairing' && !prompts[activeAccount.id] && (
+                <p style={{ margin: '4px 0 0', fontSize: 12.5 }}>
+                  <a href="#tg-adv" onClick={(e) => (e.preventDefault(), setActive('telegram:new'))} style={{ color: 'var(--text3)' }}>
+                    Gelişmiş: kendi uygulama kimliğinle bağlan
+                  </a>
+                </p>
+              )}
 
               {DEMO_OFFLINE && PLATFORMS[activeAccount.platform].mode === 'browser' && activeAccount.status === 'pairing' && <DemoLogin account={activeAccount} onDone={onChanged} />}
               {!DEMO_OFFLINE && PLATFORMS[activeAccount.platform].mode === 'browser' && activeAccount.status !== 'connected' && (
@@ -605,6 +615,7 @@ export function ConnectModal({
                         if (!openDemoLoginWindow(activeAccount)) notify('Giriş penceresi engellendi; tarayıcıda açılır pencerelere izin ver', true);
                         return;
                       }
+                      preopenLogin(activeAccount.platform, activeAccount.id);
                       setBusy(true);
                       markOpening(activeAccount.id, 'Giriş penceresi açılıyor');
                       api.restartAccount(activeAccount.id).catch((e) => (clearOpening(activeAccount.id), notify(e.message, true), onChanged())).finally(() => setBusy(false));
@@ -681,16 +692,15 @@ export function ConnectModal({
   return (
     <div className={`overlay ${closing ? 'closing' : ''}`} onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Uygulama bağla">
+        {/* kapatma düğmesi kaydırılan alanın DIŞINDA: aşağı inince de görünür */}
+        <button className="btn icon b b2 modal-x" onClick={onClose} aria-label="Kapat">
+          <Icon name="x" size={15} sw={2} />
+        </button>
         <div className="modal-scroll">
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-          <div style={{ flexGrow: 1 }}>
-            <h2>
-              Bütün sohbetlerin, <mark>tek bir yerde.</mark>
-            </h2>
-          </div>
-          <button className="btn icon b b2" onClick={onClose} aria-label="Kapat">
-            <Icon name="x" size={15} sw={2} />
-          </button>
+        <div style={{ paddingRight: 52 }}>
+          <h2>
+            Bütün sohbetlerin, <mark>tek bir yerde.</mark>
+          </h2>
         </div>
 
         <div className="grid3">

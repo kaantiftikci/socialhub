@@ -154,6 +154,8 @@ Dil: arayüz ve yorumlar Türkçe.
   önce facebook.com/messages, olmazsa messenger.com — Nisan 2026'da kapandı; seçilen adres günlüğe yazılır, `verify-strategy.mjs messenger`
   hangisinin çalıştığını basar; facebook.com düzeni gerçek hesapla henüz doğrulanmadı).
   Çerezli medya `fetchMedia` ile vekilden geçer, `~/.mivelo/sessions/<hesap>/media` önbelleği.
+- Bağlan penceresi: kapatma ✕ `.modal-x` kaydırılan alanın DIŞINDA (mutlak konum, aşağı inince de görünür). Telegram kartında Bağlan → doğrudan QR (ara form yok; kendi api_id'si yalnız QR altındaki "Gelişmiş" bağlantısıyla `telegram:new`).
+- **Sunucu çekirdeğinde giriş HARİCİ SEKMEDE** (Kaan: uygulama içinde açılmasın): `LoginView.tsx` `preopenLogin(platform, id?)` sekmeyi TIKLAMA ANINDA açar (await sonrası açılanı tarayıcı engelliyordu → giriş Mivelo içinde görünüyordu); id yoksa boş sekme + `bindLogin`. Çağrılar: Connect `add` (token'sız), "Giriş ekranını aç", App uyarı düğmeleri/menü "Yeniden bağlan". Uzak modda LoginView asla katman çizmez: "Giriş ayrı sekmede açık · Sekmeye git" / "Giriş sekmesi engellendi · Giriş sekmesini aç" hapı. `?loginview` sekmesi login.end'de, hesap 'connected' olunca ya da 30 sn görüntü gelmez ve hesap 'pairing' değilse kendini kapatır.
 - **Telegram** (teleproto — bakımı süren GramJS fork'u; GramJS Temmuz 2026'da arşivlendi): api_id/api_hash Bağlan formundan (token dosyası JSON); giriş QR ile (`tg://login?token`), 2FA parolası prompt.
 - **iMessage**: `~/Library/Messages/chat.db` salt okunur + AppleScript gönderim; Tam Disk Erişimi yoksa Sistem Ayarları bölmesini açar.
 - **E-posta** (`connectors/mail.ts`): imapflow + nodemailer + mailparser; thread = sohbet. Gmail: uygulama şifresi ya da
