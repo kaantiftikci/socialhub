@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { authLoadAccounts, authLogin, authLogout, authMe, type SessionUser } from './auth-api';
+import { authLoadAccounts, authLogin, authLogout, authMe, authRegister, type SessionUser } from './auth-api';
 import { setLeaveDemoPanel } from './demo-session';
 import { setProfileName } from './profile';
 import { clearDemoAccounts, loadDemoAccounts } from './static-demo';
@@ -70,10 +70,21 @@ function AuthScreen({
   onClearError: () => void;
   onEnter: (user: SessionUser) => Promise<void>;
 }) {
+  const [mode, setMode] = useState<'login' | 'signup' | 'sent'>('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [note, setNote] = useState('');
+  const [website, setWebsite] = useState('');
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState('');
+
+  const switchTo = (m: 'login' | 'signup') => {
+    setMode(m);
+    setLocalError('');
+    onClearError();
+  };
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -81,6 +92,12 @@ function AuthScreen({
     onClearError();
     setBusy(true);
     try {
+      if (mode === 'signup') {
+        await authRegister({ name: name.trim(), username: username.trim().toLowerCase(), email: email.trim(), password, note: note.trim() || undefined, website });
+        setPassword('');
+        setMode('sent');
+        return;
+      }
       const res = await authLogin(username.trim(), password);
       await onEnter(res.user);
     } catch (err) {
@@ -92,6 +109,25 @@ function AuthScreen({
 
   const shown = localError || error;
 
+  if (mode === 'sent')
+    return (
+      <div className="auth-screen">
+        <div className="auth-card">
+          <div className="brand">
+            <Logo size={36} />
+            <span>mivelo</span>
+          </div>
+          <h1>Talebin alındı</h1>
+          <p className="auth-note">
+            Üyelik talebin incelemeye gönderildi. Onaylanınca <b>{email.trim()}</b> adresine e-posta gelecek; sonra <b>{username.trim().toLowerCase()}</b> kullanıcı adı ve belirlediğin şifreyle giriş yapabilirsin.
+          </p>
+          <button className="btn primary b" type="button" onClick={() => switchTo('login')}>
+            Giriş ekranına dön
+          </button>
+        </div>
+      </div>
+    );
+
   return (
     <div className="auth-screen">
       <form className="auth-card" onSubmit={submit}>
@@ -99,18 +135,54 @@ function AuthScreen({
           <Logo size={36} />
           <span>mivelo</span>
         </div>
-        <h1>Giriş yap</h1>
+        <div className="auth-tabs" role="tablist">
+          <button type="button" role="tab" aria-selected={mode === 'login'} className={mode === 'login' ? 'on' : ''} onClick={() => switchTo('login')}>
+            Giriş yap
+          </button>
+          <button type="button" role="tab" aria-selected={mode === 'signup'} className={mode === 'signup' ? 'on' : ''} onClick={() => switchTo('signup')}>
+            Üyelik oluştur
+          </button>
+        </div>
+        {mode === 'signup' && (
+          <>
+            <p className="auth-note">Demoyu denemek için üyelik talebi gönder. Onaylanınca e-posta ile haber veririz; demo sana özel olur.</p>
+            <label>
+              Adın
+              <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" required minLength={2} maxLength={60} />
+            </label>
+            <label>
+              E-posta
+              <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" autoComplete="email" autoCapitalize="none" required maxLength={120} />
+            </label>
+          </>
+        )}
         <label>
           Kullanıcı adı
-          <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoCapitalize="none" required minLength={2} maxLength={40} pattern=".*\S.*\S.*" title="En az 2 karakter" />
+          {mode === 'signup' ? (
+            <input value={username} onChange={(e) => setUsername(e.target.value.toLowerCase())} autoComplete="username" autoCapitalize="none" required pattern="[a-z0-9._\-]{3,24}" title="3-24 karakter: küçük harf, rakam, nokta, tire, alt çizgi" maxLength={24} />
+          ) : (
+            <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoCapitalize="none" required minLength={2} maxLength={120} pattern=".*\S.*\S.*" title="En az 2 karakter" />
+          )}
         </label>
         <label>
           Şifre
-          <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
+          <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} required minLength={mode === 'signup' ? 8 : undefined} />
         </label>
+        {mode === 'signup' && (
+          <>
+            <label>
+              <span>
+                Not <span className="auth-opt">(isteğe bağlı)</span>
+              </span>
+              <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={300} placeholder="Nereden duydun, ne için kullanacaksın?" />
+            </label>
+            {/* bot tuzağı: görünmez alan */}
+            <input className="auth-hp" value={website} onChange={(e) => setWebsite(e.target.value)} tabIndex={-1} autoComplete="off" aria-hidden="true" name="website" />
+          </>
+        )}
         {shown && <div className="auth-error">{shown}</div>}
         <button className="btn primary b" type="submit" disabled={busy}>
-          {busy ? <span className="spin" /> : 'Giriş yap'}
+          {busy ? <span className="spin" /> : mode === 'signup' ? 'Üyelik talebi gönder' : 'Giriş yap'}
         </button>
         {REMOTE_CORE && (
           <div className="auth-remote">

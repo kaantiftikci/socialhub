@@ -1805,7 +1805,7 @@ function accountIssue(a: Account): { title: string; how: string; label: string; 
 function handleOf(a: Account): string {
   const pn = PLATFORMS[a.platform].name.toLowerCase();
   const label = (a.label ?? '').trim();
-  if (label && label.toLowerCase() !== pn && label.toLowerCase() !== a.platform) return label;
+  if (label && !/^(error|hata)$|^olk-|pivot/i.test(label) && label.toLowerCase() !== pn && label.toLowerCase() !== a.platform) return label;
   if (a.status === 'connected' && a.detail && /^[+@]/.test(a.detail)) return a.detail;
   return '';
 }

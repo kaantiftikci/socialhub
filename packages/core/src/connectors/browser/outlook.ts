@@ -338,7 +338,11 @@ export const outlook: Strategy = {
           const count = new Map<string, number>();
           try {
             for (let i = 0; i < localStorage.length; i++) {
-              for (const m of (localStorage.key(i) ?? '').match(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/gi) ?? []) count.set(m.toLowerCase(), (count.get(m.toLowerCase()) ?? 0) + 1);
+              // adres anahtara bitişik yazılır ("olk-mail_LAST_SELECTED_PIVOTad@hotmail.com"): baştaki BÜYÜK_HARF önekini ve olk- kısmını at
+              for (const raw of (localStorage.key(i) ?? '').match(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/gi) ?? []) {
+                const m = raw.replace(/^.*[A-Z]{3,}(?:_[A-Z]+)*_?(?=[a-z0-9])/, '').replace(/^olk-[\w-]*?_/i, '').toLowerCase();
+                if (m.includes('@') && !/^olk-|pivot/i.test(m)) count.set(m, (count.get(m) ?? 0) + 1);
+              }
             }
           } catch {
             /* yok */

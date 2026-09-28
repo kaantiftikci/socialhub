@@ -36,13 +36,6 @@ const SLACK_APP_URL = `https://api.slack.com/apps?new_app=1&manifest_json=${enco
 const MAIL_FORM_FIRST = new Set<Platform>(['gmail', 'icloud', 'yahoo']);
 const usesMailForm = (p: Platform) => PLATFORMS[p]?.mode === 'mail' || MAIL_FORM_FIRST.has(p);
 
-const UNOFFICIAL: Partial<Record<Platform, string>> = {
-  whatsapp: 'WhatsApp kişisel hesaplar için API sunmaz; Mivelo WhatsApp Web gibi "bağlı cihaz" olarak bağlanır.',
-  instagram: 'Instagram kişisel hesaplar için mesaj API’si sunmaz; Mivelo kendi web oturumunla bağlanır.',
-  messenger: 'Messenger kişisel hesaplar için API sunmaz; Mivelo kendi web oturumunla bağlanır.',
-  linkedin: 'LinkedIn mesaj API’sini yalnız onaylı iş ortaklarına açar; Mivelo kendi web oturumunla bağlanır.',
-  x: 'X’in DM API’si ücretli ve şifreli sohbetleri göstermez; Mivelo kendi web oturumunla bağlanır.',
-};
 const SHOP_ORDER: Platform[] = ['trendyol', 'hepsiburada', 'n11', 'etsy', 'shopify', 'amazon'];
 
 interface MailForm {
@@ -97,6 +90,7 @@ export function ConnectModal({
     setActive(`${a.platform}:new`);
   };
   const [tg, setTg] = useState({ apiId: '', apiHash: '' });
+  const [tgAdv, setTgAdv] = useState(false);
   /** Slack resmi uygulama: User OAuth Token (xoxp) + isteğe bağlı App-Level Token (xapp, Socket Mode) */
   const [slackTok, setSlackTok] = useState({ user: '', app: '' });
   const [pat, setPat] = useState('');
@@ -239,7 +233,7 @@ export function ConnectModal({
               <div style={{ flexGrow: 1 }}>
                 <h3>{PLATFORMS[p].name} hesabını bağla</h3>
                 <p style={{ margin: '0 0 12px', fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.5 }}>
-                  {who} giriş sayfası açılır; her zamanki e-posta adresin ve şifrenle giriş yap (doğrulama isterse tamamla). Giriş algılanınca pencere kendiliğinden kapanır. Şifren Mivelo'ya girilmez.
+                  {who} giriş sayfası açılır. E-posta adresin ve şifrenle giriş yap; pencere kendiliğinden kapanır.
                 </p>
                 <div className="field" style={{ gap: 8, flexWrap: 'wrap' }}>
                   <button className="btn lime b" onClick={() => void add(p, { browser: true })} disabled={busy}>
@@ -247,9 +241,9 @@ export function ConnectModal({
                   </button>
                 </div>
                 <p style={{ margin: '10px 0 0', fontSize: 12.5, color: 'var(--text3, var(--text2))', lineHeight: 1.5 }}>
-                  E-postaların saniyesinde gelsin ve arka planda tarayıcı açılmasın istersen{' '}
+                  Ya da{' '}
                   <a href="#form" onClick={(e) => (e.preventDefault(), setActive(`${p}:new`))} style={{ color: 'var(--v-txt)', fontWeight: 600 }}>
-                    uygulama şifresiyle bağlan (gelişmiş)
+                    uygulama şifresiyle bağlan
                   </a>
                   .
                 </p>
@@ -268,17 +262,12 @@ export function ConnectModal({
                 <p style={{ margin: '0 0 10px', fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.5 }}>
                   {p === 'gmail' && !mail.useOAuth && (
                     <>
-                      Google hesabında 2 adımlı doğrulama açık olmalı. <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer" style={{ color: 'var(--v-txt)' }}><b>Uygulama şifreleri sayfasını aç</b></a>, 16 haneli bir şifre üret ve buraya yapıştır (normal şifren
-                      çalışmaz).{' '}
-                      <a href="#oauth" onClick={(e) => (e.preventDefault(), setMail({ ...mail, useOAuth: true }))} style={{ color: 'var(--v-txt)', fontWeight: 600 }}>
-                        Şifresiz, Google giriş penceresiyle bağlan →
-                      </a>
+                      <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer" style={{ color: 'var(--v-txt)' }}><b>Google uygulama şifresi oluştur</b></a> ve buraya yapıştır.
                     </>
                   )}
                   {p === 'gmail' && mail.useOAuth && (
                     <>
-                      Google giriş penceresiyle bağlanmak için bir kez ücretsiz OAuth istemcisi gerekir: <b>console.cloud.google.com → APIs & Services → Credentials → Create OAuth client ID → Desktop app</b>; OAuth consent
-                      screen'de kendini "test user" olarak ekle. Oluşan <b>Client ID</b> ve <b>Client secret</b>'ı gir; Bağlan deyince Google penceresi açılır, giriş yapınca kapanır.{' '}
+                      Client ID ve Client secret'ı gir; Bağlan deyince Google penceresi açılır.{' '}
                       <a href="#pass" onClick={(e) => (e.preventDefault(), setMail({ ...mail, useOAuth: false }))} style={{ color: 'var(--v-txt)', fontWeight: 600 }}>
                         Uygulama şifresiyle bağlan →
                       </a>
@@ -286,35 +275,33 @@ export function ConnectModal({
                   )}
                   {isOutlook && (
                     <>
-                      Microsoft kişisel hesaplarda şifreyle IMAP kapalı; ücretsiz bir Azure uygulama kimliği gerekir: <b>portal.azure.com → App registrations → New</b> (Hesap türü: kişisel + kurumsal, Mobile/desktop
-                      platform, "Allow public client flows" = Yes). Oluşan <b>Application (client) ID</b>'yi gir; bağlanınca sana bir kod ve microsoft.com/devicelogin adresi verilecek.
+                      E-posta adresini ve uygulama kimliğini gir.
                     </>
                   )}
                   {p === 'yahoo' && (
                     <>
-                      <a href="https://login.yahoo.com/myaccount/security/app-password/" target="_blank" rel="noreferrer" style={{ color: 'var(--v-txt)' }}><b>Yahoo uygulama şifresi sayfasını aç</b></a>, bir şifre üret ve buraya gir. Yahoo birçok hesapta uygulama şifresini kapattı; sayfada seçenek yoksa aşağıdaki tarayıcı girişini kullan (normal şifrenle).
+                      <a href="https://login.yahoo.com/myaccount/security/app-password/" target="_blank" rel="noreferrer" style={{ color: 'var(--v-txt)' }}><b>Yahoo uygulama şifresi oluştur</b></a> ve buraya yapıştır.
                     </>
                   )}
                   {p === 'icloud' && (
                     <>
-                      <a href="https://account.apple.com/account/manage" target="_blank" rel="noreferrer" style={{ color: 'var(--v-txt)' }}><b>Apple hesabı sayfasını aç</b></a> → Oturum açma ve güvenlik → <b>Uygulamaya özel şifreler</b>; kullanıcı adı iCloud e-posta adresin.
+                      <a href="https://account.apple.com/account/manage" target="_blank" rel="noreferrer" style={{ color: 'var(--v-txt)' }}><b>Apple hesabında</b></a> Oturum açma ve güvenlik → <b>Uygulamaya özel şifreler</b>'den bir şifre oluştur ve buraya yapıştır.
                     </>
                   )}
-                  {isOutlook && <> Bağlan deyince Microsoft giriş penceresi kod önceden dolu açılır; giriş yapınca kendiliğinden kapanır.</>}
                   {p === 'yandex' && (
                     <>
-                      <a href="https://id.yandex.com/security/app-passwords" target="_blank" rel="noreferrer" style={{ color: 'var(--v-txt)' }}><b>Yandex uygulama şifresi sayfasını aç</b></a> → "E-posta" türünde bir şifre üret ve buraya gir (Yandex, posta uygulamalarında normal şifreyi kabul etmiyor).
+                      <a href="https://id.yandex.com/security/app-passwords" target="_blank" rel="noreferrer" style={{ color: 'var(--v-txt)' }}><b>Yandex uygulama şifresi oluştur</b></a> ve buraya yapıştır.
                     </>
                   )}
-                  {isImap && <>E-posta adresini ve şifreni gir; sunucu ayarları adresten otomatik bulunur. Bazı sağlayıcılar (GMX, Zoho…) normal şifre yerine uygulama şifresi ister.</>}
+                  {isImap && <>E-posta adresini ve şifreni gir.</>}
                 </p>
                 <div className="field" style={{ marginTop: 6, flexWrap: 'wrap', gap: 8 }}>
                   <input value={mail.user} onChange={(e) => setMail({ ...mail, user: e.target.value })} placeholder="e-posta adresi" type="email" autoComplete="off" style={{ flex: '1 1 220px' }} />
                   {isOutlook ? (
-                    <input value={mail.clientId} onChange={(e) => setMail({ ...mail, clientId: e.target.value })} placeholder="Azure Application (client) ID" style={{ flex: '1 1 260px' }} />
+                    <input value={mail.clientId} onChange={(e) => setMail({ ...mail, clientId: e.target.value })} placeholder="Uygulama kimliği" style={{ flex: '1 1 260px' }} />
                   ) : p === 'gmail' && mail.useOAuth ? (
                     <>
-                      <input value={mail.clientId} onChange={(e) => setMail({ ...mail, clientId: e.target.value })} placeholder="Google Client ID (…apps.googleusercontent.com)" style={{ flex: '1 1 260px' }} />
+                      <input value={mail.clientId} onChange={(e) => setMail({ ...mail, clientId: e.target.value })} placeholder="Client ID" style={{ flex: '1 1 260px' }} />
                       <PasswordInput value={mail.clientSecret} onChange={(e) => setMail({ ...mail, clientSecret: e.target.value })} placeholder="Client secret" autoComplete="off" style={{ flex: '1 1 200px' }} />
                     </>
                   ) : (
@@ -341,11 +328,11 @@ export function ConnectModal({
                 )}
                 {MAIL_FORM_FIRST.has(p) && (
                   <p style={{ margin: '10px 0 0', fontSize: 12.5, color: 'var(--text3, var(--text2))', lineHeight: 1.5 }}>
-                    Uygulama şifresiyle yeni e-postalar anında (~2 sn) gelir ve tarayıcı açılmaz. Şifre üretmek istemiyorsan{' '}
+                    Şifre oluşturmak istemiyorsan{' '}
                     <a href="#browser" onClick={(e) => (e.preventDefault(), void add(p, { browser: true }))} style={{ color: 'var(--v-txt)', fontWeight: 600 }}>
-                      tarayıcı girişiyle bağlan
-                    </a>{' '}
-                    (Mivelo açıkken ~15 sn, arka planda ~50 sn gecikmeyle).
+                      hesabınla giriş yap
+                    </a>
+                    .
                   </p>
                 )}
               </div>
@@ -358,11 +345,10 @@ export function ConnectModal({
             <div style={{ flexGrow: 1 }}>
               <h3>Shopier’i bağla</h3>
               <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.5 }}>
-                Shopier satıcı panelinde <b>Hesap Yönetimi → Kişisel Erişim Anahtarı</b> ile bir anahtar üret (hesapta iki adımlı doğrulama açık olmalı; anahtar yalnızca bir kez gösterilir) ve buraya yapıştır.
-                Siparişler her sipariş bir sohbet olacak şekilde akar; kargoya verme / kapatma sağ panelden yapılır. Shopier API’sinde alıcı-satıcı mesajlaşması yok, DM bu yüzden sunulmaz.
+                Shopier panelinde <b>Hesap Yönetimi → Kişisel Erişim Anahtarı</b>'ndan bir anahtar oluştur ve buraya yapıştır.
               </p>
               <div className="field" style={{ marginTop: 12 }}>
-                <PasswordInput value={pat} onChange={(e) => setPat(e.target.value)} placeholder="Kişisel Erişim Anahtarı (PAT)" autoComplete="off" />
+                <PasswordInput value={pat} onChange={(e) => setPat(e.target.value)} placeholder="Erişim anahtarı" autoComplete="off" />
                 <button className="btn lime b" onClick={() => add('shopier')} disabled={busy || !pat.trim()}>
                   Bağlan
                 </button>
@@ -379,32 +365,32 @@ export function ConnectModal({
                 <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.5 }}>
                   {p === 'trendyol' && (
                     <>
-                      Trendyol Partner → <b>Hesap Bilgilerim → Entegrasyon Bilgileri</b>: Satıcı ID, API Key ve API Secret. Siparişler ve müşteri soruları sohbet olarak akar; sorulara buradan yanıt verirsin (yanıt Trendyol’a gider).
+                      Trendyol Satıcı Paneli → <b>Hesap Bilgilerim → Entegrasyon Bilgileri</b>'ndeki üç bilgiyi gir.
                     </>
                   )}
                   {p === 'hepsiburada' && (
                     <>
-                      Hepsiburada Satıcı Paneli → <b>Entegrasyon</b>: Merchant ID ile entegrasyon kullanıcı adı/şifresi. Siparişler ve müşteri soruları sohbet olarak akar; sorulara buradan yanıt verirsin.
+                      Hepsiburada Satıcı Paneli → <b>Entegrasyon</b> sayfasındaki bilgileri gir.
                     </>
                   )}
                   {p === 'etsy' && (
                     <>
-                      etsy.com/developers’ta bir uygulama oluştur, <b>Keystring</b>’i gir; uygulamanın geri dönüş adresine <code>http://127.0.0.1:7788/oauth/callback</code> ekle. Bağlan deyince Etsy girişi açılır. Siparişler resmi API’den gelir. Etsy Mesajları API’de olmadığından okunmaz (hesabını riske atmamak için tarayıcıyla okuma varsayılan kapalı).
+                      Etsy geliştirici sayfasında oluşturduğun uygulamanın anahtarını gir; Bağlan deyince Etsy girişi açılır.
                     </>
                   )}
                   {p === 'n11' && (
                     <>
-                      n11 Mağaza Paneli → <b>Ayarlar → API Bilgileri</b>: App Key ve App Secret. Siparişler ve müşteri soruları sohbet olarak akar; sorulara buradan yanıt verirsin.
+                      n11 Mağaza Paneli → <b>Ayarlar → API Bilgileri</b>'ndeki iki bilgiyi gir.
                     </>
                   )}
                   {p === 'amazon' && (
                     <>
-                      Seller Central → <b>Uygulamalar ve Hizmetler → Uygulama geliştir</b> (SP-API, kendi kendine yetkilendirme): LWA Client ID, Client Secret ve Refresh Token. Siparişler resmi API’den gelir. Alıcı mesajları Amazon’un e-posta bildirimleriyle gelir: Amazon e-posta adresini Mivelo’ya bağlaman yeterli (Seller Central’ı tarayıcıyla okumak Amazon politikası gereği kapalı). Pazar yeri varsayılan Türkiye.
+                      Seller Central → <b>Uygulamalar ve Hizmetler → Uygulama geliştir</b>'den aldığın bilgileri gir. Alıcı mesajları için Amazon e-posta adresini de bağla.
                     </>
                   )}
                   {p === 'shopify' && (
                     <>
-                      Shopify yönetici → <b>Ayarlar → Uygulamalar → Uygulama geliştir</b>: read_orders, read_customers, read_fulfillments kapsamlarıyla Admin API erişim belirteci (shpat_…). Siparişler resmi API’den gelir. Shopify Inbox sohbetleri API’de olmadığından okunmaz (hesabını riske atmamak için tarayıcıyla okuma varsayılan kapalı).
+                      Shopify yönetici → <b>Ayarlar → Uygulamalar → Uygulama geliştir</b>'den bir erişim anahtarı oluştur ve gir.
                     </>
                   )}
                 </p>
@@ -425,7 +411,7 @@ export function ConnectModal({
                   )}
                   {p === 'etsy' && (
                     <>
-                      <input value={sf('keystring')} onChange={(e) => setSf('keystring', e.target.value)} placeholder="Keystring (API key)" autoComplete="off" />
+                      <input value={sf('keystring')} onChange={(e) => setSf('keystring', e.target.value)} placeholder="Uygulama anahtarı (Keystring)" autoComplete="off" />
                       <input value={sf('shopId')} onChange={(e) => setSf('shopId', e.target.value)} placeholder="Shop ID (isteğe bağlı)" autoComplete="off" />
                     </>
                   )}
@@ -440,13 +426,13 @@ export function ConnectModal({
                       <input value={sf('clientId')} onChange={(e) => setSf('clientId', e.target.value)} placeholder="LWA Client ID" autoComplete="off" />
                       <PasswordInput value={sf('clientSecret')} onChange={(e) => setSf('clientSecret', e.target.value)} placeholder="LWA Client Secret" autoComplete="off" />
                       <PasswordInput value={sf('refreshToken')} onChange={(e) => setSf('refreshToken', e.target.value)} placeholder="Refresh Token" autoComplete="off" />
-                      <input value={sf('marketplaceId')} onChange={(e) => setSf('marketplaceId', e.target.value)} placeholder="Marketplace ID (boş: Türkiye A33AVAJ2PDY3EV)" autoComplete="off" />
+                      <input value={sf('marketplaceId')} onChange={(e) => setSf('marketplaceId', e.target.value)} placeholder="Pazar yeri (boş bırak: Türkiye)" autoComplete="off" />
                     </>
                   )}
                   {p === 'shopify' && (
                     <>
                       <input value={sf('shop')} onChange={(e) => setSf('shop', e.target.value)} placeholder="magaza.myshopify.com" autoComplete="off" />
-                      <PasswordInput value={sf('accessToken')} onChange={(e) => setSf('accessToken', e.target.value)} placeholder="Admin API erişim belirteci (shpat_…)" autoComplete="off" />
+                      <PasswordInput value={sf('accessToken')} onChange={(e) => setSf('accessToken', e.target.value)} placeholder="Erişim anahtarı (shpat_…)" autoComplete="off" />
                     </>
                   )}
                   <button className="btn lime b" onClick={() => add(p)} disabled={busy}>
@@ -470,7 +456,7 @@ export function ConnectModal({
             <div style={{ flexGrow: 1 }}>
               <h3>Slack’i bağla</h3>
               <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.5 }}>
-                Önerilen yol resmi Slack API’si: kendi çalışma alanında yalnız sana ait küçük bir uygulama oluşturursun (ücretsiz, ~1 dk; çalışma alanı ayarlarına göre yönetici onayı isteyebilir).
+                Slack'te sana özel küçük bir uygulama oluşturup bağlanırsın (yaklaşık 1 dakika).
               </p>
               <ol style={{ margin: '10px 0 0', paddingLeft: 20, fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.6 }}>
                 <li>
@@ -478,7 +464,7 @@ export function ConnectModal({
                     <a href={SLACK_APP_URL} target="_blank" rel="noreferrer" style={{ color: 'var(--v-txt)' }}>
                       <b>Slack’te Mivelo uygulamasını oluştur</b>
                     </a>{' '}
-                    → çalışma alanını seç → <b>Next</b> → <b>Create</b> (izinler hazır gelir)
+                    → çalışma alanını seç → <b>Next</b> → <b>Create</b>
                   </span>
                 </li>
                 <li>
@@ -488,28 +474,28 @@ export function ConnectModal({
                 </li>
                 <li>
                   <span>
-                    Çıkan <b>User OAuth Token</b>’ı (<code>xoxp-…</code>) aşağıya yapıştır
+                    Çıkan <b>User OAuth Token</b>’ı aşağıya yapıştır
                   </span>
                 </li>
                 <li>
                   <span>
-                    İsteğe bağlı, mesajların anında gelmesi için: <b>Basic Information → App-Level Tokens → Generate</b> (kapsam: <code>connections:write</code>) → <code>xapp-…</code>
+                    İsteğe bağlı, mesajların anında gelmesi için: <b>Basic Information → App-Level Tokens → Generate</b>
                   </span>
                 </li>
               </ol>
               <div className="field" style={{ marginTop: 12, gap: 8 }}>
-                <PasswordInput value={slackTok.user} onChange={(e) => setSlackTok({ ...slackTok, user: e.target.value })} placeholder="User OAuth Token (xoxp-…)" autoComplete="off" />
-                <PasswordInput value={slackTok.app} onChange={(e) => setSlackTok({ ...slackTok, app: e.target.value })} placeholder="App-Level Token (xapp-…, isteğe bağlı)" autoComplete="off" />
+                <PasswordInput value={slackTok.user} onChange={(e) => setSlackTok({ ...slackTok, user: e.target.value })} placeholder="User OAuth Token" autoComplete="off" />
+                <PasswordInput value={slackTok.app} onChange={(e) => setSlackTok({ ...slackTok, app: e.target.value })} placeholder="App-Level Token (isteğe bağlı)" autoComplete="off" />
                 <button className="btn lime b" onClick={() => add('slack')} disabled={busy || !slackTok.user.trim().startsWith('xoxp-') || (!!slackTok.app.trim() && !slackTok.app.trim().startsWith('xapp-'))}>
                   Bağlan
                 </button>
               </div>
               <p style={{ margin: '10px 0 0', fontSize: 12.5, color: 'var(--text3, var(--text2))', lineHeight: 1.5 }}>
-                Uygulama oluşturamıyorsan{' '}
+                Olmuyorsa{' '}
                 <a href="#browser" onClick={(e) => (e.preventDefault(), void add('slack', { browser: true }))} style={{ color: 'var(--v-txt)', fontWeight: 600 }}>
-                  tarayıcı girişiyle bağlan
-                </a>{' '}
-                (resmi değil, yedek yol: Slack web oturumun kullanılır).
+                  Slack hesabınla giriş yap
+                </a>
+                .
               </p>
             </div>
           </div>
@@ -520,16 +506,24 @@ export function ConnectModal({
             <div style={{ flexGrow: 1 }}>
               <h3>Telegram’ı bağla</h3>
               <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.5 }}>
-                WhatsApp gibi QR ile bağlanır: Bağlan deyince çıkan kodu telefondaki Telegram → <b>Ayarlar → Cihazlar → Masaüstü Cihazı Bağla</b> ile okut. Alanları boş bırakırsan Mivelo’nun
-                varsayılan uygulama kimliği kullanılır; istersen <b>my.telegram.org → API development tools</b>’dan kendi <b>api_id</b> / <b>api_hash</b>’ini gir.
+                Bağlan deyince çıkan kodu telefondaki Telegram → <b>Ayarlar → Cihazlar → Masaüstü Cihazı Bağla</b> ile okut.
               </p>
               <div className="field" style={{ marginTop: 12, gap: 8 }}>
+                {tgAdv && <>
                 <input value={tg.apiId} onChange={(e) => setTg({ ...tg, apiId: e.target.value })} placeholder="api_id (isteğe bağlı)" style={{ flex: '0 0 160px' }} />
                 <PasswordInput value={tg.apiHash} onChange={(e) => setTg({ ...tg, apiHash: e.target.value })} placeholder="api_hash (isteğe bağlı)" autoComplete="off" />
+                </>}
                 <button className="btn lime b" onClick={() => add('telegram')} disabled={busy}>
                   Bağlan
                 </button>
               </div>
+              {!tgAdv && (
+                <p style={{ margin: '8px 0 0', fontSize: 12.5 }}>
+                  <a href="#tg-adv" onClick={(e) => (e.preventDefault(), setTgAdv(true))} style={{ color: 'var(--text3)' }}>
+                    Gelişmiş
+                  </a>
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -545,7 +539,7 @@ export function ConnectModal({
             <div style={{ flexGrow: 1, minWidth: 0 }}>
               <h3>
                 {PLATFORMS[activeAccount.platform].name}
-                {activeAccount.label && activeAccount.label !== PLATFORMS[activeAccount.platform].name && ` · ${activeAccount.label}`}
+                {accountLabel(activeAccount) && ` · ${accountLabel(activeAccount)}`}
               </h3>
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text2)' }}>
                 <span className={`dot ${activeAccount.status === 'connected' ? 'on' : activeAccount.status}`} />
@@ -569,7 +563,7 @@ export function ConnectModal({
                   <li>
                     <b>Ayarlar → Cihazlar → Masaüstü Cihazı Bağla</b>
                   </li>
-                  <li>Kamerayı bu koda tut (kod ~30 sn’de bir yenilenir); iki adımlı doğrulaman varsa parola sorulur</li>
+                  <li>Kamerayı bu koda tut</li>
                 </ol>
               )}
 
@@ -592,23 +586,16 @@ export function ConnectModal({
                     <Icon name="refresh" size={14} sw={2} color="#fff" /> Giriş penceresini aç
                   </button>
                   <ol>
-                    <li>Açılan Chromium penceresinde {PLATFORMS[activeAccount.platform].name} hesabına normal şekilde giriş yap (ilk seferde <code>npx playwright install chromium</code> gerekebilir)</li>
-                    <li>Giriş (ve varsa izin adımları) tamamlanınca pencere kendiliğinden kapanır; bağlantı arka planda sürer</li>
+                    <li>Açılan pencerede {PLATFORMS[activeAccount.platform].name} hesabına giriş yap</li>
+                    <li>Giriş tamamlanınca pencere kendiliğinden kapanır</li>
                   </ol>
                 </>
               )}
               {activeAccount.platform === 'imessage' && activeAccount.status === 'error' && !macOnlyOff('imessage') && (
                 <ol>
-                  <li>Sistem Ayarları → Gizlilik ve Güvenlik → <b>Tam Disk Erişimi</b> bölmesi otomatik açıldı (açılmadıysa ⌘K ile arat)</li>
-                  <li>Listede <b>Mivelo</b> yoksa “+” ile ekle — geliştirme modunda (<code>npm run desktop</code>) <b>Terminal</b>’i ekle; anahtarı aç</li>
-                  <li>Terminal’i/uygulamayı yeniden başlat ve aşağıdaki <b>Yeniden dene</b>’ye bas</li>
-                </ol>
-              )}
-              {false && (
-                <ol>
-                  <li>Sistem Ayarları → Gizlilik ve Güvenlik → <b>Tam Disk Erişimi</b></li>
-                  <li>Çekirdeği çalıştıran uygulamayı (Terminal / iTerm / Node) listeye ekle</li>
-                  <li>Çekirdeği yeniden başlat ve “Yeniden dene”ye bas</li>
+                  <li>Sistem Ayarları → Gizlilik ve Güvenlik → <b>Tam Disk Erişimi</b>'ni aç</li>
+                  <li>Listede <b>Mivelo</b>'yu (yoksa Terminal'i) aç</li>
+                  <li>Mivelo'yu yeniden başlatıp <b>Yeniden dene</b>'ye bas</li>
                 </ol>
               )}
               {activeAccount.platform === 'telegram' && prompts[activeAccount.id] && activeAccount.status === 'pairing' && (
@@ -648,7 +635,7 @@ export function ConnectModal({
                 </div>
               )}
               {activeAccount.status === 'connected' && (
-                <p style={{ margin: '10px 0 0', fontSize: 13.5, color: 'var(--text2)' }}>Bağlı. {PLATFORMS[activeAccount.platform].category === 'shop' ? 'Siparişler ve müşteri soruları' : 'Sohbetler'} gelen kutusuna akıyor{PLATFORMS[activeAccount.platform].mode === 'browser' ? '; tarayıcı arka planda görünmez çalışıyor' : ''}.</p>
+                <p style={{ margin: '10px 0 0', fontSize: 13.5, color: 'var(--text2)' }}>Bağlı. {PLATFORMS[activeAccount.platform].category === 'shop' ? 'Siparişler ve müşteri soruları' : 'Sohbetler'} gelen kutusuna geliyor.</p>
               )}
             </div>
           </div>
@@ -691,8 +678,7 @@ export function ConnectModal({
                       <Icon name="users" size={16} sw={2} /> Sosyal Medya
                     </div>
                     <p className="grid-note">
-                      Bu kanalların çoğu kişisel hesaplar için API sunmadığından senin oturumunla, kendi bilgisayarından bağlanır. Mivelo istekleri seyrek ve düzensiz tutar,
-                      toplu ya da aşırı gönderimi kendiliğinden durdurur. Yine de bu uygulamaların kurallarına göre otomatik veya toplu mesaj gönderme.
+                      Bu uygulamalara kendi hesabınla giriş yaparak bağlanırsın. Toplu ya da otomatik mesaj göndermek için kullanma.
                     </p>
                   </>
                 )}
@@ -771,12 +757,15 @@ export function ConnectModal({
   );
 }
 
+/** Eski sürümlerin yazdığı hatalı etiketler (Facebook hata sayfası başlığı, Outlook localStorage anahtarı) */
+export const BAD_LABEL = /^(error|hata)$|^olk-|pivot/i;
+
 /** Bağlı hesabın adresi / kullanıcı adı (etiket platform adından ibaretse yok) */
 function accountLabel(a: Account | undefined): string | undefined {
   if (!a?.label) return undefined;
   const l = a.label.trim();
   const generic = [a.platform, PLATFORMS[a.platform]?.name, 'Gmail', 'Outlook', 'Yahoo Mail', 'iCloud Mail', 'Messenger', 'Instagram', 'X', 'LinkedIn', 'Slack', 'WhatsApp', 'Telegram', 'iMessage'];
-  return l && !generic.some((g) => g && g.toLowerCase() === l.toLowerCase()) ? l : undefined;
+  return l && !BAD_LABEL.test(l) && !generic.some((g) => g && g.toLowerCase() === l.toLowerCase()) ? l : undefined;
 }
 
 const STATUS_RANK: Record<Account['status'], number> = { connected: 0, connecting: 1, pairing: 2, error: 3, disconnected: 4 };

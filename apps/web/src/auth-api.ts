@@ -49,3 +49,8 @@ export async function authLoadAccounts(): Promise<Array<Record<string, unknown>>
 export function authSaveAccounts(accounts: Array<Record<string, unknown>>): Promise<unknown> {
   return call('accounts', 'PUT', { accounts });
 }
+
+/** Üyelik talebi: onaylanana kadar giriş yapılamaz (admin panelinden onaylanınca e-posta gider) */
+export function authRegister(form: { name: string; username: string; email: string; password: string; note?: string; website?: string }): Promise<{ ok: boolean; pending: boolean }> {
+  return call('register', 'POST', form);
+}

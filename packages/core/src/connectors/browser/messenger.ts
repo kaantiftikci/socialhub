@@ -747,13 +747,29 @@ export function parseDate(input: string, now = new Date()): number | undefined {
   return Number.isFinite(t) ? t : undefined;
 }
 
-/** Oturum sahibinin adı (+ kullanıcı adı): facebook.com/me profile yönlendirir; sayfa başlığı "Ad | Facebook",
- *  son adres /<kullanıcı-adı> (profile.php?id= ise kullanıcı adı yok). Tarayıcı bağlamının istek bağlamı (aynı çerezler). */
+/** Oturum sahibinin adı (+ kullanıcı adı): facebook.com/me profile yönlendirir; sayfa başlığı "Ad | Facebook", son adres
+ *  /<kullanıcı-adı> (profile.php?id= ise kullanıcı adı yok). Önce sayfanın içinden fetch (gerçek tarayıcı başlıkları; dışarıdan
+ *  istek Facebook'un "Error" sayfasını döndürüyordu → hesap adı "Error" görünüyordu), olmazsa bağlamın istek bağlamı. */
 async function facebookName(page: Page): Promise<string> {
-  const r = await page.context().request.get('https://www.facebook.com/me', { timeout: 20_000 });
-  const html = await r.text();
-  const title = (html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] ?? '').replace(/\s*\|\s*Facebook\s*$/i, '').replace(/&#039;|&#39;/g, "'").replace(/&amp;/g, '&').trim();
-  const vanity = (r.url().match(/facebook\.com\/([A-Za-z0-9.]{3,})\/?(?:[?#]|$)/)?.[1] ?? '').replace(/^(profile\.php|login|checkpoint|me)$/i, '');
-  const name = /^(facebook|log in|giriş yap)/i.test(title) ? '' : title;
-  return [name, vanity && `@${vanity}`].filter(Boolean).join(' · ');
+  const BAD = /^(error|hata|facebook|log in|giriş yap|oturum aç|sayfa bulunamadı|page not found|content not found|içerik bulunamadı)\b/i;
+  const parse = (url: string, html: string) => {
+    const title = (html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] ?? '').replace(/\s*\|\s*Facebook\s*$/i, '').replace(/&#039;|&#39;/g, "'").replace(/&amp;/g, '&').trim();
+    const vanity = (url.match(/facebook\.com\/([A-Za-z0-9.]{3,})\/?(?:[?#]|$)/)?.[1] ?? '').replace(/^(profile\.php|login|checkpoint|me|messages|home\.php)$/i, '');
+    const name = !title || BAD.test(title) || title.length > 80 ? '' : title;
+    return [name, vanity && `@${vanity}`].filter(Boolean).join(' · ');
+  };
+  if (/^https:\/\/www\.facebook\.com\//.test(page.url())) {
+    const r = await page
+      .evaluate(async () => {
+        const res = await fetch('/me', { credentials: 'include' });
+        return { url: res.url, html: (await res.text()).slice(0, 200_000) };
+      })
+      .catch(() => undefined);
+    const got = r && parse(r.url, r.html);
+    if (got) return got;
+  }
+  const res = await page.context().request.get('https://www.facebook.com/me', { timeout: 20_000 });
+  const got = parse(res.url(), await res.text());
+  if (!got) bus.log('info', `Messenger: hesap adı okunamadı (/me → ${res.status()} ${res.url().replace(/\?.*/, '')})`);
+  return got;
 }

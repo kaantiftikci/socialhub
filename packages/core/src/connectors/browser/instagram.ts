@@ -382,15 +382,16 @@ export const instagram: Strategy = {
       const d = await ig(page, cookies, '/api/v1/direct_v2/inbox/?limit=1&thread_message_limit=1');
       if (d.viewer?.pk) viewerId = String(d.viewer.pk);
       if (d.viewer?.username) return { id: viewerId, label: `@${d.viewer.username}` };
-    } catch {
-      /* aşağıdaki uca düş */
+      bus.log('info', `Instagram: gelen kutusu yanıtında kullanıcı adı yok (viewer alanları: ${Object.keys(d.viewer ?? {}).slice(0, 12).join(',') || 'yok'})`);
+    } catch (e) {
+      bus.log('info', `Instagram: kullanıcı adı (inbox) okunamadı: ${(e as Error).message.slice(0, 120)}`);
     }
     // hesap ayarlarının kullandığı uç: yalnız oturum sahibinin kullanıcı adını döndürür
     try {
       const c = await ig(page, cookies, '/api/v1/accounts/current_user/?edit=true');
       if (c.user?.username) return { id: viewerId || String(c.user.pk ?? ''), label: `@${c.user.username}` };
-    } catch {
-      /* aşağıdaki uca düş */
+    } catch (e) {
+      bus.log('info', `Instagram: kullanıcı adı (current_user) okunamadı: ${(e as Error).message.slice(0, 120)}`);
     }
     try {
       const u = await ig(page, cookies, `/api/v1/users/${viewerId}/info/`);

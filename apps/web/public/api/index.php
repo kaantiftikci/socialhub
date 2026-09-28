@@ -41,12 +41,16 @@ const PLATFORMS = [
 ];
 const STATUSES = ['disconnected', 'connecting', 'pairing', 'connected', 'error'];
 
-/** Demo kullanıcıları (kayıt kapalı). Şifre karmaları bcrypt; users.json'da yoksa ilk istekte eklenir, bağladıkları uygulamalar orada saklanır. */
+/**
+ * Demo kullanıcıları. Hazır tek hesap: admin. Diğerleri "Üyelik oluştur" ile talep açar (status 'pending'); talep
+ * mivelo.app/admin → Demo'da onaylanınca 'active' olur ve kullanıcıya e-posta gider. Şifre karmaları bcrypt.
+ * passVersion artınca users.json'daki karma da güncellenir (şifre değişikliği sunucudaki kayda yansısın diye).
+ */
 const SEED_USERS = [
-    ['username' => 'admin', 'name' => 'Admin', 'pass' => '$2y$12$1tzNt3O9WIQS14iDfUZKu.0W1pEji2HesBhT3HEw5/7BW8B82x/PS'],
-    ['username' => 'editor', 'name' => 'Editör', 'pass' => '$2y$12$D3SKU5xbB5nDTIFmxA82bem7YHqBPD0dzi3KJCLyAEr65l.9j5x/u'],
-    ['username' => 'misafir', 'name' => 'Misafir', 'pass' => '$2y$12$q0j8FuH7YcxzBLye9Vxtg.RDgao05rMFlL3B/UIkR0JfPhU02Svk6'],
+    ['username' => 'admin', 'name' => 'Admin', 'pass' => '$2y$12$778n9wFmpF66gXSB4xaqau.BTb76mZD8vpYlTEbFVvOSmt36HaNNC', 'passVersion' => 2],
 ];
+/** Artık kullanılmayan hazır hesaplar: users.json'dan silinir */
+const REMOVED_USERS = ['editor', 'misafir'];
 /** Demo kullanıcıları boş başlar; uygulamaları kendileri "Uygulama bağla" ile ekler. Sürüm artınca mevcut listeleri de sıfırlanır. */
 const SEED_ACCOUNTS = [];
 const SEED_VERSION = 2;
@@ -54,6 +58,11 @@ const SEED_VERSION = 2;
 function seed_users(array &$data): bool
 {
     $changed = false;
+    $before = count($data['users']);
+    $data['users'] = array_values(array_filter($data['users'], fn ($u) => !(in_array($u['username'] ?? '', REMOVED_USERS, true) && strpos((string) ($u['id'] ?? ''), 'u-' . ($u['username'] ?? '')) === 0 && empty($u['requestedAt']))));
+    if (count($data['users']) !== $before) {
+        $changed = true;
+    }
     foreach (SEED_USERS as $i => $su) {
         $found = false;
         foreach ($data['users'] as &$u) {
@@ -62,6 +71,11 @@ function seed_users(array &$data): bool
                 if ((int) ($u['seedVersion'] ?? 1) < SEED_VERSION) {
                     $u['accounts'] = [];
                     $u['seedVersion'] = SEED_VERSION;
+                    $changed = true;
+                }
+                if ((int) ($u['passVersion'] ?? 1) < (int) ($su['passVersion'] ?? 1)) {
+                    $u['pass'] = $su['pass'];
+                    $u['passVersion'] = (int) $su['passVersion'];
                     $changed = true;
                 }
                 break;
@@ -82,6 +96,8 @@ function seed_users(array &$data): bool
             'name' => $su['name'],
             'email' => $su['username'] . '@demo',
             'pass' => $su['pass'],
+            'passVersion' => (int) ($su['passVersion'] ?? 1),
+            'status' => 'active',
             'accounts' => $accounts,
             'seedVersion' => SEED_VERSION,
             'createdAt' => (int) (microtime(true) * 1000),
@@ -89,6 +105,13 @@ function seed_users(array &$data): bool
         $changed = true;
     }
     return $changed;
+}
+
+/** Hesap durumu: eski kayıtlarda alan yok → etkin */
+function user_status(array $u): string
+{
+    $s = (string) ($u['status'] ?? 'active');
+    return in_array($s, ['pending', 'active', 'rejected'], true) ? $s : 'active';
 }
 
 function fail(int $code, string $message)
@@ -207,7 +230,7 @@ function current_user(array $data): ?array
     }
     foreach ($data['users'] as $u) {
         if (($u['id'] ?? '') === $id) {
-            return $u;
+            return user_status($u) === 'active' ? $u : null;
         }
     }
     return null;
@@ -267,8 +290,93 @@ if ($method === 'POST' || $method === 'PUT') {
     $body = is_array($decoded) ? $decoded : [];
 }
 
-if ($action === 'register') {
-    fail(403, 'Kayıt kapalı: bu demo için hazır kullanıcılarla giriş yap');
+/**
+ * Üyelik talebi: onay bekleyen kullanıcı olarak kaydedilir (giriş yapamaz). IP (/64) başına saatte 5, toplam en çok 300
+ * bekleyen talep; gizli "website" alanı bot tuzağı (doluysa sessizce başarılı görünür, kaydedilmez).
+ */
+if ($action === 'register' && $method === 'POST') {
+    $name = trim(preg_replace('/\s+/u', ' ', (string) ($body['name'] ?? '')) ?? '');
+    $username = strtolower(trim((string) ($body['username'] ?? '')));
+    $email = strtolower(trim((string) ($body['email'] ?? '')));
+    $password = (string) ($body['password'] ?? '');
+    $note = trim(preg_replace('/\s+/u', ' ', (string) ($body['note'] ?? '')) ?? '');
+    if (trim((string) ($body['website'] ?? '')) !== '') {
+        echo json_encode(['ok' => true, 'pending' => true]);
+        exit;
+    }
+    $len = fn (string $x) => function_exists('mb_strlen') ? mb_strlen($x) : strlen($x);
+    if ($len($name) < 2 || $len($name) > 60) {
+        fail(400, 'Adını yaz (2-60 karakter)');
+    }
+    if (!preg_match('/^[a-z0-9._-]{3,24}$/', $username)) {
+        fail(400, 'Kullanıcı adı 3-24 karakter olmalı; yalnız küçük harf, rakam, nokta, tire ve alt çizgi');
+    }
+    if (in_array($username, ['admin', 'root', 'mivelo', 'editor', 'misafir', 'destek', 'support'], true)) {
+        fail(409, 'Bu kullanıcı adı alınmış; başka bir tane dene');
+    }
+    if (strlen($email) > 120 || !filter_var($email, FILTER_VALIDATE_EMAIL) || !preg_match('/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i', $email)) {
+        fail(400, 'Geçerli bir e-posta adresi yaz');
+    }
+    if (strlen($password) < 8 || strlen($password) > 200) {
+        fail(400, 'Şifre en az 8 karakter olmalı');
+    }
+    $note = function_exists('mb_substr') ? mb_substr($note, 0, 300) : substr($note, 0, 300);
+    // hız sınırı (demo-signup.json)
+    $sgFile = data_dir() . '/demo-signup.json';
+    $ipKey = client_key((string) ($_SERVER['REMOTE_ADDR'] ?? ''));
+    $now = time();
+    $slh = store_lock($sgFile);
+    $sg = store_read($sgFile, []);
+    foreach ($sg as $k => $v) {
+        $sg[$k] = array_values(array_filter(is_array($v) ? $v : [], fn ($t) => (int) $t > $now - 3600));
+        if (!$sg[$k]) {
+            unset($sg[$k]);
+        }
+    }
+    if (count($sg[$ipKey] ?? []) >= 5) {
+        fail(429, 'Çok fazla talep gönderildi. Bir saat sonra tekrar dene.');
+    }
+    $sg[$ipKey][] = $now;
+    store_write($sgFile, $sg);
+    flock($slh, LOCK_UN);
+    fclose($slh);
+    $hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]);
+    $err = with_users(function (array &$data) use ($name, $username, $email, $hash, $note) {
+        $pending = 0;
+        foreach ($data['users'] as $u) {
+            if (strtolower((string) ($u['username'] ?? '')) === $username) {
+                return ['write' => false, 'out' => 'Bu kullanıcı adı alınmış; başka bir tane dene'];
+            }
+            if (strtolower((string) ($u['email'] ?? '')) === $email) {
+                return ['write' => false, 'out' => user_status($u) === 'pending' ? 'Bu e-postayla bir talep zaten onay bekliyor' : 'Bu e-postayla bir üyelik zaten var'];
+            }
+            if (user_status($u) === 'pending') {
+                $pending++;
+            }
+        }
+        if ($pending >= 300) {
+            return ['write' => false, 'out' => 'Şu an çok fazla bekleyen talep var; daha sonra tekrar dene'];
+        }
+        $data['users'][] = [
+            'id' => 'u-' . bin2hex(random_bytes(6)),
+            'username' => $username,
+            'name' => $name,
+            'email' => $email,
+            'pass' => $hash,
+            'status' => 'pending',
+            'note' => $note,
+            'accounts' => [],
+            'seedVersion' => SEED_VERSION,
+            'requestedAt' => time(),
+            'createdAt' => (int) (microtime(true) * 1000),
+        ];
+        return ['write' => true, 'out' => null];
+    });
+    if ($err !== null) {
+        fail(409, $err);
+    }
+    echo json_encode(['ok' => true, 'pending' => true]);
+    exit;
 }
 
 if ($action === 'login' && $method === 'POST') {
@@ -297,7 +405,11 @@ if ($action === 'login' && $method === 'POST') {
     usleep(250000); // kaba kuvvete karşı küçük gecikme
     $user = with_users(function (array &$data) use ($username, $password) {
         foreach ($data['users'] as &$u) {
-            if (strtolower((string) ($u['username'] ?? $u['email'] ?? '')) === $username && password_verify($password, (string) ($u['pass'] ?? ''))) {
+            if ((strtolower((string) ($u['username'] ?? '')) === $username || strtolower((string) ($u['email'] ?? '')) === $username) && password_verify($password, (string) ($u['pass'] ?? ''))) {
+                // şifre doğru ama üyelik onaylanmamış: durumu söyle (şifre doğrulandıktan sonra → kullanıcı adı taraması olmaz)
+                if (user_status($u) !== 'active') {
+                    return ['write' => false, 'out' => ['__status' => user_status($u)]];
+                }
                 // admin paneli (mivelo.app/admin → Demo) için giriş sayısı ve son giriş
                 $u['logins'] = (int) ($u['logins'] ?? 0) + 1;
                 $u['lastLogin'] = time();
@@ -309,6 +421,9 @@ if ($action === 'login' && $method === 'POST') {
     });
     if ($user === null) {
         fail(401, 'Kullanıcı adı veya şifre hatalı');
+    }
+    if (isset($user['__status'])) {
+        fail(403, $user['__status'] === 'pending' ? 'Üyelik talebin henüz onaylanmadı. Onaylanınca e-posta ile haber vereceğiz.' : 'Üyelik talebin onaylanmadı.');
     }
     $alh = store_lock($authFile);
     $auth = store_read($authFile, []);

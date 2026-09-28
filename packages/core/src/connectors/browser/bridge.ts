@@ -1152,7 +1152,8 @@ function isMediaFile(u: string | undefined): boolean {
 export const VERIFY_RE = /checkpoint|challenge_required|captcha|account\/access|\/authwall|verify it'?s you/i;
 export const RATE_RE = /\b(429|999)\b|rate.?limit|too many/i;
 
-const GENERIC_LABEL = /^(messenger|instagram|x|linkedin|slack|outlook|gmail|icloud mail|yahoo mail|yandex mail|yahoo|yandex|etsy|shopify|amazon)$/i;
+/** Genel ya da hatalı etiket (eski sürümlerin yazdığı "Error" / "olk-mail_…" dahil): yenisi gelince üstüne yazılabilir */
+const GENERIC_LABEL = /^(messenger|instagram|x|linkedin|slack|outlook|gmail|icloud mail|yahoo mail|yandex mail|yahoo|yandex|etsy|shopify|amazon|error|hata)$|^olk-|pivot/i;
 
 /** Kalıcı profilde çerez veritabanı var mı (daha önce giriş denenmiş mi) */
 function hasProfileCookies(profile: string): boolean {

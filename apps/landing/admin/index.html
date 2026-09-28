@@ -336,7 +336,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     <!-- demo -->
     <section class="page" id="p-demo">
       <div class="top"><h2>Demo</h2><span class="sp"></span><a class="btn" href="https://demo.mivelo.app" target="_blank" rel="noopener">demo.mivelo.app ↗</a></div>
-      <div class="card" style="overflow-x:auto"><h3>Demo hesapları <span class="sub">giriş sayıları demo girişleri kaydedilmeye başladıktan sonrası</span></h3><div id="demoBox"></div></div>
+      <div class="card" style="overflow-x:auto"><h3>Demo hesapları <span class="sub">üyelik talepleri burada; onaylayınca kullanıcıya e-posta gider</span></h3><div id="demoBox"></div></div>
     </section>
 
     <!-- görevler -->
@@ -571,9 +571,32 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   });
 
   /* ---------- demo ---------- */
+  var DEMO_ST={pending:['Onay bekliyor','st-invited'],active:['Etkin','st-joined'],rejected:['Reddedildi','st-spam']};
   function loadDemo(){ api('demo').then(function(d){
-    $('#demoBox').innerHTML=d.users.length?'<table class="t"><thead><tr><th>Kullanıcı</th><th class="r">Giriş</th><th>Son giriş</th><th>Bağladığı uygulamalar</th></tr></thead><tbody>'+d.users.map(function(u){ return '<tr><td><b>'+esc(u.name||u.username)+'</b><div class="muted" style="font-size:12px">'+esc(u.username)+'</div></td><td class="r num">'+fmt(u.logins)+'</td><td style="white-space:nowrap">'+ago(u.lastLogin)+'</td><td>'+(u.apps.length?u.apps.map(function(a){ return '<span class="chip" style="margin:2px 4px 2px 0">'+esc(a)+'</span>'; }).join(''):'<span class="muted">—</span>')+'</td></tr>'; }).join('')+'</tbody></table>':'<div class="empty">Demo henüz hiç açılmamış.</div>';
+    var pend=d.users.filter(function(u){ return u.status==='pending'; }).length;
+    $('#nc-demo').textContent=pend||'';
+    $('#demoBox').innerHTML=d.users.length?'<table class="t"><thead><tr><th>Kullanıcı</th><th>Durum</th><th class="r">Giriş</th><th>Son giriş</th><th>Bağladığı uygulamalar</th><th></th></tr></thead><tbody>'+d.users.map(function(u){
+      var st=DEMO_ST[u.status]||DEMO_ST.active, acts='';
+      if(u.id!=='u-admin'){
+        if(u.status!=='active') acts+='<button class="btn sm soft" data-dm="'+esc(u.id)+'" data-to="active">Onayla</button> ';
+        if(u.status==='pending') acts+='<button class="btn sm danger" data-dm="'+esc(u.id)+'" data-to="rejected">Reddet</button> ';
+        if(u.status==='active' && u.email) acts+='<button class="btn sm" data-dmail="'+esc(u.id)+'" title="Onay e-postasını yeniden gönder">E-posta</button> ';
+        acts+='<button class="icon-btn" data-ddel="'+esc(u.id)+'" data-name="'+esc(u.username)+'" title="Sil" aria-label="Sil">'+I.trash+'</button>';
+      }
+      var mail=u.mailed===false?' <span class="chip st-spam" title="Sunucu e-postayı gönderemedi">e-posta gitmedi</span>':u.mailed===true?' <span class="chip st-joined">e-posta gitti</span>':'';
+      return '<tr><td><b>'+esc(u.name||u.username)+'</b><div class="muted" style="font-size:12px">'+esc(u.username)+(u.email?' · '+esc(u.email):'')+'</div>'+(u.note?'<div class="muted" style="font-size:12px;max-width:320px">“'+esc(u.note)+'”</div>':'')+(u.requestedAt?'<div class="muted" style="font-size:11.5px">talep '+ago(u.requestedAt)+'</div>':'')+'</td>'+
+        '<td style="white-space:nowrap"><span class="chip '+st[1]+'"><i></i>'+st[0]+'</span>'+mail+'</td><td class="r num">'+fmt(u.logins)+'</td><td style="white-space:nowrap">'+ago(u.lastLogin)+'</td><td>'+(u.apps.length?u.apps.map(function(a){ return '<span class="chip" style="margin:2px 4px 2px 0">'+esc(a)+'</span>'; }).join(''):'<span class="muted">—</span>')+'</td><td style="white-space:nowrap;text-align:right">'+acts+'</td></tr>'; }).join('')+'</tbody></table>':'<div class="empty">Demo henüz hiç açılmamış.</div>';
   }).catch(function(e){ toast(e.message,true); }); }
+  document.addEventListener('click',function(e){
+    var b=e.target.closest('[data-dm],[data-dmail],[data-ddel]'); if(!b) return;
+    var done=function(d){ if(d&&d.mailed===false) toast('Kaydedildi ama e-posta gönderilemedi (sunucu mail())',true); else toast(d&&d.mailed?'Onaylandı, e-posta gönderildi':'Kaydedildi'); loadDemo(); };
+    if(b.dataset.dm){ b.disabled=true; api('demo_update',{id:b.dataset.dm,status:b.dataset.to}).then(done).catch(function(err){ toast(err.message,true); b.disabled=false; }); }
+    else if(b.dataset.dmail){ b.disabled=true; api('demo_mail',{id:b.dataset.dmail}).then(done).catch(function(err){ toast(err.message,true); b.disabled=false; }); }
+    else if(b.dataset.ddel){
+      if(b.dataset.armed!=='1'){ b.dataset.armed='1'; b.classList.add('danger'); toast('Silmek için tekrar tıkla ('+b.dataset.name+')'); setTimeout(function(){ b.dataset.armed=''; },3000); return; }
+      api('demo_delete',{id:b.dataset.ddel}).then(function(){ toast('Silindi'); loadDemo(); }).catch(function(err){ toast(err.message,true); });
+    }
+  });
 
   /* ---------- görevler ---------- */
   var TASKS=[], COLS=[['todo','Yapılacak'],['doing','Sürüyor'],['done','Bitti']];
@@ -610,7 +633,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
 
   /* ---------- oturum ---------- */
   function showLogin(){ $('#app').hidden=true; $('#login').hidden=false; setTimeout(function(){ $('#pw').focus(); },50); }
-  function showApp(){ $('#login').hidden=true; $('#app').hidden=false; loaded={}; route(); }
+  function showApp(){ $('#login').hidden=true; $('#app').hidden=false; loaded={}; route(); api('demo').then(function(d){ var n=d.users.filter(function(u){ return u.status==='pending'; }).length; $('#nc-demo').textContent=n||''; }).catch(function(){}); }
   $('#loginForm').addEventListener('submit',function(e){ e.preventDefault(); var b=$('#loginBtn'); b.disabled=true; $('#loginErr').textContent='';
     api('login',{password:$('#pw').value}).then(function(d){ CSRF=d.csrf; $('#pw').value=''; showApp(); }).catch(function(x){ $('#loginErr').textContent=x.message; $('#pw').select(); }).then(function(){ b.disabled=false; }); });
   $$('[data-logout]').forEach(function(b){ b.addEventListener('click',function(){ api('logout',{}).catch(function(){}).then(function(){ CSRF=null; showLogin(); }); }); });

@@ -450,13 +450,142 @@ if ($a === 'wl_delete' && $method === 'POST') {
 
 if ($a === 'demo') {
     $users = read_json('users.json', ['users' => []])['users'] ?? [];
-    out(['users' => array_map(fn ($u) => [
+    $rank = ['pending' => 0, 'active' => 1, 'rejected' => 2];
+    $list = array_map(fn ($u) => [
+        'id' => (string) ($u['id'] ?? ''),
         'username' => $u['username'] ?? ($u['email'] ?? ''),
         'name' => $u['name'] ?? '',
+        'email' => str_ends_with_s((string) ($u['email'] ?? ''), '@demo') ? '' : (string) ($u['email'] ?? ''),
+        'note' => (string) ($u['note'] ?? ''),
+        'status' => demo_status($u),
+        'requestedAt' => (int) ($u['requestedAt'] ?? 0),
+        'approvedAt' => (int) ($u['approvedAt'] ?? 0),
+        'mailed' => $u['mailed'] ?? null,
         'logins' => (int) ($u['logins'] ?? 0),
         'lastLogin' => (int) ($u['lastLogin'] ?? 0),
         'apps' => array_values(array_map(fn ($x) => (string) ($x['platform'] ?? ''), is_array($u['accounts'] ?? null) ? $u['accounts'] : [])),
-    ], $users)]);
+    ], is_array($users) ? $users : []);
+    usort($list, fn ($x, $y) => [$rank[$x['status']], -$x['requestedAt']] <=> [$rank[$y['status']], -$y['requestedAt']]);
+    out(['users' => $list]);
+}
+
+function demo_status(array $u): string
+{
+    $s = (string) ($u['status'] ?? 'active');
+    return in_array($s, ['pending', 'active', 'rejected'], true) ? $s : 'active';
+}
+
+function str_ends_with_s(string $h, string $n): bool
+{
+    return $n === '' || substr($h, -strlen($n)) === $n;
+}
+
+/** Onay e-postası (sunucunun mail() işlevi; From hello@mivelo.app). Başarısızsa false — panel uyarır. */
+function send_approval_mail(string $to, string $name, string $username): bool
+{
+    if (!filter_var($to, FILTER_VALIDATE_EMAIL) || preg_match('/[\r\n]/', $to)) {
+        return false;
+    }
+    $subject = 'Mivelo demo üyeliğin onaylandı';
+    $n = trim(preg_replace('/[\r\n]+/', ' ', $name) ?? '');
+    $body = "Merhaba $n,\n\n"
+        . "Mivelo demo üyelik talebin onaylandı. Artık giriş yapabilirsin:\n\n"
+        . "  Adres: https://demo.mivelo.app\n"
+        . "  Kullanıcı adı: $username\n"
+        . "  Şifre: talep ederken belirlediğin şifre\n\n"
+        . "Demo sana özel: bağladığın uygulamalar ve ayarların yalnız senin hesabında durur. Gördüğün mesajlar örnek veridir.\n"
+        . "Geri bildirimini bu e-postaya yanıt olarak yazabilirsin.\n\n"
+        . "Mivelo\nhello@mivelo.app\n";
+    $headers = implode("\r\n", [
+        'From: Mivelo <hello@mivelo.app>',
+        'Reply-To: hello@mivelo.app',
+        'MIME-Version: 1.0',
+        'Content-Type: text/plain; charset=UTF-8',
+        'Content-Transfer-Encoding: 8bit',
+    ]);
+    $subj = function_exists('mb_encode_mimeheader') ? mb_encode_mimeheader($subject, 'UTF-8', 'B') : '=?UTF-8?B?' . base64_encode($subject) . '?=';
+    return @mail($to, $subj, $body, $headers, '-fhello@mivelo.app');
+}
+
+if ($a === 'demo_update' && $method === 'POST') {
+    $id = (string) ($body['id'] ?? '');
+    $status = (string) ($body['status'] ?? '');
+    if (!in_array($status, ['active', 'rejected', 'pending'], true)) {
+        fail(400, 'Geçersiz durum');
+    }
+    $u = with_json('users.json', ['users' => []], function (array &$d) use ($id, $status) {
+        foreach ($d['users'] as &$u) {
+            if (($u['id'] ?? '') !== $id) {
+                continue;
+            }
+            if (($u['id'] ?? '') === 'u-admin') {
+                return 'admin';
+            }
+            $prev = demo_status($u);
+            $u['status'] = $status;
+            if ($status === 'active' && $prev !== 'active') {
+                $u['approvedAt'] = time();
+            }
+            return $u + ['__prev' => $prev];
+        }
+        unset($u);
+        return null;
+    });
+    if ($u === 'admin') {
+        fail(400, 'admin hesabının durumu değiştirilemez');
+    }
+    if ($u === null) {
+        fail(404, 'Kullanıcı yok');
+    }
+    $mailed = null;
+    if ($status === 'active' && $u['__prev'] !== 'active') {
+        $mailed = send_approval_mail((string) ($u['email'] ?? ''), (string) ($u['name'] ?? ''), (string) ($u['username'] ?? ''));
+        with_json('users.json', ['users' => []], function (array &$d) use ($id, $mailed) {
+            foreach ($d['users'] as &$x) {
+                if (($x['id'] ?? '') === $id) {
+                    $x['mailed'] = $mailed;
+                }
+            }
+            unset($x);
+        });
+    }
+    out(['ok' => true, 'mailed' => $mailed]);
+}
+
+if ($a === 'demo_mail' && $method === 'POST') {
+    $id = (string) ($body['id'] ?? '');
+    $u = null;
+    foreach (read_json('users.json', ['users' => []])['users'] ?? [] as $x) {
+        if (($x['id'] ?? '') === $id) {
+            $u = $x;
+        }
+    }
+    if ($u === null || demo_status($u) !== 'active') {
+        fail(404, 'Onaylı kullanıcı yok');
+    }
+    $mailed = send_approval_mail((string) ($u['email'] ?? ''), (string) ($u['name'] ?? ''), (string) ($u['username'] ?? ''));
+    with_json('users.json', ['users' => []], function (array &$d) use ($id, $mailed) {
+        foreach ($d['users'] as &$x) {
+            if (($x['id'] ?? '') === $id) {
+                $x['mailed'] = $mailed;
+            }
+        }
+        unset($x);
+    });
+    out(['ok' => true, 'mailed' => $mailed]);
+}
+
+if ($a === 'demo_delete' && $method === 'POST') {
+    $id = (string) ($body['id'] ?? '');
+    if ($id === 'u-admin') {
+        fail(400, 'admin hesabı silinemez');
+    }
+    $n = with_json('users.json', ['users' => []], function (array &$d) use ($id) {
+        $before = count($d['users']);
+        $d['users'] = array_values(array_filter($d['users'], fn ($u) => ($u['id'] ?? '') !== $id));
+        return $before - count($d['users']);
+    });
+    out(['deleted' => $n]);
 }
 
 /* ---------------- görevler (lansman süreçleri) ---------------- */
