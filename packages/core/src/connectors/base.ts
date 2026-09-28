@@ -11,6 +11,8 @@ export interface StartOptions {
   interactive?: boolean;
   /** Kullanıcı eylemi bekleyen uyarıdan (PIN) gelindi: görünmez denetimi atla, görünür pencereyi hemen aç */
   window?: boolean;
+  /** Oturumun düştüğü zaten biliniyor ('pairing' iken Yeniden bağlan): görünmez denetim turu yok, giriş penceresi hemen */
+  login?: boolean;
   /** Giriş Mivelo içinde (canlı görüntü) değil, ayrı tarayıcı penceresinde */
   external?: boolean;
 }

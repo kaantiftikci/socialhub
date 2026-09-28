@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type InputHTMLAttributes } from 'react';
+import { clearOpening, markOpening } from './login-opening';
 import { api } from './api';
 import { STATIC_DEMO } from './profile';
 import { MAC_ONLY, PLATFORMS, type Account, type CoreOs, type Platform } from './types';
@@ -591,7 +592,8 @@ export function ConnectModal({
                     disabled={busy}
                     onClick={() => {
                       setBusy(true);
-                      api.restartAccount(activeAccount.id).then(() => notify('Giriş penceresi açılıyor')).catch((e) => (notify(e.message, true), onChanged())).finally(() => setBusy(false));
+                      markOpening(activeAccount.id, 'Giriş penceresi açılıyor');
+                      api.restartAccount(activeAccount.id).catch((e) => (clearOpening(activeAccount.id), notify(e.message, true), onChanged())).finally(() => setBusy(false));
                     }}
                   >
                     <Icon name="refresh" size={14} sw={2} color="#fff" /> Giriş ekranını aç

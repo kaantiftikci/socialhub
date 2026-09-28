@@ -348,6 +348,10 @@ Dil: arayüz ve yorumlar Türkçe.
   `uidValidity` durum dosyasında; değişince imleç sıfırlanır. `classify`: authenticationFailed → dur (otomatik deneme yok), ETHROTTLE →
   throttleReset, [ALERT]/[LIMIT]/çok bağlantı → 15 dk. `missingIdleCommand: 'STATUS'`.
 - Amazon Seller Central / Etsy Mesajları / Shopify Inbox tarayıcı köprüleri varsayılan KAPALI (yapılandırmada messaging/inbox:true ile açılır).
+- Yeniden bağlan hızı: hesap 'pairing' iken (oturum düştüğü biliniyor) `restartNow` → `start({login:true})` görünmez denetim turu
+  OLMADAN giriş penceresi (eski çerez "giriş var" sanılmasın diye visibleLogin(false)); diğer durumlarda denetim en çok 12 sn. Eşitleme
+  yüzdesi oturum doğrulanmadan başlamaz (eskiden %20 "tarayıcı açıldı" pencereden önce çıkıyordu). Arayüz: `login-opening.ts` —
+  "… giriş penceresi açılıyor" hapı hesap 'connecting'ten çıkana dek (pairing = pencere açıldı) üstte kalır (≤90 sn).
 - "PIN'i gir" hızlı yol: `registry.restart` eski connector'da `attention` varsa `start({window:true})` → köprü görünmez denetim turunu
   (headless aç + needsWindow + kapat, 10-20 sn) atlar, görünür pencereyi hemen açar; çerezler varsa doğrudan `afterLogin` (`visibleLogin`).
 - Bildirimler (desktop.ts): Ayarlar → Bildirimler: `kavsak.soundsOn` (tüm sesler), `kavsak.volume` 0–100 (varsayılan 60, kazanç 0,5·v²),

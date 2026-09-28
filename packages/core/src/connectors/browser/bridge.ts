@@ -396,10 +396,12 @@ export class BrowserConnector extends BaseConnector {
       this.pageless = false;
       if (this.stopping) return;
     }
-    // Hiç giriş yapılmamış profil (yeni "Bağlan"): görünmez denetim turu (10-20 sn) boşuna — giriş penceresini hemen aç
-    if (interactive && !hasProfileCookies(path.join(sessionDir(this.account.id), 'profile'))) {
+    // Hiç giriş yapılmamış profil (yeni "Bağlan") ya da oturumun düştüğü biliniyor ('pairing' iken Yeniden bağlan): görünmez
+    // denetim turu (10-20 sn) boşuna — giriş penceresini hemen aç
+    if (interactive && (opts.login || !hasProfileCookies(path.join(sessionDir(this.account.id), 'profile')))) {
       if (!(await this.launchLogin())) return;
-      if (!(await this.visibleLogin(await this.isLoggedIn(true)))) return;
+      // oturum düşmüşken eski çerez "giriş var" sanılıp pencere hemen kapanmasın: girişi bekle
+      if (!(await this.visibleLogin(opts.login ? false : await this.isLoggedIn(true)))) return;
       if (this.stopping) return;
       this.syncProgress(45, 'oturum doğrulandı');
       await this.finishStart();
@@ -407,8 +409,9 @@ export class BrowserConnector extends BaseConnector {
     }
     // 1) Kayıtlı oturum var mı? Önce görünmez pencerede dene.
     if (!(await this.launch(true))) return;
-    this.syncProgress(20, 'tarayıcı açıldı');
-    let loggedIn = await this.isLoggedIn();
+    // (eşitleme yüzdesi burada BAŞLAMAZ: oturum doğrulanmadan — giriş penceresi bile açılmadan — "eşitleniyor %20" görünüyordu)
+    // kullanıcı Yeniden bağlan dediyse denetim uzun sürmesin: 12 sn'de oturum görülmezse giriş penceresi açılır
+    let loggedIn = interactive ? await withTimeout(this.isLoggedIn(), 12_000, 'oturum denetimi').catch(() => false) : await this.isLoggedIn();
     // Açılışta 8 tarayıcı aynı anda kalkınca sayfa geç çizilir ve oturum yokmuş sanılır (Outlook 'pairing' sonra 'connected'):
     // pencere açmadan önce bir kez daha dene
     if (!loggedIn && !interactive && this.page && !this.page.isClosed()) {

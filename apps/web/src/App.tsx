@@ -1,5 +1,6 @@
 import { FeedbackButton } from './Feedback';
 import { LoginView, pushLoginEvent } from './LoginView';
+import { clearOpening as clearOpeningFor, markOpening, useLoginOpening } from './login-opening';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, connectEvents } from './api';
 import { PLATFORMS, ORDER_Q_PLATFORMS, isOrderPage, questionOrderRef, shopKind, shopPending, shopTabOf, type Account, type Chat, type ChatFlags, type CoreEvent, type Message, type Platform, type ShopTab, DEFAULT_TAGS } from './types';
@@ -54,6 +55,7 @@ function saveNav(n: NavState): void {
 
 export default function App() {
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const openingTexts = useLoginOpening(accounts);
   const [chats, setChats] = useState<Map<string, Chat>>(new Map());
   const chatsRef = useRef(chats);
   chatsRef.current = chats;
@@ -1473,7 +1475,11 @@ export default function App() {
                     // QR süresi dolmuşsa (ekranda kod yok) yenisini iste
                     if (!qr[a.id]) api.restartAccount(a.id).catch((e) => notify(e.message, true));
                   }
-                  else (notify(is.done), api.restartAccount(a.id).catch((e) => notify(e.message, true)));
+                  else {
+                    // pencere açılana (ya da oturum doğrulanana) dek ekranda kalan gösterge; hata olursa kalkar
+                    markOpening(a.id, is.done || 'Yeniden bağlanılıyor');
+                    api.restartAccount(a.id).catch((e) => (clearOpeningFor(a.id), notify(e.message, true)));
+                  }
                 }}
               >
                 {is.label}
@@ -1546,6 +1552,11 @@ export default function App() {
           </div>
         </div>
       ))(menuP.value)}
+      {openingTexts.length > 0 && (
+        <div className="login-opening" role="status" aria-live="polite">
+          <span className="spin" /> {openingTexts[openingTexts.length - 1]}…
+        </div>
+      )}
       {toast && (
         <div className={`toast ${toast.err ? 'err' : ''}`} role="status" aria-live="polite">
           {toast.text}

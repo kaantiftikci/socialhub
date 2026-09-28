@@ -195,11 +195,13 @@ export class Registry {
     const c = this.connectors.get(id);
     // PIN gibi kullanıcı eylemi bekleniyorsa yeni bağlantı pencereyi doğrudan açar (görünmez denetim turu yok)
     const window = !!(c as { attention?: string } | undefined)?.attention;
+    // 'pairing' = giriş gerektiği biliniyor: görünmez denetim turu (10-20 sn) boşuna → giriş penceresi hemen açılır
+    const login = !window && a.status === 'pairing';
     if (c) {
       this.connectors.delete(id);
       await withTimeout(c.stop(), 15_000).catch(() => undefined);
     }
-    await this.spawn(a, true, window, !!opts.external);
+    await this.spawn(a, true, window, !!opts.external, login);
   }
 
   /** Bir düzeltmeden sonra hesabın sohbetlerini bir kez silip yeniden eşitlet (işaret dosyası hesabın oturum klasöründe) */
@@ -211,7 +213,7 @@ export class Registry {
     fs.writeFileSync(file, '');
   }
 
-  private async spawn(account: Account, interactive = true, window = false, external = false): Promise<void> {
+  private async spawn(account: Account, interactive = true, window = false, external = false, login = false): Promise<void> {
     let c: Connector;
     switch (account.platform) {
       case 'whatsapp':
@@ -363,7 +365,7 @@ export class Registry {
     }
     this.connectors.set(account.id, c);
     // start() uzun sürebilir (QR bekleme vb.); arka planda çalışsın
-    void c.start({ interactive, window, external }).catch((e) => bus.log('error', `${account.platform} hata: ${(e as Error).message}`));
+    void c.start({ interactive, window, external, login }).catch((e) => bus.log('error', `${account.platform} hata: ${(e as Error).message}`));
   }
 
   async stopAll(): Promise<void> {

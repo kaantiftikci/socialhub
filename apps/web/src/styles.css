@@ -535,6 +535,8 @@ a.att-card { cursor: pointer; }
 .field { display: flex; gap: 8px; align-items: center; }
 .toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 10px 14px; border-radius: 12px; font-size: 13px; box-shadow: 0 12px 30px -10px rgba(0,0,0,.5); z-index: 30; }
 .toast.err { background: #a32d2d; color: #fff; }
+/* Yeniden bağlan → giriş penceresi açılana dek kalan gösterge (login-opening.ts) */
+.login-opening { position: fixed; left: 50%; top: 18px; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 9px; background: var(--card); color: var(--text); border: 1px solid var(--line); padding: 10px 16px; border-radius: 999px; font-size: 13px; font-weight: 500; box-shadow: var(--shadow-3); z-index: 60; animation: bubIn .18s ease-out both; }
 
 /* ---------- sağ tık menüsü ---------- */
 .menu-backdrop { position: fixed; inset: 0; z-index: 25; }
