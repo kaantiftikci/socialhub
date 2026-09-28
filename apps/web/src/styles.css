@@ -1503,3 +1503,35 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .login-keys { position: absolute; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; resize: none; pointer-events: none; user-select: text; -webkit-user-select: text; font-size: 16px; line-height: normal; }
 .login-foot { padding: 8px 14px; font-size: 12px; color: var(--text3); border-top: 1px solid var(--line); }
 .login-err { color: var(--danger-txt); }
+/* Geri bildirim düğmesi + paneli (sağ alt) */
+.fb-fab { position: fixed; right: 18px; bottom: 18px; z-index: 15; }
+.fb-open { width: 46px; height: 46px; border-radius: 50%; border: 0; display: grid; place-items: center; background: var(--v); color: #fff; cursor: pointer; box-shadow: 0 10px 24px -8px rgba(108,71,255,.6), 0 2px 6px rgba(0,0,0,.12); transition: transform .15s ease; }
+.fb-open:hover { transform: scale(1.06); }
+.fb-hide { position: absolute; top: -5px; right: -5px; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line); background: var(--raise); color: var(--text2); display: grid; place-items: center; cursor: pointer; opacity: 0; transition: opacity .15s; padding: 0; }
+.fb-fab:hover .fb-hide, .fb-hide:focus-visible { opacity: 1; }
+@media (hover: none) { .fb-hide { opacity: 1; } }
+.fb-panel { position: fixed; right: 18px; bottom: 18px; z-index: 30; width: min(360px, calc(100vw - 24px)); max-height: calc(100vh - 36px); overflow: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 20px; box-shadow: 0 30px 60px -20px rgba(0,0,0,.4); animation: modalIn .2s cubic-bezier(.2,.8,.2,1) both; transform-origin: bottom right; }
+.fb-head { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 14px 44px 10px 16px; border-bottom: 1px solid var(--line); }
+.fb-head b { font-size: 15px; }
+.fb-head span { font-size: 12px; color: var(--text3); }
+.fb-head .btn { position: absolute; top: 10px; right: 10px; }
+.fb-body { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 14px; }
+.fb-types { display: flex; gap: 4px; padding: 3px; border-radius: 12px; background: var(--tabs-bg); }
+.fb-types button { flex: 1; height: 30px; border: 0; border-radius: 9px; background: transparent; color: var(--text2); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.fb-types button.on { background: var(--raise); color: var(--text); box-shadow: var(--shadow-1); }
+.fb-body textarea, .fb-email { width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: 12px; background: var(--field); color: var(--text); padding: 10px 12px; font: inherit; font-size: 13.5px; resize: vertical; outline: none; }
+.fb-email { height: 38px; padding: 0 12px; }
+.fb-body textarea:focus, .fb-email:focus { border-color: var(--v); }
+.fb-hp { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+.fb-atts { display: flex; gap: 6px; flex-wrap: wrap; }
+.fb-att { position: relative; width: 64px; height: 64px; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); background: var(--bg2); }
+.fb-att img, .fb-att video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fb-att button { position: absolute; top: 3px; right: 3px; width: 18px; height: 18px; border-radius: 50%; border: 0; background: rgba(0,0,0,.6); color: #fff; display: grid; place-items: center; cursor: pointer; padding: 0; }
+.fb-tools { display: flex; gap: 6px; flex-wrap: wrap; }
+.fb-rec { color: var(--danger-txt); border-color: var(--danger-line); }
+.fb-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger-txt); animation: pulse 1s ease-in-out infinite alternate; }
+.fb-err { font-size: 12.5px; color: var(--danger-txt); }
+.fb-send { height: 40px; justify-content: center; gap: 8px; }
+.fb-sent { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 26px 16px; text-align: center; }
+.fb-sent span { font-size: 13px; color: var(--text2); margin-bottom: 8px; }
+@keyframes pulse { from { opacity: 1; } to { opacity: .35; } }

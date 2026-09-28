@@ -2,6 +2,8 @@ export interface SessionUser {
   id: string;
   name: string;
   username: string;
+  /** Kayıtla gelen (hazır olmayan) kullanıcı: demo boş panelle açılır */
+  fresh?: boolean;
 }
 
 /** Ağ hatası tarayıcının İngilizce "Failed to fetch" iletisiyle değil, Türkçe görünsün */

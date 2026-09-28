@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { authLoadAccounts, authLogin, authLogout, authMe, authRegister, type SessionUser } from './auth-api';
 import { setLeaveDemoPanel } from './demo-session';
-import { setProfileName } from './profile';
+import { setProfileName, setProfileUser } from './profile';
 import { clearDemoAccounts, loadDemoAccounts } from './static-demo';
 import { Logo, PasswordInput } from './ui';
 import { REMOTE_CORE, clearRemoteCore } from './desktop';
@@ -18,8 +18,9 @@ export function DemoGate() {
         if (cancelled) return;
         if (u) {
           setProfileName(u.name);
+          setProfileUser(u.username);
           // kayıtlı kanallar okunamazsa oturum geçerli kalır (giriş ekranına atılmaz), demo varsayılan kanallarla açılır
-          loadDemoAccounts(await authLoadAccounts().catch(() => []));
+          loadDemoAccounts(await authLoadAccounts().catch(() => []), { fresh: u.fresh });
         }
         setUser(u);
       })
@@ -46,7 +47,8 @@ export function DemoGate() {
 
   async function enter(u: SessionUser) {
     setProfileName(u.name);
-    loadDemoAccounts(await authLoadAccounts().catch(() => []));
+    setProfileUser(u.username);
+    loadDemoAccounts(await authLoadAccounts().catch(() => []), { fresh: u.fresh });
     setUser(u);
   }
 

@@ -37,21 +37,29 @@ export function MailFrame({ messageId, fallback }: { messageId: string; fallback
     };
   }, [messageId]);
 
+  // Yükseklik bir sonraki karede ve yalnız gerçekten değişince yazılır: aynı karede iframe boyunu değiştirmek gözlemciyi yeniden
+  // tetikliyordu ("ResizeObserver loop completed with undelivered notifications"). Gövde gözlenir (iframe'e bağlı html değil).
+  const raf = useRef(0);
   const measure = () => {
-    const d = ref.current?.contentDocument;
-    if (!d?.documentElement) return;
-    setH(Math.min(20000, Math.max(40, d.documentElement.scrollHeight)));
+    cancelAnimationFrame(raf.current);
+    raf.current = requestAnimationFrame(() => {
+      const b = ref.current?.contentDocument?.body;
+      if (!b) return;
+      const next = Math.min(20000, Math.max(40, Math.ceil(b.getBoundingClientRect().height) + 2));
+      setH((cur) => (Math.abs(cur - next) > 2 ? next : cur));
+    });
   };
   const onLoad = () => {
     measure();
     const d = ref.current?.contentDocument;
-    if (!d) return;
+    if (!d?.body) return;
     // geç yüklenen görseller yüksekliği değiştirir
     const ro = new ResizeObserver(measure);
-    ro.observe(d.documentElement);
+    ro.observe(d.body);
     for (const img of Array.from(d.images)) img.addEventListener('load', measure);
     ref.current!.addEventListener('load', () => ro.disconnect(), { once: true });
   };
+  useEffect(() => () => cancelAnimationFrame(raf.current), []);
 
   if (html === null) return <div className="mail-body">{fallback}</div>;
   if (html === undefined) return <div className="mail-body mail-loading">{fallback.slice(0, 300)}</div>;

@@ -580,6 +580,98 @@ if ($a === 'demo_delete' && $method === 'POST') {
     out(['deleted' => $n]);
 }
 
+/* ---------------- geri bildirim (uygulamadaki sağ alt düğme → api/feedback.php) ---------------- */
+function fb_dir(): string
+{
+    return data_dir() . '/feedback';
+}
+
+if ($a === 'fb_list') {
+    $d = store_read(fb_dir() . '/index.json', ['items' => []]);
+    $items = array_reverse(is_array($d['items'] ?? null) ? $d['items'] : []);
+    out(['items' => array_map(fn ($x) => [
+        'id' => (string) $x['id'], 'at' => (int) $x['at'], 'type' => (string) $x['type'], 'message' => (string) $x['message'],
+        'email' => (string) ($x['email'] ?? ''), 'name' => (string) ($x['name'] ?? ''), 'user' => (string) ($x['user'] ?? ''),
+        'page' => (string) ($x['page'] ?? ''), 'app' => (string) ($x['app'] ?? ''), 'ua' => (string) ($x['ua'] ?? ''),
+        'files' => is_array($x['files'] ?? null) ? $x['files'] : [], 'status' => (string) ($x['status'] ?? 'new'), 'note' => (string) ($x['note'] ?? ''),
+    ], $items)]);
+}
+
+if ($a === 'fb_update' && $method === 'POST') {
+    $id = (string) ($body['id'] ?? '');
+    $status = isset($body['status']) ? (string) $body['status'] : null;
+    $note = isset($body['note']) ? mb_substr((string) $body['note'], 0, 1000) : null;
+    if ($status !== null && !in_array($status, ['new', 'doing', 'done', 'wontfix'], true)) {
+        fail(400, 'Geçersiz durum');
+    }
+    $path = fb_dir() . '/index.json';
+    $lh = store_lock($path);
+    $d = store_read($path, ['items' => []]);
+    $n = 0;
+    foreach ($d['items'] as &$x) {
+        if (($x['id'] ?? '') === $id) {
+            if ($status !== null) {
+                $x['status'] = $status;
+            }
+            if ($note !== null) {
+                $x['note'] = $note;
+            }
+            $n++;
+        }
+    }
+    unset($x);
+    if ($n) {
+        store_write($path, $d, JSON_PRETTY_PRINT);
+    }
+    flock($lh, LOCK_UN);
+    fclose($lh);
+    out(['updated' => $n]);
+}
+
+if ($a === 'fb_delete' && $method === 'POST') {
+    $id = (string) ($body['id'] ?? '');
+    if (!preg_match('/^\d{8}-\d{6}-[a-f0-9]{6}$/', $id)) {
+        fail(400, 'Geçersiz kimlik');
+    }
+    $path = fb_dir() . '/index.json';
+    $lh = store_lock($path);
+    $d = store_read($path, ['items' => []]);
+    $before = count($d['items']);
+    $d['items'] = array_values(array_filter($d['items'], fn ($x) => ($x['id'] ?? '') !== $id));
+    if (count($d['items']) !== $before) {
+        store_write($path, $d, JSON_PRETTY_PRINT);
+    }
+    flock($lh, LOCK_UN);
+    fclose($lh);
+    foreach (glob(fb_dir() . '/' . $id . '/*') ?: [] as $f) {
+        @unlink($f);
+    }
+    @rmdir(fb_dir() . '/' . $id);
+    out(['deleted' => $before - count($d['items'])]);
+}
+
+// ek dosyası (yalnız oturum açmış yönetici): kimlik ve dosya adı sıkı biçimde; tür kayıttaki izinli listeden
+if ($a === 'fb_file') {
+    $id = (string) ($_GET['id'] ?? '');
+    $f = (string) ($_GET['f'] ?? '');
+    if (!preg_match('/^\d{8}-\d{6}-[a-f0-9]{6}$/', $id) || !preg_match('/^\d{1,2}\.(png|jpg|gif|webp|mp4|webm|mov)$/', $f)) {
+        fail(400, 'Geçersiz dosya');
+    }
+    $path = fb_dir() . '/' . $id . '/' . $f;
+    if (!is_file($path)) {
+        fail(404, 'Dosya yok');
+    }
+    $types = ['png' => 'image/png', 'jpg' => 'image/jpeg', 'gif' => 'image/gif', 'webp' => 'image/webp', 'mp4' => 'video/mp4', 'webm' => 'video/webm', 'mov' => 'video/quicktime'];
+    header_remove('Content-Type');
+    header('Content-Type: ' . $types[pathinfo($f, PATHINFO_EXTENSION)]);
+    header('Content-Length: ' . filesize($path));
+    header('Content-Disposition: inline; filename="' . $id . '-' . $f . '"');
+    header("Content-Security-Policy: default-src 'none'; sandbox");
+    header('Cache-Control: private, max-age=3600');
+    readfile($path);
+    exit;
+}
+
 /* ---------------- görevler (lansman süreçleri) ---------------- */
 function default_tasks(): array
 {

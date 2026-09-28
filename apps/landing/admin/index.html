@@ -238,6 +238,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   .bulk{top:70px}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+.fb-files{display:flex;gap:8px;flex-wrap:wrap}.fb-media{max-width:240px;max-height:170px;border-radius:10px;border:1px solid var(--line);display:block;background:#000}
 </style>
 </head>
 <body>
@@ -339,6 +340,14 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
       <div class="card" style="overflow-x:auto"><h3>Demo hesapları <span class="sub">üyelik talepleri burada; onaylayınca kullanıcıya e-posta gider</span></h3><div id="demoBox"></div></div>
     </section>
 
+    <!-- geri bildirim -->
+    <section class="page" id="p-geri">
+      <div class="top"><h2>Geri bildirim</h2><span class="sp"></span>
+        <div class="seg" id="fbSeg"><button data-f="open" class="on">Açık</button><button data-f="all">Tümü</button><button data-f="done">Çözülen</button></div>
+      </div>
+      <div id="fbBox"></div>
+    </section>
+
     <!-- görevler -->
     <section class="page" id="p-gorev">
       <div class="top"><h2>Görevler</h2><span class="sp"></span><span class="muted" id="taskSum"></span></div>
@@ -409,6 +418,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     genel:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></svg>',
     liste:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c1.9.7 3.1 2.4 3.5 5.2"/></svg>',
     trafik:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5M4 19h16M8 15l4-4 3 3 5-6"/></svg>',
+    geri:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z"/><path d="M9 9h6M9 12.5h4"/></svg>',
     demo:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="12.5" rx="2.5"/><path d="M8 20.5h8M12 17v3.5"/></svg>',
     gorev:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/></svg>',
     ayar:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>',
@@ -416,7 +426,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     next:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
     prev:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>'
   };
-  var PAGES=[['genel','Genel bakış','Genel'],['liste','Bekleme listesi','Liste'],['trafik','Trafik','Trafik'],['demo','Demo','Demo'],['gorev','Görevler','Görevler'],['ayar','Ayarlar','Ayarlar']];
+  var PAGES=[['genel','Genel bakış','Genel'],['liste','Bekleme listesi','Liste'],['trafik','Trafik','Trafik'],['demo','Demo','Demo'],['geri','Geri bildirim','Geri'],['gorev','Görevler','Görevler'],['ayar','Ayarlar','Ayarlar']];
   var ST={waiting:'Bekliyor',invited:'Davet edildi',joined:'Katıldı',spam:'Spam'};
   var ST_COLOR={waiting:'#C9C6D6',invited:'#6C47FF',joined:'#16A34A',spam:'#C2261A'};
 
@@ -503,7 +513,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   }
   function load(id,force){
     if(loaded[id] && !force) return; loaded[id]=true;
-    ({genel:loadOverview,liste:loadList,trafik:loadOverview,demo:loadDemo,gorev:loadTasks,ayar:function(){ loadSystem(); loadSmtp(); }})[id]();
+    ({genel:loadOverview,liste:loadList,trafik:loadOverview,demo:loadDemo,geri:loadFb,gorev:loadTasks,ayar:function(){ loadSystem(); loadSmtp(); }})[id]();
   }
   window.addEventListener('hashchange',route);
 
@@ -621,6 +631,35 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     }
   });
 
+  /* ---------- geri bildirim ---------- */
+  var FB=[], FBF='open';
+  var FB_TYPE={bug:['Hata','st-spam'],idea:['Öneri','st-invited'],request:['Talep','st-joined'],other:['Diğer','st-waiting']};
+  var FB_ST=[['new','Yeni'],['doing','İnceleniyor'],['done','Çözüldü'],['wontfix','Yapılmayacak']];
+  function fbCount(){ $('#nc-geri').textContent=FB.filter(function(x){ return x.status==='new'; }).length||''; }
+  function loadFb(){ api('fb_list').then(function(d){ FB=d.items; fbCount(); renderFb(); }).catch(function(e){ toast(e.message,true); }); }
+  function renderFb(){
+    var list=FB.filter(function(x){ return FBF==='all'||(FBF==='done'?(x.status==='done'||x.status==='wontfix'):(x.status==='new'||x.status==='doing')); });
+    $('#fbBox').innerHTML=list.length?list.map(function(x){
+      var t=FB_TYPE[x.type]||FB_TYPE.other, who=(x.name||x.user||'')+(x.email?' · '+x.email:'');
+      var files=(x.files||[]).map(function(f){ var u='api.php?a=fb_file&id='+encodeURIComponent(x.id)+'&f='+encodeURIComponent(f.file);
+        return /^video/.test(f.mime)?'<video src="'+u+'" controls preload="metadata" class="fb-media"></video>':'<a href="'+u+'" target="_blank" rel="noopener"><img src="'+u+'" alt="" class="fb-media" loading="lazy"></a>'; }).join('');
+      return '<div class="card fb-item" style="margin-bottom:12px"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="chip '+t[1]+'"><i></i>'+t[0]+'</span><b>'+esc(who||'anonim')+'</b><span class="muted" style="font-size:12px">'+ago(x.at)+' · '+esc(x.app)+'</span><span class="sp" style="flex:1"></span>'+
+        '<select class="input" data-fbst="'+esc(x.id)+'" style="height:30px;width:auto">'+FB_ST.map(function(s){ return '<option value="'+s[0]+'"'+(x.status===s[0]?' selected':'')+'>'+s[1]+'</option>'; }).join('')+'</select>'+
+        (x.email?'<a class="btn sm" href="mailto:'+esc(x.email)+'?subject='+encodeURIComponent('Mivelo geri bildirimin hakkında')+'">Yanıtla</a>':'')+
+        '<button class="icon-btn" data-fbdel="'+esc(x.id)+'" title="Sil" aria-label="Sil">'+I.trash+'</button></div>'+
+        '<p style="white-space:pre-wrap;margin:10px 0">'+esc(x.message)+'</p>'+(files?'<div class="fb-files">'+files+'</div>':'')+
+        '<div class="muted" style="font-size:11.5px;margin-top:8px;word-break:break-all">'+esc(x.page)+(x.ua?' · '+esc(x.ua):'')+'</div>'+
+        '<input class="input" data-fbnote="'+esc(x.id)+'" value="'+esc(x.note)+'" placeholder="Not (yalnız sen görürsün)" style="margin-top:8px;height:32px"></div>';
+    }).join(''):'<div class="card"><div class="empty">'+(FBF==='open'?'Açık geri bildirim yok.':'Kayıt yok.')+'</div></div>';
+  }
+  $('#fbSeg').addEventListener('click',function(e){ var b=e.target.closest('button'); if(!b) return; FBF=b.dataset.f; $$('#fbSeg button').forEach(function(x){ x.classList.toggle('on',x===b); }); renderFb(); });
+  $('#fbBox').addEventListener('change',function(e){ var el=e.target;
+    if(el.dataset.fbst) api('fb_update',{id:el.dataset.fbst,status:el.value}).then(function(){ FB.forEach(function(x){ if(x.id===el.dataset.fbst) x.status=el.value; }); fbCount(); toast('Güncellendi'); }).catch(function(x){ toast(x.message,true); });
+    if(el.dataset.fbnote) api('fb_update',{id:el.dataset.fbnote,note:el.value}).then(function(){ toast('Not kaydedildi'); }).catch(function(x){ toast(x.message,true); }); });
+  $('#fbBox').addEventListener('click',function(e){ var b=e.target.closest('[data-fbdel]'); if(!b) return;
+    if(b.dataset.armed!=='1'){ b.dataset.armed='1'; toast('Silmek için tekrar tıkla'); setTimeout(function(){ b.dataset.armed=''; },3000); return; }
+    api('fb_delete',{id:b.dataset.fbdel}).then(function(){ FB=FB.filter(function(x){ return x.id!==b.dataset.fbdel; }); fbCount(); renderFb(); toast('Silindi'); }).catch(function(x){ toast(x.message,true); }); });
+
   /* ---------- görevler ---------- */
   var TASKS=[], COLS=[['todo','Yapılacak'],['doing','Sürüyor'],['done','Bitti']];
   function loadTasks(){ api('tasks').then(function(d){ TASKS=d.tasks; renderTasks(); }).catch(function(e){ toast(e.message,true); }); }
@@ -668,7 +707,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
 
   /* ---------- oturum ---------- */
   function showLogin(){ $('#app').hidden=true; $('#login').hidden=false; setTimeout(function(){ $('#pw').focus(); },50); }
-  function showApp(){ $('#login').hidden=true; $('#app').hidden=false; loaded={}; route(); api('demo').then(function(d){ var n=d.users.filter(function(u){ return u.status==='pending'; }).length; $('#nc-demo').textContent=n||''; }).catch(function(){}); }
+  function showApp(){ $('#login').hidden=true; $('#app').hidden=false; loaded={}; route(); api('demo').then(function(d){ var n=d.users.filter(function(u){ return u.status==='pending'; }).length; $('#nc-demo').textContent=n||''; }).catch(function(){}); api('fb_list').then(function(d){ FB=d.items; fbCount(); }).catch(function(){}); }
   $('#loginForm').addEventListener('submit',function(e){ e.preventDefault(); var b=$('#loginBtn'); b.disabled=true; $('#loginErr').textContent='';
     api('login',{password:$('#pw').value}).then(function(d){ CSRF=d.csrf; $('#pw').value=''; showApp(); }).catch(function(x){ $('#loginErr').textContent=x.message; $('#pw').select(); }).then(function(){ b.disabled=false; }); });
   $$('[data-logout]').forEach(function(b){ b.addEventListener('click',function(){ api('logout',{}).catch(function(){}).then(function(){ CSRF=null; showLogin(); }); }); });

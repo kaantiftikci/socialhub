@@ -7,3 +7,9 @@ export let PROFILE_NAME = STATIC_DEMO ? '' : 'Kaan';
 export function setProfileName(name: string): void {
   PROFILE_NAME = name;
 }
+
+/** Web demoda oturum açan kullanıcı adı (geri bildirime eklenir) */
+export let PROFILE_USER = '';
+export function setProfileUser(username: string): void {
+  PROFILE_USER = username;
+}

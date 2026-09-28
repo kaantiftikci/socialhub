@@ -1,3 +1,4 @@
+import { FeedbackButton } from './Feedback';
 import { LoginView, pushLoginEvent } from './LoginView';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, connectEvents } from './api';
@@ -292,7 +293,11 @@ export default function App() {
 
   // ---- olay akışı ----
   useEffect(() => {
-    const onErr = (e: ErrorEvent) => notify(`Arayüz hatası: ${e.message}`, true);
+    // "ResizeObserver loop …" tarayıcının zararsız uyarısı (gözlemci aynı karede yeniden tetiklendi); hata sayılmaz
+    const onErr = (e: ErrorEvent) => {
+      if (/ResizeObserver loop/i.test(e.message ?? '')) return;
+      notify(`Arayüz hatası: ${e.message}`, true);
+    };
     const onRej = (e: PromiseRejectionEvent) => notify(`Arayüz hatası: ${String((e.reason as Error)?.message ?? e.reason)}`, true);
     // uygulama kapalıyken zamanı geçen zamanlanmış mesajlar sessizce gönderilmez (Conversation.tsx flushScheduled)
     const onMissed = (e: Event) => notify(`${(e as CustomEvent<number>).detail} zamanlanmış mesaj uygulama kapalıyken zamanını kaçırdı; gönderilmedi.`, true);
@@ -1416,6 +1421,7 @@ export default function App() {
       </div>
 
       <LoginView accounts={accounts} />
+      <FeedbackButton />
 
       {settingsP.value && (
         <SettingsModal

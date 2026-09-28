@@ -219,7 +219,8 @@ function with_users(callable $fn)
 
 function user_public(array $u): array
 {
-    return ['id' => $u['id'], 'name' => $u['name'], 'username' => $u['username'] ?? $u['email']];
+    // fresh: üyelik talebiyle gelen kullanıcı → demo boş panelle açılır (varsayılan örnek uygulama/sohbet yok)
+    return ['id' => $u['id'], 'name' => $u['name'], 'username' => $u['username'] ?? $u['email'], 'fresh' => !empty($u['requestedAt'])];
 }
 
 function current_user(array $data): ?array

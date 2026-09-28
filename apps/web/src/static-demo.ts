@@ -185,7 +185,12 @@ async function saveAccounts(): Promise<void> {
   await authSaveAccounts(accounts.map(publicAccount));
 }
 
-export function loadDemoAccounts(list: Array<Record<string, unknown>>): void {
+/** Yeni kayıtlı demo kullanıcısı: boş panel (varsayılan uygulama, örnek sohbet ve etkinlik yok); bağladığı uygulamanın örnekleri gelir */
+let freshUser = false;
+
+export function loadDemoAccounts(list: Array<Record<string, unknown>>, opts: { fresh?: boolean } = {}): void {
+  freshUser = !!opts.fresh;
+  calEvents = freshUser ? [] : null;
   accounts = list
     .filter((a) => PLATFORMS[a.platform as Platform])
     .map((a) => ({
@@ -198,7 +203,8 @@ export function loadDemoAccounts(list: Array<Record<string, unknown>>): void {
     .filter((a) => DEMO_APPS.includes(a.platform) || !String(a.id).startsWith('demo:'));
   const byPlatform = new Map(accounts.map((a) => [a.platform, a]));
   const extras = accounts.filter((a) => !DEMO_APPS.includes(a.platform));
-  const next = [...DEMO_APPS.map((p) => byPlatform.get(p) ?? demoAccount(p)), ...extras];
+  // yeni kullanıcıya varsayılan demo uygulamaları eklenmez: yalnız kendi bağladıkları
+  const next = freshUser ? accounts : [...DEMO_APPS.map((p) => byPlatform.get(p) ?? demoAccount(p)), ...extras];
   const changed = next.length !== accounts.length || next.some((a, i) => a.id !== accounts[i]?.id);
   accounts = next;
   if (changed) void saveAccounts().catch(() => undefined);

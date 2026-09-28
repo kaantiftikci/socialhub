@@ -71,6 +71,14 @@ Dil: arayüz ve yorumlar Türkçe.
   `mv_send_mail` (kimlik doğrulamalı SMTP, bağımlılıksız; ayar `~/mivelo-data/smtp.json` 0600, Admin → Ayarlar → E-posta gönderimi + deneme
   e-postası + sunucu konuşma dökümü, şifre dökümde gizli). SMTP yoksa mail() yedeği — cPanel'de "gönderildi" deyip ULAŞMIYORDU (SPF/DKIM).
   Şifre e-postada YOK; sonuç `mailed`/`mailError` rozetinde. Her kullanıcının bağladığı uygulamalar kendi kaydında (bağımsız); reddedilenin oturumu düşer.
+  Kayıtla gelen kullanıcı (`requestedAt`) `user_public.fresh` → demo BOŞ panelle açılır (`loadDemoAccounts(list, {fresh})`: varsayılan
+  DEMO_APPS, örnek sohbet ve takvim etkinliği yok; bağladığı uygulamanın örnekleri gelir). admin örnek veriyle açılır.
+  **Geri bildirim** (`Feedback.tsx`, sağ alt mor düğme; ✕ yalnız o oturumda gizler, yenilemede geri gelir): Hata/Öneri/Talep/Diğer, metin,
+  e-posta (isteğe bağlı), ekran görüntüsü (getDisplayMedia tek kare) / ekran kaydı (MediaRecorder ≤60 sn) / dosya (görsel-video; ≤5, 40 MB,
+  toplam 60 MB; yapıştırma da) → `https://mivelo.app/api/feedback.php` (`VITE_FEEDBACK_URL`; CORS yalnız demo/localhost/tauri; multipart;
+  tür finfo ile içerikten; IP başına saatte 10; `~/mivelo-data/feedback/index.json` + `<id>/<n>.<ext>`; `.user.ini` yükleme sınırları;
+  SMTP ayarlıysa sahibine e-posta). Başarı yalnız `{ok:true}` (yanlış adres 200+HTML döndürebilir). Admin → Geri bildirim (Açık/Tümü/Çözülen,
+  durum Yeni/İnceleniyor/Çözüldü/Yapılmayacak, not, Yanıtla=mailto, ekler `fb_file` yalnız oturumla, CSP sandbox).
   Demoda örnek AI açık (`demo-ai.ts`: sohbete özel taslak/özet/aksiyon/olay, model çağrısı yok); pazaryeri sipariş kartı `Script.order`.
   Tek dosya demo (`npm run demo:html`) profil adı "Mivelo".
 - **Tanıtım videosu (reels 1080×1920, ~68 sn; TM() zaman eşlemesi: 5,5 sn sonrası ×1,25 + GAPS araları: AI özeti, sağ panel, takip/zamanlama hareketli grafikleri)** `scripts/promo/`: videodaki arayüz GERÇEK tek dosya demo (iframe, Playwright sanal saati
@@ -169,7 +177,8 @@ Dil: arayüz ve yorumlar Türkçe.
   Kaynaklar: IMAP `mailparser` html (gömülü `cid:` görseller yerel medya adresine, gövdede kullanılanlar ek listesinde yok; ilk yoklamada son 150
   e-posta bir kez yeniden okunur `html-v1`), tarayıcı yolları (Gmail `div.a3s` alıntısız, Yahoo/Yandex gövde öğesi, iCloud article, Outlook gövde).
   Hepsi `connectors/mail-html.ts` `cleanMailHtml` (betik/iframe/form/on*/javascript: atılır, `<base>` eklenir). Arayüz: sandbox'ta allow-scripts
-  YOK (yalnız same-origin: yükseklik ölçümü + popups), CSP, `<base target=_blank>`, beyaz "kağıt" (koyu temada da), ResizeObserver yüksekliği.
+  YOK (yalnız same-origin: yükseklik ölçümü + popups), CSP, `<base target=_blank>`, beyaz "kağıt" (koyu temada da), ResizeObserver yüksekliği (gövde gözlenir, ölçüm bir sonraki karede ve yalnız değişince: aynı karede boy yazmak
+  "ResizeObserver loop …" uyarısı veriyordu; App'in hata bildirimi bu zararsız uyarıyı yok sayar).
 - **Tarayıcı e-posta saatleri**: `parseMailDate` (outlook.ts; TR/EN/RU, Bugün/Dün/Сегодня/Вчера, ISO/RFC; okunamazsa undefined — ESKİDEN NaN →
   Date.now(): her e-posta eşitleme anında gelmiş görünüyordu) + `fillListTimes` (okunamayan satır komşusundan) + ileti zamanı okunamazsa
   liste satırı zamanı (`threadTs`). Sohbet zamanı MAX ile güncellendiği için bozuk kayıtlar Yahoo/Yandex/iCloud tarayıcı hesaplarında
