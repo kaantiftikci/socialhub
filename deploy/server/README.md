@@ -16,7 +16,7 @@ Caddy (HTTPS, sertifika kendiliğinden)  →  ağ geçidi 127.0.0.1:8787  (apps/
 ```
 
 - Çekirdek ilk istekte açılır (1–3 sn), 12 saat hiç kullanılmazsa kapanır (açık sekme = kullanılıyor), sonraki girişte
-  yeniden açılır. Aynı anda en çok `MAX_CORES` üye (varsayılan: her 2 GB bellek için 1; 24 GB → 12).
+  yeniden açılır. Aynı anda en çok `MAX_CORES` üye (varsayılan: sistem için 1 GB ayrılır, kalan her 1 GB için 1 üye; 8 GB → 6-7, 14 GB → 12-13).
 - Tarayıcıyla girilen kanalların (Instagram, LinkedIn, Gmail…) giriş sayfası sunucudaki Chromium'da açılır ve görüntüsü
   Mivelo'nun içine yayınlanır; kullanıcı orada tıklar/yazar.
 - `main` dalına her gönderimden sonra sunucu 5 dk içinde kendini günceller (yalnız çekirdek ya da ağ geçidi değiştiyse
@@ -104,7 +104,7 @@ sudo systemctl start mivelo-update       # güncellemeyi hemen dene
 
 - **Bellek**: üye başına çekirdek ~150 MB; tarayıcıyla bağlanan her kanal (Instagram, LinkedIn, X, Messenger, Gmail/Outlook
   tarayıcı girişi…) ~250 MB daha. WhatsApp, Telegram, Slack (uygulama), e-posta (uygulama şifresi) ve pazaryerleri tarayıcısız
-  ve hafif. 24 GB'lık Oracle sunucusu ~12 üyeyi rahat taşır; `free -h` ve `MAX_CORES` ile ayarla.
+  ve hafif. Ortalama etkin üye ~1 GB kullanır (her şeyi bağlayan ~2 GB); `free -h` ve `MAX_CORES` ile ayarla.
 - **Disk**: üye başına veritabanı + medya önbelleği (60 günden eskisi silinir) + tarayıcı profilleri; birkaç yüz MB olabilir.
 - **Veri merkezi IP'si**: Instagram, LinkedIn, Facebook ve Google, bulut sunucusundan gelen girişte sıkça ek doğrulama
   (e-posta/SMS kodu, "Bu sen misin?") ister, bazen hesabı geçici kısıtlar. Üyelere bunu söyle; önemli hesaplarla deneme

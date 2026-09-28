@@ -51,8 +51,8 @@ main() {
   local MEM_MB
   MEM_MB=$(awk '/^MemTotal:/ {print int($2/1024)}' /proc/meminfo)
   if [ -z "$MAX" ]; then
-    # üye başına ~150 MB çekirdek + tarayıcılı her kanal ~250 MB: 2 GB'ta bir üye (24 GB → 12)
-    MAX=$(((MEM_MB + 1024) / 2048))
+    # ortalama üye ~1 GB (çekirdek ~200 MB + tarayıcılı kanallar ~300-500 MB), sistem ~1 GB; 4 GB takas yedekte (8 GB → 7, 14 GB → 13)
+    MAX=$(((MEM_MB - 1024) / 1024))
     [ "$MAX" -ge 2 ] || MAX=2
     [ "$MAX" -le 40 ] || MAX=40
   fi
