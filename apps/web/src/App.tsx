@@ -1,6 +1,7 @@
 import { FeedbackButton } from './Feedback';
 import { LoginView, pushLoginEvent } from './LoginView';
 import { UpdateBanner } from './UpdateBanner';
+import { trPreview } from './reaction-text';
 import { clearOpening as clearOpeningFor, markOpening, useLoginOpening } from './login-opening';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, connectEvents } from './api';
@@ -1307,7 +1308,7 @@ export default function App() {
                 <div className="quick" aria-label="Sabitlenenler">
                   {pinnedChats.slice(0, 8).map((c, i, arr) => (
                     <button key={c.id} className={`qc b ${c.id === selected ? 'on' : ''}`} onClick={() => setSelected(c.id)} title={stripLeadIcon(c.lastPreview)}>
-                      {c.unread > 0 && arr.findIndex((x) => x.unread > 0) === i && <span className="qc-bub">{stripLeadIcon(c.lastPreview.replace(/^Sen: /, ''))}</span>}
+                      {c.unread > 0 && arr.findIndex((x) => x.unread > 0) === i && <span className="qc-bub">{stripLeadIcon(trPreview(c.lastPreview.replace(/^Sen: /, '')))}</span>}
                       <span className="avwrap">
                         <Avatar name={c.name} size={46} url={c.avatarUrl} />
                         <Chip platform={c.platform} size={17} ring="var(--bg)" />
@@ -2019,7 +2020,7 @@ function ChatRow({
             <span className={`prev ${chat.lastReaction ? 'rx' : ''}`}>
               {/* son mesaj benimse balondaki gibi tik: gönderildi / iletildi / görüldü (tepki önizlemesinde, e-postada ve pazaryerinde yok) */}
               {chat.lastFromMe && !chat.lastReaction && chat.lastStatus && !isMail && PLATFORMS[chat.platform].category !== 'shop' && statusIcon(chat.lastStatus)}
-              {(isMail ? mailPreview : chat.lastPreview) ? <IconText text={(isMail ? mailPreview : chat.lastPreview)!} size={12} /> : '…'}
+              {(isMail ? mailPreview : chat.lastPreview) ? <IconText text={isMail ? mailPreview! : trPreview(chat.lastPreview)} size={12} /> : '…'}
             </span>
           )}
           {chat.unread > 0 && <span className="badge" aria-label={`${chat.unread} okunmamış`}>{fmtBadge(chat)}</span>}

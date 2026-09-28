@@ -1,4 +1,5 @@
 import { MailFrame } from './MailFrame';
+import { trReactionText } from './reaction-text';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EmojiPicker } from './emoji';
 import { api, USE_STATIC } from './api';
@@ -13,7 +14,8 @@ import { useClosing, Avatar, Chip, Icon, IconText, Resizer, Tag, ago, fmtDay, fm
 const SYSTEM_LEAD = new Set(['🔒', '🚫', '⏳', '⌛', '🗑', '⚠']);
 
 /** Balon metni: sistem mesajıysa baştaki emoji ikon ("🔒 Tek seferlik fotoğraf…"), değilse olduğu gibi (bağlantılar tıklanır) */
-function bubbleText(text: string) {
+function bubbleText(raw: string) {
+  const text = trReactionText(raw);
   const first = Array.from(text)[0] ?? '';
   const lead = SYSTEM_LEAD.has(first) ? leadIcon(text) : undefined;
   if (!lead?.icon || lead.prefix) return linkify(text);

@@ -252,7 +252,40 @@ export interface BridgeOptions {
   backfillMs?: number;
 }
 
+/** Açılış yuvaları: etkileşimsiz tarayıcı açılışları sırayla (en çok 2'si birlikte); yuva en geç 45 sn sonra kendiliğinden boşalır */
+const BOOT_SLOTS = 2;
+let bootBusy = 0;
+const bootWaiters: Array<() => void> = [];
+function acquireBootSlot(cancelled: () => boolean): Promise<() => void> {
+  return new Promise((resolve) => {
+    const grant = () => {
+      if (cancelled()) {
+        resolve(() => undefined);
+        return nextBootSlot();
+      }
+      bootBusy++;
+      let done = false;
+      const release = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(t);
+        bootBusy--;
+        nextBootSlot();
+      };
+      const t = setTimeout(release, 45_000);
+      t.unref?.();
+      resolve(release);
+    };
+    if (bootBusy < BOOT_SLOTS) grant();
+    else bootWaiters.push(grant);
+  });
+}
+function nextBootSlot(): void {
+  while (bootBusy < BOOT_SLOTS && bootWaiters.length) bootWaiters.shift()!();
+}
+
 export class BrowserConnector extends BaseConnector {
+  protected override syncOnConnecting = false;
   private chromium?: (typeof import('playwright'))['chromium'];
   private request?: (typeof import('playwright'))['request'];
   private ctx?: BrowserContext;
@@ -391,7 +424,22 @@ export class BrowserConnector extends BaseConnector {
     return this.opts.keepOpen === 'always' || (this.opts.keepOpen === 'whileActive' && isUiActive());
   }
 
+  /**
+   * Açılışta (etkileşimsiz) tarayıcı kanalları aynı anda en çok BOOT_SLOTS tanesi kalkar; kullanıcının bastığı "Bağlan"/
+   * "Yeniden bağlan" sıraya girmez. (29.09, Kaan: uzun aradan sonra açınca her şey aynı anda eşitleniyor, TikTok giriş
+   * penceresi dakikalar sonra açılıyor — 8-10 Chromium'un eşzamanlı açılışı + ilk turları CPU/diski tüketiyordu.)
+   */
   async start(opts: StartOptions = {}): Promise<void> {
+    if (opts.interactive !== false) return this.startInner(opts);
+    const release = await acquireBootSlot(() => this.stopping);
+    try {
+      if (!this.stopping) await this.startInner(opts);
+    } finally {
+      release();
+    }
+  }
+
+  private async startInner(opts: StartOptions = {}): Promise<void> {
     const interactive = opts.interactive !== false;
     this.stopping = false;
     this.loginCancelledOnce = false;
@@ -478,6 +526,9 @@ export class BrowserConnector extends BaseConnector {
    * pencereyi kapatıp görünmez devam et.
    */
   private async visibleLogin(loggedIn: boolean): Promise<boolean> {
+    if (this.loginCancelledOnce || this.stopping) return false;
+    // oturum zaten var (PIN adımı): pencereyi kapatmak iptal sayılmaz, eskisi gibi görünmez devam edilir
+    if (loggedIn) this.stopLoginWatch();
     this.setStatus('pairing', loggedIn ? 'Açılan pencerede PIN kodunu gir; kabul edilince pencere kendiliğinden kapanır' : this.strategy.loginHint);
     if (!loggedIn && !(await this.waitForLogin())) return false;
     // Platforma özgü son adım (Messenger: "PIN kodunu gir") — pencere hâlâ açıkken
@@ -667,6 +718,8 @@ export class BrowserConnector extends BaseConnector {
     this.diagnoseRealtime(this.page);
     ctx.on('close', () => {
       if (this.ctx !== ctx) return; // biz kapattık (görünürden görünmeze geçiş)
+      // giriş penceresi (bekçi açıkken) girişsiz kapandı: bağlanma iptal (hesap "Bağlı değil", yeni hesap kaldırılır)
+      if (this.loginWatchTimer && !this.stopping) return void this.loginCancelled('giriş penceresi giriş yapılmadan kapatıldı');
       if (!this.stopping) this.setStatus('disconnected', 'Tarayıcı penceresi kapatıldı');
       this.unschedule();
     });
@@ -705,7 +758,14 @@ export class BrowserConnector extends BaseConnector {
 
   /** Giriş sayfasını aç: varsayılan Mivelo içinde (görünmez tarayıcı + ekran yayını), istenirse ayrı küçük pencerede */
   private async launchLogin(): Promise<boolean> {
-    if (this.external) return this.launch(false);
+    if (this.external) {
+      if (!(await this.launch(false))) return false;
+      if (this.loginCancelledOnce || this.stopping) return false;
+      // pencere artık ekranda: "Bağlanıyor %N" değil "Eşleşme bekleniyor" (kullanıcı pencereyi kapatınca bekçi iptal eder)
+      this.setStatus('pairing', this.strategy.loginHint);
+      this.watchLoginWindow();
+      return true;
+    }
     this.embedOn = true;
     this.loginAbort = false;
     // arayüz giriş ekranını hemen ("açılıyor…") gösterir; ilk kare sayfa yüklenmeden gelir (eskiden 5-10 sn sonra açılıyordu)
@@ -861,9 +921,37 @@ export class BrowserConnector extends BaseConnector {
    * kaldırır, Bağlan kartı ilk haline döner. Eskiden hesap sonsuza dek "Eşleşme bekleniyor"da kalıyordu.
    */
   private loginCancelledOnce = false;
+  /**
+   * Görünür giriş penceresi bekçisi (29.09, Kaan: Slack giriş penceresini kapattım, "Bağlanıyor" ve yüzde artmaya devam etti).
+   * Pencere, akışın herhangi bir adımında (sayfa yüklenirken, oturum denetimi sürerken — waitForLogin'e gelmeden) kapatılabilir;
+   * macOS'ta son pencere kapanınca Chromium ve bağlamı açık kalır, 'close' olayı gelmez. Saniyede bir açık sayfa kalmış mı bakılır;
+   * kalmadıysa giriş iptal edilir. Giriş algılanınca (waitForLogin) bekçi durur: sonra kapatmak devam etmeyi engellemez.
+   */
+  private loginWatchTimer?: NodeJS.Timeout;
+  private watchLoginWindow(): void {
+    this.stopLoginWatch();
+    const ctx = this.ctx;
+    let empty = 0;
+    this.loginWatchTimer = setInterval(() => {
+      if (this.stopping || this.loginCancelledOnce || !ctx || this.ctx !== ctx) return this.stopLoginWatch();
+      const open = ctx.pages().filter((p) => !p.isClosed()).length;
+      // iki ardışık denetim: OAuth yönlendirmesinde sekme kısa süre kapanıp yenisi açılabilir
+      empty = open ? 0 : empty + 1;
+      if (empty >= 2) {
+        this.stopLoginWatch();
+        void this.loginCancelled('giriş penceresi giriş yapılmadan kapatıldı');
+      }
+    }, 1000);
+    this.loginWatchTimer.unref?.();
+  }
+  private stopLoginWatch(): void {
+    if (this.loginWatchTimer) clearInterval(this.loginWatchTimer);
+    this.loginWatchTimer = undefined;
+  }
   private async loginCancelled(why: string): Promise<void> {
     if (this.loginCancelledOnce) return;
     this.loginCancelledOnce = true;
+    this.stopLoginWatch();
     bus.log('info', `${this.account.platform}: ${why}; bağlanma iptal edildi`);
     await this.stopEmbed().catch(() => undefined);
     await this.closeCtx();
@@ -874,7 +962,7 @@ export class BrowserConnector extends BaseConnector {
 
   private async waitForLogin(): Promise<boolean> {
     let ticks = 0;
-    while (!this.stopping) {
+    while (!this.stopping && !this.loginCancelledOnce) {
       this.adoptNewestPage();
       if (this.embedOn) await this.keepEmbedAlive();
       if (this.loginAbort) {
@@ -891,7 +979,8 @@ export class BrowserConnector extends BaseConnector {
       if (++ticks % 30 === 0) bus.log('info', `${this.account.platform}: giriş bekleniyor (${safeUrl(this.page.url())})`);
       await sleep(700);
     }
-    if (this.stopping) return false;
+    this.stopLoginWatch();
+    if (this.stopping || this.loginCancelledOnce) return false;
     bus.log('info', `${this.account.platform}: giriş algılandı (${safeUrl(this.page?.url())}), izin adımları için bekleniyor`);
     // izin ekranları: URL ~1,5 sn değişmeyene ve giriş hâlâ geçerli olana kadar bekle (en fazla 60 sn).
     // Eskiden 2 sn'lik adımlarla 4 sn kararlılık → giriş sonrası pencere 6-8 sn açık kalıyordu.
@@ -925,6 +1014,7 @@ export class BrowserConnector extends BaseConnector {
 
   async stop(): Promise<void> {
     this.stopping = true;
+    this.stopLoginWatch();
     await this.stopEmbed().catch(() => undefined);
     this.offActive?.();
     this.offActive = undefined;

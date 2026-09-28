@@ -264,6 +264,8 @@ export class Store {
 
   // ---------- accounts ----------
   upsertAccount(a: Account): void {
+    // kaldırılan hesabın arka planda duran connector'ı durum yazınca hesap geri dirilmesin
+    if (this.removing.has(a.id) || this.purged.has(a.id)) return;
     this
       .stmt(
         `INSERT INTO accounts (id, platform, label, status, detail, created_at) VALUES (@id, @platform, @label, @status, @detail, @createdAt)
@@ -273,12 +275,46 @@ export class Store {
   }
 
   listAccounts(): Account[] {
-    return this.stmt('SELECT * FROM accounts ORDER BY created_at').all().map(rowToAccount);
+    const all = this.stmt('SELECT * FROM accounts ORDER BY created_at').all().map(rowToAccount);
+    return this.removing.size ? all.filter((a) => !this.removing.has(a.id)) : all;
   }
 
   getAccount(id: string): Account | undefined {
+    if (this.removing.has(id)) return undefined;
     const r = this.stmt('SELECT * FROM accounts WHERE id = ?').get(id);
     return r ? rowToAccount(r) : undefined;
+  }
+
+  /**
+   * Kaldırılan hesaplar: listelerde/aramada hemen görünmez, verisi arka planda parça parça silinir (purgeAccount).
+   * Eskiden tek işlemde 150 bin mesaj + FTS silinirken olay döngüsü saniyelerce kilitleniyor, "Kaldır" çalışmıyor sanılıyordu.
+   */
+  private removing = new Set<string>();
+  private purged = new Set<string>();
+  isRemoving(id: string): boolean {
+    return this.removing.has(id);
+  }
+  /** Yarıda kalmış (çekirdek kapandı) kaldırmalar: açılışta devam edilecek hesaplar */
+  pendingPurges(): string[] {
+    return (this.stmt("SELECT key FROM meta WHERE key LIKE 'removing:%'").all() as Array<{ key: string }>).map((r) => r.key.slice('removing:'.length));
+  }
+  /** Hesabı hemen gizle, mesajlarını 2000'lik dilimlerle (arada olay döngüsüne dönerek) sil, sonra sohbetleri ve hesabı kaldır */
+  async purgeAccount(id: string, step = 2000): Promise<void> {
+    this.removing.add(id);
+    this.setFlag(`removing:${id}`);
+    try {
+      const del = this.stmt('DELETE FROM messages WHERE rowid IN (SELECT m.rowid FROM messages m JOIN chats c ON c.id = m.chat_id WHERE c.account_id = ? LIMIT ?)');
+      for (;;) {
+        const n = del.run(id, step).changes;
+        if (n < step) break;
+        await new Promise((r) => setImmediate(r));
+      }
+      this.deleteAccount(id);
+      this.purged.add(id);
+      this.stmt('DELETE FROM meta WHERE key = ?').run(`removing:${id}`);
+    } finally {
+      this.removing.delete(id);
+    }
   }
 
   deleteAccount(id: string): void {
@@ -400,7 +436,7 @@ export class Store {
    * Silinenler'deki sohbetler sınırdan bağımsız hep gelir.
    */
   listChats(perAccount = 3000): Chat[] {
-    return this
+    const rows = this
       .stmt(
         `SELECT *, ${LAST_STATUS} FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY account_id ORDER BY last_message_at DESC) AS rn FROM chats) AS chats
           WHERE rn <= ? OR unread > 0 OR flags IS NOT NULL OR followup IS NOT NULL
@@ -409,6 +445,7 @@ export class Store {
       )
       .all(perAccount)
       .map(rowToChat);
+    return this.removing.size ? rows.filter((c) => !this.removing.has(c.accountId)) : rows;
   }
 
   /** Bir hesabın tüm sohbetleri (sınırsız; connector içi toplu işlemler için). */
@@ -748,7 +785,7 @@ export class Store {
     }
     return rows.flatMap((message) => {
       const chat = this.getChat(message.chatId);
-      return chat ? [{ message, chat }] : [];
+      return chat && !this.removing.has(chat.accountId) ? [{ message, chat }] : [];
     });
   }
 

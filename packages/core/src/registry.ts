@@ -82,7 +82,6 @@ export class Registry {
       if (this.fresh.has(id)) {
         this.fresh.delete(id);
         await this.removeNow(id);
-        bus.emit({ type: 'account.removed', accountId: id });
         return 'removed';
       }
       const c = this.connectors.get(id);
@@ -124,7 +123,11 @@ export class Registry {
   }
 
   async bootAll(): Promise<void> {
+    // yarıda kalmış kaldırmalar: bu hesaplar başlatılmaz, verisi silinir
+    const purging = new Set(this.store.pendingPurges());
+    if (purging.size) this.resumePurges();
     for (const a of this.store.listAccounts()) {
+      if (purging.has(a.id)) continue;
       if (a.platform === 'demo') continue;
       try {
         await this.spawn(a, false);
@@ -205,22 +208,44 @@ export class Registry {
     return account;
   }
 
+  /**
+   * Kaldır: hesap HEMEN listeden kalkar ve yanıt döner; platform çıkışı (WhatsApp telefondan düşürme), connector durdurma,
+   * mesajların silinmesi ve oturum klasörü arka planda (29.09, Kaan: "Kaldır ya çalışmıyor ya çok yavaş" — çıkış + durdurma
+   * 30 sn'ye, büyük hesapta tek işlemde mesaj/FTS silme saniyelere varıyordu). Arka plan işi hesap kilidinde sürer: aynı
+   * hesaba sonraki işlem (yeniden ekleme vb.) temizlik bitince çalışır.
+   */
   remove(id: string): Promise<void> {
-    return this.serial(id, () => this.removeNow(id));
+    if (!this.store.getAccount(id) && !this.connectors.has(id)) return Promise.reject(new Error('Hesap yok'));
+    this.fresh.delete(id);
+    const c = this.connectors.get(id);
+    this.connectors.delete(id);
+    const purge = this.store.purgeAccount(id);
+    bus.emit({ type: 'account.removed', accountId: id });
+    void this.serial(id, async () => {
+      if (c) {
+        await withTimeout(c.logout?.() ?? Promise.resolve(), 15_000).catch((e) => bus.log('warn', `${id} platform çıkışı yapılamadı: ${(e as Error).message}`));
+        await withTimeout(c.stop(), 15_000).catch(() => undefined);
+      }
+      await purge.catch((e) => bus.log('warn', `${id} verisi silinemedi: ${(e as Error).message}`));
+      await fs.promises.rm(sessionDir(id), { recursive: true, force: true }).catch(() => undefined);
+      bus.log('info', `Hesap kaldırıldı: ${id}`);
+    });
+    return Promise.resolve();
+  }
+
+  /** Çekirdek kaldırma sürerken kapandıysa: açılışta kalan veriyi sil */
+  resumePurges(): void {
+    for (const id of this.store.pendingPurges()) {
+      void this.serial(id, async () => {
+        await this.store.purgeAccount(id).catch(() => undefined);
+        await fs.promises.rm(sessionDir(id), { recursive: true, force: true }).catch(() => undefined);
+        bus.log('info', `Yarıda kalan hesap kaldırma tamamlandı: ${id}`);
+      });
+    }
   }
 
   private async removeNow(id: string): Promise<void> {
-    if (!this.store.getAccount(id) && !this.connectors.has(id)) throw new Error('Hesap yok');
-    this.fresh.delete(id);
-    const c = this.connectors.get(id);
-    if (c) {
-      this.connectors.delete(id);
-      await withTimeout(c.logout?.() ?? Promise.resolve(), 15_000).catch((e) => bus.log('warn', `${id} platform çıkışı yapılamadı: ${(e as Error).message}`));
-      await withTimeout(c.stop(), 15_000).catch(() => undefined);
-    }
-    this.store.deleteAccount(id);
-    fs.rmSync(sessionDir(id), { recursive: true, force: true });
-    bus.log('info', `Hesap kaldırıldı: ${id}`);
+    await this.remove(id);
   }
 
   restart(id: string, opts: { external?: boolean } = {}): Promise<void> {

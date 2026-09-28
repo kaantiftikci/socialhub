@@ -220,20 +220,26 @@ export function ConnectModal({
   }
 
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
   async function remove(id: string) {
+    if (removingId) return;
     if (confirmId !== id) {
       setConfirmId(id);
-      notify('Kaldırmak için bir kez daha tıkla');
       window.setTimeout(() => setConfirmId((c) => (c === id ? null : c)), 4000);
       return;
     }
     setConfirmId(null);
+    setRemovingId(id);
     try {
+      // çekirdek hesabı hemen listeden kaldırıp yanıt verir (çıkış/silme arka planda); account.removed olayı kartı günceller
       await api.removeAccount(id);
       if (active === id) setActive(null);
-      await onChanged();
+      notify('Kaldırıldı');
+      void onChanged();
     } catch (e) {
       notify((e as Error).message, true);
+    } finally {
+      setRemovingId(null);
     }
   }
 
@@ -783,8 +789,16 @@ export function ConnectModal({
                       <button className="btn sm b b2" onClick={() => setActive(acc[0].id)}>
                         Ayrıntı
                       </button>
-                      <button className={`btn sm icon b b2 ${confirmId === acc[0].id ? 'danger-solid' : ''}`} onClick={() => remove(acc[0].id)} aria-label="Kaldır" title={confirmId === acc[0].id ? 'Onaylamak için tekrar tıkla' : 'Kaldır'}>
+                      {/* ikinci tık onayı düğmenin kendisinde görünür (eskiden yalnız köşedeki bildirimdeydi → "Kaldır çalışmıyor" sanılıyordu) */}
+                      <button
+                        className={`btn sm b b2 ${confirmId === acc[0].id ? 'danger-solid' : 'icon'}`}
+                        onClick={() => remove(acc[0].id)}
+                        disabled={removingId === acc[0].id}
+                        aria-label={confirmId === acc[0].id ? 'Kaldırmayı onayla' : 'Kaldır'}
+                        title={confirmId === acc[0].id ? 'Onaylamak için tekrar tıkla' : 'Kaldır'}
+                      >
                         <Icon name="trash" size={13} />
+                        {removingId === acc[0].id ? ' Kaldırılıyor…' : confirmId === acc[0].id ? ' Emin misin? Kaldır' : null}
                       </button>
                     </>
                   )}

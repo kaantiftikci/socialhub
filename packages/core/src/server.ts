@@ -874,13 +874,16 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     const b = batcher.take();
     if (!b || !wss.clients.size) return;
     // mesaj olayları sohbeti katılımcısız (hafif) taşır: demetteki her sohbetin tam hali burada bir kez okunur
-    b.chats = b.chats.map((c) => store.getChat(c.id) ?? c);
+    b.chats = b.chats.map((c) => store.getChat(c.id) ?? c).filter((c) => !store.isRemoving(c.accountId));
     sendAll(JSON.stringify(b));
   };
   const unsub = bus.on((ev) => {
     if (!wss.clients.size) return; // arayüz bağlı değil: boşuna JSON üretme (bağlanınca listeyi kendisi çeker)
     // giriş ekranı kareleri büyük ve sürekli: demetlenmez, hemen gider
     if (ev.type === 'login.frame') return sendAll(JSON.stringify(ev));
+    // kaldırılmakta olan hesabın (connector arka planda durdurulurken) sohbet/mesaj/durum olayları arayüze gitmesin
+    const accId = ev.type === 'chat.upsert' || ev.type === 'message.upsert' ? ev.chat.accountId : ev.type === 'account.status' ? ev.account.id : undefined;
+    if (accId && store.isRemoving(accId)) return;
     batcher.push(ev);
     batchTimer ??= setTimeout(flushBatch, 40);
   });

@@ -241,6 +241,19 @@ Dil: arayüz ve yorumlar Türkçe.
   edilir. `POST /api/accounts/:id/cancel-login`. Arayüz: Bağlan penceresi kapanınca bu pencerede başlatılıp hâlâ bekleyen QR'lı hesaplar
   (WhatsApp/Telegram; tek dosya demoda satır içi giriş formu da) iptal (`startedHere`, `QR_CANCEL`). Demo: giriş açılır penceresi girişsiz
   kapanınca (`watchDemoLoginWindow`, `win.closed` + 0,9 sn pay) aynı. Bildirim "Giriş penceresi kapatıldı; bağlanma iptal edildi". Test: connect-cancel.test.ts.
+- **Giriş penceresi bekçisi (29.09, Kaan: Slack giriş penceresini kapattım, "Bağlanıyor" + yüzde artmaya devam etti)**: ayrı giriş penceresi
+  açılınca durum hemen 'pairing' (`launchLogin`), köprü saniyede bir açık sayfa kalmış mı bakar (`watchLoginWindow`, iki ardışık boş denetim;
+  macOS'ta son pencere kapanınca bağlam açık kalıp 'close' gelmiyor) → `loginCancelled` ("Bağlı değil"); giriş algılanınca ya da PIN adımında
+  (oturum var) bekçi durur. Tarayıcı kanallarında 'connecting'de eşitleme çubuğu BAŞLAMAZ (`syncOnConnecting=false`; çubuk oturum doğrulanınca %45).
+  Açılışta etkileşimsiz tarayıcı kanalları en çok 2'si birlikte kalkar (`acquireBootSlot`, yuva ≤45 sn); kullanıcının "Bağlan"ı sıraya girmez.
+- **Kaldır hızlı (29.09)**: `registry.remove` hesabı HEMEN gizler (`store.purgeAccount`: `removing` kümesi → listAccounts/getAccount/listChats/
+  arama/WS olayları görmez; `purged` hesabın geri dirilmesini engeller) + `account.removed`, yanıt döner; platform çıkışı + durdurma + 2000'lik
+  mesaj silme dilimleri + oturum klasörü arka planda (hesap kilidinde). Çekirdek yarıda kapanırsa `meta removing:<id>` → bootAll başlatmaz,
+  `resumePurges` bitirir. Bağlan kartında çöp düğmesi ilk tıkta kırmızı "Emin misin? Kaldır", sonra "Kaldırılıyor…". Test: remove-reaction-text.test.ts.
+- **Tepki metinleri Türkçe (29.09)**: `reaction-text.ts` `trReactionText` (çekirdek + arayüz kopyası `apps/web/src/reaction-text.ts`, aynı kalmalı):
+  "Liked a message" → "👍 Bir mesajı beğendi", "Ayşe reacted ❤️ to your message", SMS/RCS 'Liked “…”'/'Laughed at "…"'/'Removed a like from “…”';
+  yalnız metnin TAMAMI kalıpsa. Çekirdek yazarken (base upsertMessage/upsertChat önizlemesi/reactionPreview), arayüz eski kayıtları gösterirken
+  (liste önizlemesi `trPreview`, balon `bubbleText`).
 - **Yeniden bağlan (29.09)**: uyarı kartındaki ve sağ tık menüsündeki "Yeniden bağlan"/"PIN'i gir" (`App.reconnect`) Bağlan penceresini o hesabın
   alanında açar (`connectFocus`) + yeniden bağlanmayı başlatır; "Ayrıntı ve eşleşme" de o hesaba odaklanır. Panelde `attention` (PIN vb.) kırmızı satır.
 - Bağlan penceresi: kapatma ✕ `.modal-x` kaydırılan alanın DIŞINDA (mutlak konum, aşağı inince de görünür). Telegram kartında Bağlan → doğrudan QR (ara form yok; kendi api_id'si yalnız QR altındaki "Gelişmiş" bağlantısıyla `telegram:new`).

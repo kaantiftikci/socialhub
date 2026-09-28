@@ -1,4 +1,5 @@
 import { bus } from '../bus.js';
+import { trReactionText } from '../reaction-text.js';
 import type { Store } from '../store.js';
 import { chatId, messageId, type Reaction, type Account, type AccountStatus, type Chat, type ChatKind, type Message, type Participant } from '../model.js';
 
@@ -125,6 +126,11 @@ export abstract class BaseConnector implements Connector {
    * yeniden deneniyor") yine görünür.
    */
   private everSynced = false;
+  /**
+   * 'connecting' durumunda eşitleme çubuğu başlasın mı. Tarayıcı kanallarında hayır: oturum doğrulanmadan (giriş penceresi
+   * açık/kapatılmışken) "Bağlanıyor %25" yükselip duruyordu; çubuk oturum doğrulanınca (bridge %45) başlar.
+   */
+  protected syncOnConnecting = true;
   /** Bağlanma/eşitleme ilerlemesi (0-100). Connector kilometre taşlarını bildirir; bağlandıktan sonra 6 sn sohbet gelmezse 100 sayılır. */
   protected syncProgress(progress: number, label?: string): void {
     if (this.syncDone && progress < 100) this.syncDone = false;
@@ -160,7 +166,7 @@ export abstract class BaseConnector implements Connector {
     this.store.upsertAccount(this.account);
     bus.emit({ type: 'account.status', account: { ...this.account } });
     if (status === 'connecting') {
-      if (!this.everSynced) this.syncProgress(5, 'bağlanıyor');
+      if (!this.everSynced && this.syncOnConnecting) this.syncProgress(5, 'bağlanıyor');
     } else if (status === 'connected') {
       if (!this.everSynced) {
         this.syncProgress(this.syncLast >= 60 ? this.syncLast : 60, 'sohbetler alınıyor');
@@ -196,7 +202,7 @@ export abstract class BaseConnector implements Connector {
       unread: input.unread ?? existing?.unread ?? 0,
       lastMessageAt: input.lastMessageAt ?? existing?.lastMessageAt ?? 0,
       lastFromMe: existing?.lastFromMe,
-      lastPreview: input.lastPreview ?? existing?.lastPreview ?? '',
+      lastPreview: (input.lastPreview !== undefined ? trReactionText(input.lastPreview) : undefined) ?? existing?.lastPreview ?? '',
       avatarUrl: input.avatarUrl ?? existing?.avatarUrl,
       tags: existing?.tags ?? [],
       handle: input.handle ?? existing?.handle,
@@ -214,7 +220,7 @@ export abstract class BaseConnector implements Connector {
    */
   protected reactionPreview(remoteChatId: string, text: string): void {
     const cid = chatId(this.account.id, remoteChatId);
-    if (!this.store.setReactionPreview(cid, text.slice(0, 200))) return;
+    if (!this.store.setReactionPreview(cid, trReactionText(text).slice(0, 200))) return;
     const chat = this.store.getChat(cid);
     if (chat) bus.emit({ type: 'chat.upsert', chat });
   }
@@ -249,6 +255,8 @@ export abstract class BaseConnector implements Connector {
     }
     const { remoteChatId: _drop, html, ...rest } = input;
     const message: Message = { ...rest, id: messageId(cid, input.remoteId), chatId: cid };
+    // platformun İngilizce tepki satırı ("Liked a message", SMS'ten 'Liked “…”') Türkçe görünsün
+    if (message.text) message.text = trReactionText(message.text);
     // gönderdiğim mesajın "gelen" gibi dönen yankısı: kaydetme (sayaç artmasın, kopya balon çıkmasın)
     if (!input.fromMe && input.text && !this.store.hasMessage(message.id) && this.store.isOwnEcho(cid, input.text, input.ts)) {
       bus.log('info', `${this.account.platform}: kendi mesajının yankısı gelen sayılmadı (${input.remoteId})`);
