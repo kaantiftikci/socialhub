@@ -46,14 +46,16 @@ if (!function_exists('mv_smtp_config')) {
             }
             // son çare: barındırmanın yerel posta sunucusu (cPanel "SMTP Restrictions" açıkken betikler yalnız localhost'a bağlanabilir;
             // posta kutusu aynı sunucudaysa çalışır)
-            $alts = [['port' => 587, 'secure' => 'tls'], ['port' => 465, 'secure' => 'ssl'], ['host' => 'localhost', 'port' => 587, 'secure' => 'tls'], ['host' => 'localhost', 'port' => 25, 'secure' => 'none']];
+            $alts = [['port' => 587, 'secure' => 'tls'], ['port' => 465, 'secure' => 'ssl'], ['host' => 'localhost', 'port' => 587, 'secure' => 'tls'], ['host' => 'localhost', 'port' => 25, 'secure' => 'none'],
+                // yerel sunucu posta kutusunu tanımıyorsa (535: kutu başka sunucuda): cPanel Exim yerelden gelen postayı kimliksiz iletir
+                ['host' => '127.0.0.1', 'port' => 25, 'secure' => 'none', 'auth' => false], ['host' => 'localhost', 'port' => 25, 'secure' => 'none', 'auth' => false]];
             $log = array_merge(['— ' . ($res['error'] ?? '')], $res['log'] ?? []);
             foreach ($alts as $alt) {
                 if (!isset($alt['host']) && (int) ($cfg['port'] ?? 0) === $alt['port']) {
                     continue;
                 }
                 $try = mv_smtp_send(array_merge($cfg, $alt), $to, $subject, $body, $replyTo);
-                $log[] = '— ' . ($alt['host'] ?? $cfg['host']) . ':' . $alt['port'] . ' (' . $alt['secure'] . '): ' . ($try['ok'] ? 'başarılı' : ($try['error'] ?? ''));
+                $log[] = '— ' . ($alt['host'] ?? $cfg['host']) . ':' . $alt['port'] . ' (' . $alt['secure'] . (($alt['auth'] ?? true) ? '' : ', kimliksiz') . '): ' . ($try['ok'] ? 'başarılı' : ($try['error'] ?? ''));
                 $log = array_merge($log, $try['log'] ?? []);
                 if ($try['ok']) {
                     // çalışan portu kaydet (sonraki gönderimler doğrudan onu kullansın)
@@ -61,9 +63,16 @@ if (!function_exists('mv_smtp_config')) {
                     @file_put_contents(mv_smtp_path(), json_encode($saved, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
                     return ['ok' => true, 'via' => 'smtp', 'log' => $log, 'note' => ($alt['host'] ?? $cfg['host']) . ':' . $alt['port'] . ' kullanıldı ve kaydedildi'];
                 }
-                if (empty($try['connectFailed'])) {
+                // yerel yollarda kimlik reddi de sonraki yolu engellemez
+                if (empty($try['connectFailed']) && !isset($alt['host'])) {
                     return ['ok' => false, 'via' => 'smtp', 'error' => $try['error'] ?? '', 'log' => $log];
                 }
+                if (empty($try['connectFailed'])) {
+                    $localErr = $try['error'] ?? '';
+                }
+            }
+            if (!empty($localErr)) {
+                return ['ok' => false, 'via' => 'smtp', 'error' => 'Dış SMTP portları (465/587) barındırmada kapalı; sunucunun kendi posta sunucusu da postayı kabul etmedi (' . $localErr . '). Barındırma desteğinden giden SMTP erişimi iste ya da gönderen adresi için bu barındırmada (cPanel → E-posta Hesapları) bir posta kutusu açıp bilgilerini buraya yaz.', 'log' => $log];
             }
             return ['ok' => false, 'via' => 'smtp', 'error' => 'SMTP sunucusuna hiçbir yoldan bağlanılamadı (465, 587 ve sunucunun yerel posta sunucusu): barındırma, betiklerin dışarıya e-posta bağlantısını engelliyor (cPanel "SMTP Restrictions"). Barındırma sağlayıcısından giden SMTP (465/587) erişimini açmasını iste.', 'log' => $log];
         }
@@ -140,9 +149,11 @@ if (!function_exists('mv_smtp_config')) {
                 }
                 $cmd($ehlo, [250]);
             }
-            $cmd('AUTH LOGIN', [334]);
-            $cmd(base64_encode($user), [334], '(kullanıcı adı)');
-            $cmd(base64_encode($pass), [235], '(şifre)');
+            if (($cfg['auth'] ?? true) !== false) {
+                $cmd('AUTH LOGIN', [334]);
+                $cmd(base64_encode($user), [334], '(kullanıcı adı)');
+                $cmd(base64_encode($pass), [235], '(şifre)');
+            }
             $cmd('MAIL FROM:<' . $from . '>', [250]);
             $cmd('RCPT TO:<' . $to . '>', [250, 251]);
             $cmd('DATA', [354]);

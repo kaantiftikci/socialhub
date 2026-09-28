@@ -77,7 +77,8 @@ Dil: arayüz ve yorumlar Türkçe.
   e-postası + sunucu konuşma dökümü, şifre dökümde gizli). Türkticaret: smtp.turkticaret.net 465 SSL / 587 STARTTLS, kullanıcı = gönderen
   (varsayılan sunucu değeri bu). Bağlantı kurulamazsa ("Connection refused": barındırma bir giden portu kapatmış olabilir) öteki port
   kendiliğinden denenir, sonra sunucunun yerel posta sunucusu (localhost:587 STARTTLS, localhost:25; yalnız localhost'ta sertifika
-  denetimi yok) — cPanel "SMTP Restrictions" dışarıyı kapatıyor (Kaan'ın sunucusunda 465/587 ikisi de "Connection refused"); çalışan kaydedilir;
+  denetimi yok; 535 = posta kutusu o sunucuda değil → 127.0.0.1/localhost:25 KİMLİKSİZ, cPanel Exim yerelden iletir, `auth:false`
+  kaydedilir) — Kaan'ın barındırması Türkticaret python01-host (Exim), cPanel "SMTP Restrictions" dışarıyı kapatıyor (Kaan'ın sunucusunda 465/587 ikisi de "Connection refused"); çalışan kaydedilir;
   hepsi kapalıysa sağlayıcıdan giden SMTP erişimi istenmeli. SMTP yoksa mail() yedeği — cPanel'de "gönderildi" deyip ULAŞMIYORDU (SPF/DKIM).
   Şifre e-postada YOK; sonuç `mailed`/`mailError` rozetinde. Her kullanıcının bağladığı uygulamalar kendi kaydında (bağımsız); reddedilenin oturumu düşer.
   Kayıtla gelen kullanıcı (`requestedAt`) `user_public.fresh` → demo BOŞ panelle açılır (`loadDemoAccounts(list, {fresh})`: varsayılan
