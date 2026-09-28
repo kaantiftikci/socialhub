@@ -20,6 +20,7 @@ import { gmail } from './connectors/browser/gmail.js';
 import { outlook } from './connectors/browser/outlook.js';
 import { icloud } from './connectors/browser/icloud.js';
 import { yahoo } from './connectors/browser/yahoo.js';
+import { yandex } from './connectors/browser/yandex.js';
 import { slackStrategy } from './connectors/browser/slack.js';
 import { MailConnector, type MailConfig } from './connectors/mail.js';
 import { ShopierConnector } from './connectors/shopier.js';
@@ -53,7 +54,25 @@ export class Registry {
     return run;
   }
 
-  constructor(private store: Store) {}
+  constructor(private store: Store) {
+    // tarayıcı girişli e-posta hesabı bağlanınca önceki denemelerden kalan boş kopyaları temizle
+    bus.on((ev) => {
+      if (ev.type === 'account.status' && ev.account.status === 'connected') void this.pruneStaleLogins(ev.account);
+    });
+  }
+
+  /** Aynı platformda token'sız (tarayıcı girişli), hiç bağlanamamış ve sohbeti olmayan e-posta hesapları: yarım kalmış
+   *  "Bağlan" denemelerinin kopyaları. Kartta bağlı hesabın yerine "Bağlı değil" gösteriyorlardı. */
+  private async pruneStaleLogins(acc: Account): Promise<void> {
+    if (!MAIL_PLATFORMS.includes(acc.platform) || readToken(acc.id) !== undefined) return;
+    const stale = this.list().filter(
+      (o) => o.id !== acc.id && o.platform === acc.platform && o.status !== 'connected' && readToken(o.id) === undefined && this.store.listChatsOf(o.id).length === 0,
+    );
+    for (const o of stale) {
+      bus.log('info', `${o.id}: yarım kalmış giriş denemesi kaldırıldı (${acc.id} bağlandı)`);
+      await this.remove(o.id).catch(() => undefined);
+    }
+  }
 
   list(): Account[] {
     // attention kalıcı değil: çalışan connector'dan eklenir
@@ -93,14 +112,22 @@ export class Registry {
       return existing;
     }
     // Yahoo tarayıcı girişi (token'sız): IMAP'i reddedilen var olan Yahoo hesabı kopya açılmadan tarayıcı yoluna geçirilir
-    if (platform === 'yahoo' && !opts.token) {
-      const imapOnes = this.list().filter((a) => a.platform === 'yahoo' && readToken(a.id) !== undefined);
+    if ((platform === 'yahoo' || platform === 'yandex') && !opts.token) {
+      const imapOnes = this.list().filter((a) => a.platform === platform && readToken(a.id) !== undefined);
       const broken = imapOnes.find((a) => a.status === 'error' || a.status === 'disconnected') ?? (imapOnes.length === 1 ? imapOnes[0] : undefined);
       if (broken) {
         fs.rmSync(path.join(sessionDir(broken.id), 'token'), { force: true });
         bus.log('info', `${broken.id}: uygulama şifresi yolu bırakıldı, Yahoo tarayıcı girişine geçiliyor`);
         await this.restart(broken.id);
         return broken;
+      }
+    }
+    // E-posta tarayıcı girişi (token'sız) yeniden denendi: bağlanamamış token'sız hesap varsa onu yeniden başlat, kopya açma
+    if (MAIL_PLATFORMS.includes(platform) && !opts.token) {
+      const pending = this.list().find((a) => a.platform === platform && a.status !== 'connected' && readToken(a.id) === undefined);
+      if (pending) {
+        await this.restart(pending.id);
+        return pending;
       }
     }
     // E-posta: aynı adres yeniden bağlanınca kopya hesap açma → var olan hesabın bilgilerini güncelle (ör. yenilenen uygulama şifresi)
@@ -285,6 +312,11 @@ export class Registry {
         // Yahoo: uygulama şifresi (token) yoksa tarayıcı girişi — Yahoo birçok hesapta uygulama şifresini kapattı, IMAP normal şifreyi reddediyor
         if (account.platform === 'yahoo' && !fs.existsSync(tokenFile)) {
           c = new BrowserConnector(account, this.store, yahoo, 30_000, { idlePollMs: 90_000, keepOpen: 'whileActive' });
+          break;
+        }
+        // Yandex: aynı şekilde token'sız hesap = tarayıcı girişi (normal şifre + Yandex doğrulaması; uygulama şifresi gerekmez)
+        if (account.platform === 'yandex' && !fs.existsSync(tokenFile)) {
+          c = new BrowserConnector(account, this.store, yandex, 30_000, { idlePollMs: 90_000, keepOpen: 'whileActive' });
           break;
         }
         let cfg: MailConfig = { user: '' };

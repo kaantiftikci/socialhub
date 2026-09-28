@@ -3,7 +3,7 @@ import { authLoadAccounts, authLogin, authLogout, authMe, type SessionUser } fro
 import { setLeaveDemoPanel } from './demo-session';
 import { setProfileName } from './profile';
 import { clearDemoAccounts, loadDemoAccounts } from './static-demo';
-import { Logo } from './ui';
+import { Logo, PasswordInput } from './ui';
 import { REMOTE_CORE, clearRemoteCore } from './desktop';
 import App from './App';
 
@@ -106,7 +106,7 @@ function AuthScreen({
         </label>
         <label>
           Şifre
-          <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" autoComplete="current-password" required />
+          <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
         </label>
         {shown && <div className="auth-error">{shown}</div>}
         <button className="btn primary b" type="submit" disabled={busy}>

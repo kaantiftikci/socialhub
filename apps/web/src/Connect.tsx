@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type InputHTMLAttributes } from 'react';
 import { api } from './api';
 import { STATIC_DEMO } from './profile';
 import { MAC_ONLY, PLATFORMS, type Account, type CoreOs, type Platform } from './types';
-import { Chip, Icon, SyncBar } from './ui';
+import { Chip, Icon, PasswordInput, SyncBar } from './ui';
 
 const ORDER: Platform[] = ['whatsapp', 'telegram', 'slack', 'imessage', 'linkedin', 'x', 'instagram', 'messenger'];
 const MAIL_ORDER: Platform[] = ['gmail', 'outlook', 'yahoo', 'yandex', 'icloud', 'imap'];
@@ -315,10 +315,10 @@ export function ConnectModal({
                   ) : p === 'gmail' && mail.useOAuth ? (
                     <>
                       <input value={mail.clientId} onChange={(e) => setMail({ ...mail, clientId: e.target.value })} placeholder="Google Client ID (…apps.googleusercontent.com)" style={{ flex: '1 1 260px' }} />
-                      <input value={mail.clientSecret} onChange={(e) => setMail({ ...mail, clientSecret: e.target.value })} placeholder="Client secret" type="password" autoComplete="off" style={{ flex: '1 1 200px' }} />
+                      <PasswordInput value={mail.clientSecret} onChange={(e) => setMail({ ...mail, clientSecret: e.target.value })} placeholder="Client secret" autoComplete="off" style={{ flex: '1 1 200px' }} />
                     </>
                   ) : (
-                    <input value={mail.pass} onChange={(e) => setMail({ ...mail, pass: e.target.value })} placeholder={isImap ? 'şifre' : 'uygulama şifresi'} type="password" autoComplete="new-password" style={{ flex: '1 1 200px' }} />
+                    <PasswordInput value={mail.pass} onChange={(e) => setMail({ ...mail, pass: e.target.value })} placeholder={isImap ? 'şifre' : 'uygulama şifresi'} autoComplete="new-password" style={{ flex: '1 1 200px' }} />
                   )}
                   {isImap && mail.manual && (
                     <>
@@ -362,7 +362,7 @@ export function ConnectModal({
                 Siparişler her sipariş bir sohbet olacak şekilde akar; kargoya verme / kapatma sağ panelden yapılır. Shopier API’sinde alıcı-satıcı mesajlaşması yok, DM bu yüzden sunulmaz.
               </p>
               <div className="field" style={{ marginTop: 12 }}>
-                <input value={pat} onChange={(e) => setPat(e.target.value)} placeholder="Kişisel Erişim Anahtarı (PAT)" type="password" autoComplete="off" />
+                <PasswordInput value={pat} onChange={(e) => setPat(e.target.value)} placeholder="Kişisel Erişim Anahtarı (PAT)" autoComplete="off" />
                 <button className="btn lime b" onClick={() => add('shopier')} disabled={busy || !pat.trim()}>
                   Bağlan
                 </button>
@@ -413,14 +413,14 @@ export function ConnectModal({
                     <>
                       <input value={sf('sellerId')} onChange={(e) => setSf('sellerId', e.target.value)} placeholder="Satıcı ID" autoComplete="off" />
                       <input value={sf('apiKey')} onChange={(e) => setSf('apiKey', e.target.value)} placeholder="API Key" autoComplete="off" />
-                      <input value={sf('apiSecret')} onChange={(e) => setSf('apiSecret', e.target.value)} placeholder="API Secret" type="password" autoComplete="off" />
+                      <PasswordInput value={sf('apiSecret')} onChange={(e) => setSf('apiSecret', e.target.value)} placeholder="API Secret" autoComplete="off" />
                     </>
                   )}
                   {p === 'hepsiburada' && (
                     <>
                       <input value={sf('merchantId')} onChange={(e) => setSf('merchantId', e.target.value)} placeholder="Merchant ID" autoComplete="off" />
                       <input value={sf('username')} onChange={(e) => setSf('username', e.target.value)} placeholder="Entegrasyon kullanıcı adı" autoComplete="off" />
-                      <input value={sf('password')} onChange={(e) => setSf('password', e.target.value)} placeholder="Şifre" type="password" autoComplete="off" />
+                      <PasswordInput value={sf('password')} onChange={(e) => setSf('password', e.target.value)} placeholder="Şifre" autoComplete="off" />
                     </>
                   )}
                   {p === 'etsy' && (
@@ -432,21 +432,21 @@ export function ConnectModal({
                   {p === 'n11' && (
                     <>
                       <input value={sf('appKey')} onChange={(e) => setSf('appKey', e.target.value)} placeholder="App Key" autoComplete="off" />
-                      <input value={sf('appSecret')} onChange={(e) => setSf('appSecret', e.target.value)} placeholder="App Secret" type="password" autoComplete="off" />
+                      <PasswordInput value={sf('appSecret')} onChange={(e) => setSf('appSecret', e.target.value)} placeholder="App Secret" autoComplete="off" />
                     </>
                   )}
                   {p === 'amazon' && (
                     <>
                       <input value={sf('clientId')} onChange={(e) => setSf('clientId', e.target.value)} placeholder="LWA Client ID" autoComplete="off" />
-                      <input value={sf('clientSecret')} onChange={(e) => setSf('clientSecret', e.target.value)} placeholder="LWA Client Secret" type="password" autoComplete="off" />
-                      <input value={sf('refreshToken')} onChange={(e) => setSf('refreshToken', e.target.value)} placeholder="Refresh Token" type="password" autoComplete="off" />
+                      <PasswordInput value={sf('clientSecret')} onChange={(e) => setSf('clientSecret', e.target.value)} placeholder="LWA Client Secret" autoComplete="off" />
+                      <PasswordInput value={sf('refreshToken')} onChange={(e) => setSf('refreshToken', e.target.value)} placeholder="Refresh Token" autoComplete="off" />
                       <input value={sf('marketplaceId')} onChange={(e) => setSf('marketplaceId', e.target.value)} placeholder="Marketplace ID (boş: Türkiye A33AVAJ2PDY3EV)" autoComplete="off" />
                     </>
                   )}
                   {p === 'shopify' && (
                     <>
                       <input value={sf('shop')} onChange={(e) => setSf('shop', e.target.value)} placeholder="magaza.myshopify.com" autoComplete="off" />
-                      <input value={sf('accessToken')} onChange={(e) => setSf('accessToken', e.target.value)} placeholder="Admin API erişim belirteci (shpat_…)" type="password" autoComplete="off" />
+                      <PasswordInput value={sf('accessToken')} onChange={(e) => setSf('accessToken', e.target.value)} placeholder="Admin API erişim belirteci (shpat_…)" autoComplete="off" />
                     </>
                   )}
                   <button className="btn lime b" onClick={() => add(p)} disabled={busy}>
@@ -498,8 +498,8 @@ export function ConnectModal({
                 </li>
               </ol>
               <div className="field" style={{ marginTop: 12, gap: 8 }}>
-                <input value={slackTok.user} onChange={(e) => setSlackTok({ ...slackTok, user: e.target.value })} placeholder="User OAuth Token (xoxp-…)" type="password" autoComplete="off" />
-                <input value={slackTok.app} onChange={(e) => setSlackTok({ ...slackTok, app: e.target.value })} placeholder="App-Level Token (xapp-…, isteğe bağlı)" type="password" autoComplete="off" />
+                <PasswordInput value={slackTok.user} onChange={(e) => setSlackTok({ ...slackTok, user: e.target.value })} placeholder="User OAuth Token (xoxp-…)" autoComplete="off" />
+                <PasswordInput value={slackTok.app} onChange={(e) => setSlackTok({ ...slackTok, app: e.target.value })} placeholder="App-Level Token (xapp-…, isteğe bağlı)" autoComplete="off" />
                 <button className="btn lime b" onClick={() => add('slack')} disabled={busy || !slackTok.user.trim().startsWith('xoxp-') || (!!slackTok.app.trim() && !slackTok.app.trim().startsWith('xapp-'))}>
                   Bağlan
                 </button>
@@ -525,7 +525,7 @@ export function ConnectModal({
               </p>
               <div className="field" style={{ marginTop: 12, gap: 8 }}>
                 <input value={tg.apiId} onChange={(e) => setTg({ ...tg, apiId: e.target.value })} placeholder="api_id (isteğe bağlı)" style={{ flex: '0 0 160px' }} />
-                <input value={tg.apiHash} onChange={(e) => setTg({ ...tg, apiHash: e.target.value })} placeholder="api_hash (isteğe bağlı)" type="password" autoComplete="off" />
+                <PasswordInput value={tg.apiHash} onChange={(e) => setTg({ ...tg, apiHash: e.target.value })} placeholder="api_hash (isteğe bağlı)" autoComplete="off" />
                 <button className="btn lime b" onClick={() => add('telegram')} disabled={busy}>
                   Bağlan
                 </button>
@@ -615,10 +615,10 @@ export function ConnectModal({
                 <div style={{ marginTop: 12 }}>
                   <p style={{ margin: '0 0 8px', fontSize: 13.5 }}>{prompts[activeAccount.id].message}</p>
                   <div className="field">
-                    <input
+                    <InputOrPassword
+                      password={prompts[activeAccount.id].prompt === 'password'}
                       value={input}
                       onChange={(e) => setInput(e.target.value)}
-                      type={prompts[activeAccount.id].prompt === 'password' ? 'password' : 'text'}
                       placeholder={prompts[activeAccount.id].prompt === 'phone' ? '+90…' : prompts[activeAccount.id].prompt === 'code' ? '12345' : '••••••'}
                       onKeyDown={(e) => e.key === 'Enter' && sendInput()}
                       autoFocus
@@ -632,12 +632,12 @@ export function ConnectModal({
 
               {(activeAccount.status === 'error' || activeAccount.status === 'disconnected') && (
                 <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  {activeAccount.platform === 'yahoo' && (
-                    <button className="btn lime b" onClick={() => void add('yahoo', { browser: true })} disabled={busy}>
-                      Yahoo ile giriş yap
+                  {(activeAccount.platform === 'yahoo' || activeAccount.platform === 'yandex') && (
+                    <button className="btn lime b" onClick={() => void add(activeAccount.platform, { browser: true })} disabled={busy}>
+                      {activeAccount.platform === 'yahoo' ? 'Yahoo' : 'Yandex'} ile giriş yap
                     </button>
                   )}
-                  {(PLATFORMS[activeAccount.platform].mode === 'mail' || PLATFORMS[activeAccount.platform].category === 'shop' || /uygulama şifresi|giriş reddedildi/i.test(activeAccount.detail ?? '')) && (
+                  {activeAccount.platform !== 'yandex' && (PLATFORMS[activeAccount.platform].mode === 'mail' || PLATFORMS[activeAccount.platform].category === 'shop' || /uygulama şifresi|giriş reddedildi/i.test(activeAccount.detail ?? '')) && (
                     <button className="btn primary b" onClick={() => editCredentials(activeAccount)}>
                       <Icon name="lock" size={14} sw={2} /> {PLATFORMS[activeAccount.platform].category === 'shop' ? 'Bilgileri güncelle' : 'Şifreyi güncelle'}
                     </button>
@@ -675,7 +675,8 @@ export function ConnectModal({
         <div className="grid3">
           {[...ORDER, ...MAIL_ORDER, ...SHOP_ORDER].map((p) => {
             const meta = PLATFORMS[p];
-            const acc = accounts.filter((a) => a.platform === p);
+            // kartın durumu en iyi durumdaki hesaptan (bağlı olan önde); ilk kaydı göstermek bağlı hesabın yanında "Bağlı değil" yazıyordu
+            const acc = accounts.filter((a) => a.platform === p).sort((x, y) => STATUS_RANK[x.status] - STATUS_RANK[y.status]);
             const isConn = connected.includes(p);
             // ':choose' (Gmail/iCloud giriş yolu seçimi) de bu kartın panelini açar
             const isActive = acc.some((a) => a.id === active) || active === `${p}:new` || active === `${p}:choose`;
@@ -690,7 +691,7 @@ export function ConnectModal({
                       <Icon name="users" size={16} sw={2} /> Sosyal Medya
                     </div>
                     <p className="grid-note">
-                      “Resmi değil” etiketli kanallar kişisel hesaplar için API sunmadığı için senin oturumunla, kendi bilgisayarından bağlanır. Mivelo istekleri seyrek ve düzensiz tutar,
+                      Bu kanalların çoğu kişisel hesaplar için API sunmadığından senin oturumunla, kendi bilgisayarından bağlanır. Mivelo istekleri seyrek ve düzensiz tutar,
                       toplu ya da aşırı gönderimi kendiliğinden durdurur. Yine de bu uygulamaların kurallarına göre otomatik veya toplu mesaj gönderme.
                     </p>
                   </>
@@ -712,13 +713,8 @@ export function ConnectModal({
                     <div className="nm" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       {meta.name}
                       {meta.experimental && <span className="pill" style={{ background: 'var(--amber-bg)', color: 'var(--amber-txt)' }}>deneysel</span>}
-                      {UNOFFICIAL[p] && (
-                        <span className="pill" style={{ background: 'var(--tabs-bg)', color: 'var(--text2)' }} title={UNOFFICIAL[p]}>
-                          resmi değil
-                        </span>
-                      )}
                     </div>
-                    <div className="mt">{macOnly ? 'Yalnız macOS · Mesajlar uygulaması' : meta.method}</div>
+                    <div className="mt" title={meta.method}>{macOnly ? 'Yalnız macOS · Mesajlar uygulaması' : accountLabel(acc[0]) ?? meta.method}</div>
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -727,6 +723,7 @@ export function ConnectModal({
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                         <span className={`dot ${acc[0].status === 'connected' ? 'on' : acc[0].status}`} />
                         {sync[acc[0].id] ? (sync[acc[0].id].label ?? 'Eşitleniyor') : statusText(acc[0])}
+                        {acc.length > 1 && <span style={{ color: 'var(--text3)' }}>· {acc.length} hesap</span>}
                       </span>
                       {sync[acc[0].id] && <SyncBar progress={sync[acc[0].id].progress} since={sync[acc[0].id].since} />}
                     </span>
@@ -774,6 +771,21 @@ export function ConnectModal({
   );
 }
 
+/** Bağlı hesabın adresi / kullanıcı adı (etiket platform adından ibaretse yok) */
+function accountLabel(a: Account | undefined): string | undefined {
+  if (!a?.label) return undefined;
+  const l = a.label.trim();
+  const generic = [a.platform, PLATFORMS[a.platform]?.name, 'Gmail', 'Outlook', 'Yahoo Mail', 'iCloud Mail', 'Messenger', 'Instagram', 'X', 'LinkedIn', 'Slack', 'WhatsApp', 'Telegram', 'iMessage'];
+  return l && !generic.some((g) => g && g.toLowerCase() === l.toLowerCase()) ? l : undefined;
+}
+
+const STATUS_RANK: Record<Account['status'], number> = { connected: 0, connecting: 1, pairing: 2, error: 3, disconnected: 4 };
+
 function statusText(a: Account): string {
   return { connected: 'Bağlı', connecting: 'Bağlanıyor…', pairing: 'Eşleşme bekleniyor', disconnected: 'Bağlı değil', error: 'Hata' }[a.status];
+}
+
+/** Hesap istemi (telefon/kod/2FA): parola isteniyorsa göz düğmeli alan */
+function InputOrPassword({ password, ...rest }: { password: boolean } & Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>) {
+  return password ? <PasswordInput {...rest} /> : <input {...rest} type="text" />;
 }

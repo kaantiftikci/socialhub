@@ -526,6 +526,30 @@ export class Store {
     return rows.map((r) => r.id);
   }
 
+  /** Aynı sohbette, aynı gönderenden, ±10 sn içinde aynı yer tutucu metinli başka kimlikli mesaj (WhatsApp tek seferlik medya ikizi) */
+  findTwin(chatId: string, remoteId: string, fromMe: boolean, senderId: string, text: string, ts: number): Message | undefined {
+    const r = this.db
+      .prepare('SELECT id FROM messages WHERE chat_id = ? AND remote_id <> ? AND from_me = ? AND sender_id = ? AND text = ? AND ts BETWEEN ? AND ? ORDER BY ts LIMIT 1')
+      .get(chatId, remoteId, fromMe ? 1 : 0, senderId, text, ts - 10_000, ts + 10_000) as { id: string } | undefined;
+    return r ? this.getMessage(r.id) : undefined;
+  }
+
+  /** Var olan ikiz yer tutucuları temizle: her kümeden en iyi durumlu (sonra en eski) kalır. Silinen kimlikleri döndürür. */
+  dropTwins(text: string): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT b.id FROM messages a JOIN messages b ON b.chat_id = a.chat_id AND b.id <> a.id AND b.from_me = a.from_me AND b.sender_id = a.sender_id
+           AND b.text = a.text AND ABS(b.ts - a.ts) <= 10000
+         WHERE a.text = ? AND (
+           (CASE a.status WHEN 'read' THEN 3 WHEN 'delivered' THEN 2 WHEN 'sent' THEN 1 ELSE 0 END) > (CASE b.status WHEN 'read' THEN 3 WHEN 'delivered' THEN 2 WHEN 'sent' THEN 1 ELSE 0 END)
+           OR ((CASE a.status WHEN 'read' THEN 3 WHEN 'delivered' THEN 2 WHEN 'sent' THEN 1 ELSE 0 END) = (CASE b.status WHEN 'read' THEN 3 WHEN 'delivered' THEN 2 WHEN 'sent' THEN 1 ELSE 0 END) AND (a.ts < b.ts OR (a.ts = b.ts AND a.id < b.id))))`,
+      )
+      .all(text) as Array<{ id: string }>;
+    const ids = [...new Set(rows.map((r) => r.id))];
+    for (const id of ids) this.db.prepare('DELETE FROM messages WHERE id = ?').run(id);
+    return ids;
+  }
+
   /**
    * Kendi mesajımın yankısı mı: aynı sohbette ±3 dk içinde birebir aynı metinli (≥12 karakter) benim gönderdiğim bir mesaj var.
    * Bazı platformlar/istemciler gönderdiğim mesajı başka kimlikle (WhatsApp LID, DOM okuyan köprüler) karşı taraftan gelmiş gibi

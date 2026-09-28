@@ -313,54 +313,118 @@ export function Conversation({
     requestAnimationFrame(() => taRef.current?.focus());
   }, []);
   /** Sağa kaydırarak yanıt: dokunmatik/fare sürükleme ya da trackpad yatay kaydırması; 64 px'i geçince yanıt modu */
-  const swipe = useRef<{ id: string; x0: number; y0: number; dx: number; el: HTMLElement | null; wheelT?: number }>({ id: '', x0: 0, y0: 0, dx: 0, el: null });
+  /** Sağa kaydırarak yanıt. Ham hareket (dx) → yumuşatılmış görsel konum (cur, her karede hedefe yaklaşır) →
+   *  CSS değişkeni --sw (px, sayı). 60 px sonrası lastik direnci; bırakınca yaylı dönüş (.swipe-back geçişi). */
+  const swipe = useRef<{ id: string; x0: number; y0: number; dx: number; cur: number; el: HTMLElement | null; ready: boolean; raf: number; wheelT?: number; wheel?: boolean; cool: number }>(
+    { id: '', x0: 0, y0: 0, dx: 0, cur: 0, el: null, ready: false, raf: 0, cool: 0 },
+  );
+  const SWIPE_READY = 56;
+  const rubber = (dx: number) => (dx <= 0 ? 0 : dx < 60 ? dx : Math.min(100, 60 + (dx - 60) * 0.35));
+  const swipeFrame = () => {
+    const s = swipe.current;
+    s.raf = 0;
+    if (!s.el) return;
+    const target = rubber(s.dx);
+    s.cur += (target - s.cur) * 0.42;
+    if (Math.abs(target - s.cur) < 0.3) s.cur = target;
+    s.el.style.setProperty('--sw', s.cur.toFixed(2));
+    s.el.classList.toggle('swiping', s.cur > 0.5);
+    const ready = s.cur >= SWIPE_READY;
+    if (ready !== s.ready) {
+      s.ready = ready;
+      s.el.classList.toggle('swipe-ready', ready);
+      if (ready) navigator.vibrate?.(8);
+    }
+    if (s.cur !== target) s.raf = requestAnimationFrame(swipeFrame);
+  };
+  const swipeTick = () => {
+    const s = swipe.current;
+    if (!s.raf) s.raf = requestAnimationFrame(swipeFrame);
+  };
+  /** Trackpad hareketi sürerken tekerlek olaylarını pencereden dinle: balon kayınca imlecin altından çıkıyor, olaylar artık
+   *  balona gelmiyordu → hareket yarıda sıfırlanıp yeniden başlıyordu (titreme gibi görünen sıçrama) */
+  const wheelFeed = useRef<((e: WheelEvent) => void) | null>(null);
+  const swipeReset = () => {
+    const s = swipe.current;
+    if (s.raf) cancelAnimationFrame(s.raf);
+    window.clearTimeout(s.wheelT);
+    if (wheelFeed.current) window.removeEventListener('wheel', wheelFeed.current, true);
+    wheelFeed.current = null;
+    swipe.current = { id: '', x0: 0, y0: 0, dx: 0, cur: 0, el: null, ready: false, raf: 0, cool: s.cool };
+  };
+  const swipeBegin = (m: Message, el: HTMLElement, x: number, y: number, wheel = false) => {
+    swipeReset();
+    el.classList.remove('swipe-back');
+    swipe.current = { ...swipe.current, id: m.id, x0: x, y0: y, el, wheel };
+  };
   const swipeProps = (m: Message) => {
-    const set = (el: HTMLElement | null, dx: number) => {
-      if (!el) return;
-      el.style.transform = dx ? `translateX(${Math.min(90, dx)}px)` : '';
-      el.classList.toggle('swiping', dx > 0);
-      el.classList.toggle('swipe-ready', dx >= 64);
-    };
     const done = () => {
       const s = swipe.current;
-      if (s.dx >= 64) startReply(m);
-      if (s.el) {
-        s.el.style.transition = 'transform .18s ease';
-        set(s.el, 0);
-        const el = s.el;
-        window.setTimeout(() => (el.style.transition = ''), 200);
+      const el = s.el;
+      const fire = s.ready;
+      swipeReset();
+      if (!el) return;
+      // yaylı dönüş: --sw @property ile kayıtlı olduğundan balon ve ok birlikte geri akar
+      el.classList.add('swipe-back');
+      el.classList.remove('swipe-ready');
+      el.style.setProperty('--sw', '0');
+      window.setTimeout(() => {
+        el.classList.remove('swipe-back', 'swiping');
+        el.style.removeProperty('--sw');
+      }, 380);
+      if (fire) {
+        // trackpad'in atalet olayları hemen ikinci bir kaydırma başlatmasın
+        swipe.current.cool = Date.now() + 450;
+        startReply(m);
       }
-      swipe.current = { id: '', x0: 0, y0: 0, dx: 0, el: null };
     };
     return {
       onPointerDown: (e: React.PointerEvent<HTMLElement>) => {
-        if (e.button !== 0 || (e.target as HTMLElement).closest('button, a, video, audio, input, textarea')) return;
-        swipe.current = { id: m.id, x0: e.clientX, y0: e.clientY, dx: 0, el: e.currentTarget };
+        if (e.button !== 0 || e.pointerType === 'mouse' && e.buttons !== 1) return;
+        if ((e.target as HTMLElement).closest('button, a, video, audio, input, textarea')) return;
+        swipeBegin(m, e.currentTarget, e.clientX, e.clientY);
       },
       onPointerMove: (e: React.PointerEvent<HTMLElement>) => {
         const s = swipe.current;
-        if (s.id !== m.id) return;
+        if (s.id !== m.id || s.wheel || !s.el) return;
         const dx = e.clientX - s.x0;
+        const dy = Math.abs(e.clientY - s.y0);
         // dikey kaydırma ya da metin seçimi: iptal
-        if (Math.abs(e.clientY - s.y0) > 24 && s.dx < 12) return void (swipe.current = { id: '', x0: 0, y0: 0, dx: 0, el: null });
-        if (dx > 8 && !window.getSelection()?.toString()) {
-          s.dx = dx;
-          set(s.el, dx);
+        if (s.dx === 0 && (dy > 16 || window.getSelection()?.toString())) return void (dy > 16 && swipeReset());
+        if (s.dx === 0 && dx <= 10) return;
+        if (s.dx === 0) {
+          // yatay hareket kesinleşti: işaretçiyi yakala (balonun dışına çıkınca da sürsün)
+          try {
+            s.el.setPointerCapture(e.pointerId);
+          } catch {
+            /* yok say */
+          }
+          window.getSelection()?.removeAllRanges();
         }
+        s.dx = Math.max(0.01, dx - 10);
+        swipeTick();
       },
-      onPointerUp: () => swipe.current.id === m.id && done(),
-      onPointerCancel: () => swipe.current.id === m.id && done(),
-      onPointerLeave: () => swipe.current.id === m.id && swipe.current.dx > 0 && done(),
-      // Mac trackpad: iki parmakla sağa kaydırma yatay tekerlek olayı (deltaX < 0) üretir
+      onPointerUp: () => swipe.current.id === m.id && !swipe.current.wheel && (swipe.current.dx > 0 ? done() : swipeReset()),
+      onPointerCancel: () => swipe.current.id === m.id && !swipe.current.wheel && done(),
+      // Mac trackpad: iki parmakla sağa kaydırma yatay tekerlek olayı (deltaX < 0) üretir; olaylar kesik gelir,
+      // görsel konum rAF ile yumuşatılır, 180 ms olay gelmezse "bırakıldı" sayılır
       onWheel: (e: React.WheelEvent<HTMLElement>) => {
-        if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
-        const s = swipe.current;
-        if (s.id !== m.id) swipe.current = { id: m.id, x0: 0, y0: 0, dx: 0, el: e.currentTarget };
-        const cur = swipe.current;
-        cur.dx = Math.max(0, cur.dx - e.deltaX);
-        set(cur.el, cur.dx);
-        window.clearTimeout(cur.wheelT);
-        cur.wheelT = window.setTimeout(done, 140);
+        if (wheelFeed.current) return; // süren hareket pencere dinleyicisinden besleniyor
+        if (Math.abs(e.deltaX) <= Math.abs(e.deltaY) * 1.2 || e.deltaX >= 0) return;
+        if (Date.now() < swipe.current.cool) return;
+        swipeBegin(m, e.currentTarget, 0, 0, true);
+        const feed = (ev: { deltaX: number; deltaY: number }) => {
+          const s = swipe.current;
+          if (!s.wheel) return;
+          if (Math.abs(ev.deltaY) > Math.abs(ev.deltaX) * 2 && Math.abs(ev.deltaY) > 4) return void done(); // dikey kaydırmaya döndü
+          s.dx = Math.max(0, s.dx - ev.deltaX);
+          swipeTick();
+          window.clearTimeout(s.wheelT);
+          s.wheelT = window.setTimeout(done, 180);
+        };
+        wheelFeed.current = feed;
+        window.addEventListener('wheel', feed, { capture: true, passive: true });
+        feed(e);
       },
     };
   };
@@ -1275,7 +1339,7 @@ export function Conversation({
             </div>
           )}
           {replyTarget && (
-            <div className="reply-bar">
+            <div className="reply-bar" key={replyTarget.id}>
               <Icon name="reply" size={14} sw={2} />
               <span className="rb-body">
                 <b>{replyTarget.fromMe ? 'Kendine' : replyTarget.senderName} yanıt veriyorsun</b>

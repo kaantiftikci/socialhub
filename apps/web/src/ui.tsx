@@ -1,6 +1,6 @@
 import { mediaUrl } from './desktop';
 import { publicAsset } from './demo-asset';
-import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useState, type InputHTMLAttributes, type MouseEvent as ReactMouseEvent } from 'react';
 import type { ReactNode } from 'react';
 import { PLATFORMS, TAG_COLORS, type Platform } from './types';
 import { siWhatsapp, siTelegram, siX, siInstagram, siMessenger, siGmail, siIcloud, siShopify } from 'simple-icons';
@@ -67,6 +67,7 @@ const PATHS: Record<string, ReactNode> = {
   chevup: <path d="M6 15l6-6 6 6" />,
   grip: <path d="M4 7h16M4 12h16M4 17h16" />,
   back: <path d="M15 6l-6 6 6 6" />,
+  eye: (<><path d="M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z" /><circle cx="12" cy="12" r="3" /></>),
   eyeoff: (<><path d="M3 3l18 18" /><path d="M10.6 5.1A10 10 0 0 1 12 5c6 0 9.5 7 9.5 7a17 17 0 0 1-2.6 3.4M6.4 6.5A16 16 0 0 0 2.5 12S6 19 12 19a9.6 9.6 0 0 0 4.2-1" /><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" /></>),
   history: (<><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></>),
   users: (<><path d="M16 20v-1.2A3.8 3.8 0 0 0 12.2 15H7.8A3.8 3.8 0 0 0 4 18.8V20" /><circle cx="10" cy="8" r="3" /><path d="M20 20v-1.1a3.2 3.2 0 0 0-2.4-3.1" /><path d="M16.2 5.1a3 3 0 0 1 0 5.8" /></>),
@@ -400,6 +401,38 @@ export function SyncBar({ progress, since, compact = false }: { progress: number
       <span className="pct" style={{ left: `clamp(0px, calc(${shown}% - 17px), calc(100% - 34px))` }}>
         {pct}%
       </span>
+    </span>
+  );
+}
+
+/** Parola alanı: sağdaki göze basılı tutunca parola görünür, bırakınca yeniden gizlenir (klavyede Boşluk/Enter basılıyken). */
+export function PasswordInput({ style, className, ...rest }: Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>) {
+  const [show, setShow] = useState(false);
+  const hide = () => setShow(false);
+  return (
+    <span className={`pw-field ${className ?? ''}`} style={style}>
+      <input {...rest} type={show ? 'text' : 'password'} />
+      <button
+        type="button"
+        className={`pw-eye ${show ? 'on' : ''}`}
+        tabIndex={-1}
+        aria-label="Parolayı göstermek için basılı tut"
+        title="Görmek için basılı tut"
+        onPointerDown={(e) => {
+          e.preventDefault(); // odak alanda kalsın
+          (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+          setShow(true);
+        }}
+        onPointerUp={hide}
+        onPointerCancel={hide}
+        onLostPointerCapture={hide}
+        onKeyDown={(e) => (e.key === ' ' || e.key === 'Enter') && (e.preventDefault(), setShow(true))}
+        onKeyUp={hide}
+        onBlur={hide}
+        onContextMenu={(e) => e.preventDefault()}
+      >
+        <Icon name={show ? 'eyeoff' : 'eye'} size={15} sw={1.9} />
+      </button>
     </span>
   );
 }

@@ -312,7 +312,24 @@ Dil: arayüz ve yorumlar Türkçe.
 - Arayüzde emoji yerine ikon (`LEAD_RE` U+2300–23FF'yi de kapsar: ⏳⌛⏰ → clock; sipariş durum rozetleri de `IconText`): bağlayıcıların yazdığı baş emojiler ("📦 Kargoya verildi", "📷 Fotoğraf", "Sen: 🎤 …") `ui.tsx`
   `IconText`/`leadIcon` (`LEAD_ICONS` eşlemesi) ile ikon çizilir; sistem bildiriminde `stripLeadIcon` (düz metin). Kullanıcı içeriği ve
   tepki metinleri ("😂 … beğendi") olduğu gibi. Yeni arayüz metnine emoji yazma; `Icon` kullan.
-- Bağlan: resmi olmayan kanallarda "resmi değil" etiketi + Sosyal Medya altında açıklama (`UNOFFICIAL`, Connect.tsx).
+- Bağlan: "resmi değil" etiketi kullanıcı isteğiyle KALDIRILDI (yalnız Sosyal Medya altındaki açıklama). Kart durumu en iyi durumdaki hesaptan
+  (`STATUS_RANK`, bağlı önde; birden çoksa "· N hesap"), alt satırda bağlı hesabın adresi/@kullanıcı adı (`accountLabel`; genel adsa yöntem metni).
+- Parola alanları `PasswordInput` (ui.tsx): sağdaki göze BASILI TUTUNCA görünür, bırakınca gizlenir (Bağlan formları, 2FA istemi, AI anahtarı, giriş).
+- Tarayıcı girişi hızı (bridge): hiç çerezi olmayan profilde (`hasProfileCookies`) görünmez denetim turu atlanır → pencere hemen açılır; giriş 700 ms'de bir
+  denetlenir, sonra URL 1,5 sn sabit kalınca (500 ms adım) pencere kapanır (eskiden 2 sn adım + 4 sn → 6-8 sn).
+- Hesap etiketi: `finishStart` genel adı ("Instagram", "Outlook"…, `GENERIC_LABEL`) önceden öğrenilmiş @kullanıcı/adresin üstüne yazmaz. Instagram
+  `accounts/current_user` + DOM yedeği; Messenger `facebook.com/me` (başlık = ad, son adres = @kullanıcı); Outlook localStorage ANAHTARLARINDAKI adres.
+- Yarım kalmış tarayıcı girişi kopyaları: token'sız e-posta hesabı bağlanınca aynı platformdaki token'sız, bağlanmamış, sohbetsiz hesaplar silinir
+  (`pruneStaleLogins`); token'sız yeniden "Bağlan" bağlanmamış token'sız hesabı yeniden başlatır (kopya açmaz). (Yahoo kartı "Bağlı değil" / panel "Bağlı".)
+- **Yandex (tarayıcı)** (`connectors/browser/yandex.ts`): Bağlan → doğrudan passport.yandex girişi (uygulama şifresi formu yok; `mode:'browser'`),
+  mail.yandex.com liza BEM seçicileri (mail-MessageSnippet…) + yedekler, `Session_id` çerezi. DOĞRULANMADI. Token dosyalı eski IMAP hesapları sürer;
+  şifre reddinde "Yandex ile giriş yap" (Yahoo gibi, IMAP hesabı tarayıcı yoluna çevrilir).
+- WhatsApp tek seferlik medya ikizi: telefon aynı gönderimi iki kimlikle yollayabiliyor (biri tek, biri çift tik iki yer tutucu) → `upsertPlaceholder`
+  aynı sohbet+gönderen ±10 sn ikizi varsa yeni kayıt açmaz, kimliği `twins` ile bağlar (alındılar tek balona); açılışta `store.dropTwins` eskileri birleştirir.
+- **Kaydırarak yanıt animasyonu** (Conversation.tsx `swipeProps`): ham dx → rAF ile yumuşatılan `--sw` (CSS `@property`, sayı), 60 px sonrası lastik direnci,
+  56 px'te hazır (ok mor + pop, `navigator.vibrate`), bırakınca `.swipe-back` yaylı geçiş; ok yarı hızda gelip belirir/büyür; `.reply-bar` kayarak açılır.
+  Trackpad: hareket başlayınca tekerlek olayları PENCEREDEN dinlenir (`wheelFeed`; balon imlecin altından kayınca olaylar kesilip hareket sıfırlanıyordu),
+  180 ms sessizlik = bırakıldı, tetikten sonra 450 ms atalet yok sayılır. `prefers-reduced-motion` uyar.
 
 ## Sunucu/arayüz sözleşmesi
 - CORS: localhost/127.0.0.1/tauri.localhost/tauri://localhost ve WKWebView'ın `null` kaynağı (paketli uygulama!).

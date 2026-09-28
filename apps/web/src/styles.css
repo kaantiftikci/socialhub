@@ -936,9 +936,24 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .bwrap.me .rpos { right: auto; left: -32px; } .bwrap.me .rpos.p1 { left: -60px; } .bwrap.me .rpos.p2 { left: -88px; } .bwrap.me .rpos.p3 { left: -116px; }
 /* sağa kaydırarak yanıt: balon kayar, solda yanıt oku belirir */
 .bwrap { touch-action: pan-y; }
-.bwrap.swiping { user-select: none; }
-.bwrap.swiping::before { content: ''; position: absolute; left: -34px; top: 50%; width: 26px; height: 26px; margin-top: -13px; border-radius: 50%; background: var(--bg2) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236c47ff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 14 4 9l5-5'/%3E%3Cpath d='M20 20v-7a4 4 0 0 0-4-4H4'/%3E%3C/svg%3E") center / 15px no-repeat; opacity: .5; transition: opacity .12s ease, transform .12s ease; }
-.bwrap.swipe-ready::before { opacity: 1; transform: scale(1.12); }
+/* --sw: kaydırma miktarı (px, sayı). @property ile kayıtlı → bırakınca balon ve ok birlikte yaylanarak döner */
+@property --sw { syntax: '<number>'; inherits: true; initial-value: 0; }
+.bwrap.swiping, .bwrap.swipe-back { transform: translateX(calc(var(--sw) * 1px)); user-select: none; }
+.bwrap.swipe-back { transition: --sw .38s cubic-bezier(.3, 1.35, .5, 1); }
+/* ok balonla birlikte gelmez: yerinde kalır gibi yarı hızda ilerler, kaydıkça belirip büyür */
+.bwrap.swiping::before, .bwrap.swipe-back::before { content: ''; position: absolute; left: -30px; top: 50%; width: 28px; height: 28px; margin-top: -14px; border-radius: 50%;
+  background: var(--bg2) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236c47ff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 14 4 9l5-5'/%3E%3Cpath d='M20 20v-7a4 4 0 0 0-4-4H4'/%3E%3C/svg%3E") center / 15px no-repeat;
+  opacity: clamp(0, calc(var(--sw) / 48), 1);
+  transform: translateX(calc(var(--sw) * -0.6px)) scale(clamp(.35, calc(.35 + var(--sw) / 86), 1)) rotate(calc((1 - min(var(--sw) / 56, 1)) * -40deg));
+  pointer-events: none; }
+.bwrap.swipe-ready::before { background: var(--v) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 14 4 9l5-5'/%3E%3Cpath d='M20 20v-7a4 4 0 0 0-4-4H4'/%3E%3C/svg%3E") center / 15px no-repeat; animation: swipe-pop .26s cubic-bezier(.3, 1.6, .5, 1); }
+@keyframes swipe-pop { 0% { scale: .8; } 55% { scale: 1.22; } 100% { scale: 1; } }
+.reply-bar { animation: reply-in .22s cubic-bezier(.2, .9, .3, 1.15); transform-origin: bottom left; }
+@keyframes reply-in { from { opacity: 0; transform: translateY(10px) scale(.97); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .bwrap.swipe-back { transition: none; }
+  .bwrap.swipe-ready::before, .reply-bar { animation: none; }
+}
 /* balondaki alıntı (yanıtlanan mesaj) */
 .bub .quote { display: flex; flex-direction: column; gap: 1px; width: 100%; min-width: 140px; margin: 0 0 6px; padding: 6px 10px; border: 0; border-left: 3px solid var(--v); border-radius: 8px; background: var(--card); color: var(--text2); font-size: 12.5px; line-height: 1.35; text-align: left; cursor: pointer; }
 .bub .quote b { color: var(--v-txt); font-size: 12px; font-weight: 600; }
@@ -1458,3 +1473,9 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .lb-nav.next svg { transform: rotate(180deg); }
 .lb-count { font-variant-numeric: tabular-nums; color: #fff; font-weight: 600; flex: none; }
 @media (max-width: 720px) { .lb-nav { width: 38px; height: 38px; } .lb-nav.prev { left: 8px; } .lb-nav.next { right: 8px; } }
+/* parola alanı + basılı tutunca gösteren göz */
+.pw-field { position: relative; display: flex; align-items: center; flex: 1 1 auto; min-width: 0; }
+.pw-field > input { flex: 1; width: 100%; min-width: 0; padding-right: 38px !important; }
+.pw-eye { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--text3); cursor: pointer; touch-action: none; -webkit-user-select: none; user-select: none; }
+.pw-eye:hover { color: var(--text2); background: var(--faint); }
+.pw-eye.on { color: var(--v-txt); }

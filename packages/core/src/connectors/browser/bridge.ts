@@ -390,6 +390,15 @@ export class BrowserConnector extends BaseConnector {
       this.pageless = false;
       if (this.stopping) return;
     }
+    // Hiç giriş yapılmamış profil (yeni "Bağlan"): görünmez denetim turu (10-20 sn) boşuna — giriş penceresini hemen aç
+    if (interactive && !hasProfileCookies(path.join(sessionDir(this.account.id), 'profile'))) {
+      if (!(await this.launch(false))) return;
+      if (!(await this.visibleLogin(await this.isLoggedIn(true)))) return;
+      if (this.stopping) return;
+      this.syncProgress(45, 'oturum doğrulandı');
+      await this.finishStart();
+      return;
+    }
     // 1) Kayıtlı oturum var mı? Önce görünmez pencerede dene.
     if (!(await this.launch(true))) return;
     this.syncProgress(20, 'tarayıcı açıldı');
@@ -443,7 +452,9 @@ export class BrowserConnector extends BaseConnector {
   private async finishStart(): Promise<void> {
     try {
       const me = await this.strategy.me(this.target(), await this.cookies());
-      this.account.label = me.label;
+      // strateji adı bulamayınca genel ad döner ("Instagram", "Outlook"): önceden öğrenilmiş @kullanıcı/adres ezilmesin
+      if (me.label && (!GENERIC_LABEL.test(me.label.trim()) || !this.account.label || GENERIC_LABEL.test(this.account.label.trim()) || this.account.label === this.account.platform))
+        this.account.label = me.label;
     } catch {
       /* etiket kalsın */
     }
@@ -658,24 +669,25 @@ export class BrowserConnector extends BaseConnector {
       }
       if (await this.isLoggedIn(true)) break;
       // ilerleme görünür olsun: 20 sn'de bir hangi sayfada beklendiği
-      if (++ticks % 10 === 0) bus.log('info', `${this.account.platform}: giriş bekleniyor (${safeUrl(this.page.url())})`);
-      await sleep(2000);
+      if (++ticks % 30 === 0) bus.log('info', `${this.account.platform}: giriş bekleniyor (${safeUrl(this.page.url())})`);
+      await sleep(700);
     }
     if (this.stopping) return false;
     bus.log('info', `${this.account.platform}: giriş algılandı (${safeUrl(this.page?.url())}), izin adımları için bekleniyor`);
-    // izin ekranları: URL 4 sn boyunca değişmeyene ve giriş hâlâ geçerli olana kadar bekle (en fazla 60 sn)
+    // izin ekranları: URL ~1,5 sn değişmeyene ve giriş hâlâ geçerli olana kadar bekle (en fazla 60 sn).
+    // Eskiden 2 sn'lik adımlarla 4 sn kararlılık → giriş sonrası pencere 6-8 sn açık kalıyordu.
     let lastUrl = '';
     let stableFor = 0;
-    for (let i = 0; i < 30 && !this.stopping; i++) {
+    for (let i = 0; i < 120 && !this.stopping; i++) {
       this.adoptNewestPage();
       if (!this.page || this.page.isClosed()) return false;
       const url = this.page.url();
       const stillIn = await this.isLoggedIn(true);
-      if (url === lastUrl && stillIn) stableFor += 2;
+      if (url === lastUrl && stillIn) stableFor += 500;
       else stableFor = 0;
       lastUrl = url;
-      if (stableFor >= 4) break;
-      await sleep(2000);
+      if (stableFor >= 1500) break;
+      await sleep(500);
     }
     return !this.stopping;
   }
@@ -1139,6 +1151,13 @@ function isMediaFile(u: string | undefined): boolean {
 /** Platform doğrulama/kilit sayfası (yoklama durur) ve hız sınırı (üstel geri çekilme) hata kalıpları */
 export const VERIFY_RE = /checkpoint|challenge_required|captcha|account\/access|\/authwall|verify it'?s you/i;
 export const RATE_RE = /\b(429|999)\b|rate.?limit|too many/i;
+
+const GENERIC_LABEL = /^(messenger|instagram|x|linkedin|slack|outlook|gmail|icloud mail|yahoo mail|yandex mail|yahoo|yandex|etsy|shopify|amazon)$/i;
+
+/** Kalıcı profilde çerez veritabanı var mı (daha önce giriş denenmiş mi) */
+function hasProfileCookies(profile: string): boolean {
+  return ['Default/Cookies', 'Default/Network/Cookies'].some((f) => fs.existsSync(path.join(profile, f)));
+}
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

@@ -21,6 +21,9 @@ import { newerVersion, TtlCache, useAtomicAuthState } from './wa-auth.js';
 // Hesap başına AYRI: userDevicesCache kullanıcı numarasıyla anahtarlanır ve Baileys sorgulayan hesabın kendi cihazını listeden
 // çıkarır; paylaşılırsa (iki WhatsApp hesabı aynı çekirdekte) A'nın kendi listesi B'nin A'ya gönderiminde kullanılır ve A'nın
 // Mivelo cihazı mesajı hiç almaz. Mesaj kimliğiyle anahtarlanan önbellekler de hesaplar arasında karışmasın.
+/** Tek seferlik medya yer tutucusu (telefon bu medyayı bağlı cihazlara içeriksiz, kimi zaman iki ayrı kimlikle gönderir) */
+const VIEW_ONCE_TEXT = '🔒 Tek seferlik fotoğraf/video — WhatsApp içeriğini bağlı cihazlara göndermiyor; telefonda aç';
+
 const waCaches = new Map<string, { msgRetryCounterCache: TtlCache; placeholderResendCache: TtlCache; userDevicesCache: TtlCache }>();
 function cachesFor(accountId: string) {
   let c = waCaches.get(accountId);
@@ -304,6 +307,13 @@ export class WhatsAppConnector extends BaseConnector {
   }
 
   async start(_opts: StartOptions = {}): Promise<void> {
+    // önceki sürümlerin yazdığı ikiz tek seferlik medya yer tutucuları (bir kez; ucuz sorgu)
+    try {
+      const dropped = this.store.dropTwins(VIEW_ONCE_TEXT);
+      if (dropped.length) bus.log('info', `WhatsApp: ${dropped.length} ikiz tek seferlik medya kaydı birleştirildi`);
+    } catch {
+      /* yok say */
+    }
     this.stopping = false;
     this.historySeen = false;
     this.opened = false;
@@ -679,7 +689,7 @@ export class WhatsAppConnector extends BaseConnector {
         const mid = `${chatIdOf(this.account.id, cj)}#${u.key.id}`;
         // alındı mesajın kaydedildiğinden farklı sohbet kimliğiyle (LID ↔ numara) gelebiliyor: bulunamazsa mesaj kimliğiyle ara
         // (eskiden atlanıyordu → o sohbette mesajlar tek tikte kalıyordu, başkasında çift)
-        const stored = this.store.getMessage(mid) ?? this.store.findMessageByRemote(this.account.id, u.key.id);
+        const stored = this.store.getMessage(mid) ?? this.store.findMessageByRemote(this.account.id, u.key.id) ?? this.twinMessage(u.key.id);
         if (!stored) continue; // bilmediğimiz mesaj için boş kayıt açma
         const next = map[st] ?? 'sent';
         // gönderim hatası yalnızca henüz iletilmemiş kendi mesajımızı "başarısız" yapar
@@ -710,7 +720,7 @@ export class WhatsAppConnector extends BaseConnector {
       for (const r of receipts) {
         if (!r.key.remoteJid || !r.key.id || !isChatJid(r.key.remoteJid) || !r.receipt.userJid) continue;
         const cj = this.canon(r.key.remoteJid);
-        const stored = this.store.getMessage(`${chatIdOf(this.account.id, cj)}#${r.key.id}`) ?? this.store.findMessageByRemote(this.account.id, r.key.id);
+        const stored = this.store.getMessage(`${chatIdOf(this.account.id, cj)}#${r.key.id}`) ?? this.store.findMessageByRemote(this.account.id, r.key.id) ?? this.twinMessage(r.key.id);
         if (!stored) continue;
         if (me.has(jidNormalizedUser(r.receipt.userJid))) {
           // telefonda benim okumam (read-self)
@@ -1837,14 +1847,14 @@ export class WhatsAppConnector extends BaseConnector {
         this.tryPlaceholderResend(m);
         const senderJid = m.key.fromMe ? 'me' : this.canon(m.key.participant ? jidNormalizedUser(m.key.participant) : jid);
         this.ensureWaChat(jid);
-        this.upsertMessage(
+        this.upsertPlaceholder(
           {
             remoteChatId: jid,
             remoteId: m.key.id,
             senderId: senderJid,
             senderName: m.key.fromMe ? 'Ben' : this.nameOf(senderJid),
             fromMe: !!m.key.fromMe,
-            text: '🔒 Tek seferlik fotoğraf/video — WhatsApp içeriğini bağlı cihazlara göndermiyor; telefonda aç',
+            text: VIEW_ONCE_TEXT,
             ts: toMs(m.messageTimestamp) || Date.now(),
             status: m.key.fromMe ? waStatus(m.status) : 'delivered',
           },
@@ -1940,6 +1950,24 @@ export class WhatsAppConnector extends BaseConnector {
    * Telefondan (fromMe) gelenlerin sürekli çözülememesi telefon↔cihaz oturumunun bozulduğunu gösterir (aynı kimlikle iki
    * çekirdek çalışınca olur); tek kalıcı çare cihazı Bağlı cihazlar'dan kaldırıp yeniden eşleştirmek.
    */
+  /** Atlanan ikiz yer tutucu kimliği → tutulan mesajın kimliği (alındılar hangisine gelirse gelsin tek balona işlensin) */
+  private twins = new Map<string, string>();
+  private twinMessage(remoteId: string) {
+    const id = this.twins.get(remoteId);
+    return id ? this.store.getMessage(id) : undefined;
+  }
+
+  /** Tek seferlik medya yer tutucusu: telefon aynı gönderimi ikinci bir kimlikle de yollayabiliyor (biri tek, biri çift tik
+   *  iki balon görünüyordu). Aynı sohbet + gönderen + ±10 sn'de ikiz varsa yeni kayıt açılmaz, kimlik ikize bağlanır. */
+  private upsertPlaceholder(input: Omit<Message, 'id' | 'chatId'> & { remoteChatId: string }, opts: { live?: boolean; bump?: boolean }) {
+    const chatId = chatIdOf(this.account.id, input.remoteChatId);
+    const twin = this.store.findTwin(chatId, input.remoteId, !!input.fromMe, input.senderId, input.text, input.ts);
+    if (!twin) return this.upsertMessage(input, opts);
+    this.twins.set(input.remoteId, twin.id);
+    if (this.twins.size > 500) this.twins.delete(this.twins.keys().next().value!);
+    return undefined;
+  }
+
   private resendIds?: Set<string>;
   private resendTried(): Set<string> {
     if (!this.resendIds) {
@@ -1997,14 +2025,14 @@ export class WhatsAppConnector extends BaseConnector {
     // yaz, yine de telefondan bir kez iste (yanıt gelirse aynı kimlikle üstüne yazılır)
     if (/absent/i.test(reason)) {
       this.ensureWaChat(jid);
-      this.upsertMessage(
+      this.upsertPlaceholder(
         {
           remoteChatId: jid,
           remoteId: m.key.id,
           senderId: sender,
           senderName: m.key.fromMe ? 'Ben' : (this.nameCache.get(sender) ?? m.pushName ?? this.nameOf(sender)),
           fromMe: !!m.key.fromMe,
-          text: '🔒 Tek seferlik fotoğraf/video — WhatsApp içeriğini bağlı cihazlara göndermiyor; telefonda aç',
+          text: VIEW_ONCE_TEXT,
           ts: toMs(m.messageTimestamp) || Date.now(),
           status: m.key.fromMe ? waStatus(m.status) : 'delivered',
         },

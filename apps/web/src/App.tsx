@@ -1750,11 +1750,12 @@ function accountIssue(a: Account): { title: string; how: string; label: string; 
   const detail = (a.detail ?? '').replace(/\s+/g, ' ').trim();
   // Şifre/anahtar reddedildiyse "Yeniden bağlan" aynı bilgiyle tekrar dener ve sessizce yine düşer → bilgileri güncelleme formunu aç
   // Yahoo: uygulama şifresi reddedildi (Yahoo birçok hesapta kapattı) → tarayıcı girişi. Aynı şifreyle yeniden deneme yok (kilitlenme riski)
-  if (a.platform === 'yahoo' && (a.status === 'error' || a.status === 'disconnected') && AUTH_FAIL.test(detail))
+  // Yandex: aynı — uygulama şifresi yerine normal şifreyle tarayıcı girişi
+  if ((a.platform === 'yahoo' || a.platform === 'yandex') && (a.status === 'error' || a.status === 'disconnected') && AUTH_FAIL.test(detail))
     return {
-      title: 'Yahoo uygulama şifresini kabul etmedi',
-      how: 'Yahoo birçok hesapta uygulama şifresini kapattı. Açılan panelde “Yahoo ile giriş yap” de; normal şifrenle bir kez giriş yapman yeterli.',
-      label: 'Yahoo ile giriş yap',
+      title: `${a.platform === 'yahoo' ? 'Yahoo' : 'Yandex'} uygulama şifresini kabul etmedi`,
+      how: `Uygulama şifresine gerek yok: açılan panelde “${a.platform === 'yahoo' ? 'Yahoo' : 'Yandex'} ile giriş yap” de; normal şifrenle bir kez giriş yapman yeterli.`,
+      label: `${a.platform === 'yahoo' ? 'Yahoo' : 'Yandex'} ile giriş yap`,
       action: 'panelOnly',
       done: '',
     };

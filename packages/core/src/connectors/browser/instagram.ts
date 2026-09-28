@@ -385,12 +385,27 @@ export const instagram: Strategy = {
     } catch {
       /* aşağıdaki uca düş */
     }
+    // hesap ayarlarının kullandığı uç: yalnız oturum sahibinin kullanıcı adını döndürür
+    try {
+      const c = await ig(page, cookies, '/api/v1/accounts/current_user/?edit=true');
+      if (c.user?.username) return { id: viewerId || String(c.user.pk ?? ''), label: `@${c.user.username}` };
+    } catch {
+      /* aşağıdaki uca düş */
+    }
     try {
       const u = await ig(page, cookies, `/api/v1/users/${viewerId}/info/`);
-      return { id: viewerId, label: u.user?.username ? `@${u.user.username}` : 'Instagram' };
+      if (u.user?.username) return { id: viewerId, label: `@${u.user.username}` };
     } catch {
-      return { id: viewerId, label: 'Instagram' };
+      /* sayfadan dene */
     }
+    // son çare: sayfanın gezinme çubuğundaki profil bağlantısı ("<kullanıcı> adlı kişinin profil resmi")
+    const fromDom = await page
+      .evaluate(() => {
+        const img = Array.from(document.querySelectorAll('img[alt]')).find((i) => /profil resmi|profile picture/i.test(i.getAttribute('alt') ?? ''));
+        return (img?.getAttribute('alt') ?? '').match(/^([\w.]+)/)?.[1] ?? '';
+      })
+      .catch(() => '');
+    return { id: viewerId, label: fromDom ? `@${fromDom}` : 'Instagram' };
   },
 
   async markRead(page, _cookies, threadId) {

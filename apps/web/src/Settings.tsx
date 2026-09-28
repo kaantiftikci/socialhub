@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { api } from './api';
 import { PLATFORMS, type Account } from './types';
-import { Chip, Icon } from './ui';
+import { Chip, Icon, PasswordInput } from './ui';
 import { SOUNDS, getPlatformSound, getPlatformTone, getPlatformVolume, getVolume, groupsNotify, bannersEnabled, soundsEnabled, playNotifySound, playPing, setBannersEnabled, setGroupsNotify, setPlatformSound, setPlatformTone, setPlatformVolume, setSoundsEnabled, setVolume, webNotifyPermission, requestWebNotify, testNotify } from './desktop';
 import { setAiPrefs, useAiPrefs } from './ai-prefs';
 import { DEMO_OFFLINE, STATIC_DEMO } from './profile';
@@ -301,7 +301,7 @@ function AiKeyRow({ ai, onChange, notify }: { ai: boolean; onChange: (on: boolea
     return (
       <form className="ai-key-form" onSubmit={(e) => (e.preventDefault(), val.trim() && save(val.trim()))}>
         <b>Anthropic anahtarı</b>
-        <input autoFocus type="password" placeholder="sk-ant-…" value={val} onChange={(e) => setVal(e.target.value)} aria-label="Anthropic API anahtarı" autoComplete="off" spellCheck={false} />
+        <PasswordInput autoFocus placeholder="sk-ant-…" value={val} onChange={(e) => setVal(e.target.value)} aria-label="Anthropic API anahtarı" autoComplete="off" spellCheck={false} />
         <div style={{ display: 'flex', gap: 6 }}>
           <button type="submit" className="btn primary xs b b2" disabled={busy || !val.trim()}>
             Kaydet

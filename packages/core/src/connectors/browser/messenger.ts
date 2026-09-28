@@ -517,8 +517,8 @@ export const messenger: Strategy & PinHooks = {
     }
   },
 
-  async me(_page, cookies) {
-    return { id: cookies.c_user ?? '', label: 'Messenger' };
+  async me(page, cookies) {
+    return { id: cookies.c_user ?? '', label: (await facebookName(page).catch(() => '')) || 'Messenger' };
   },
 
   async threads(page): Promise<Thread[]> {
@@ -745,4 +745,15 @@ export function parseDate(input: string, now = new Date()): number | undefined {
   if (s.length > 40 || !/\d{1,2}[:.]\d{2}/.test(s)) return undefined;
   const t = Date.parse(s);
   return Number.isFinite(t) ? t : undefined;
+}
+
+/** Oturum sahibinin adı (+ kullanıcı adı): facebook.com/me profile yönlendirir; sayfa başlığı "Ad | Facebook",
+ *  son adres /<kullanıcı-adı> (profile.php?id= ise kullanıcı adı yok). Tarayıcı bağlamının istek bağlamı (aynı çerezler). */
+async function facebookName(page: Page): Promise<string> {
+  const r = await page.context().request.get('https://www.facebook.com/me', { timeout: 20_000 });
+  const html = await r.text();
+  const title = (html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] ?? '').replace(/\s*\|\s*Facebook\s*$/i, '').replace(/&#039;|&#39;/g, "'").replace(/&amp;/g, '&').trim();
+  const vanity = (r.url().match(/facebook\.com\/([A-Za-z0-9.]{3,})\/?(?:[?#]|$)/)?.[1] ?? '').replace(/^(profile\.php|login|checkpoint|me)$/i, '');
+  const name = /^(facebook|log in|giriş yap)/i.test(title) ? '' : title;
+  return [name, vanity && `@${vanity}`].filter(Boolean).join(' · ');
 }

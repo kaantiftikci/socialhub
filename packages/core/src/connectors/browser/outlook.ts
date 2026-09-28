@@ -333,6 +333,18 @@ export const outlook: Strategy = {
         // Yalnızca hesaba ait kaynaklar: sayfa metnindeki ilk adres bir yazışanınki olabilir (fromMe ters döner) →
         // bulunamazsa boş kalır (tahmin yok)
         email ||= pick(label);
+        // OWA localStorage ANAHTARLARI hesabın adresini taşır (değerlerde yazışanlar olabilir → yalnız anahtarlar, en sık geçen)
+        if (!email) {
+          const count = new Map<string, number>();
+          try {
+            for (let i = 0; i < localStorage.length; i++) {
+              for (const m of (localStorage.key(i) ?? '').match(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/gi) ?? []) count.set(m.toLowerCase(), (count.get(m.toLowerCase()) ?? 0) + 1);
+            }
+          } catch {
+            /* yok */
+          }
+          email = [...count.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '';
+        }
         return { email, name: label.replace(/[\w.+-]+@[\w.-]+/, '').replace(/^(Hesap yöneticisi|Account manager)( for)?:?/i, '').trim() };
       })
       .catch(() => ({ email: '', name: '' }));

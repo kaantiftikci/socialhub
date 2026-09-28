@@ -171,7 +171,7 @@ export const PLATFORMS: Record<Platform, { name: string; code: string; color: st
   gmail: { name: 'Gmail', code: 'GM', color: '#EA4335', method: 'Google hesabınla giriş', available: true, mode: 'browser', category: 'mail' },
   outlook: { name: 'Outlook', code: 'OL', color: '#0F6CBD', method: 'Tarayıcı girişi · Outlook web', available: true, mode: 'browser', category: 'mail' },
   yahoo: { name: 'Yahoo Mail', code: 'YH', color: '#6001D2', method: 'Yahoo hesabınla giriş', available: true, mode: 'browser', category: 'mail' },
-  yandex: { name: 'Yandex Mail', code: 'YA', color: '#FC3F1D', method: 'Uygulama şifresi · anlık', available: true, mode: 'mail', category: 'mail' },
+  yandex: { name: 'Yandex Mail', code: 'YA', color: '#FC3F1D', method: 'Yandex hesabınla giriş', available: true, mode: 'browser', category: 'mail' },
   icloud: { name: 'iCloud Mail', code: 'IC', color: '#3693F3', method: 'Apple hesabınla giriş', available: true, mode: 'browser', category: 'mail' },
   imap: { name: 'Diğer e-posta', code: '@', color: '#4A4757', method: 'E-posta + şifre · kurumsal, Fastmail, GMX…', available: true, mode: 'mail', category: 'mail' },
   pttavm: { name: 'ePttAVM', code: 'PT', color: '#FFC20E', method: 'Resmi satıcı API · yakında', available: false, mode: 'token', category: 'shop' },
@@ -238,6 +238,8 @@ export function openInAppLink(c: Chat): { href: string; label: string } | null {
       return { href: 'https://www.icloud.com/mail/', label };
     case 'yahoo':
       return { href: 'https://mail.yahoo.com/', label };
+    case 'yandex':
+      return { href: 'https://mail.yandex.com/', label };
     default:
       return c.link ? { href: c.link, label } : null;
   }
