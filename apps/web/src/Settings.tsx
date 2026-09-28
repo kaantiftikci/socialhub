@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { api } from './api';
 import { PLATFORMS, type Account } from './types';
 import { Chip, Icon } from './ui';
-import { SOUNDS, getPlatformSound, getPlatformTone, getPlatformVolume, getVolume, groupsNotify, bannersEnabled, soundsEnabled, playNotifySound, playPing, setBannersEnabled, setGroupsNotify, setPlatformSound, setPlatformTone, setPlatformVolume, setSoundsEnabled, setVolume } from './desktop';
+import { SOUNDS, getPlatformSound, getPlatformTone, getPlatformVolume, getVolume, groupsNotify, bannersEnabled, soundsEnabled, playNotifySound, playPing, setBannersEnabled, setGroupsNotify, setPlatformSound, setPlatformTone, setPlatformVolume, setSoundsEnabled, setVolume, webNotifyPermission, requestWebNotify, testNotify } from './desktop';
 import { setAiPrefs, useAiPrefs } from './ai-prefs';
 import { DEMO_OFFLINE, STATIC_DEMO } from './profile';
 import { leaveDemoPanel } from './demo-session';
@@ -53,6 +53,7 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
   const [pSounds, setPSounds] = useState<Record<string, string>>({});
   const [pVols, setPVols] = useState<Record<string, number>>({});
   const [pTones, setPTones] = useState<Record<string, string>>({});
+  const [perm, setPerm] = useState(webNotifyPermission);
 
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === 'Escape' && (e.stopPropagation(), onClose());
@@ -121,6 +122,29 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
               </Row>
               <Row title="Masaüstü bildirimleri" hint="Mivelo arka plandayken sistem bildirim kartı göster">
                 <Switch label="Masaüstü bildirimleri" on={bnrOn} onChange={(v) => (setBannersEnabled(v), setBnrOn(v))} />
+              </Row>
+              {perm !== 'granted' && (
+                <Row
+                  title="Tarayıcı bildirim izni"
+                  hint={
+                    perm === 'denied'
+                      ? 'Engellenmiş: adres çubuğundaki site ayarlarından (kilit/ⓘ simgesi) Bildirimler → İzin ver, sonra sayfayı yenile. Mac: Sistem Ayarları → Bildirimler → tarayıcın açık olsun.'
+                      : perm === 'unsupported'
+                        ? 'Bu tarayıcı bildirim desteklemiyor'
+                        : 'Verilmedi — sağ üstte bildirim kartı çıkması için izin gerekli'
+                  }
+                >
+                  {perm === 'default' && (
+                    <button type="button" className="btn primary xs b b2" onClick={() => void requestWebNotify().then(setPerm)}>
+                      İzin ver
+                    </button>
+                  )}
+                </Row>
+              )}
+              <Row title="Deneme bildirimi" hint="Sağ üstte kart çıkıyorsa bildirimler çalışıyor">
+                <button type="button" className="btn ghost xs b b2" disabled={perm !== 'granted'} onClick={() => void testNotify().then((ok) => !ok && notify('Bildirim gösterilemedi: izin yok', true))}>
+                  Gönder
+                </button>
               </Row>
               <Row title="Grup ve kanal bildirimleri" hint="Kapalıyken yalnız birebir sohbetler bildirir">
                 <Switch label="Grup ve kanal bildirimleri" on={grpOn} onChange={(v) => (setGroupsNotify(v), setGrpOn(v))} />

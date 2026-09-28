@@ -430,6 +430,12 @@ export class Store {
     return inserted;
   }
 
+  /** Hesabın herhangi bir sohbetinde platform kimliğiyle mesaj (WhatsApp alındısı LID/numara farklı sohbet kimliğiyle gelebiliyor) */
+  findMessageByRemote(accountId: string, remoteId: string): Message | undefined {
+    const r = this.db.prepare("SELECT id FROM messages WHERE remote_id = ? AND chat_id LIKE ? ESCAPE '\\' LIMIT 1").get(remoteId, accountId.replace(/[\\%_]/g, (c) => '\\' + c) + '/%') as { id: string } | undefined;
+    return r ? this.getMessage(r.id) : undefined;
+  }
+
   getMessage(id: string): Message | undefined {
     const r = this.db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
     return r ? rowToMessage(r) : undefined;

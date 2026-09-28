@@ -677,13 +677,15 @@ export class WhatsAppConnector extends BaseConnector {
         const map = WA_STATUS;
         const cj = this.canon(u.key.remoteJid);
         const mid = `${chatIdOf(this.account.id, cj)}#${u.key.id}`;
-        const stored = this.store.getMessage(mid);
+        // alındı mesajın kaydedildiğinden farklı sohbet kimliğiyle (LID ↔ numara) gelebiliyor: bulunamazsa mesaj kimliğiyle ara
+        // (eskiden atlanıyordu → o sohbette mesajlar tek tikte kalıyordu, başkasında çift)
+        const stored = this.store.getMessage(mid) ?? this.store.findMessageByRemote(this.account.id, u.key.id);
         if (!stored) continue; // bilmediğimiz mesaj için boş kayıt açma
         const next = map[st] ?? 'sent';
         // gönderim hatası yalnızca henüz iletilmemiş kendi mesajımızı "başarısız" yapar
         if (next === 'failed') {
           if (stored.fromMe && (stored.status === 'pending' || stored.status === 'sent')) {
-            this.store.updateStatus(mid, 'failed');
+            this.store.updateStatus(stored.id, 'failed');
             const chat = this.store.getChat(stored.chatId);
             if (chat) bus.emit({ type: 'message.upsert', message: { ...stored, status: 'failed' }, chat });
           }
@@ -695,7 +697,7 @@ export class WhatsAppConnector extends BaseConnector {
         // Karşı tarafın mesajı "okundu" olduysa bunu yalnızca biz yapmış olabiliriz (telefondaki 'read-self' alındısı) → sayaç sıfır
         if (next === 'read' && !stored.fromMe) this.clearUnread(cj);
         if (stored.status === next) continue;
-        this.store.updateStatus(mid, next);
+        this.store.updateStatus(stored.id, next);
         const chat = this.store.getChat(stored.chatId);
         if (chat) bus.emit({ type: 'message.upsert', message: { ...stored, status: next }, chat });
       }
@@ -706,11 +708,26 @@ export class WhatsAppConnector extends BaseConnector {
       const me = new Set([sock.user?.id, sock.user?.lid].filter((x): x is string => !!x).map((x) => jidNormalizedUser(x)));
       if (!me.size) return;
       for (const r of receipts) {
-        if (!r.key.remoteJid || !r.key.id || !isChatJid(r.key.remoteJid) || !r.receipt.readTimestamp || !r.receipt.userJid) continue;
-        if (!me.has(jidNormalizedUser(r.receipt.userJid))) continue;
+        if (!r.key.remoteJid || !r.key.id || !isChatJid(r.key.remoteJid) || !r.receipt.userJid) continue;
         const cj = this.canon(r.key.remoteJid);
-        const stored = this.store.getMessage(`${chatIdOf(this.account.id, cj)}#${r.key.id}`);
-        if (stored && !stored.fromMe) this.clearUnread(cj);
+        const stored = this.store.getMessage(`${chatIdOf(this.account.id, cj)}#${r.key.id}`) ?? this.store.findMessageByRemote(this.account.id, r.key.id);
+        if (!stored) continue;
+        if (me.has(jidNormalizedUser(r.receipt.userJid))) {
+          // telefonda benim okumam (read-self)
+          if (r.receipt.readTimestamp && !stored.fromMe) this.clearUnread(cj);
+          continue;
+        }
+        // karşı tarafın alındısı (gruplarda bu olayla gelir): benim mesajım iletildi / görüldü. Grupta "görüldü" herkes okuyunca olur;
+        // tek tek alındı tutulmadığından grupta yalnız "iletildi"ye yükseltilir, birebirde okunma zamanı "görüldü"
+        if (!stored.fromMe) continue;
+        const group = r.key.remoteJid.endsWith('@g.us');
+        const next = !group && (r.receipt.readTimestamp || r.receipt.playedTimestamp) ? 'read' : r.receipt.receiptTimestamp || r.receipt.readTimestamp ? 'delivered' : undefined;
+        if (!next) continue;
+        const RANK: Record<string, number> = { failed: -1, pending: 0, sent: 1, delivered: 2, read: 3 };
+        if ((RANK[next] ?? 0) <= (RANK[stored.status] ?? 0)) continue;
+        this.store.updateStatus(stored.id, next);
+        const chat = this.store.getChat(stored.chatId);
+        if (chat) bus.emit({ type: 'message.upsert', message: { ...stored, status: next }, chat });
       }
     });
   }

@@ -154,7 +154,14 @@ Dil: arayüz ve yorumlar Türkçe.
   GÖTÜRMEZ (yeniden eşitleme "görüldü"yü "gönderildi"ye indiriyordu → tik kayboluyordu); failed yalnız pending/sent'in yerine geçer.
   Kaynaklar: WhatsApp geçmişi `waStatus(m.status)`, Telegram geçmişi diyalog `readOutboxMaxId` (`applyReadOutbox`), iMessage chat.db
   `is_delivered/is_read/date_read/error` (`imessageStatus`) + son 3 günün alındıları 5 sn'de bir (`syncReceipts`), IG/X/Messenger görüldü
-  zamanı. Slack/e-posta/pazaryeri alındı vermez → tek tik.
+  zamanı. Slack/e-posta/pazaryeri alındı vermez → tek tik. WhatsApp alındısı LID/numara farklı sohbet kimliğiyle gelebilir →
+  `store.findMessageByRemote` yedeği (eskiden atlanıyordu: aynı koşullu bir sohbette tek, ötekinde çift tik); grup alındıları
+  `message-receipt.update` ile (grupta en çok "iletildi", birebirde okunma = görüldü).
+- **Albüm + galeri** (Conversation.tsx `toUnits`/`AlbumView`): aynı kişiden art arda ≥3 metinsiz görsel/video mesajı (aralar ≤3 dk) tek
+  balonda 2 sütun ızgara (≤4 kare, "+N"); tüm platformlarda arayüz tarafında. Medya penceresi `Lightbox` sohbetteki tüm medya
+  (`mediaList`) arasında ←/→ ve `.lb-nav` okları, "i / n" sayacı. Medyalı balon iç boşluğu 2 px (ince mor çerçeve).
+- **Web bildirimleri**: tarayıcı izni yalnız kullanıcı tıklamasıyla istenebilir (açılışta istenen sessizce engelleniyordu → sağ üstte
+  sistem bildirimi çıkmıyordu); ilk `pointerdown`'da `requestWebNotify`; Ayarlar → Bildirimler'de izin durumu + "Deneme bildirimi".
 - **Kendi mesajının yankısı**: `store.isOwnEcho` (aynı sohbette ±3 dk, ≥12 kr. aynı metinli fromMe) → base.upsertMessage gelen saymaz (tüm
   platformlar); WhatsApp'ta katılımcı kimliği `meIds` ise fromMe. Uyarıdaki "QR'ı göster" Bağlan'ı o hesabın eşleştirme alanıyla açar (`focus`).
 

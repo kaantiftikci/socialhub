@@ -119,9 +119,34 @@ export async function coreInfo(): Promise<string> {
 
 let permissionOk: boolean | null = null;
 
-export async function notify(title: string, body: string): Promise<void> {
+/** Web (tarayıcı) bildirim izni: 'granted' | 'denied' | 'default' | 'unsupported'; Tauri'de izin kabukta */
+export function webNotifyPermission(): 'granted' | 'denied' | 'default' | 'unsupported' {
+  if (isTauri) return 'granted';
+  return 'Notification' in window ? Notification.permission : 'unsupported';
+}
+/** İzni iste (tarayıcılar yalnız kullanıcı tıklamasıyla gelen isteğe pencere açar; sayfa açılışında istenen sessizce engelleniyordu) */
+export async function requestWebNotify(): Promise<'granted' | 'denied' | 'default' | 'unsupported'> {
+  if (isTauri || !('Notification' in window)) return webNotifyPermission();
+  try {
+    return await Notification.requestPermission();
+  } catch {
+    return Notification.permission;
+  }
+}
+/** Deneme bildirimi: odak durumundan bağımsız gösterir (ayarlardan sınamak için) */
+export async function testNotify(): Promise<boolean> {
+  if (isTauri) {
+    await notify('Mivelo', 'Deneme bildirimi — bildirimler çalışıyor', true);
+    return true;
+  }
+  if (!('Notification' in window) || Notification.permission !== 'granted') return false;
+  new Notification('Mivelo', { body: 'Deneme bildirimi — bildirimler çalışıyor', tag: 'mivelo-test' });
+  return true;
+}
+
+export async function notify(title: string, body: string, force = false): Promise<void> {
   if (!isTauri) {
-    if ('Notification' in window && Notification.permission === 'granted' && !document.hasFocus()) new Notification(title, { body });
+    if ('Notification' in window && Notification.permission === 'granted' && (force || !document.hasFocus())) new Notification(title, { body });
     return;
   }
   try {

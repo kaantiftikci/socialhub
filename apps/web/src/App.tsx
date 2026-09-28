@@ -9,7 +9,7 @@ import { onThemeChange, resolvedTheme, setThemePref } from './theme';
 import { SettingsModal } from './Settings';
 import { SearchPalette } from './SearchPalette';
 import { CalendarView, ymd } from './CalendarView';
-import { MOD_KEY, isTauri, notify as desktopNotify, onDesktopEvent, playPing, setBadge, windowFocused, coreInfo, playNotifySound, platformNotifyOn, soundsEnabled, bannersEnabled, groupsNotify, unlockAudio } from './desktop';
+import { MOD_KEY, isTauri, notify as desktopNotify, requestWebNotify, onDesktopEvent, playPing, setBadge, windowFocused, coreInfo, playNotifySound, platformNotifyOn, soundsEnabled, bannersEnabled, groupsNotify, unlockAudio } from './desktop';
 import { PROFILE_NAME, STATIC_DEMO } from './profile';
 
 export type View = 'inbox' | 'focus' | 'calendar' | 'archived' | 'muted' | 'hidden';
@@ -740,8 +740,14 @@ export default function App() {
   }, []);
   useEffect(() => {
     void setBadge(Math.min(totals.unread, 999));
-    if (!isTauri && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => undefined);
   }, [totals.unread]);
+  // Web: bildirim izni ilk tıklamada istenir (tarayıcılar kullanıcı hareketi olmadan istenen izni gösterme/engelliyor)
+  useEffect(() => {
+    if (isTauri || !('Notification' in window) || Notification.permission !== 'default') return;
+    const ask = () => void requestWebNotify();
+    window.addEventListener('pointerdown', ask, { once: true });
+    return () => window.removeEventListener('pointerdown', ask);
+  }, []);
   useEffect(() => {
     let un = () => undefined as void;
     let cancelled = false;
