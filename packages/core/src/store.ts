@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3-multiple-ciphers';
 import fs from 'node:fs';
 import { DB_PATH } from './config.js';
-import type { Account, CalEvent, Chat, ChatFlags, FollowUp, Message, Platform, Reaction } from './model.js';
+import { DELETED_TEXT, type Account, type CalEvent, type Chat, type ChatFlags, type FollowUp, type Message, type Platform, type Reaction } from './model.js';
 
 /**
  * Yerel SQLite deposu. Şema küçük tutuldu; FTS5 ile tam metin arama var.
@@ -113,6 +113,8 @@ export class Store {
     if (!cols.has('reply_count')) this.db.exec('ALTER TABLE messages ADD COLUMN reply_count INTEGER');
     if (!cols.has('reply_to')) this.db.exec('ALTER TABLE messages ADD COLUMN reply_to TEXT'); // alıntılı yanıt (JSON ReplyRef)
     if (!cols.has('html')) this.db.exec('ALTER TABLE messages ADD COLUMN html TEXT'); // e-posta özgün HTML gövdesi
+    if (!cols.has('edited')) this.db.exec('ALTER TABLE messages ADD COLUMN edited INTEGER'); // gönderildikten sonra düzenlendi
+    if (!cols.has('deleted')) this.db.exec('ALTER TABLE messages ADD COLUMN deleted INTEGER'); // herkesten silindi
     const ccols = new Set((this.db.prepare('PRAGMA table_info(chats)').all() as Array<{ name: string }>).map((c) => c.name));
     if (!ccols.has('handle')) this.db.exec('ALTER TABLE chats ADD COLUMN handle TEXT');
     if (!ccols.has('link')) this.db.exec('ALTER TABLE chats ADD COLUMN link TEXT');
@@ -384,8 +386,8 @@ export class Store {
     const existed = this.hasMessage(m.id);
     this.db
       .prepare(
-        `INSERT INTO messages (id, chat_id, remote_id, sender_id, sender_name, from_me, text, ts, status, attachments, sender_avatar, reactions, thread_id, reply_count, reply_to, html)
-         VALUES (@id, @chatId, @remoteId, @senderId, @senderName, @fromMe, @text, @ts, @status, @attachments, @senderAvatar, @reactions, @threadId, @replyCount, @replyTo, @html)
+        `INSERT INTO messages (id, chat_id, remote_id, sender_id, sender_name, from_me, text, ts, status, attachments, sender_avatar, reactions, thread_id, reply_count, reply_to, html, edited, deleted)
+         VALUES (@id, @chatId, @remoteId, @senderId, @senderName, @fromMe, @text, @ts, @status, @attachments, @senderAvatar, @reactions, @threadId, @replyCount, @replyTo, @html, @edited, @deleted)
          ON CONFLICT(id) DO UPDATE SET
            -- durum geri gitmez (tüm platformlar): yeniden eşitleme/yoklama "görüldü"yü "gönderildi"ye indirmesin; başarısız yalnız henüz
            -- iletilmemiş mesajın yerini alır, başarısızdan sonra gelen gerçek durum ise yazılır
@@ -395,8 +397,15 @@ export class Store {
                   >= (CASE messages.status WHEN 'read' THEN 3 WHEN 'delivered' THEN 2 WHEN 'sent' THEN 1 WHEN 'failed' THEN -1 ELSE 0 END)
                THEN excluded.status
              ELSE messages.status END,
-           text = CASE WHEN excluded.text <> '' THEN excluded.text WHEN excluded.attachments IS NOT NULL THEN '' ELSE messages.text END,
-           attachments = COALESCE(excluded.attachments, messages.attachments),
+           -- herkesten silinen mesaj yeniden eşitlemede eski metnine/eklerine dönmez; düzenlenmiş metni düzenleme bilgisi taşımayan
+           -- (özgün metinli) geçmiş kaydı ezmez
+           text = CASE
+             WHEN messages.deleted = 1 AND COALESCE(excluded.deleted, 0) = 0 THEN messages.text
+             WHEN messages.edited = 1 AND COALESCE(excluded.edited, 0) = 0 AND COALESCE(excluded.deleted, 0) = 0 THEN messages.text
+             WHEN excluded.text <> '' THEN excluded.text WHEN excluded.attachments IS NOT NULL THEN '' ELSE messages.text END,
+           attachments = CASE WHEN messages.deleted = 1 THEN messages.attachments ELSE COALESCE(excluded.attachments, messages.attachments) END,
+           edited = CASE WHEN excluded.edited = 1 OR messages.edited = 1 THEN 1 ELSE NULL END,
+           deleted = CASE WHEN excluded.deleted = 1 OR messages.deleted = 1 THEN 1 ELSE NULL END,
            sender_avatar = COALESCE(excluded.sender_avatar, messages.sender_avatar),
            sender_name = CASE WHEN excluded.sender_name <> '' THEN excluded.sender_name ELSE messages.sender_name END,
            reactions = COALESCE(excluded.reactions, messages.reactions),
@@ -415,6 +424,8 @@ export class Store {
         replyCount: m.replyCount ?? null,
         replyTo: m.replyTo ? JSON.stringify(m.replyTo) : null,
         html: opts.html ? opts.html.slice(0, 1_500_000) : null,
+        edited: m.edited ? 1 : null,
+        deleted: m.deleted ? 1 : null,
       });
     const inserted = !existed;
     const chat = this.getChat(m.chatId);
@@ -461,6 +472,28 @@ export class Store {
     const next = remove ? rest : [...rest, r];
     this.db.prepare('UPDATE messages SET reactions = ? WHERE id = ?').run(next.length ? JSON.stringify(next) : null, id);
     return { ...m, reactions: next.length ? next : undefined };
+  }
+
+  /**
+   * Mesajı düzenlendi (text) ya da herkesten silindi (text === null) olarak işaretle; sohbetin son mesajıysa önizleme de güncellenir.
+   * Kendi düzenlemem/silmem ve platformdan gelen düzenleme/silme olayları bunu kullanır. Değişiklik yoksa undefined.
+   */
+  applyEdit(id: string, text: string | null): Message | undefined {
+    const m = this.getMessage(id);
+    if (!m) return undefined;
+    const deleted = text === null;
+    if (deleted ? m.deleted : m.text === text && m.edited) return undefined;
+    if (m.deleted && !deleted) return undefined; // silinen mesaj düzenlenemez
+    const next = deleted ? DELETED_TEXT : text;
+    if (deleted) this.db.prepare('UPDATE messages SET text = ?, attachments = ?, deleted = 1 WHERE id = ?').run(next, '[]', id);
+    else this.db.prepare('UPDATE messages SET text = ?, edited = 1 WHERE id = ?').run(next, id);
+    const out: Message = deleted ? { ...m, text: next, attachments: [], deleted: true } : { ...m, text: next, edited: true };
+    const chat = this.getChat(m.chatId);
+    if (chat && m.ts >= chat.lastMessageAt) {
+      const preview = chat.kind !== 'direct' && next ? `${m.fromMe ? 'Sen' : (m.senderName || '').split(/\s+/)[0] || '?'}: ${next}` : next;
+      this.db.prepare('UPDATE chats SET last_preview = ? WHERE id = ?').run(preview, m.chatId);
+    }
+    return out;
   }
 
   /** Tepki listesini bütünüyle değiştir (Telegram güncellemeleri tam listeyi verir) */
@@ -831,6 +864,8 @@ function rowToMessage(r: unknown): Message {
     replyCount: x.reply_count != null ? Number(x.reply_count) : undefined,
     replyTo: x.reply_to ? safeJson<Message['replyTo']>(x.reply_to as string, undefined) : undefined,
     hasHtml: x.html ? true : undefined,
+    edited: Number(x.edited) === 1 ? true : undefined,
+    deleted: Number(x.deleted) === 1 ? true : undefined,
   };
 }
 

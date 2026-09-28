@@ -49,6 +49,9 @@ const liveApi = {
   send: (chatId: string, text: string, threadId?: string, replyTo?: string) => call<{ remoteId: string }>('POST', `/chats/${enc(chatId)}/send`, { text, threadId, replyTo }),
   compose: (accountId: string, draft: { to: string; subject: string; text: string }) => call<Chat>('POST', `/accounts/${enc(accountId)}/compose`, draft),
   react: (chatId: string, messageId: string, emoji: string) => call<Message>('POST', `/chats/${enc(chatId)}/react`, { messageId, emoji }),
+  /** Kendi mesajını herkesten sil / düzenle (EDIT_PLATFORMS / UNSEND_PLATFORMS) */
+  deleteMessage: (messageId: string) => call<Message>('POST', `/messages/${enc(messageId)}/delete`),
+  editMessage: (messageId: string, text: string) => call<Message>('POST', `/messages/${enc(messageId)}/edit`, { text }),
   setFlags: (chatId: string, flags: ChatFlags) => call<Chat>('POST', `/chats/${enc(chatId)}/flags`, flags),
   preview: (url: string) => call<LinkPreview>('GET', `/preview?url=${enc(url)}`),
   markRead: (chatId: string) => call('POST', `/chats/${enc(chatId)}/read`),

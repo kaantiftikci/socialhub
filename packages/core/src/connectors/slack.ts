@@ -165,6 +165,11 @@ export class SlackConnector extends BaseConnector {
       } else if (env.type === 'events_api') {
         const ev = env.payload?.event;
         if (ev?.type === 'message' && ev.channel) {
+          // düzenleme / silme doğrudan olaydan (history'de oldest sonrası görünmez); yanıt sayısı değişimi de message_changed gelir
+          if (ev.subtype === 'message_changed' && ev.message?.ts && ev.message.edited) {
+            const text = formatSlackText(ev.message.text ?? '', this.users);
+            if (text) this.applyEdited(ev.channel, String(ev.message.ts), text);
+          } else if (ev.subtype === 'message_deleted' && ev.deleted_ts) this.applyEdited(ev.channel, String(ev.deleted_ts), null);
           this.markDirty(ev.channel);
           // iş parçacığı yanıtı history'de görünmez: üst mesajın yanıtları da çekilsin
           const parent = ev.thread_ts ?? ev.message?.thread_ts;
@@ -238,6 +243,20 @@ export class SlackConnector extends BaseConnector {
     // yoklamada oldest=<benim ts> yüzünden hiç çekilmiyordu. Kendi mesajım yoklamada aynı ts ile gelip üzerine yazılır.
     this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent', threadId: opts?.threadId });
     return { remoteId: id };
+  }
+
+  /** Herkesten sil (chat.delete; kullanıcı belirteci kendi mesajını silebilir) */
+  async deleteMessage(remoteChatId: string, remoteId: string): Promise<void> {
+    await this.web.chat.delete({ channel: remoteChatId, ts: remoteId }).catch((e) => {
+      if (slackError(e) !== 'message_not_found') throw scopeHint(e, 'silme');
+    });
+  }
+
+  /** Metni düzenle (chat.update; Slack'te süre sınırı çalışma alanı ayarına bağlı) */
+  async editMessage(remoteChatId: string, remoteId: string, text: string): Promise<void> {
+    await this.web.chat.update({ channel: remoteChatId, ts: remoteId, text }).catch((e) => {
+      throw scopeHint(e, 'düzenleme');
+    });
   }
 
   /** Tepki ver/kaldır (reactions:write). Zaten var/yok hataları sessiz: sonuç aynı */
@@ -496,6 +515,7 @@ export class SlackConnector extends BaseConnector {
         reactions: reactions.length ? reactions : [],
         threadId: m.thread_ts && String(m.thread_ts) !== String(m.ts) ? String(m.thread_ts) : undefined,
         replyCount: m.reply_count ? Number(m.reply_count) : undefined,
+        edited: m.edited ? true : undefined,
       },
       { live },
     );
@@ -516,13 +536,18 @@ type SlackMsg = {
   latest_reply?: string;
   files?: Array<Record<string, any>>;
   reactions?: Array<{ name?: string; users?: string[]; count?: number }>;
+  /** düzenlendiyse {user, ts} */
+  edited?: { user?: string; ts?: string };
 };
 type SlackEvent = {
   type?: string;
   channel?: string;
   subtype?: string;
   thread_ts?: string;
-  message?: { thread_ts?: string };
+  /** message_changed: mesajın yeni hâli */
+  message?: SlackMsg & { thread_ts?: string };
+  /** message_deleted: silinen mesajın ts'si */
+  deleted_ts?: string;
   user?: string;
   reaction?: string;
   item?: { channel?: string; ts?: string };

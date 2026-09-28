@@ -1554,3 +1554,17 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 @keyframes fbBubbleIn { from { opacity: 0; transform: translateX(8px) scale(.96); } to { opacity: 1; transform: none; } }
 @media (max-width: 640px) { .fb-bubble { display: none; } }
 @media (prefers-reduced-motion: reduce) { .fb-bubble { animation: none; } }
+
+/* Kendi mesajını düzenle / herkesten sil */
+.rpos.p4 { right: -144px; }
+.bwrap.me .rpos.p4 { left: -144px; }
+.rbar.own-menu { gap: 2px; }
+.rbar.own-menu button { width: auto; padding: 0 10px; gap: 6px; border-radius: 999px; font: inherit; font-size: 12.5px; font-weight: 500; line-height: 1; color: var(--text2); white-space: nowrap; }
+.rbar.own-menu button:hover { transform: none; background: var(--bg2); color: var(--text); }
+.rbar.own-menu button.danger { color: var(--danger-txt); background: var(--danger-bg); }
+.rbar.own-menu button.danger:hover { color: var(--danger-txt); }
+.bub .bt .edited { font-style: italic; margin-right: 3px; opacity: .9; }
+.bub.deleted { font-style: italic; color: var(--text3); }
+.grp.me .bub.deleted { background: var(--bg2); color: var(--text3); box-shadow: none; }
+.grp.me .bub.deleted .bt { color: var(--text3); }
+.reply-bar.edit-bar .rb-body span { white-space: nowrap; }

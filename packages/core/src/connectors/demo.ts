@@ -97,6 +97,10 @@ export class DemoConnector extends BaseConnector {
     this.setStatus('disconnected');
   }
 
+  /** Demo: platform çağrısı yok; depo güncellemesini sunucu yapar */
+  async deleteMessage(): Promise<void> {}
+  async editMessage(): Promise<void> {}
+
   async sendText(remoteChatId: string, text: string): Promise<{ remoteId: string }> {
     const id = `demo-${Date.now()}`;
     this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent' });

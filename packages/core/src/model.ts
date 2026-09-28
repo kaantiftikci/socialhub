@@ -101,7 +101,14 @@ export interface Message {
   replyTo?: ReplyRef;
   /** E-posta: özgün HTML gövdesi var (ayrı yüklenir: GET /api/messages/:id/html; listede taşınmaz) */
   hasHtml?: boolean;
+  /** Mesaj gönderildikten sonra düzenlendi (arayüzde "düzenlendi") */
+  edited?: boolean;
+  /** Mesaj herkesten silindi (metin "🚫 Bu mesaj silindi", ekler boş) */
+  deleted?: boolean;
 }
+
+/** Herkesten silinen mesajın metni (WhatsApp/Telegram/Slack/Instagram ortak; arayüz 🚫 baş ikonunu SYSTEM_LEAD ile çizer) */
+export const DELETED_TEXT = '🚫 Bu mesaj silindi';
 
 export interface ReplyRef {
   /** yanıtlanan mesajın platform kimliği */

@@ -216,6 +216,19 @@ Dil: arayüz ve yorumlar Türkçe.
   (Esc iptal); balonda `.quote` (tıkla → o mesaja kaydır). `REPLY_PLATFORMS` (types.ts): WhatsApp (`sendMessage(..., {quoted})`, gelen
   `contextInfo.stanzaId` → `quotedOf`), Telegram (`replyTo`, gelen `replyTo.replyToMsgId`), Instagram (`replied_to_item_id`, gelen
   `replied_to_message`; strateji `canReply`), Slack (iş parçacığına: threadId), demo. `SendOptions.replyTo` = platform kimliği.
+- **Düzenle / herkesten sil** (yalnız kendi mesajım): `Connector.deleteMessage?/editMessage?` (base.ts), köprüde `Strategy.unsend?/edit?`
+  (`react` gibi `urgent()+run`). `POST /api/messages/:id/delete` ve `/edit {text}` (fromMe değilse/destek yoksa 400; yalnız metin mesajı
+  düzenlenir, bağlantı önizlemesi ('other') sayılmaz) → platform çağrısı + `store.applyEdit(id, text|null)` + message.upsert. DB `edited`/`deleted`
+  sütunları; upsert düzenlenmiş metni düzenleme bilgisi taşımayan eşitlemeyle EZMEZ, silineni geri getirmez (silinen: `DELETED_TEXT`
+  "🚫 Bu mesaj silindi", ekler []). WhatsApp `{delete:key}` / `{text, edit:key}` (anahtar fromMe, grupta katılımcı=ben; gelen düzenleme/REVOKE
+  `applyEdit` → `applyEdited`), Telegram `deleteMessages(revoke)` / `editMessage` + gelen `EditedMessage`/`DeletedMessage` olayları (kanal
+  dışında sohbet bilinmez → kimlikle `findMessageByRemote`; `editDate && !editHide` = düzenlendi), Slack xoxp `chat.delete/chat.update` +
+  Socket Mode `message_changed`(edited)/`message_deleted`, tarayıcı Slack aynı yöntemler (xoxc), Instagram yalnız geri alma
+  (`direct_v2/threads/<id>/items/<öğe>/delete/`; düzenleme ucu yok), demo. Arayüz: `EDIT_PLATFORMS`/`UNSEND_PLATFORMS` + süre sınırları
+  `EDIT_LIMIT_MS` (WhatsApp 15 dk, Telegram 48 sa) / `UNSEND_LIMIT_MS` (WhatsApp 48 sa); kendi balonunda `…` düğmesi → `.own-menu`
+  (Düzenle · Herkesten sil → "Emin misin? Sil" ikinci tık onayı), düzenleme yazma alanında `.edit-bar` (Enter kaydeder, Esc iptal, önceki taslak
+  geri gelir, düğme "Kaydet"), saatte "düzenlendi", silinen balon soluk italik (`.bub.deleted`). Outbox kopyası gerçek kimlikle (`realId`) eşleşir
+  (düzenlenince metin eşleşmesi bozulup kopya geri çıkıyordu). Gerçek hesaplarla DOĞRULANMADI (yalnız birim testi + statik demo). Test: edit-delete.test.ts.
 - **Yahoo Mail**: varsayılan tarayıcı girişi (`connectors/browser/yahoo.ts`, mail.yahoo.com; `data-test-id` seçicileri + ARIA yedekleri,
   çerez onayı, oturum çerezleri kalıcı; DOĞRULANMADI → ilk girişte günlükle ayarlanacak). Yahoo birçok hesapta uygulama şifresini kapattı,
   IMAP normal şifreyi reddediyor. Token dosyası varsa IMAP (`MailConnector`). `registry.add('yahoo')` token'sız çağrılınca IMAP'i bozuk

@@ -1,7 +1,7 @@
 import type { CalendarResult, DeviceCalendars } from './api';
 import type { CalEvent } from './types';
 import type { Account, Attachment, CalendarDraft, Chat, ChatFlags, CoreEvent, CoreOs, DraftResult, LinkPreview, Message, Platform } from './types';
-import { PLATFORMS } from './types';
+import { DELETED_TEXT, PLATFORMS } from './types';
 import { authSaveAccounts } from './auth-api';
 import { demoAsset } from './demo-asset';
 import { DEMO_OFFLINE } from './profile';
@@ -16,6 +16,32 @@ import { STATIC_DEMO } from './profile';
 
 type Listener = (ev: CoreEvent) => void;
 const listeners = new Set<Listener>();
+/** Demo: kendi mesajını düzenle (text) ya da herkesten sil (null); son mesajsa sohbet önizlemesi de değişir */
+function demoEdit(messageId: string, text: string | null): Message {
+  const m = messages.find((x) => x.id === messageId);
+  if (!m) throw new Error('Mesaj yok');
+  if (!m.fromMe) throw new Error('Yalnız kendi mesajın');
+  if (m.deleted) throw new Error('Mesaj zaten silinmiş');
+  if (text === null) {
+    m.text = DELETED_TEXT;
+    m.attachments = [];
+    m.deleted = true;
+  } else {
+    const t = text.trim();
+    if (!t) throw new Error('Metin gerekli');
+    if (t === m.text) return { ...m };
+    m.text = t;
+    m.edited = true;
+  }
+  let chat = chatOf(m.chatId);
+  if (!messages.some((x) => x.chatId === m.chatId && x.ts > m.ts)) {
+    chat = { ...chat, lastPreview: m.text };
+    chats = chats.map((c) => (c.id === chat.id ? chat : c));
+  }
+  emit({ type: 'message.upsert', message: { ...m }, chat });
+  return { ...m };
+}
+
 const emit = (ev: CoreEvent) => {
   for (const fn of listeners) fn(ev);
 };
@@ -458,6 +484,8 @@ export const staticApi = {
     emit({ type: 'message.upsert', message: { ...m }, chat });
     return { ...m };
   },
+  deleteMessage: async (messageId: string): Promise<Message> => demoEdit(messageId, null),
+  editMessage: async (messageId: string, text: string): Promise<Message> => demoEdit(messageId, text),
   setFlags: async (chatId: string, flags: ChatFlags): Promise<Chat> => {
     const cur = chatOf(chatId);
     const next: Chat = { ...cur };

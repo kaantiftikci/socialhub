@@ -59,6 +59,8 @@ export interface Msg {
   replyTo?: { remoteId: string; senderName?: string; text?: string };
   /** E-posta: özgün gövde HTML'i (arayüz güvenli çerçevede gösterir) */
   html?: string;
+  /** Gönderildikten sonra düzenlendi */
+  edited?: boolean;
 }
 
 /** Sayfasız (tarayıcısız) modda stratejiye verilen sahte sayfanın taşıdığı istek bağlamı */
@@ -115,6 +117,10 @@ export interface Strategy {
   compose?(page: Page, cookies: Record<string, string>, draft: ComposeDraft): Promise<string | undefined>;
   /** Emoji tepkisi ver/kaldır (Slack reactions.add/remove) */
   react?(page: Page, cookies: Record<string, string>, threadId: string, msgId: string, emoji: string, remove: boolean): Promise<void>;
+  /** Kendi mesajımı herkesten sil / geri al (Slack chat.delete, Instagram unsend) */
+  unsend?(page: Page, cookies: Record<string, string>, threadId: string, msgId: string): Promise<void>;
+  /** Kendi mesajımın metnini düzenle (Slack chat.update) */
+  edit?(page: Page, cookies: Record<string, string>, threadId: string, msgId: string, text: string): Promise<void>;
   /** Bir üyeyle birebir sohbet kimliği (yoksa oluştur) */
   openDirect?(page: Page, cookies: Record<string, string>, participant: Participant): Promise<string>;
   /** Platformda okundu işaretle; lastIncomingId depodaki son gelen mesajın kimliği */
@@ -923,6 +929,20 @@ export class BrowserConnector extends BaseConnector {
     await this.urgent(async () => this.run((p, c) => this.strategy.react!(p, c, remoteChatId, remoteMsgId, emoji, remove)));
   }
 
+  /** Herkesten sil: strateji destekliyorsa (depo güncellemesi sunucuda) */
+  async deleteMessage(remoteChatId: string, remoteId: string): Promise<void> {
+    if (!this.strategy.unsend) throw new Error('Bu platformda mesaj silme desteklenmiyor');
+    if (!this.pageless && !(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
+    await this.urgent(async () => this.run((p, c) => this.strategy.unsend!(p, c, remoteChatId, remoteId)));
+  }
+
+  /** Metni düzenle: strateji destekliyorsa (depo güncellemesi sunucuda) */
+  async editMessage(remoteChatId: string, remoteId: string, text: string): Promise<void> {
+    if (!this.strategy.edit) throw new Error('Bu platformda mesaj düzenleme desteklenmiyor');
+    if (!this.pageless && !(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
+    await this.urgent(async () => this.run((p, c) => this.strategy.edit!(p, c, remoteChatId, remoteId, text)));
+  }
+
   async sendMedia(remoteChatId: string, file: { path: string; name: string; mime: string; size: number }, caption?: string): Promise<{ remoteId: string }> {
     if (!this.strategy.sendFile) throw new Error('Bu platformda dosya gönderme desteklenmiyor');
     if (!this.pageless && !(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
@@ -1312,6 +1332,7 @@ export class BrowserConnector extends BaseConnector {
         replyCount: m.replyCount,
         replyTo: m.replyTo ? { ...m.replyTo, ...this.replyInfo(threadId, m.replyTo.remoteId, m.replyTo) } : undefined,
         html: m.html,
+        edited: m.edited || undefined,
       },
       { live, bump: false },
     );

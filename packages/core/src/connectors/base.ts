@@ -56,6 +56,10 @@ export interface Connector {
   sendText(remoteChatId: string, text: string, opts?: SendOptions): Promise<{ remoteId: string }>;
   /** Mesaja emoji tepkisi ver/kaldır (WhatsApp, Telegram, Slack) */
   react?(remoteChatId: string, remoteMsgId: string, emoji: string, remove: boolean): Promise<void>;
+  /** Kendi mesajımı herkesten sil / geri al (WhatsApp, Telegram, Slack, Instagram). Depo güncellemesi sunucuda yapılır */
+  deleteMessage?(remoteChatId: string, remoteId: string): Promise<void>;
+  /** Kendi mesajımın metnini düzenle (WhatsApp, Telegram, Slack). Depo güncellemesi sunucuda yapılır */
+  editMessage?(remoteChatId: string, remoteId: string, text: string): Promise<void>;
   /** Yeni e-posta gönder ve dizi sohbetini döndür (e-posta hesapları) */
   compose?(draft: ComposeDraft): Promise<Chat>;
   /** Telegram gibi etkileşimli girişlerde (telefon, kod, 2FA) arayüzden gelen değeri iletir. */
@@ -192,6 +196,18 @@ export abstract class BaseConnector implements Connector {
     const m = this.store.setReaction(messageId(cid, remoteMsgId), r, remove);
     const chat = this.store.getChat(cid);
     if (m && chat) bus.emit({ type: 'message.upsert', message: m, chat });
+  }
+
+  /**
+   * Platformdan gelen (ya da benim yaptığım) düzenleme / herkesten silme: text === null silindi demek. Depoda mesaj yoksa
+   * kayıt açılmaz; değişiklik varsa arayüze yayınlanır.
+   */
+  protected applyEdited(remoteChatId: string, remoteId: string, text: string | null): Message | undefined {
+    const cid = chatId(this.account.id, remoteChatId);
+    const m = this.store.applyEdit(messageId(cid, remoteId), text);
+    const chat = this.store.getChat(cid);
+    if (m && chat) bus.emit({ type: 'message.upsert', message: m, chat });
+    return m;
   }
 
   protected upsertMessage(

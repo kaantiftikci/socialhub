@@ -96,10 +96,23 @@ export interface Message {
   replyTo?: { remoteId: string; senderName: string; text: string; fromMe?: boolean };
   /** E-posta: özgün HTML gövdesi var (api.messageHtml ile yüklenir) */
   hasHtml?: boolean;
+  /** Gönderildikten sonra düzenlendi */
+  edited?: boolean;
+  /** Herkesten silindi (metin "🚫 Bu mesaj silindi") */
+  deleted?: boolean;
 }
 
 /** Mesaja alıntılı yanıt verilebilen platformlar (sağa kaydır / Yanıtla); Slack'te yanıt iş parçacığına gider */
 export const REPLY_PLATFORMS = new Set<Platform>(['whatsapp', 'telegram', 'instagram', 'slack', 'demo']);
+/** Kendi mesajını düzenleyebilen platformlar (API destekli) */
+export const EDIT_PLATFORMS = new Set<Platform>(['whatsapp', 'telegram', 'slack', 'demo']);
+/** Kendi mesajını herkesten silebilen (geri alabilen) platformlar */
+export const UNSEND_PLATFORMS = new Set<Platform>(['whatsapp', 'telegram', 'slack', 'instagram', 'demo']);
+/** Düzenleme süre sınırı (ms; yoksa sınırsız): WhatsApp 15 dk, Telegram 48 sa */
+export const EDIT_LIMIT_MS: Partial<Record<Platform, number>> = { whatsapp: 15 * 60_000, telegram: 48 * 3600_000 };
+/** Herkesten silme süre sınırı (ms; yoksa sınırsız): WhatsApp ~2 gün */
+export const UNSEND_LIMIT_MS: Partial<Record<Platform, number>> = { whatsapp: 48 * 3600_000 };
+export const DELETED_TEXT = '🚫 Bu mesaj silindi';
 
 export type CoreEvent =
   | { type: 'account.status'; account: Account }

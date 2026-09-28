@@ -4,7 +4,7 @@ import { EmojiPicker } from './emoji';
 import { api, USE_STATIC } from './api';
 import { EventEditor } from './CalendarView';
 import { API_BASE, mediaUrl, openExternal } from './desktop';
-import { DEFAULT_TAGS, PLATFORMS, REPLY_PLATFORMS, isOrderPage, questionOrderRef, shopKind, QUICK_REACTIONS, REACT_PLATFORMS, TAG_COLORS, openInAppLink, type Attachment, type CalendarDraft, type Chat, type ChatFlags, type DraftResult, type LinkPreview, type Message, type Reaction } from './types';
+import { DEFAULT_TAGS, EDIT_LIMIT_MS, EDIT_PLATFORMS, PLATFORMS, REPLY_PLATFORMS, UNSEND_LIMIT_MS, UNSEND_PLATFORMS, isOrderPage, questionOrderRef, shopKind, QUICK_REACTIONS, REACT_PLATFORMS, TAG_COLORS, openInAppLink, type Attachment, type CalendarDraft, type Chat, type ChatFlags, type DraftResult, type LinkPreview, type Message, type Reaction } from './types';
 import { guessWhen } from './when';
 import { useAiPrefs } from './ai-prefs';
 import { useClosing, Avatar, Chip, Icon, IconText, Resizer, Tag, ago, fmtDay, fmtStamp, fmtTime, leadIcon } from './ui';
@@ -233,13 +233,14 @@ export function Conversation({
 }) {
   // Anında görünen giden mesajlar: Enter'a basınca "Gönderiliyor" balonu hemen çıkar, platform onaylayınca gerçek kayıt
   // (WS message.upsert) aynı metinle gelir ve bu kopya gizlenir. Hata olursa balon kalkar, metin kutuya geri döner.
-  const [outbox, setOutbox] = useState<Message[]>([]);
+  // realId: platformun verdiği kimlik (onaydan sonra); metin sonradan düzenlense/silinse de kopya kimlikle eşleşir
+  const [outbox, setOutbox] = useState<Array<Message & { realId?: string }>>([]);
   const messages = useMemo(() => {
     // bire bir eşleşme: aynı metin art arda gönderilince ilk gerçek kayıt iki balonu birden gizlemesin
     const used = new Set<string>();
     const mine = outbox.filter((o) => {
       if (o.chatId !== chat.id) return false;
-      const hit = stored.find((m) => m.fromMe && !used.has(m.id) && m.text.trim() === o.text && m.ts >= o.ts - 10_000);
+      const hit = stored.find((m) => m.fromMe && !used.has(m.id) && ((o.realId && m.remoteId === o.realId) || (m.text.trim() === o.text && m.ts >= o.ts - 10_000)));
       if (!hit) return true;
       used.add(hit.id);
       return false;
@@ -310,9 +311,71 @@ export function Conversation({
   useEffect(() => setReplyTarget(null), [chat.id]);
   const canReplyChat = REPLY_PLATFORMS.has(chat.platform);
   const startReply = useCallback((m: Message) => {
+    // düzenleme sürüyorsa bırakılır: yazma alanı düzenleme öncesi metnine döner
+    setEditTarget((cur) => {
+      if (cur) setText(editSaved.current);
+      return null;
+    });
     setReplyTarget(m);
     requestAnimationFrame(() => taRef.current?.focus());
   }, []);
+  /** Kendi mesajını düzenleme: yazma alanı düzenleme kipinde (üstte çubuk), Enter kaydeder, Esc iptal; önceki taslak saklanır */
+  const [editTarget, setEditTarget] = useState<Message | null>(null);
+  const editSaved = useRef('');
+  /** Kendi mesajındaki "Düzenle / Herkesten sil" menüsü ve silme onayı (Tauri'de confirm() yok: ikinci tık onaylar) */
+  const [ownFor, setOwnFor] = useState<string | null>(null);
+  const [delAsk, setDelAsk] = useState<string | null>(null);
+  useEffect(() => (setEditTarget(null), setOwnFor(null), setDelAsk(null)), [chat.id]);
+  const canEditChat = EDIT_PLATFORMS.has(chat.platform);
+  const canUnsendChat = UNSEND_PLATFORMS.has(chat.platform);
+  function startEdit(m: Message) {
+    setReplyTarget(null);
+    setOwnFor(null);
+    setDelAsk(null);
+    if (!editTarget) editSaved.current = text;
+    setEditTarget(m);
+    setText(m.text);
+    requestAnimationFrame(() => {
+      const ta = taRef.current;
+      if (!ta) return;
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+    });
+  }
+  function cancelEdit() {
+    setEditTarget(null);
+    setText(editSaved.current);
+    editSaved.current = '';
+  }
+  async function saveEdit() {
+    const m = editTarget;
+    if (!m) return;
+    const body = text.trim();
+    if (!body) return notify('Mesaj boş olamaz; silmek için "Herkesten sil"i kullan', true);
+    if (body === m.text) return cancelEdit();
+    const saved = editSaved.current;
+    cancelEdit();
+    try {
+      await api.editMessage(m.id, body);
+    } catch (e) {
+      // başarısızsa düzenleme kipine geri dön (yazılan kaybolmasın)
+      editSaved.current = saved;
+      setEditTarget(m);
+      setText(body);
+      notify(`Düzenlenemedi: ${(e as Error).message}`, true);
+    }
+  }
+  async function unsend(m: Message) {
+    setOwnFor(null);
+    setDelAsk(null);
+    if (editTarget?.id === m.id) cancelEdit();
+    try {
+      await api.deleteMessage(m.id);
+      notify('Mesaj herkesten silindi');
+    } catch (e) {
+      notify(`Silinemedi: ${(e as Error).message}`, true);
+    }
+  }
   /** Sağa kaydırarak yanıt: dokunmatik/fare sürükleme ya da trackpad yatay kaydırması; 64 px'i geçince yanıt modu */
   /** Sağa kaydırarak yanıt. Ham hareket (dx) → yumuşatılmış görsel konum (cur, her karede hedefe yaklaşır) →
    *  CSS değişkeni --sw (px, sayı). 60 px sonrası lastik direnci; bırakınca yaylı dönüş (.swipe-back geçişi). */
@@ -460,6 +523,14 @@ export function Conversation({
     window.addEventListener('mousedown', close);
     return () => window.removeEventListener('mousedown', close);
   }, [barFor]);
+  useEffect(() => {
+    if (!ownFor) return;
+    const close = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest('.own-menu, .rtrig')) (setOwnFor(null), setDelAsk(null));
+    };
+    window.addEventListener('mousedown', close);
+    return () => window.removeEventListener('mousedown', close);
+  }, [ownFor]);
   useEffect(() => (setThreadFocus(null), setEmojiOpen(false), setReactPick(null), setBarFor(null)), [chat.id]);
   const canReact = REACT_PLATFORMS.has(chat.platform);
   // takip hatırlatıcısı pazaryeri dışında her sohbette (sağ paneldeki ile aynı)
@@ -819,6 +890,7 @@ export function Conversation({
   }, []);
 
   async function send() {
+    if (editTarget) return saveEdit();
     if (pending) {
       if (uploading) return;
       const f = pending.file;
@@ -854,8 +926,8 @@ export function Conversation({
       if (sendChains.get(chatId) === tail) sendChains.delete(chatId);
     });
     try {
-      await run;
-      setOutbox((x) => x.map((o) => (o.id === id ? { ...o, status: 'sent' } : o)));
+      const r = await run;
+      setOutbox((x) => x.map((o) => (o.id === id ? { ...o, status: 'sent', realId: r?.remoteId } : o)));
       setTimeout(() => setOutbox((x) => x.filter((o) => o.id !== id)), 5000);
     } catch (e) {
       setOutbox((x) => x.filter((o) => o.id !== id));
@@ -866,6 +938,11 @@ export function Conversation({
   }
 
   function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Escape' && editTarget) {
+      e.preventDefault(); // sohbet kapanmasın, yalnız düzenleme iptal
+      cancelEdit();
+      return;
+    }
     if (e.key === 'Escape' && replyTarget) {
       e.preventDefault(); // sohbet kapanmasın, yalnız yanıt iptal
       setReplyTarget(null);
@@ -1062,7 +1139,11 @@ export function Conversation({
                     const replyable = canReplyChat && !m.remoteId.startsWith('local-') && !m.remoteId.startsWith('out-') && !m.id.startsWith('out-');
                     const isReact = /^(👍|❤️|😂|🔥|👏|😮) .+ (bir mesajı beğendi|mesajına tepki verdi)$/.test(m.text);
                     const parent = m.threadId ? byRemote.get(m.threadId) : undefined;
-                    const url = !isReact && !m.attachments?.length ? firstUrl(m.text) : undefined;
+                    const url = !isReact && !m.attachments?.length && !m.deleted ? firstUrl(m.text) : undefined;
+                    // kendi mesajım: düzenle (yalnız metin, süre sınırı içinde) / herkesten sil
+                    const own = m.fromMe && !m.deleted && !isReact && !m.remoteId.startsWith('local-') && !m.id.startsWith('out-') && !m.remoteId.startsWith('out-');
+                    const editable = own && canEditChat && !!m.text.trim() && !m.attachments?.some((a) => a.kind !== 'other') && within(m.ts, EDIT_LIMIT_MS[chat.platform]);
+                    const unsendable = own && canUnsendChat && within(m.ts, UNSEND_LIMIT_MS[chat.platform]);
                     return (
                       <div key={m.id} data-mid={m.id} className={`bwrap ${g.fromMe ? 'me' : ''}`} {...(replyable && !isReact ? swipeProps(m) : {})}>
                         {m.threadId && !threadFocus && (
@@ -1072,7 +1153,7 @@ export function Conversation({
                             <span className="tq-t">{parent?.text || 'İş parçacığı'}</span>
                           </button>
                         )}
-                        <div className={`bub ${g.items.length === 1 ? 'first last' : i === 0 ? 'first' : i === g.items.length - 1 ? 'last' : 'mid'} ${isReact ? 'react' : ''}`}>
+                        <div className={`bub ${g.items.length === 1 ? 'first last' : i === 0 ? 'first' : i === g.items.length - 1 ? 'last' : 'mid'} ${isReact ? 'react' : ''} ${m.deleted ? 'deleted' : ''}`}>
                           {m.replyTo && (
                             // alıntı: tıklayınca yanıtlanan mesaja kaydır ve vurgula
                             <button
@@ -1097,6 +1178,7 @@ export function Conversation({
                           {(() => {
                             const timeEl = !isReact ? (
                               <time className="bt" dateTime={new Date(m.ts).toISOString()} title={fmtStamp(m.ts)}>
+                                {m.edited && !m.deleted && <span className="edited">düzenlendi</span>}
                                 {fmtTime(m.ts)}
                                 {g.fromMe && statusIcon(m.status)}
                               </time>
@@ -1133,6 +1215,7 @@ export function Conversation({
                           </button>
                         )}
                         {!isReact &&
+                          !m.deleted &&
                           [
                             replyable && (
                               <button key="y" type="button" className="rtrig" aria-label="Yanıtla" title="Yanıtla (ya da balonu sağa kaydır)" onClick={() => (startReply(m), setBarFor(null))}>
@@ -1152,6 +1235,11 @@ export function Conversation({
                             canFollow && (
                               <button key="f" type="button" className={`rtrig ${chat.followUp ? 'rtrig-on' : ''}`} aria-label={chat.followUp ? 'Takip hatırlatıcısını kaldır' : '2 gün yanıt gelmezse hatırlat'} title={chat.followUp ? 'Takip hatırlatıcısını kaldır' : 'Takip: 2 gün yanıt gelmezse hatırlat'} onClick={() => void setFollowUp(chat.followUp ? null : 2)}>
                                 <Icon name="bell" size={14} />
+                              </button>
+                            ),
+                            (editable || unsendable) && (
+                              <button key="o" type="button" className={`rtrig ${ownFor === m.id ? 'on' : ''}`} aria-label="Düzenle veya herkesten sil" title={editable ? 'Düzenle / herkesten sil' : 'Herkesten sil'} aria-expanded={ownFor === m.id} onClick={() => (setOwnFor(ownFor === m.id ? null : m.id), setDelAsk(null), setBarFor(null))}>
+                                <Icon name="dots" size={15} />
                               </button>
                             ),
                           ]
@@ -1188,6 +1276,25 @@ export function Conversation({
                                 <Icon name="thread" size={14} />
                               </button>
                             )}
+                          </span>
+                        )}
+                        {ownFor === m.id && (editable || unsendable) && (
+                          <span className="rbar own-menu" role="menu" aria-label="Mesaj işlemleri">
+                            {editable && (
+                              <button type="button" role="menuitem" onClick={() => startEdit(m)}>
+                                <Icon name="pen" size={14} /> Düzenle
+                              </button>
+                            )}
+                            {unsendable &&
+                              (delAsk === m.id ? (
+                                <button type="button" role="menuitem" className="danger" onClick={() => void unsend(m)} autoFocus>
+                                  <Icon name="trash" size={14} /> Emin misin? Sil
+                                </button>
+                              ) : (
+                                <button type="button" role="menuitem" onClick={() => setDelAsk(m.id)}>
+                                  <Icon name="trash" size={14} /> Herkesten sil
+                                </button>
+                              ))}
                           </span>
                         )}
                         {reactPick?.id === m.id && (
@@ -1351,6 +1458,18 @@ export function Conversation({
               </button>
             </div>
           )}
+          {editTarget && (
+            <div className="reply-bar edit-bar" key={`e-${editTarget.id}`}>
+              <Icon name="pen" size={14} sw={2} />
+              <span className="rb-body">
+                <b>Mesajı düzenle</b>
+                <span>{editTarget.text}</span>
+              </span>
+              <button className="btn ghost xs icon b" onClick={cancelEdit} aria-label="Düzenlemeyi iptal et" title="İptal (Esc)">
+                <Icon name="x" size={13} sw={2} />
+              </button>
+            </div>
+          )}
           {draftShown && !text.trim() && <div className="ghost-draft">{draftShown.draft}</div>}
           <textarea
             ref={taRef}
@@ -1447,7 +1566,7 @@ export function Conversation({
               </span>
             )}
             <button className="btn primary b" onClick={send} disabled={!!uploading || !!rec || !(pending || text.trim() || draftShown?.draft)}>
-              {uploading ?<span className="spin" /> : <Icon name="send" size={15} sw={1.9} />} Gönder
+              {uploading ? <span className="spin" /> : <Icon name={editTarget ? 'check' : 'send'} size={15} sw={1.9} />} {editTarget ? 'Kaydet' : 'Gönder'}
             </button>
           </div>
         </div>
@@ -2255,6 +2374,11 @@ function linkify(text: string): React.ReactNode {
 
 /** Kendi mesajımın tiki (her balonda): görüldü = yeşil çift tik, iletildi (karşıda görüldü bilgisi kapalı ya da henüz açılmadı) = çift tik,
  *  gönderildi (sunucuda; WhatsApp'ta alıcı çevrimdışı) = tek tik, gönderiliyor = saat, gönderilemedi = kırmızı uyarı */
+/** Süre sınırı (ms) içinde mi; sınır yoksa her zaman */
+function within(ts: number, limit?: number): boolean {
+  return limit == null || Date.now() - ts < limit;
+}
+
 function statusIcon(s: Message['status']) {
   if (s === 'read') return <span className="tick read" title="Görüldü"><Icon name="checks" size={14} sw={2.2} /></span>;
   if (s === 'delivered') return <span className="tick" title="İletildi"><Icon name="checks" size={14} sw={2.2} /></span>;

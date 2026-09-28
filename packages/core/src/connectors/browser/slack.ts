@@ -311,6 +311,7 @@ async function toMsg(page: Page, m: J): Promise<Msg | undefined> {
     reactions: slackReactions(m.reactions as J[] | undefined),
     threadId: m.thread_ts && String(m.thread_ts) !== String(m.ts) ? String(m.thread_ts) : undefined,
     replyCount: m.reply_count ? Number(m.reply_count) : undefined,
+    edited: m.edited ? true : undefined,
   };
 }
 
@@ -467,6 +468,16 @@ export const slackStrategy: Strategy = {
 
   async react(page, _cookies, threadId, msgId, emoji, remove) {
     await slack(page, remove ? 'reactions.remove' : 'reactions.add', { channel: threadId, timestamp: msgId, name: slackEmojiName(emoji) });
+  },
+
+  /** Herkesten sil (chat.delete; yalnız kendi mesajım) */
+  async unsend(page, _cookies, threadId, msgId) {
+    await slack(page, 'chat.delete', { channel: threadId, ts: msgId });
+  },
+
+  /** Metni düzenle (chat.update) */
+  async edit(page, _cookies, threadId, msgId, text) {
+    await slack(page, 'chat.update', { channel: threadId, ts: msgId, text, as_user: true });
   },
 
   async openDirect(page, _cookies, p) {

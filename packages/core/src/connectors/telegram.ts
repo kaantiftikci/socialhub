@@ -7,7 +7,7 @@ import bigInt from 'big-integer';
 import QRCode from 'qrcode';
 import { TelegramClient, Api } from 'teleproto';
 import { StringSession } from 'teleproto/sessions/index.js';
-import { NewMessage, Raw, type NewMessageEvent } from 'teleproto/events/index.js';
+import { NewMessage, Raw, EditedMessage, DeletedMessage, type NewMessageEvent, type EditedMessageEvent, type DeletedMessageEvent } from 'teleproto/events/index.js';
 import { getPeerId } from 'teleproto/Utils.js';
 import { BaseConnector, type OutFile, type SendOptions } from './base.js';
 import type { Reaction, ReplyRef } from '../model.js';
@@ -124,6 +124,9 @@ export class TelegramConnector extends BaseConnector {
     await client.invoke(new Api.account.UpdateStatus({ offline: true })).catch(() => undefined);
 
     client.addEventHandler((ev: NewMessageEvent) => void this.onNew(ev), new NewMessage({}));
+    // Başka cihazda / karşı tarafça düzenlenen ve silinen mesajlar
+    client.addEventHandler((ev: EditedMessageEvent) => void this.onEdited(ev), new EditedMessage({}));
+    client.addEventHandler((ev: DeletedMessageEvent) => this.onDeleted(ev), new DeletedMessage({}));
     // Telefonda/başka istemcide okununca okunmamış sayacı burada da düşsün
     client.addEventHandler((u: Api.TypeUpdate) => this.onRead(u), new Raw({ types: [Api.UpdateReadHistoryInbox, Api.UpdateReadChannelInbox, Api.UpdateFolderPeers, Api.UpdateReadHistoryOutbox, Api.UpdateReadChannelOutbox, Api.UpdateUserTyping, Api.UpdateChatUserTyping, Api.UpdateChannelUserTyping, Api.UpdateMessageReactions] }));
     await this.backfill(client);
@@ -260,6 +263,22 @@ export class TelegramConnector extends BaseConnector {
     if (!ent || !('id' in ent)) throw new Error(`Telegram'da bulunamadı: ${raw} (kullanıcı adı ya da rehberdeki numara olmalı)`);
     this.entities.set(String(ent.id), ent as never);
     return String(ent.id);
+  }
+
+  /** Herkesten sil (revoke: karşı taraftan da kalkar) */
+  async deleteMessage(remoteChatId: string, remoteId: string): Promise<void> {
+    if (!this.client) throw new Error('Telegram bağlı değil');
+    const peer = await this.entityOf(remoteChatId);
+    await this.client.deleteMessages(peer, [Number(remoteId)], { revoke: true });
+    this.offlineSoon();
+  }
+
+  /** Metni düzenle (Telegram birebir/grupta 48 saat izin verir) */
+  async editMessage(remoteChatId: string, remoteId: string, text: string): Promise<void> {
+    if (!this.client) throw new Error('Telegram bağlı değil');
+    const peer = await this.entityOf(remoteChatId);
+    await this.client.editMessage(peer, { message: Number(remoteId), text });
+    this.offlineSoon();
   }
 
   async react(remoteChatId: string, remoteMsgId: string, emoji: string, remove: boolean): Promise<void> {
@@ -545,6 +564,36 @@ export class TelegramConnector extends BaseConnector {
     }
   }
 
+  /** Düzenlenen mesaj: depodaki kayıt yeni metinle güncellenir (canlı sayılmaz: bildirim/sayaç yok) */
+  private async onEdited(ev: EditedMessageEvent): Promise<void> {
+    const m = ev.message;
+    const rid = m.chatId ? String(m.chatId) : undefined;
+    if (!rid || !(m instanceof Api.Message)) return;
+    const stored = this.store.getMessage(`${this.account.id}/${rid}#${m.id}`);
+    if (!stored || stored.deleted) return; // bilmediğimiz eski mesaj için kayıt açma
+    const chat = this.store.getChat(`${this.account.id}/${rid}`);
+    this.ingest(m, rid, chat?.name ?? rid, false, stored.senderName);
+  }
+
+  /**
+   * Silinen mesajlar: kanal/süpergrupta kanal kimliği gelir; birebir ve küçük gruplarda Telegram sohbeti söylemez (mesaj kimlikleri
+   * hesap genelinde tekil) → hesabın kanal dışı sohbetlerinde kimlikle aranır.
+   */
+  private onDeleted(ev: DeletedMessageEvent): void {
+    const u = ev.originalUpdate;
+    const channel = u instanceof Api.UpdateDeleteChannelMessages ? getPeerId(new Api.PeerChannel({ channelId: u.channelId })) : undefined;
+    for (const id of ev.deletedIds ?? []) {
+      if (channel) {
+        this.applyEdited(String(channel), String(id), null);
+        continue;
+      }
+      const m = this.store.findMessageByRemote(this.account.id, String(id));
+      const chat = m ? this.store.getChat(m.chatId) : undefined;
+      if (!m || !chat || chat.remoteId.startsWith('-100')) continue;
+      this.applyEdited(chat.remoteId, m.remoteId, null);
+    }
+  }
+
   private ingest(m: Api.Message, remoteChatId: string, chatName: string, live: boolean, senderName?: string): void {
     if (!(m instanceof Api.Message)) return; // MessageService (katılma, başlık değişimi vb.) atlanır
     const text = m.message ?? '';
@@ -567,6 +616,8 @@ export class TelegramConnector extends BaseConnector {
         // Boş dizi de yazılır: eski sürümün bağlantı önizlemesi için bıraktığı içi boş {kind:'other'} eki temizlensin
         attachments: attachments ?? undefined,
         reactions: tgReactions(m.reactions, chat.kind === 'direct' ? chatName : ''),
+        // editHide: tepki gibi görünmez değişiklikler "düzenlendi" sayılmaz
+        edited: m.editDate && !m.editHide ? true : undefined,
         // gelen yanıt: hangi mesaja (replyTo.replyToMsgId) — alıntı kutusu depodaki metinle
         replyTo: (() => {
           const rid = (m.replyTo as { replyToMsgId?: number } | undefined)?.replyToMsgId;

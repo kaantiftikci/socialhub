@@ -748,10 +748,36 @@ export class WhatsAppConnector extends BaseConnector {
     const stored = this.store.getMessage(`${chatIdOf(this.account.id, cj)}#${id}`);
     if (!stored) return;
     const revoked = update.messageStubType === WAProto.WebMessageInfo.StubType.REVOKE;
-    const text = revoked ? '🚫 Bu mesaj silindi' : textOf(unwrap(update.message));
-    if (!text || text === stored.text) return;
-    const { id: _id, chatId: _c, ...rest } = stored;
-    this.upsertMessage({ ...rest, remoteChatId: cj, text, attachments: revoked ? [] : stored.attachments });
+    const text = revoked ? null : textOf(unwrap(update.message));
+    if (text === '' || text === stored.text) return;
+    this.applyEdited(cj, id, text);
+  }
+
+  /** Kendi mesajımın anahtarı (düzenleme/silme): tepkideki gibi; grupta katılımcı = ben */
+  private ownKey(remoteChatId: string, remoteId: string): proto.IMessageKey {
+    return {
+      remoteJid: this.wireOf(remoteChatId),
+      id: remoteId,
+      fromMe: true,
+      participant: remoteChatId.endsWith('@g.us') ? this.participantOf(remoteChatId, 'me') : undefined,
+    };
+  }
+
+  /** Herkesten sil (WhatsApp ~2 gün içinde izin verir; süre dolmuşsa sunucu reddeder) */
+  async deleteMessage(remoteChatId: string, remoteId: string): Promise<void> {
+    if (!this.sock) throw new Error('WhatsApp bağlı değil');
+    await this.gateSend();
+    await this.sock.sendMessage(this.wireOf(remoteChatId), { delete: this.ownKey(remoteChatId, remoteId) });
+    this.afterActivity('silme');
+  }
+
+  /** Metni düzenle (WhatsApp gönderimden sonra 15 dk izin verir) */
+  async editMessage(remoteChatId: string, remoteId: string, text: string): Promise<void> {
+    if (!this.sock) throw new Error('WhatsApp bağlı değil');
+    await this.gateSend();
+    const sent = await this.sock.sendMessage(this.wireOf(remoteChatId), { text, edit: this.ownKey(remoteChatId, remoteId) });
+    this.rememberSent(sent);
+    this.afterActivity('düzenleme');
   }
 
   /** Telefonda okunan sohbetin sayacını sıfırla (bekleyen artışlar da düşer) */

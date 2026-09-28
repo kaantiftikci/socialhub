@@ -415,6 +415,39 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     if (next) bus.emit({ type: 'message.upsert', message: next, chat: store.getChat(id)! });
     return next;
   });
+  // Kendi mesajımı herkesten sil / düzenle: platforma iletilir, depo hemen güncellenir (platformun yankısı aynı sonucu yazar)
+  const ownMessage = (id: string) => {
+    const m = store.getMessage(id);
+    if (!m) throw new HttpError(404, 'Mesaj yok');
+    if (!m.fromMe) throw new HttpError(400, 'Yalnız kendi mesajın');
+    if (m.deleted) throw new HttpError(400, 'Mesaj zaten silinmiş');
+    if (m.remoteId.startsWith('local-')) throw new HttpError(400, 'Mesaj henüz platforma ulaşmadı');
+    const chat = store.getChat(m.chatId);
+    if (!chat) throw new HttpError(404, 'Sohbet yok');
+    return { m, chat, c: registry.get(chat.accountId) };
+  };
+  route('POST', '/api/messages/:id/delete', async (_r, _s, p) => {
+    const { m, chat, c } = ownMessage(dec(p.id));
+    if (!c?.deleteMessage) throw new HttpError(400, 'Bu platformda mesaj silme desteklenmiyor');
+    await c.deleteMessage(chat.remoteId, m.remoteId);
+    const next = store.applyEdit(m.id, null) ?? store.getMessage(m.id);
+    if (next) bus.emit({ type: 'message.upsert', message: next, chat: store.getChat(chat.id)! });
+    return next;
+  });
+  route('POST', '/api/messages/:id/edit', async (_r, _s, p, body) => {
+    const { m, chat, c } = ownMessage(dec(p.id));
+    if (!c?.editMessage) throw new HttpError(400, 'Bu platformda mesaj düzenleme desteklenmiyor');
+    const text = String((body as { text?: unknown } | undefined)?.text ?? '').trim();
+    if (!text) throw new HttpError(400, 'Metin gerekli');
+    if (text.length > 20_000) throw new HttpError(400, 'Metin çok uzun');
+    // bağlantı önizlemesi (kind 'other') metin mesajı sayılır; medya/dosyalı mesaj düzenlenmez
+    if (!m.text.trim() || m.attachments?.some((a) => a.kind !== 'other')) throw new HttpError(400, 'Yalnız metin mesajı düzenlenebilir');
+    if (text === m.text) return m;
+    await c.editMessage(chat.remoteId, m.remoteId, text);
+    const next = store.applyEdit(m.id, text) ?? store.getMessage(m.id);
+    if (next) bus.emit({ type: 'message.upsert', message: next, chat: store.getChat(chat.id)! });
+    return next;
+  });
   // Yerel bayraklar: sabitle / arşivle / sessize al / gizle (platforma yansımaz)
   route('POST', '/api/chats/:id/flags', (_r, _s, p, body) => {
     const id = dec(p.id);

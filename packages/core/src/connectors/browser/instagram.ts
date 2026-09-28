@@ -558,6 +558,17 @@ export const instagram: Strategy = {
     });
   },
 
+  /**
+   * Gönderimi geri al (herkesten sil): web istemcisinin ve instagrapi'nin kullandığı /direct_v2/threads/<id>/items/<öğe>/delete/.
+   * Instagram'da düzenleme ucu yok.
+   */
+  async unsend(page, cookies, threadId, msgId) {
+    await ig(page, cookies, `/api/v1/direct_v2/threads/${encodeURIComponent(threadId)}/items/${encodeURIComponent(msgId)}/delete/`, {
+      is_shh_mode: '0',
+      send_attribution: 'direct_thread',
+    });
+  },
+
   canReply: true,
   async send(page, cookies, threadId, text, opts) {
     const r = await ig(page, cookies, '/api/v1/direct_v2/threads/broadcast/text/', {
