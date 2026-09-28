@@ -167,7 +167,7 @@ function AuthScreen({
         </div>
         {mode === 'signup' && (
           <>
-            <p className="auth-note">{autoApprove ? 'Demoyu denemek için üye ol; hemen giriş yaparsın. Demo sana özel olur.' : 'Demoyu denemek için üyelik talebi gönder. Onaylanınca e-posta ile haber veririz; demo sana özel olur.'}</p>
+            {!autoApprove && <p className="auth-note">Demoyu denemek için üyelik talebi gönder. Onaylanınca e-posta ile haber veririz; demo sana özel olur.</p>}
             <div className="auth-row">
               <label>
                 Ad
