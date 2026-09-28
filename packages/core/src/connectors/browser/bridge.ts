@@ -360,7 +360,8 @@ export class BrowserConnector extends BaseConnector {
   async start(opts: StartOptions = {}): Promise<void> {
     const interactive = opts.interactive !== false;
     this.stopping = false;
-    this.external = !!opts.external || process.env.MIVELO_LOGIN_WINDOW === '1';
+    // Giriş varsayılan olarak AYRI pencerede (Kaan: Mivelo içi yayında sitelerin düğmeleri tepki vermiyordu); içeride açmak için MIVELO_LOGIN_EMBED=1
+    this.external = !!opts.external || process.env.MIVELO_LOGIN_EMBED !== '1';
     try {
       ({ chromium: this.chromium, request: this.request } = await import('playwright'));
     } catch {

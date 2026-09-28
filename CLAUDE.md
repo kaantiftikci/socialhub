@@ -362,12 +362,12 @@ Dil: arayüz ve yorumlar Türkçe.
 - Bağlan: "resmi değil" etiketi kullanıcı isteğiyle KALDIRILDI (yalnız Sosyal Medya altındaki açıklama). Kart durumu en iyi durumdaki hesaptan
   (`STATUS_RANK`, bağlı önde; birden çoksa "· N hesap"), alt satırda bağlı hesabın adresi/@kullanıcı adı (`accountLabel`; genel adsa yöntem metni).
 - Parola alanları `PasswordInput` (ui.tsx): sağdaki göze BASILI TUTUNCA görünür, bırakınca gizlenir (Bağlan formları, 2FA istemi, AI anahtarı, giriş).
-- **Mivelo içi giriş** (varsayılan; `bridge.launchLogin`): giriş sayfası GÖRÜNMEZ tarayıcıda açılır (görünürlük taklidi yok, 820×700, DPR 2),
+- **Mivelo içi giriş** (VARSAYILAN DEĞİL — Kaan isteğiyle kapatıldı, düğmeler tepki vermiyordu; yalnız `MIVELO_LOGIN_EMBED=1` ile; varsayılan ayrı `--app` penceresi; `bridge.launchLogin`): giriş sayfası GÖRÜNMEZ tarayıcıda açılır (görünürlük taklidi yok, 820×700, DPR 2),
   CDP `Page.startScreencast` kareleri `login.frame` olayıyla (JPEG base64) arayüze; `apps/web/src/LoginView.tsx` üst katmanda gösterir
   (kareler App durumundan geçmez: `pushLoginEvent` yayıncısı). Girdi `POST /api/accounts/:id/login-input {events}` (move/down/up/wheel/text/key;
   arayüz sıralı toplu gönderir, köprü `inputQ` ile sırayla uygular; klavye gizli textarea `.login-keys` — üst öğelerin `user-select:none`'ı yazmayı
   engelliyordu, `user-select:text` şart), `login-cancel` (bekleyen girişi bırakır, 'pairing'), `login-window` (restart `{external:true}` → eski
-  ayrı pencere). OAuth açılır penceresine geçilince yayın yeni sayfaya taşınır (`startEmbed`). `MIVELO_LOGIN_WINDOW=1` hep ayrı pencere.
+  ayrı pencere). OAuth açılır penceresine geçilince yayın yeni sayfaya taşınır (`startEmbed`). 
   Hız: `login.start` olayı → arayüz ekranı HEMEN "açılıyor…" ile açar; tarayıcı gezinmeden (`launch(…, navigate=false)`) yayın başlar,
   sonra `Strategy.loginUrl ?? home` (Yandex: passport; eskiden 5-10 sn sonra açılıyordu). Akış donmasın: ana çerçeve gezinmesinde ve 2,5 sn kare
   gelmezse yayın yeniden başlar (`keepEmbedAlive`; tıklama/tuş sonrası da); `Emulation.setFocusEmulationEnabled` (sayfa odakta sanılsın);
