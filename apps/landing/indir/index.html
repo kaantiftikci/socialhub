@@ -399,7 +399,7 @@ footer a:hover{color:var(--ink)}
     </form>
     <div class="dlm-done" id="dlmDone" hidden>
       <span class="ok-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
-      <h3>İndirme başladı</h3>
+      <h3 id="dlmDoneT">İndirme başladı</h3>
       <p>Lisans anahtarın <b id="dlmMail"></b> adresine gelecek. İndirme başlamadıysa <a id="dlmLink" href="#">buraya dokun</a>.</p>
     </div>
   </div>
@@ -519,14 +519,19 @@ footer a:hover{color:var(--ink)}
     var f=dlmForm.elements, err=$('#dlmErr'), btn=$('#dlmBtn');
     var first=f.firstName.value.trim(), last=f.lastName.value.trim(), mail=f.email.value.trim().toLowerCase();
     err.textContent='';
+    first=first.replace(/\s+/g,' '); last=last.replace(/\s+/g,' ');
     if(!first||!last){ err.textContent='Adını ve soyadını yaz.'; (first?f.lastName:f.firstName).focus(); return; }
-    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)){ err.textContent='Geçerli bir e-posta adresi yaz.'; f.email.focus(); return; }
+    var NAME=/^\p{L}[\p{L} '’.\-]{0,39}$/u, two=function(v){ return (v.match(/\p{L}/gu)||[]).length>=2; };
+    if(!NAME.test(first)||!two(first)){ err.textContent='Ad yalnız harflerden oluşmalı (en az 2 harf).'; f.firstName.focus(); return; }
+    if(!NAME.test(last)||!two(last)){ err.textContent='Soyad yalnız harflerden oluşmalı (en az 2 harf).'; f.lastName.focus(); return; }
+    if(!/^[a-z0-9][a-z0-9._%+-]{0,63}@[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)*\.[a-z]{2,}$/.test(mail)){ err.textContent='Geçerli bir e-posta adresi yaz.'; f.email.focus(); return; }
     if(!f.ok.checked){ err.textContent='Devam etmek için Gizlilik Politikası onayını işaretle.'; return; }
     btn.disabled=true; btn.lastChild.textContent='Kaydediliyor…';
     var p=pending;
     post({email:mail,firstName:first,lastName:last,file:p.file,website:f.website.value})
-      .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){ if(!r.ok||!j.ok) throw new Error(j.error||'Kayıt yapılamadı, biraz sonra tekrar dene.'); }); })
-      .then(function(){
+      .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){ if(!r.ok||!j.ok) throw new Error(j.error||'Kayıt yapılamadı, biraz sonra tekrar dene.'); return j; }); })
+      .then(function(j){
+        $('#dlmDoneT').textContent=j.known?'Zaten kayıtlısın, indirme başladı':'İndirme başladı';
         regSet({email:mail,firstName:first,lastName:last});
         $('#dlmMail').textContent=mail; $('#dlmLink').href=p.href; $('#dlmLink').setAttribute('download','');
         dlmForm.hidden=true; $('#dlmDone').hidden=false;

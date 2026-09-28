@@ -80,8 +80,16 @@ Dil: arayüz ve yorumlar Türkçe.
   **Lisans için kayıt = indirme sayfası**: kartlardaki "İndir" → kayıt penceresi `#dlm` (ad, soyad, e-posta, gizlilik onayı, bot tuzağı) →
   `api/register.php` → `lib-members.php` `mv_members_update`/`mv_member_upsert` → `~/mivelo-data/members.json` (src 'indir', indirme geçmişi ≤20;
   IP başına saatte 10 yeni, günde 1000) → dosya kendiliğinden iner; tarayıcıda kayıt varsa (`localStorage mivelo.reg`) pencere açılmaz, indirme
-  keepalive ile kayda yazılır. Bekleme listesi (waitlist.json) AYRI ve yalnız e-posta — ona ekleme YAPILMAZ. Admin → Lisanslar → "Üyelere anahtar gönder"
-  (`lic_people`) üyeleri + bekleme listesini + demo kullanıcılarını birleştirir (kaynak: İndirme kaydı / Demo üyesi / Bekleme listesi). `lib-members.php`
+  keepalive ile kayda yazılır. Bekleme listesi (waitlist.json) AYRI ve yalnız e-posta — ona ekleme YAPILMAZ.
+  **Kayıt denetimi** (lib-members `mv_member_name_error`/`mv_member_email_error`, indir sayfasında da aynı kurallar): ad/soyad yalnız harf (+boşluk ' - .),
+  en az 2 harf, ≤40; e-posta sıkı biçim + geçici servis listesi (`mv_disposable_domains`) + alan adında MX/A kaydı (`checkdnsrr`; testte `MV_SKIP_DNS=1`).
+  Aynı e-posta yeni kayıt açmaz (`{known:true}` → "Zaten kayıtlısın"). **Aynı ad soyad** (`mv_member_namekey`: büyük/küçük harf + Türkçe karakter farkı
+  yok, en az iki kelime) başka e-postadan gelirse kayıt `dupOf` ile işaretlenir; admin `people_with_keys` grupta tek "asıl" seçer (etkin anahtarlı, yoksa
+  ilk kaydolan), ötekiler dupOf → `license_issue` onları ve aynı istekte adı tekrarlayanı ATLAR (`skipped`), arayüzde soluk "Aynı ad" satırı.
+  **Admin → Üyeler** (ayrı sayfa `#p-uye`, Lisanslar'dan taşındı; `members` ucu = members.json'dakiler, `member_delete`): ad, e-posta, kaynak (İndirme
+  sayfası / Eski demo üyesi), kayıt zamanı, indirme sayısı + son dosya, anahtar durumu; filtre Tümü/Anahtarsız/Gönderilen/Hatalı/Aynı ad; seç → cihaz +
+  süre (vars. 30 gün) → anahtar gönder, Sil (iki tık). Bekleme listesindekilere anahtar: Bekleme listesi toplu çubuğu "Anahtar gönder" (2 cihaz, 30 gün).
+  Lisanslar sayfasında yalnız e-posta taslağı + anahtar üretme + anahtar listesi. `lib-members.php`
   demo api/'ye de kopyalanır (deploy-demo.yml). LicenseGate: "anahtarın mivelo.app/indir'den indirirken kayıt olduğun e-postaya gelir".
   (Eski) Demo üyeliği: hazır tek hesap `admin` (şifre karması `SEED_USERS`, `passVersion` artınca users.json'daki karma da güncellenir; editor/misafir
   `REMOVED_USERS` ile silinir). Giriş ekranında "Üyelik oluştur" (`Auth.tsx`, `authRegister`) → `action=register`: ad + soyad (ayrı alanlar; `firstName`/`lastName`, `name` birleşik), e-posta, kullanıcı adı
@@ -159,7 +167,7 @@ Dil: arayüz ve yorumlar Türkçe.
   karışmayan harf/rakam, 80 bit; not, e-posta (bekleme listesinden öneri), cihaz sınırı 1-10 (vars. 2), süre VARSAYILAN 30 gün (7/14/30/60/90/180/365/süresiz + "Özel…" 1-3650 gün; bitiş tarihi
   etiketin yanında; `daysOf`/`daysHint`, Oluştur formu ve Üyelere gönder'de aynı; sunucu `days` gelmezse 30), adet ≤50;
   Kopyala · E-postayla gönder (SMTP) / Taslağı aç (mailto yedeği) · İptal et/Etkinleştir · Cihazları sıfırla · cihaz başına Kaldır · Sil).
-  **Üyelere anahtar gönder** (Lisanslar üstü): bekleme listesi + demo üyeleri (spam/reddedilen hariç, e-postayla birleşik; `lic_people`) seçilir →
+  **Anahtar gönderimi** (Üyeler sayfası / Bekleme listesi toplu): üyeler + bekleme listesi + demo üyeleri (spam/reddedilen hariç, e-postayla birleşik; `lic_people`) seçilir →
   `license_issue` kişi başına etkin anahtarı varsa onu, yoksa yenisini (≤50/istek) logolu HTML e-postayla gönderir (`lic_send_one`: anahtara
   `sentAt/sentTo/mailError`, başarıda bekleme listesi Bekliyor → Davet edildi). Oluştur formunda "hemen gönder" kutusu. **E-posta taslağı**
   (`~/mivelo-data/license-mail.json`, varsayılan `LIC_MAIL_DEFAULT`: kurumsal "siz" dili, konu "Mivelo Masaüstü Uygulaması | Lisans Anahtarınız";

@@ -928,27 +928,86 @@ if ($a === 'lic_mail_test' && $method === 'POST') {
     out(['ok' => $res['ok'] && $res['via'] === 'smtp', 'error' => $res['ok'] && $res['via'] === 'smtp' ? '' : ($res['error'] ?? '')]);
 }
 
-if ($a === 'lic_people' && $method === 'GET') {
-    $keys = read_json('licenses.json', ['keys' => []])['keys'] ?? [];
+/**
+ * Kişiler + son anahtar durumu + aynı ad işareti. Aynı ad soyad (mv_member_namekey: büyük/küçük harf, Türkçe karakter farkı yok)
+ * birden çok e-postada varsa yalnız biri "asıl" sayılır: etkin/gönderilmiş anahtarı olan, yoksa ilk kaydolan; ötekiler dupOf = asıl e-posta
+ * (anahtar onlara gönderilmez, license_issue atlar).
+ */
+function people_with_keys(): array
+{
     $byMail = [];
-    foreach ($keys as $k) {
+    foreach (read_json('licenses.json', ['keys' => []])['keys'] ?? [] as $k) {
         $m = strtolower((string) ($k['email'] ?? ''));
         if ($m !== '') {
             $byMail[$m][] = $k;
         }
     }
+    $members = [];
+    foreach (mv_members_read() as $x) {
+        $members[strtolower((string) ($x['email'] ?? ''))] = $x;
+    }
     $out = [];
     foreach (lic_people() as $m => $x) {
         $ks = $byMail[$m] ?? [];
         $last = $ks ? end($ks) : null;
-        $out[] = $x + [
+        $mem = $members[$m] ?? null;
+        $dl = $mem['downloads'] ?? [];
+        $out[$m] = $x + [
             'key' => $last ? ['id' => $last['id'], 'status' => license_public($last)['status'], 'used' => !empty($last['activations'])] : null,
             'sentAt' => $last ? (int) ($last['sentAt'] ?? 0) : 0,
             'mailError' => $last ? (string) ($last['mailError'] ?? '') : '',
+            'member' => (bool) $mem,
+            'downloads' => count($dl),
+            'lastFile' => $dl ? (string) (end($dl)['file'] ?? '') : '',
+            'lastAt' => (int) ($mem['lastAt'] ?? 0),
+            'dupOf' => '',
         ];
     }
+    // aynı ad soyad grupları
+    $groups = [];
+    foreach ($out as $m => $x) {
+        $nk = mv_member_namekey((string) $x['name']);
+        if ($nk !== '' && strpos($nk, ' ') !== false) { // tek kelimelik ad (soyadsız) eşleştirilmez
+            $groups[$nk][] = $m;
+        }
+    }
+    foreach ($groups as $ms) {
+        if (count($ms) < 2) {
+            continue;
+        }
+        usort($ms, function ($a, $b) use ($out) {
+            $ha = $out[$a]['key'] && $out[$a]['key']['status'] === 'active' ? 0 : 1;
+            $hb = $out[$b]['key'] && $out[$b]['key']['status'] === 'active' ? 0 : 1;
+            return $ha <=> $hb ?: ($out[$a]['at'] ?: PHP_INT_MAX) <=> ($out[$b]['at'] ?: PHP_INT_MAX);
+        });
+        foreach (array_slice($ms, 1) as $m) {
+            $out[$m]['dupOf'] = $ms[0];
+        }
+    }
+    return $out;
+}
+
+if ($a === 'lic_people' && $method === 'GET') {
+    $out = array_values(people_with_keys());
     usort($out, fn ($p, $q) => $q['at'] <=> $p['at']);
     out(['people' => $out]);
+}
+
+// Üyeler sayfası: indirme sayfasında kaydolanlar (src 'indir') + eski demo üyeleri (src 'demo'); members.json
+if ($a === 'members' && $method === 'GET') {
+    $out = array_values(array_filter(people_with_keys(), fn ($p) => $p['member']));
+    usort($out, fn ($p, $q) => $q['at'] <=> $p['at']);
+    out(['members' => $out]);
+}
+
+if ($a === 'member_delete' && $method === 'POST') {
+    $emails = array_flip(array_map(fn ($m) => strtolower(trim((string) $m)), (array) ($body['emails'] ?? [])));
+    $n = mv_members_update(function (array &$members) use ($emails) {
+        $before = count($members);
+        $members = array_values(array_filter($members, fn ($x) => !isset($emails[strtolower((string) ($x['email'] ?? ''))])));
+        return $before - count($members);
+    });
+    out(['ok' => true, 'deleted' => $n]);
 }
 
 /** Anahtarı e-postayla gönder; sonucu anahtar kaydına yaz, başarıda bekleme listesinde "Davet edildi" */
@@ -997,8 +1056,23 @@ if ($a === 'license_issue' && $method === 'POST') {
     $days = (int) ($body['days'] ?? 30);
     $exp = $days > 0 ? gmdate('c', time() + min($days, 3650) * 86400) : null;
     $newKey = !empty($body['newKey']);
-    $people = lic_people();
-    $keys = with_json('licenses.json', ['keys' => []], function (array &$d) use ($emails, $max, $exp, $newKey, $people) {
+    $people = people_with_keys();
+    // aynı ad soyadlı ikinci kişiye anahtar gitmez: listede işaretli (dupOf) olan ya da bu istekte aynı adı tekrarlayan atlanır
+    $skipped = [];
+    $seen = [];
+    foreach ($emails as $m) {
+        $p = $people[$m] ?? null;
+        $nk = $p ? mv_member_namekey((string) $p['name']) : '';
+        if ($p && $p['dupOf'] !== '') {
+            $skipped[$m] = 'Aynı ad soyadla başka bir kayıt var (' . $p['dupOf'] . '); anahtar gönderilmedi';
+        } elseif ($nk !== '' && strpos($nk, ' ') !== false && isset($seen[$nk])) {
+            $skipped[$m] = 'Aynı ad soyad bu gönderimde ' . $seen[$nk] . ' ile zaten var; anahtar gönderilmedi';
+        } elseif ($nk !== '' && strpos($nk, ' ') !== false) {
+            $seen[$nk] = $m;
+        }
+    }
+    $emails = array_values(array_filter($emails, fn ($m) => !isset($skipped[$m])));
+    $keys = !$emails ? [] : with_json('licenses.json', ['keys' => []], function (array &$d) use ($emails, $max, $exp, $newKey, $people) {
         $have = array_flip(array_map(fn ($k) => $k['key'], $d['keys']));
         $out = [];
         foreach ($emails as $m) {
@@ -1028,7 +1102,10 @@ if ($a === 'license_issue' && $method === 'POST') {
     foreach ($keys as $m => $k) {
         $res[] = lic_send_one($k, $m, $people[$m]['name'] ?? '');
     }
-    out(['results' => $res, 'sent' => count(array_filter($res, fn ($r) => $r['ok']))]);
+    foreach ($skipped as $m => $why) {
+        $res[] = ['email' => $m, 'key' => '', 'id' => '', 'ok' => false, 'skipped' => true, 'error' => $why];
+    }
+    out(['results' => $res, 'sent' => count(array_filter($res, fn ($r) => $r['ok'])), 'skipped' => count($skipped)]);
 }
 
 // Var olan anahtarı (yeniden) gönder: kayıttaki e-postaya ya da verilen adrese

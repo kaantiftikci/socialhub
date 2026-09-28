@@ -3,8 +3,9 @@ declare(strict_types=1);
 
 /**
  * İndirme kaydı (mivelo.app/api/register.php): indirme sayfasında "İndir"e basınca açılan pencere → POST {firstName, lastName, email, file, website}
- * → {ok:true}; ardından sayfa dosyayı indirir. Kayıt lib-members.php ile ~/mivelo-data/members.json'a (src 'indir'); Admin → Lisanslar →
- * "Üyelere anahtar gönder"de görünür. Aynı e-posta yeniden gelirse yeni kayıt açılmaz (indirme geçmişine eklenir); yanıt ikisinde de aynı.
+ * → {ok:true}; ardından sayfa dosyayı indirir. Kayıt lib-members.php ile ~/mivelo-data/members.json'a (src 'indir'); Admin →
+ * Üyeler sayfasında görünür. Ad/soyad yalnız harf, e-posta biçim + geçici servis + alan adı (MX/A) denetimi (lib-members). Aynı e-posta yeniden
+ * gelirse yeni kayıt açılmaz ({known:true}); aynı ad soyadla başka e-postadan gelen kayıt 'dupOf' ile işaretlenir.
  * Bot tuzağı gizli "website" alanı; aynı IP'den (IPv6 /64) saatte en çok 10 yeni üye, günde toplam 1000.
  */
 
@@ -46,11 +47,8 @@ $first = mv_member_name($body['firstName'] ?? '');
 $last = mv_member_name($body['lastName'] ?? '');
 $file = (string) ($body['file'] ?? '');
 $FILES = ['Mivelo-mac-arm64.dmg', 'Mivelo-mac-intel.dmg', 'Mivelo-windows-x64-setup.exe'];
-if ($first === '' || $last === '') {
-    fail(400, 'Adını ve soyadını yaz.');
-}
-if (strlen($email) > 254 || !filter_var($email, FILTER_VALIDATE_EMAIL) || !preg_match('/^[a-z0-9][a-z0-9._%+-]{0,63}@[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)+$/', $email)) {
-    fail(400, 'Geçerli bir e-posta adresi yaz.');
+if (($err = mv_member_name_error($first, 'Ad')) !== '' || ($err = mv_member_name_error($last, 'Soyad')) !== '' || ($err = mv_member_email_error($email)) !== '') {
+    fail(400, $err);
 }
 if ($file !== '' && !in_array($file, $FILES, true)) {
     $file = '';
@@ -87,7 +85,7 @@ try {
             return 'limit';
         }
         mv_member_upsert($members, ['email' => $email, 'firstName' => $first, 'lastName' => $last, 'src' => 'indir', 'ip' => $ip], $file);
-        return 'ok';
+        return $known ? 'known' : 'ok';
     });
 } catch (Throwable $e) {
     fail(500, 'Kayıt şu an alınamıyor, biraz sonra tekrar dene.');
@@ -95,4 +93,5 @@ try {
 if ($res === 'limit') {
     fail(429, 'Çok fazla deneme, biraz sonra tekrar dene.');
 }
-out(['ok' => true]);
+// known: bu e-posta zaten kayıtlı (yeni kayıt açılmadı; indirme kaydına eklendi)
+out(['ok' => true, 'known' => $res === 'known']);

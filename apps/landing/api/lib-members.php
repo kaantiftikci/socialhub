@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Üyeler (lisans alacaklar): indirme sayfasında "İndir"e basınca açılan kayıt penceresinden gelenler (src 'indir') ve
  * kapatılan demo üyeliklerinden aktarılanlar (src 'demo'). Bekleme listesinden (waitlist.json, yalnız e-posta) AYRI tutulur.
  * Kayıt ~/mivelo-data/members.json (web kökü dışında, 0600): {members:[{email, firstName, lastName, name, src, at, lastAt, ip, downloads:[{file,at}]}]}.
- * Admin → Lisanslar → "Üyelere anahtar gönder" listesinde görünürler. mivelo.app/api ve demo api/ (yayında kopyalanır) ortak kullanır.
+ * Admin → Üyeler sayfasında görünürler (aynı ad soyadlı ikinci kayıt 'dupOf' ile işaretli). mivelo.app/api ve demo api/ (yayında kopyalanır) ortak kullanır.
  * Yazım admin/api.php düzeninde: ayrı .lock, önce kodla, geçici dosya + rename; bozuk dosya asla boş sayılıp üstüne yazılmaz.
  */
 
@@ -81,6 +81,58 @@ if (!function_exists('mv_members_update')) {
     }
 
     /**
+     * Ad karşılaştırma anahtarı: büyük/küçük harf, boşluk ve Türkçe karakter farkı yok sayılır ("Çağla  IŞIK" = "cagla isik").
+     * Aynı anahtarlı iki üyeye iki ayrı lisans gönderilmez (admin license_issue).
+     */
+    function mv_member_namekey(string $name): string
+    {
+        $name = strtr($name, ['İ' => 'i', 'I' => 'ı']);
+        $name = mb_strtolower($name, 'UTF-8');
+        $name = strtr($name, ['ç' => 'c', 'ğ' => 'g', 'ı' => 'i', 'ö' => 'o', 'ş' => 's', 'ü' => 'u', 'â' => 'a', 'î' => 'i', 'û' => 'u']);
+        return trim(preg_replace('/[^a-z]+/u', ' ', $name) ?? '');
+    }
+
+    /** Ad/soyad denetimi: yalnız harf (+ boşluk, kesme, tire, nokta), 2-40 karakter, en az 2 harf, rakam/bağlantı yok. Hata metni ya da '' */
+    function mv_member_name_error(string $v, string $label): string
+    {
+        if ($v === '') {
+            return "$label boş olamaz.";
+        }
+        if (!preg_match("/^[\\p{L}][\\p{L} '’.\\-]{0,39}$/u", $v) || preg_match_all('/\p{L}/u', $v) < 2) {
+            return "$label yalnız harflerden oluşmalı (en az 2 harf).";
+        }
+        if (preg_match('/(.)\1{3,}/u', $v)) {
+            return "$label geçerli görünmüyor.";
+        }
+        return '';
+    }
+
+    /** Geçici (tek kullanımlık) e-posta servisleri: anahtar gerçek kişiye gitsin */
+    function mv_disposable_domains(): array
+    {
+        return ['mailinator.com', 'guerrillamail.com', 'guerrillamail.net', 'sharklasers.com', '10minutemail.com', '10minutemail.net', 'temp-mail.org',
+        'tempmail.com', 'tempmail.net', 'tempmailo.com', 'yopmail.com', 'yopmail.net', 'trashmail.com', 'getnada.com', 'dispostable.com', 'maildrop.cc',
+        'throwawaymail.com', 'fakeinbox.com', 'mintemail.com', 'mohmal.com', 'emailondeck.com', 'tempr.email', 'moakt.com', 'mail.tm', 'burnermail.io'];
+    }
+
+    /** E-posta denetimi: biçim + geçici servis değil + alan adı gerçekten e-posta alıyor (MX ya da A kaydı). Hata metni ya da '' */
+    function mv_member_email_error(string $email): string
+    {
+        if (strlen($email) > 254 || !filter_var($email, FILTER_VALIDATE_EMAIL)
+            || !preg_match('/^[a-z0-9][a-z0-9._%+-]{0,63}@[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)+$/', $email)) {
+            return 'Geçerli bir e-posta adresi yaz.';
+        }
+        $domain = substr(strrchr($email, '@') ?: '', 1);
+        if (in_array($domain, mv_disposable_domains(), true)) {
+            return 'Geçici e-posta adresleri kabul edilmiyor; kendi e-posta adresini yaz.';
+        }
+        if (getenv('MV_SKIP_DNS') !== '1' && function_exists('checkdnsrr') && !checkdnsrr($domain, 'MX') && !checkdnsrr($domain, 'A')) {
+            return 'Bu e-posta adresinin alan adı bulunamadı; adresi kontrol et.';
+        }
+        return '';
+    }
+
+    /**
      * Üye ekle ya da güncelle (e-postayla tekil). Var olanın adı boşsa doldurulur (üzerine yazılmaz); $file verilirse indirme
      * geçmişine eklenir (son 20). $m: email, firstName, lastName, src, at?, ip?
      */
@@ -110,7 +162,18 @@ if (!function_exists('mv_members_update')) {
             return;
         }
         unset($x);
-        $members[] = ['email' => $email, 'firstName' => $first, 'lastName' => $last, 'name' => $name, 'src' => (string) ($m['src'] ?? 'indir'),
+        // aynı ad soyadla başka e-postadan önceki kayıt varsa işaretle (anahtar ona ikinci kez gönderilmez)
+        $dupOf = '';
+        $nk = mv_member_namekey($name);
+        if ($nk !== '') {
+            foreach ($members as $x) {
+                if (mv_member_namekey((string) ($x['name'] ?? '')) === $nk) {
+                    $dupOf = (string) $x['email'];
+                    break;
+                }
+            }
+        }
+        $members[] = ['email' => $email, 'firstName' => $first, 'lastName' => $last, 'name' => $name, 'dupOf' => $dupOf, 'src' => (string) ($m['src'] ?? 'indir'),
             'at' => (int) ($m['at'] ?? $now), 'lastAt' => $now, 'ip' => (string) ($m['ip'] ?? ''), 'downloads' => $file !== '' ? [['file' => $file, 'at' => $now]] : []];
     }
 }

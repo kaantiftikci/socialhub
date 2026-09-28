@@ -256,6 +256,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
 .pp-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--line-2);cursor:pointer}
 .pp-row:last-child{border-bottom:0}
 .pp-row:hover{background:var(--bg-2)}
+.pp-row.dup{opacity:.62}
 .pp-row input{width:17px;height:17px;flex:none}
 .pp-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
 .pp-main b{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -372,6 +373,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
         <button class="btn sm soft" data-bulk="invited">Davet edildi</button>
         <button class="btn sm" data-bulk="joined">Katıldı</button>
         <button class="btn sm" data-bulk="waiting">Bekliyor</button>
+        <button class="btn sm dark" data-bulk="key" title="Her birine anahtar üretilir (2 cihaz, 30 gün) ve logolu e-posta gider">Anahtar gönder</button>
         <button class="btn sm" data-bulk="copy">E-postaları kopyala</button>
         <button class="btn sm danger" data-bulk="delete">Sil</button>
       </div>
@@ -407,13 +409,13 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
       <div class="card" style="padding-bottom:6px"><h3>Demo hesapları <span class="sub">üyelik talepleri burada; onaylayınca kullanıcıya e-posta gider</span></h3><div id="demoBox"></div></div>
     </section>
 
-    <!-- lisanslar -->
-    <section class="page" id="p-lisans">
-      <div class="top"><h2>Lisanslar</h2><span class="sp"></span><a class="btn" href="/indir/" target="_blank" rel="noopener">mivelo.app/indir ↗</a></div>
-      <div class="card" style="margin-bottom:14px"><h3>Üyelere anahtar gönder <span class="sub">bekleme listesi ve demo üyeleri; seç, gönder de: her birine anahtar üretilir ve logolu e-posta gider</span></h3>
+    <!-- üyeler -->
+    <section class="page" id="p-uye">
+      <div class="top"><h2>Üyeler</h2><span class="sp"></span><a class="btn" href="/indir/" target="_blank" rel="noopener">mivelo.app/indir ↗</a></div>
+      <div class="card" style="margin-bottom:14px"><h3>Kayıtlı üyeler <span class="sub">indirme sayfasında kaydolanlar ve eski demo üyeleri; seç, gönder de: her birine anahtar üretilir ve logolu e-posta gider</span></h3>
         <div class="pp-bar">
           <input class="input" id="ppQ" type="search" placeholder="Ad ya da e-posta ara…" aria-label="Ara">
-          <div class="seg" id="ppSeg"><button data-f="nokey" class="on">Anahtarsız</button><button data-f="all">Tümü</button><button data-f="sent">Gönderilen</button><button data-f="fail">Hatalı</button></div>
+          <div class="seg" id="ppSeg"><button data-f="all" class="on">Tümü</button><button data-f="nokey">Anahtarsız</button><button data-f="sent">Gönderilen</button><button data-f="fail">Hatalı</button><button data-f="dup">Aynı ad</button></div>
         </div>
         <div class="pp-list" id="ppList"><div class="empty">Yükleniyor…</div></div>
         <div class="pp-foot">
@@ -421,11 +423,17 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
           <select class="input" id="ppMax" style="width:auto;height:34px" aria-label="Cihaz sınırı"><option value="1">1 cihaz</option><option value="2" selected>2 cihaz</option><option value="3">3 cihaz</option><option value="5">5 cihaz</option></select>
           <select class="input" id="ppDays" style="width:auto;height:34px" aria-label="Süre"><option value="7">7 gün</option><option value="14">14 gün</option><option value="30" selected>30 gün</option><option value="60">60 gün</option><option value="90">90 gün</option><option value="180">6 ay</option><option value="365">1 yıl</option><option value="0">Süresiz</option><option value="c">Özel…</option></select><input class="input days-c" id="ppDaysC" type="number" min="1" max="3650" placeholder="gün" aria-label="Gün sayısı" hidden><span class="muted days-end" id="ppDaysEnd"></span>
           <span class="sp"></span>
+          <button class="btn danger" id="ppDel" type="button" disabled>Sil</button>
           <button class="btn dark" id="ppSend" type="button" disabled>Seçilenlere gönder</button>
         </div>
-        <div class="muted" style="font-size:12px;margin-top:8px">Kişinin etkin anahtarı varsa yenisi üretilmez, aynı anahtar yeniden gönderilir. Başarıyla gönderilen bekleme listesi kaydı "Davet edildi" olur.</div>
+        <div class="muted" style="font-size:12px;margin-top:8px">Kişinin etkin anahtarı varsa yenisi üretilmez, aynı anahtar yeniden gönderilir. Aynı ad soyadla ikinci bir e-postadan kaydolan "Aynı ad" olarak işaretlenir ve ona anahtar gönderilmez. Bekleme listesindekilere anahtar Bekleme listesi sayfasından (seç → Anahtar gönder) gider.</div>
         <div id="ppRes"></div>
       </div>
+    </section>
+
+    <!-- lisanslar -->
+    <section class="page" id="p-lisans">
+      <div class="top"><h2>Lisanslar</h2><span class="sp"></span><a class="btn" href="/indir/" target="_blank" rel="noopener">mivelo.app/indir ↗</a></div>
       <details class="card" id="tplCard" style="margin-bottom:14px"><summary style="cursor:pointer;font-weight:600">E-posta taslağı <span class="sub" style="font-weight:400">anahtarla giden e-postanın metni; logo (e-postaya gömülü), anahtar kutusu ve indirme düğmesi kendiliğinden eklenir</span></summary>
         <div class="tpl-grid">
           <div>
@@ -531,6 +539,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   var CSRF=null;
   var I={
     genel:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></svg>',
+    uye:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4.5 20.5c.9-4 3.8-6 7.5-6s6.6 2 7.5 6"/></svg>',
     liste:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c1.9.7 3.1 2.4 3.5 5.2"/></svg>',
     trafik:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5M4 19h16M8 15l4-4 3 3 5-6"/></svg>',
     geri:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z"/><path d="M9 9h6M9 12.5h4"/></svg>',
@@ -544,7 +553,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     clip:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.5l-8.2 8.2a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></svg>',
     prev:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>'
   };
-  var PAGES=[['genel','Genel bakış','Genel'],['liste','Bekleme listesi','Liste'],['trafik','Trafik','Trafik'],['demo','Demo','Demo'],['lisans','Lisanslar','Lisans'],['geri','Geri bildirim','Geri'],['gorev','Görevler','Görevler'],['ayar','Ayarlar','Ayarlar']];
+  var PAGES=[['genel','Genel bakış','Genel'],['liste','Bekleme listesi','Liste'],['uye','Üyeler','Üyeler'],['trafik','Trafik','Trafik'],['demo','Demo','Demo'],['lisans','Lisanslar','Lisans'],['geri','Geri bildirim','Geri'],['gorev','Görevler','Görevler'],['ayar','Ayarlar','Ayarlar']];
   var ST={waiting:'Bekliyor',invited:'Davet edildi',joined:'Katıldı',spam:'Spam'};
   var ST_COLOR={waiting:'#C9C6D6',invited:'#6C47FF',joined:'#16A34A',spam:'#C2261A'};
 
@@ -631,7 +640,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   }
   function load(id,force){
     if(loaded[id] && !force) return; loaded[id]=true;
-    ({genel:loadOverview,liste:loadList,trafik:loadOverview,demo:loadDemo,lisans:loadLic,geri:loadFb,gorev:loadTasks,ayar:function(){ loadSystem(); loadSmtp(); }})[id]();
+    ({genel:loadOverview,liste:loadList,uye:loadPeople,trafik:loadOverview,demo:loadDemo,lisans:loadLic,geri:loadFb,gorev:loadTasks,ayar:function(){ loadSystem(); loadSmtp(); }})[id]();
   }
   window.addEventListener('hashchange',route);
 
@@ -647,7 +656,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   function loadOverview(){
     api('overview',null,'&days='+RANGE).then(function(o){
       var t=o.totals;
-      $('#nc-liste').textContent=fmt(t.waitlist);
+      $('#nc-liste').textContent=fmt(t.waitlist); if(!loaded.uye) api('members').then(function(m){ $('#nc-uye').textContent=(m.members||[]).length?fmt(m.members.length):''; }).catch(function(){});
       $('#kpis').innerHTML=
         kpi('Bekleme listesi',fmt(t.waitlist),(t.today?'<b>+'+fmt(t.today)+'</b> bugün':'bugün kayıt yok'),true)+
         kpi('Son 7 gün',fmt(t.week),'yeni kayıt')+
@@ -712,6 +721,14 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   document.addEventListener('keydown',function(e){ if(e.key==='Enter' && e.target.matches('.note-in')) e.target.blur(); });
   $('#bulk').addEventListener('click',function(e){
     var b=e.target.closest('[data-bulk]'); if(!b) return; var em=selected(), act=b.dataset.bulk; if(!em.length) return;
+    if(act==='key'){
+      if(em.length>50){ toast('Tek seferde en çok 50 kişi',true); return; }
+      b.disabled=true; var t=b.textContent; b.textContent='Gönderiliyor…';
+      api('license_issue',{emails:em,maxDevices:2,days:30}).then(function(d){ SEL={}; loaded.lisans=false; loaded.uye=false; loadList();
+        toast(d.sent+' / '+d.results.length+' kişiye anahtar gönderildi'+(d.results.length>d.sent?' · gönderilemeyenler Lisanslar listesinde':''),d.results.length>d.sent); })
+        .catch(function(x){ toast(x.message,true); }).then(function(){ b.disabled=false; b.textContent=t; });
+      return;
+    }
     if(act==='copy'){ (navigator.clipboard?navigator.clipboard.writeText(em.join(', ')):Promise.reject()).then(function(){ toast(em.length+' e-posta kopyalandı'); }).catch(function(){ prompt('E-postalar',em.join(', ')); }); return; }
     if(act==='delete'){
       if(b.dataset.armed!=='1'){ b.dataset.armed='1'; b.textContent='Emin misin? Tekrar bas'; setTimeout(function(){ b.dataset.armed=''; b.textContent='Sil'; },3500); return; }
@@ -742,7 +759,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   function copyText(t){ (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(function(){ toast('Kopyalandı'); }).catch(function(){ var i=document.createElement('textarea'); i.value=t; document.body.appendChild(i); i.select(); document.execCommand('copy'); i.remove(); toast('Kopyalandı'); }); }
   function loadLicKeys(){ return api('licenses').then(function(d){ LIC=d.keys; renderLic(); }).catch(function(e){ toast(e.message,true); }); }
   function loadLic(){
-    loadLicKeys(); loadPeople();
+    loadLicKeys();
     api('waitlist').then(function(d){ $('#licMails').innerHTML=(d.entries||[]).slice(0,500).map(function(e){ return '<option value="'+esc(e.email)+'">'; }).join(''); }).catch(function(){});
   }
   function renderLic(){
@@ -808,46 +825,56 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     daysHint(id);
   });
   /* ---------- üyelere anahtar gönder + e-posta taslağı ---------- */
-  var PP=[], PP_F='nokey', PP_SEL={};
-  function loadPeople(){ api('lic_people').then(function(d){ PP=d.people||[]; renderPeople(); }).catch(function(e){ $('#ppList').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; }); }
+  var PP=[], PP_F='all', PP_SEL={};
+  function loadPeople(){ api('members').then(function(d){ PP=d.members||[]; $('#nc-uye').textContent=PP.length?fmt(PP.length):''; PP.forEach(function(p){ if(p.dupOf) delete PP_SEL[p.email]; }); renderPeople(); }).catch(function(e){ $('#ppList').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; }); }
   function ppVisible(){
     var q=($('#ppQ').value||'').toLocaleLowerCase('tr');
     return PP.filter(function(p){
       if(PP_F==='nokey'&&(p.key&&p.key.status==='active')) return false;
       if(PP_F==='sent'&&!p.sentAt) return false;
       if(PP_F==='fail'&&!p.mailError) return false;
+      if(PP_F==='dup'&&!p.dupOf) return false;
       return !q||(p.name+' '+p.email).toLocaleLowerCase('tr').indexOf(q)>=0; });
   }
   function ppState(p){
+    if(p.dupOf) return '<span class="pp-st bad" title="Aynı ad soyadla '+esc(p.dupOf)+' kayıtlı; anahtar gönderilmez">Aynı ad · '+esc(p.dupOf)+'</span>';
     if(p.mailError) return '<span class="pp-st bad" title="'+esc(p.mailError)+'">Gönderilemedi</span>';
     if(p.sentAt) return '<span class="pp-st ok">Gönderildi · '+ago(p.sentAt)+(p.key&&p.key.used?' · kullanıyor':'')+'</span>';
     if(p.key) return '<span class="pp-st">'+(p.key.status==='active'?'Anahtarı var (gönderilmedi)':'Anahtarı iptal')+'</span>';
     return '<span class="pp-st muted">Anahtar yok</span>';
   }
   function renderPeople(){
-    var rows=ppVisible(), SRC={waitlist:'Bekleme listesi',demo:'Demo üyesi',indir:'İndirme kaydı'};
+    var rows=ppVisible(), SRC={waitlist:'Bekleme listesi',demo:'Eski demo üyesi',indir:'İndirme sayfası'}, FN={'Mivelo-mac-arm64.dmg':'Mac (Apple Silicon)','Mivelo-mac-intel.dmg':'Mac (Intel)','Mivelo-windows-x64-setup.exe':'Windows'};
     $('#ppList').innerHTML=rows.length?rows.map(function(p){
-      return '<label class="pp-row"><input type="checkbox" data-psel="'+esc(p.email)+'"'+(PP_SEL[p.email]?' checked':'')+'>'+
-        '<span class="pp-main"><b>'+esc(p.name||p.email)+'</b><span>'+(p.name?esc(p.email)+' · ':'')+p.src.map(function(s){ return SRC[s]||s; }).join(' + ')+(p.at?' · '+ago(p.at):'')+'</span></span>'+ppState(p)+'</label>'; }).join('')
-      :'<div class="empty">'+(PP.length?'Bu filtrede kimse yok.':'Henüz üye yok: bekleme listesine ya da demoya kaydolanlar burada görünür.')+'</div>';
-    $('#ppAll').checked=rows.length>0&&rows.every(function(p){ return PP_SEL[p.email]; });
-    var n=Object.keys(PP_SEL).filter(function(k){ return PP_SEL[k]; }).length;
-    $('#ppSend').disabled=!n; $('#ppSend').textContent=n?n+' kişiye anahtar gönder':'Seçilenlere gönder';
+      return '<label class="pp-row'+(p.dupOf?' dup':'')+'"><input type="checkbox" data-psel="'+esc(p.email)+'"'+(PP_SEL[p.email]?' checked':'')+'>'+
+        '<span class="pp-main"><b>'+esc(p.name||p.email)+'</b><span>'+(p.name?esc(p.email)+' · ':'')+p.src.map(function(s){ return SRC[s]||s; }).join(' + ')+(p.at?' · kayıt '+ago(p.at):'')+
+        (p.downloads?' · '+p.downloads+' indirme'+(p.lastFile?' ('+esc(FN[p.lastFile]||p.lastFile)+')':''):'')+'</span></span>'+ppState(p)+'</label>'; }).join('')
+      :'<div class="empty">'+(PP.length?'Bu filtrede kimse yok.':'Henüz üye yok: mivelo.app/indir sayfasında İndir\'e basıp kaydolanlar burada görünür.')+'</div>';
+    $('#ppAll').checked=rows.length>0&&rows.every(function(p){ return PP_SEL[p.email]||p.dupOf; });
+    var n=Object.keys(PP_SEL).filter(function(k){ return PP_SEL[k]; }).length, sendable=Object.keys(PP_SEL).filter(function(k){ return PP_SEL[k]&&!PP.some(function(p){ return p.email===k&&p.dupOf; }); }).length;
+    $('#ppSend').disabled=!sendable; $('#ppSend').textContent=sendable?sendable+' kişiye anahtar gönder':'Seçilenlere gönder';
+    $('#ppDel').disabled=!n; $('#ppDel').dataset.armed=''; $('#ppDel').textContent=n?n+' üyeyi sil':'Sil';
   }
   $('#ppQ').addEventListener('input',renderPeople);
   $('#ppSeg').addEventListener('click',function(e){ var b=e.target.closest('button'); if(!b) return; PP_F=b.dataset.f; $$('#ppSeg button').forEach(function(x){ x.classList.toggle('on',x===b); }); renderPeople(); });
   $('#ppList').addEventListener('change',function(e){ var t=e.target.closest('[data-psel]'); if(!t) return; PP_SEL[t.dataset.psel]=t.checked; renderPeople(); });
-  $('#ppAll').addEventListener('change',function(e){ ppVisible().forEach(function(p){ PP_SEL[p.email]=e.target.checked; }); renderPeople(); });
+  $('#ppAll').addEventListener('change',function(e){ ppVisible().forEach(function(p){ if(!p.dupOf||!e.target.checked) PP_SEL[p.email]=e.target.checked; }); renderPeople(); });
+  $('#ppDel').addEventListener('click',function(){
+    var b=this, em=Object.keys(PP_SEL).filter(function(k){ return PP_SEL[k]; }); if(!em.length) return;
+    if(b.dataset.armed!=='1'){ b.dataset.armed='1'; b.textContent='Emin misin? Tekrar bas'; setTimeout(function(){ if(b.dataset.armed==='1') renderPeople(); },3500); return; }
+    api('member_delete',{emails:em}).then(function(d){ PP_SEL={}; toast(d.deleted+' üye silindi'); loadPeople(); }).catch(function(x){ toast(x.message,true); });
+  });
   $('#ppSend').addEventListener('click',function(){
-    var b=this, em=Object.keys(PP_SEL).filter(function(k){ return PP_SEL[k]; });
+    var b=this, em=Object.keys(PP_SEL).filter(function(k){ return PP_SEL[k]&&!PP.some(function(p){ return p.email===k&&p.dupOf; }); });
     if(!em.length) return;
     if(em.length>50){ toast('Tek seferde en çok 50 kişi',true); return; }
     if(daysOf('ppDays')<0){ toast('Süre için 1–3650 arasında gün sayısı yaz',true); $('#ppDaysC').focus(); return; }
     b.disabled=true; b.textContent='Gönderiliyor… ('+em.length+')';
     api('license_issue',{emails:em,maxDevices:+$('#ppMax').value,days:daysOf('ppDays')}).then(function(d){
-      var bad=d.results.filter(function(r){ return !r.ok; });
+      var skip=d.results.filter(function(r){ return r.skipped; }), bad=d.results.filter(function(r){ return !r.ok&&!r.skipped; });
       PP_SEL={}; loadPeople(); loadLicKeys();
       $('#ppRes').innerHTML='<div class="pp-res"><b>'+d.sent+' / '+d.results.length+' e-posta gönderildi</b>'+
+        (skip.length?'<div class="bad">Aynı ad soyad nedeniyle atlanan '+skip.length+' kişi: '+skip.map(function(r){ return esc(r.email); }).join(', ')+'</div>':'')+
         (bad.length?'<div class="bad">Gönderilemeyen '+bad.length+' kişi: anahtarları üretildi, Lisanslar listesinden "Taslağı aç" ile kendi e-postandan gönderebilirsin.</div><div class="muted">'+esc(bad[0].error)+'</div>'+
           bad.map(function(r){ return '<div class="row" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span>'+esc(r.email)+'</span><span class="lic-key">'+esc(r.key)+'</span><button class="btn sm" data-lcopy="'+esc(r.key)+'">Kopyala</button></div>'; }).join(''):'')+'</div>';
       toast(bad.length?d.sent+' gönderildi, '+bad.length+' gönderilemedi':d.sent+' kişiye anahtar gönderildi',!!bad.length);
