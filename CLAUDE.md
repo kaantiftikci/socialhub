@@ -125,7 +125,8 @@ Dil: arayüz ve yorumlar Türkçe.
   DMG'den gizli `.VolumeIcon.icns` + `.fseventsd` CI'da silinir (Finder'da gizli dosyalar açıkken ikinci "amblem" görünüyordu; UDRW → sil → UDZO).
   Mac simgesi `icons/icon.icns` Apple şablonunda (1024 tuval, ortada 824 squircle + gölge; `apps/desktop/scripts/mac-icon.py` → `icon-macos.png`
   → `npx tauri icon` çıktısından YALNIZ icon.icns): macOS 26 şablon dışı (tam kaplayan) simgeyi gri squircle'a koyuyordu. Windows/PNG'ler eski tam kaplayan.
-  Node gömülü (`KAVSAK_BUNDLE_NODE=1`), macOS ad-hoc imza (`signingIdentity "-"`; Apple Developer hesabı YOK → ilk açılışta sağ tık → Aç / "Yine de aç"),
+  Node gömülü (`KAVSAK_BUNDLE_NODE=1`), macOS ad-hoc imza (`signingIdentity "-"`; Apple Developer hesabı YOK → macOS 15+/26'da "Mivelo açılmadı" uyarısı; sağ tık → Aç
+  ARTIK İŞE YARAMIYOR: Bitti → Sistem Ayarları → Gizlilik ve Güvenlik → "Yine de Aç" + parola (ya da `xattr -dr com.apple.quarantine`); indir sayfası 4 adım),
   Windows imzasız (SmartScreen). Hepsi başarılıysa `publish`: `mivelo.app/indir/files/` (FTP; Mivelo-mac-arm64.dmg, Mivelo-mac-intel.dmg,
   Mivelo-windows-x64-setup.exe, latest.json {version,date,files}; `deploy/indir/.htaccess`: json'da CORS *, indirme başlığı, liste kapalı). İndirme sayfası
   `apps/landing/indir/index.html` (ana sayfanın görsel dili: cam üst çubuk, hareketli gradyan, kelime kelime açılan başlık + süpürülen alt metin,

@@ -162,6 +162,7 @@ svg{flex-shrink:0}
 .steps li b{font-weight:600}
 .steps li div{font-size:15px;line-height:1.55;color:var(--ink-2);padding-top:4px}
 .steps li small{display:block;font-size:13px;color:var(--ink-3);margin-top:3px}
+.steps li small code{display:block;margin-top:5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;background:#F2F1F6;padding:6px 9px;border-radius:8px;white-space:nowrap;overflow-x:auto;user-select:all;-webkit-user-select:all;color:var(--ink-2)}
 
 /* neden masaüstü */
 .feats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:48px}
@@ -255,14 +256,15 @@ footer a:hover{color:var(--ink)}
 
 <section class="sec" id="kurulum" style="padding-top:20px">
   <div class="wrap center">
-    <h2 class="h2">Üç adımda hazır</h2>
+    <h2 class="h2">Birkaç dakikada hazır</h2>
     <p class="lead" style="max-width:520px;margin:16px auto 0">İlk açılıştaki uyarı bir kez çıkar; sonrası tek tık.</p>
     <div class="seg rv" role="tablist" id="seg"><span class="pill" id="pill"></span><button type="button" role="tab" data-os="mac" aria-selected="true">Mac</button><button type="button" role="tab" data-os="win" aria-selected="false">Windows</button></div>
     <div class="steps">
       <ol id="st-mac" class="on">
         <li style="--k:0"><span class="n">1</span><div>İndirdiğin <b>.dmg</b>'yi aç, Mivelo'yu <b>Uygulamalar</b> klasörüne sürükle.</div></li>
-        <li style="--k:1"><span class="n">2</span><div>Mivelo'ya <b>sağ tıkla → Aç</b>, çıkan pencerede yine <b>Aç</b>.<small>"Açılamıyor" derse: Sistem Ayarları → Gizlilik ve Güvenlik → en altta "Yine de aç". Uygulama henüz Apple onaylı imzalı olmadığı için yalnız ilk seferde.</small></div></li>
-        <li style="--k:2"><span class="n">3</span><div>E-postanla gelen <b>lisans anahtarını</b> yapıştır, kanallarını bağla.</div></li>
+        <li style="--k:1"><span class="n">2</span><div>Mivelo'yu aç. <b>"Mivelo açılmadı"</b> uyarısı çıkarsa <b>Bitti</b>'ye bas.<small>Uygulama henüz Apple onaylı imzalı olmadığı için macOS ilk açılışta bu uyarıyı gösterir; Mivelo'da bir sorun yoktur. "Çöp Sepeti'ne Taşı"ya basma.</small></div></li>
+        <li style="--k:2"><span class="n">3</span><div><b>Sistem Ayarları → Gizlilik ve Güvenlik</b> → en altta <b>"Yine de Aç"</b> → Mac parolanı gir, açılan pencerede yine <b>Yine de Aç</b>.<small>Yalnız ilk seferde. Terminal'i biliyorsan bu tek komut da olur:<code>xattr -dr com.apple.quarantine /Applications/Mivelo.app</code></small></div></li>
+        <li style="--k:3"><span class="n">4</span><div>E-postanla gelen <b>lisans anahtarını</b> yapıştır, kanallarını bağla.</div></li>
       </ol>
       <ol id="st-win">
         <li style="--k:0"><span class="n">1</span><div>İndirdiğin <b>Mivelo-…-setup.exe</b>'yi çalıştır.</div></li>
