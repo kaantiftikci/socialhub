@@ -103,6 +103,33 @@ async function completeDemoLogin(id: string): Promise<void> {
   for (const c of chats.filter((x) => x.accountId === id)) emit({ type: 'chat.upsert', chat: c });
 }
 
+/**
+ * Tarayıcıyla girilen uygulamalar: gerçek Mivelo'daki gibi AYRI bir giriş penceresi açılır (public/demo-login.html; 460×640 küçük
+ * pencere). Giriş yapılınca pencere "tamam" haberini (BroadcastChannel + postMessage, aynı köken) gönderip kapanır; bilgiler kullanılmaz.
+ */
+export function openDemoLoginWindow(a: Account): boolean {
+  const p = PLATFORMS[a.platform];
+  const q = new URLSearchParams({ id: a.id, n: p.name, code: p.code, c: p.color, mail: p.category === 'mail' ? '1' : '0' });
+  const w = 460;
+  const h = 640;
+  const left = Math.max(0, Math.round((window.screenX || 0) + ((window.outerWidth || w) - w) / 2));
+  const top = Math.max(0, Math.round((window.screenY || 0) + ((window.outerHeight || h) - h) / 2));
+  const win = window.open(`/demo-login.html?${q}`, `mivelo-login-${a.id}`, `popup=yes,width=${w},height=${h},left=${left},top=${top}`);
+  return !!win;
+}
+if (typeof window !== 'undefined') {
+  const done = (d: unknown) => {
+    const x = d as { type?: string; id?: string } | null;
+    if (x?.type === 'mivelo-demo-login' && typeof x.id === 'string') void completeDemoLogin(x.id);
+  };
+  try {
+    new BroadcastChannel('mivelo-demo-login').onmessage = (e) => done(e.data);
+  } catch {
+    /* eski tarayıcı: postMessage yeter */
+  }
+  window.addEventListener('message', (e) => e.origin === location.origin && done(e.data));
+}
+
 /** QR bekleyen hesap: kod gösterilir; kendiliğinden bağlanmaz (kullanıcı "Kodu okuttum"a basınca, Connect.tsx) */
 function startDemoQr(a: Account): Account {
   return { ...a, status: 'pairing', qrDataUrl: demoQr(a.id), detail: undefined };

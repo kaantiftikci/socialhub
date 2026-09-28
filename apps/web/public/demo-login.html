@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Giriş</title>
+<style>
+  /* Demo giriş penceresi: gerçek Mivelo'da açılan platform giriş penceresinin yerine geçer. Girilenler HİÇBİR YERE gönderilmez. */
+  :root { color-scheme: light; --c: #6c47ff; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #f4f4f7; font: 15px/1.45 -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, system-ui, sans-serif; color: #16151b; }
+  .card { width: min(380px, calc(100vw - 32px)); background: #fff; border: 1px solid #e3e2ea; border-radius: 18px; padding: 28px 26px 22px; box-shadow: 0 20px 50px -24px rgba(20, 16, 60, .25); }
+  .logo { width: 52px; height: 52px; border-radius: 15px; background: var(--c); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 19px; letter-spacing: -.5px; margin: 0 auto 14px; }
+  h1 { font-size: 21px; text-align: center; margin: 0 0 4px; letter-spacing: -.3px; }
+  .sub { text-align: center; color: #6e6c78; font-size: 13.5px; margin: 0 0 20px; }
+  label { display: block; font-size: 12.5px; color: #44424d; margin: 0 0 5px; font-weight: 500; }
+  input { width: 100%; height: 44px; border-radius: 11px; border: 1px solid #d9d8e0; padding: 0 13px; font: inherit; margin-bottom: 12px; outline: none; }
+  input:focus { border-color: var(--c); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 18%, transparent); }
+  button { width: 100%; height: 46px; border: 0; border-radius: 11px; background: var(--c); color: #fff; font: inherit; font-weight: 600; cursor: pointer; margin-top: 4px; }
+  button:disabled { opacity: .5; cursor: default; }
+  .note { margin: 16px 0 0; padding: 10px 12px; border-radius: 10px; background: #f4f3f8; color: #6e6c78; font-size: 12px; text-align: center; }
+  .done { text-align: center; padding: 30px 0 10px; }
+  .spin { width: 18px; height: 18px; border: 2px solid rgba(255,255,255,.4); border-top-color: #fff; border-radius: 50%; display: inline-block; animation: s .7s linear infinite; vertical-align: -3px; }
+  @keyframes s { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="logo" id="logo"></div>
+  <h1 id="title">Giriş yap</h1>
+  <p class="sub" id="sub">Devam etmek için hesabına giriş yap</p>
+  <form id="f" autocomplete="off">
+    <label for="u" id="ul">Kullanıcı adı, e-posta ya da telefon</label>
+    <input id="u" autofocus>
+    <label for="p">Şifre</label>
+    <input id="p" type="password">
+    <button id="b" type="submit" disabled>Giriş yap</button>
+  </form>
+  <p class="note">Mivelo demosu: girdiğin bilgiler hiçbir yere gönderilmez ve saklanmaz.</p>
+</div>
+<script>
+  (function () {
+    var q = new URLSearchParams(location.search);
+    var id = q.get('id') || '', name = (q.get('n') || 'Hesap').slice(0, 40), code = (q.get('code') || name.slice(0, 2)).slice(0, 3);
+    var color = /^#[0-9a-f]{3,8}$/i.test(q.get('c') || '') ? q.get('c') : '#6c47ff';
+    var mail = q.get('mail') === '1';
+    document.documentElement.style.setProperty('--c', color);
+    document.title = name + ' girişi';
+    document.getElementById('logo').textContent = code;
+    document.getElementById('title').textContent = name + ' hesabına giriş yap';
+    document.getElementById('sub').textContent = 'Mivelo ile bağlamak için giriş yap';
+    if (mail) document.getElementById('ul').textContent = 'E-posta adresi';
+    var u = document.getElementById('u'), p = document.getElementById('p'), b = document.getElementById('b');
+    var upd = function () { b.disabled = !u.value.trim() || !p.value; };
+    u.oninput = upd; p.oninput = upd;
+    document.getElementById('f').onsubmit = function (e) {
+      e.preventDefault();
+      if (b.disabled) return;
+      b.disabled = true;
+      b.innerHTML = '<span class="spin"></span>';
+      // bilgiler kullanılmaz: yalnız "giriş tamam" haberi Mivelo sekmesine gider (aynı köken)
+      setTimeout(function () {
+        var msg = { type: 'mivelo-demo-login', id: id };
+        try { new BroadcastChannel('mivelo-demo-login').postMessage(msg); } catch (x) {}
+        try { if (window.opener) window.opener.postMessage(msg, location.origin); } catch (x) {}
+        document.getElementById('card').innerHTML = '<div class="done"><div class="logo">✓</div><h1>Giriş yapıldı</h1><p class="sub">Bu pencere kapanıyor…</p></div>';
+        setTimeout(function () { window.close(); }, 700);
+      }, 900);
+    };
+  })();
+</script>
+</body>
+</html>

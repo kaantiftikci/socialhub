@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type InputHTMLAttributes } from 'react';
 import { clearOpening, markOpening } from './login-opening';
 import { api } from './api';
-import { STATIC_DEMO } from './profile';
-import { staticApi } from './static-demo';
+import { DEMO_OFFLINE, STATIC_DEMO } from './profile';
+import { openDemoLoginWindow, staticApi } from './static-demo';
 import { MAC_ONLY, PLATFORMS, type Account, type CoreOs, type Platform } from './types';
 import { Chip, Icon, PasswordInput, SyncBar } from './ui';
 
@@ -162,6 +162,8 @@ export function ConnectModal({
         const filled = isMail || !!shopFields || platform === 'shopier' || (platform === 'slack' && !!opts.token);
         const a = await api.addAccount(platform, filled ? 'demo-form' : undefined);
         setActive(a.id);
+        // gerçek uygulamadaki gibi giriş penceresi hemen açılır (engellenirse "Giriş ekranını aç" düğmesi)
+        if (!DEMO_OFFLINE && a.status === 'pairing' && PLATFORMS[platform].mode === 'browser' && !openDemoLoginWindow(a)) notify('Giriş penceresi engellendi; "Giriş ekranını aç"a bas', true);
         setShop({});
         setPat('');
         await onChanged();
@@ -586,8 +588,8 @@ export function ConnectModal({
                 </ol>
               )}
 
-              {STATIC_DEMO && PLATFORMS[activeAccount.platform].mode === 'browser' && activeAccount.status === 'pairing' && <DemoLogin account={activeAccount} onDone={onChanged} />}
-              {!STATIC_DEMO && PLATFORMS[activeAccount.platform].mode === 'browser' && activeAccount.status !== 'connected' && (
+              {DEMO_OFFLINE && PLATFORMS[activeAccount.platform].mode === 'browser' && activeAccount.status === 'pairing' && <DemoLogin account={activeAccount} onDone={onChanged} />}
+              {!DEMO_OFFLINE && PLATFORMS[activeAccount.platform].mode === 'browser' && activeAccount.status !== 'connected' && (
                 <>
                   {(activeAccount.detail ?? '').includes('Yeniden bağlan') ? (
                     <p style={{ margin: '6px 0 10px', fontSize: 13.5 }}>
@@ -599,6 +601,10 @@ export function ConnectModal({
                     style={{ alignSelf: 'flex-start', marginBottom: 10 }}
                     disabled={busy}
                     onClick={() => {
+                      if (STATIC_DEMO) {
+                        if (!openDemoLoginWindow(activeAccount)) notify('Giriş penceresi engellendi; tarayıcıda açılır pencerelere izin ver', true);
+                        return;
+                      }
                       setBusy(true);
                       markOpening(activeAccount.id, 'Giriş penceresi açılıyor');
                       api.restartAccount(activeAccount.id).catch((e) => (clearOpening(activeAccount.id), notify(e.message, true), onChanged())).finally(() => setBusy(false));

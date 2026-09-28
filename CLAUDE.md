@@ -103,8 +103,10 @@ Dil: arayüz ve yorumlar Türkçe.
   SMTP ayarlıysa sahibine e-posta). Başarı yalnız `{ok:true}` (yanlış adres 200+HTML döndürebilir). Admin → Geri bildirim (Açık/Tümü/Çözülen,
   durum Yeni/İnceleniyor/Çözüldü/Yapılmayacak, not, Yanıtla=mailto, ekler `fb_file` yalnız oturumla, CSP sandbox).
   **Demoda bağlanma gerçek akışla**: WhatsApp/Telegram `addAccount` → 'pairing' + taranamaz örnek QR (`demoQr`); KENDİLİĞİNDEN bağlanmaz
-  (Kaan: "eşleşme bekleniyor derken bir anda bağlı"), "Kodu okuttum" (`DemoQrDone`) → `completeDemoLogin` (yenilemede yarım QR yeniden gösterilir); tarayıcıyla girilenler (mode 'browser') 'pairing' → Connect.tsx `DemoLogin`
-  formu (bilgiler gönderilmez/saklanmaz) → `staticApi.demoLogin`. Form doldurulan yollar (e-posta şifresi, pazaryeri, Slack belirteci) `demo-form`
+  (Kaan: "eşleşme bekleniyor derken bir anda bağlı"), "Kodu okuttum" (`DemoQrDone`) → `completeDemoLogin` (yenilemede yarım QR yeniden gösterilir); tarayıcıyla girilenler (mode 'browser') 'pairing' → yereldeki gibi AYRI giriş
+  penceresi `public/demo-login.html` (`openDemoLoginWindow`, 460×640 açılır pencere; platform rengi/kodu; bilgiler gönderilmez/saklanmaz) →
+  BroadcastChannel/postMessage `mivelo-demo-login` → `completeDemoLogin`, pencere kapanır. Engellenirse "Giriş ekranını aç". Tek dosya demoda
+  (DEMO_OFFLINE) satır içi `DemoLogin` formu. Form doldurulan yollar (e-posta şifresi, pazaryeri, Slack belirteci) `demo-form`
   ile doğrudan bağlanır. Eskiden her şey anında "Bağlı" oluyordu.
   Demoda örnek AI açık (`demo-ai.ts`: sohbete özel taslak/özet/aksiyon/olay, model çağrısı yok); pazaryeri sipariş kartı `Script.order`.
   Tek dosya demo (`npm run demo:html`) profil adı "Mivelo".
