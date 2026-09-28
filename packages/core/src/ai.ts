@@ -15,7 +15,7 @@ export interface DraftInput {
   /** Karşı tarafın mesajı → benim yanıtım (önce bu sohbetten, sonra diğerlerinden) */
   pairs: Array<{ them: string; me: string }>;
   style: StyleProfile;
-  tone?: 'default' | 'short' | 'formal' | 'en';
+  tone?: AiTone;
 }
 
 /** Mesajlardan çıkan takvim etkinliği ("Takvime ekle"); start yerel saat "YYYY-MM-DDTHH:mm" ya da tüm gün "YYYY-MM-DD" */
@@ -49,6 +49,27 @@ export function setAiKey(key: string | null): void {
 }
 
 let client: Anthropic | undefined;
+
+/** Model çağrısı hatası: arayüze anlamlı durum + metin (401 geçersiz anahtar, 429 sınır, 529 yoğunluk…) */
+export class AiError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+  }
+}
+
+export const AI_TONES = ['default', 'short', 'formal', 'en'] as const;
+export type AiTone = (typeof AI_TONES)[number];
+export const isAiTone = (t: unknown): t is AiTone => typeof t === 'string' && (AI_TONES as readonly string[]).includes(t);
+
+function aiError(e: unknown): Error {
+  if (!(e instanceof Anthropic.APIError)) return e as Error;
+  const st = e.status;
+  if (st === 401 || st === 403) return new AiError(400, 'Anthropic API anahtarı geçersiz ya da yetkisiz (Ayarlar → AI özellikleri)');
+  if (st === 429) return new AiError(429, 'Anthropic hız/kota sınırı aşıldı; biraz sonra yeniden dene');
+  if (st === 529 || st === 503) return new AiError(503, 'Anthropic şu an yoğun; biraz sonra yeniden dene');
+  if (st === 400) return new AiError(502, `AI isteği reddedildi: ${e.message.split('\n')[0].slice(0, 160)}`);
+  return new AiError(502, `AI yanıt vermedi${st ? ` (${st})` : ''}: ${e.message.split('\n')[0].slice(0, 160)}`);
+}
 
 const SCHEMA = {
   type: 'object',
@@ -88,7 +109,7 @@ export async function draftReply(input: DraftInput): Promise<DraftResult | null>
     short: 'Ek ton isteği: çok kısa, en fazla iki cümle (kullanıcının tarzını koruyarak).',
     formal: 'Ek ton isteği: resmî ve ölçülü ("siz" hitabı).',
     en: 'Ek ton isteği: yanıtı İngilizce yaz (kullanıcının tarzını koruyarak).',
-  }[input.tone ?? 'default'];
+  }[isAiTone(input.tone) ? input.tone : 'default'];
 
   const style = describeStyle(input.style);
   const transcript = input.messages
@@ -110,14 +131,18 @@ ${transcript}
 
 Son mesaja yanıt taslağı üret.`;
 
-  const res = await client.messages.create({
-    model: ANTHROPIC_MODEL,
-    max_tokens: 4000,
-    system: SYSTEM,
-    output_config: { effort: 'low', format: { type: 'json_schema', schema: SCHEMA } },
-    messages: [{ role: 'user', content: user }],
-  });
-  if (res.stop_reason === 'refusal') throw new Error('AI bu sohbet için taslak üretmeyi reddetti');
+  const res = await client.messages
+    .create({
+      model: ANTHROPIC_MODEL,
+      max_tokens: 4000,
+      system: SYSTEM,
+      output_config: { effort: 'low', format: { type: 'json_schema', schema: SCHEMA } },
+      messages: [{ role: 'user', content: user }],
+    })
+    .catch((e: unknown) => {
+      throw aiError(e);
+    });
+  if (res.stop_reason === 'refusal') throw new AiError(422, 'AI bu sohbet için taslak üretmeyi reddetti');
   const text = res.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('');
   try {
     const parsed = JSON.parse(text) as Partial<DraftResult>;

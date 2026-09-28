@@ -34,8 +34,9 @@ function Marked({ text, q }: { text: string; q: string }) {
 /** Uzun mesajda eşleşmenin çevresini göster (eşleşme satır sonunda kalmasın) */
 function snippet(text: string, q: string): string {
   const w = q.trim().split(/\s+/)[0] ?? '';
-  const i = w ? norm(text).indexOf(norm(w)) : -1;
+  // konum boşlukları sıkıştırılmış metinde aranır (yoksa çok satırlı metinde kesit eşleşmeyi dışarıda bırakıyordu)
   const flat = text.replace(/\s+/g, ' ');
+  const i = w ? norm(flat).indexOf(norm(w)) : -1;
   if (i < 60) return flat.slice(0, 180);
   return '…' + flat.slice(i - 40, i + 140);
 }

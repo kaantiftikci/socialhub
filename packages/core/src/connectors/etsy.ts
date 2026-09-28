@@ -59,6 +59,8 @@ export const money = (m: EtsyMoney | undefined): string => {
   const cur = m.currency_code ?? '';
   return `${v} ${SYMBOL[cur] ?? cur}`.trim();
 };
+/** Etsy 2026: x-api-key = `keystring:shared_secret` (secret varsa); yoksa yalnız keystring (eski uygulamalar) */
+export const apiKeyHeader = (c: Pick<EtsyConfig, 'keystring' | 'sharedSecret'>): string => (c.sharedSecret?.trim() ? `${c.keystring}:${c.sharedSecret.trim()}` : c.keystring);
 const sec = (v: unknown): number | undefined => (typeof v === 'number' && v > 0 ? v * 1000 : undefined);
 
 /** PKCE çifti: 32 baytlık rastgele verifier (base64url) ve S256 challenge'ı */
@@ -97,6 +99,8 @@ export class EtsyConnector extends BaseConnector {
   private polling = false;
   private stopping = false;
   private seen = new Map<string, string>();
+  /** son başarılı yoklamanın başlangıcı (ms): sonraki yoklamalar yalnız bundan sonra değişen siparişleri ister */
+  private since?: number;
   private stateFile: string;
   private tokenFile: string;
   private bridge?: EtsyBridge;
@@ -221,7 +225,7 @@ export class EtsyConnector extends BaseConnector {
   private async api(p: string, retry = true): Promise<J> {
     await this.ensureToken();
     const r = await fetch(API + p, {
-      headers: { 'x-api-key': this.cfg.keystring, authorization: `Bearer ${this.cfg.accessToken ?? ''}`, accept: 'application/json' },
+      headers: { 'x-api-key': apiKeyHeader(this.cfg), authorization: `Bearer ${this.cfg.accessToken ?? ''}`, accept: 'application/json' },
     });
     const text = await r.text();
     if (r.status === 401) {
@@ -305,11 +309,16 @@ export class EtsyConnector extends BaseConnector {
       this.polling = false;
       return; // sipariş sohbetleri kapalı: yalnız mesajlaşma köprüsü çalışır
     }
+    const startedAt = Date.now();
     try {
       const receipts: J[] = [];
-      const pages = first ? 10 : 1;
+      // ilk yoklama: en yeni 500 sipariş (oluşturmaya göre); sonrakiler: son yoklamadan beri DEĞİŞENLER (eski siparişin kargo/iade/
+      // tamamlanma olayı da gelsin; yalnız en yeni 50'ye bakmak bunları kaçırıyordu)
+      const incremental = !first && this.since !== undefined;
+      const filter = incremental ? `&min_last_modified=${Math.floor((this.since! - 5 * 60_000) / 1000)}&sort_on=updated` : '&sort_on=created';
+      const pages = 10;
       for (let i = 0; i < pages; i++) {
-        const data = await this.api(`/shops/${encodeURIComponent(this.cfg.shopId ?? '')}/receipts?limit=50&offset=${i * 50}&sort_on=created&sort_order=desc`);
+        const data = await this.api(`/shops/${encodeURIComponent(this.cfg.shopId ?? '')}/receipts?limit=50&offset=${i * 50}${filter}&sort_order=desc`);
         const list: J[] = Array.isArray(data.results) ? data.results : [];
         receipts.push(...list);
         if (list.length < 50 || (typeof data.count === 'number' && receipts.length >= data.count)) break;
@@ -317,6 +326,7 @@ export class EtsyConnector extends BaseConnector {
       let changed = 0;
       for (const r of receipts.reverse()) if (this.ingest(r, !first)) changed++;
       if (changed) bus.log('info', `Etsy: ${changed} sipariş güncellendi`);
+      this.since = startedAt;
       this.saveState();
     } catch (e) {
       bus.log('warn', `Etsy yoklama: ${(e as Error).message}`);

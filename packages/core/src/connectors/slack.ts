@@ -67,6 +67,10 @@ export class SlackConnector extends BaseConnector {
   private convs: Array<{ id: string; name: string; kind: 'direct' | 'group' | 'channel' }> = [];
   private convsAt = 0;
   private cursor = 0;
+  /** Bağlanma anı (ms): imleci (lastTs) olmayan sohbette yalnız bundan yeni mesajlar canlı sayılır */
+  private startedAt = Date.now();
+  /** iş parçacığı: `kanal/üst ts` → alınmış en yeni yanıtın ts'i (sonraki istek oldest ile yalnız yenileri getirir) */
+  private threadLast = new Map<string, string>();
 
   /** Socket Mode */
   private sock?: WebSocket;
@@ -95,6 +99,7 @@ export class SlackConnector extends BaseConnector {
       return;
     }
     this.stopped = false;
+    this.startedAt = Date.now();
     await this.poll(true);
     this.schedule();
     if (this.appToken) void this.openSocket();
@@ -136,6 +141,7 @@ export class SlackConnector extends BaseConnector {
       bus.log('warn', `Slack Socket Mode açılamadı (${(e as Error).message}); yoklamayla devam`);
       return this.retrySocket();
     }
+    if (this.stopped) return; // istek sürerken stop(): soket açılmasın
     if (!url) return this.retrySocket();
     const ws = new WebSocket(url);
     this.sock = ws;
@@ -228,7 +234,8 @@ export class SlackConnector extends BaseConnector {
   async sendText(remoteChatId: string, text: string, opts?: SendOptions): Promise<{ remoteId: string }> {
     const res = await this.web.chat.postMessage({ channel: remoteChatId, text, ...(opts?.threadId ? { thread_ts: opts.threadId } : {}) });
     const id = String(res.ts ?? Date.now());
-    if (!opts?.threadId) this.lastTs.set(remoteChatId, id);
+    // lastTs burada ilerletilmez: son yoklamayla bu gönderim arasında karşıdan gelen mesaj (daha eski ts) sonraki
+    // yoklamada oldest=<benim ts> yüzünden hiç çekilmiyordu. Kendi mesajım yoklamada aynı ts ile gelip üzerine yazılır.
     this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent', threadId: opts?.threadId });
     return { remoteId: id };
   }
@@ -374,11 +381,19 @@ export class SlackConnector extends BaseConnector {
   }
 
   private async refreshList(): Promise<void> {
-    const list = await this.web.conversations.list({ types: 'im,mpim,private_channel,public_channel', limit: 200, exclude_archived: true });
+    // users.conversations: yalnız üyesi olunan sohbetler (conversations.list üye olunmayan açık kanalları da sayfaya
+    // dolduruyordu) + imleçle tüm sayfalar (tek 200'lük sayfada büyük çalışma alanında DM'ler hiç görünmüyordu)
+    const channels: NonNullable<Awaited<ReturnType<WebClient['users']['conversations']>>['channels']> = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < 25; page++) {
+      const r = await this.web.users.conversations({ types: 'im,mpim,private_channel,public_channel', limit: 200, exclude_archived: true, ...(cursor ? { cursor } : {}) });
+      channels.push(...(r.channels ?? []));
+      cursor = r.response_metadata?.next_cursor || undefined;
+      if (!cursor) break;
+    }
     const next: typeof this.convs = [];
-    for (const c of list.channels ?? []) {
+    for (const c of channels) {
       if (!c.id) continue;
-      if (c.is_channel && !c.is_member) continue;
       const kind = c.is_im ? 'direct' : c.is_mpim ? 'group' : 'channel';
       const name = c.is_im ? await this.userName(String(c.user ?? '')) : `#${c.name ?? c.id}`;
       this.ensureChat(c.id, name, kind);
@@ -396,8 +411,12 @@ export class SlackConnector extends BaseConnector {
       inclusive: false,
     });
     const msgs = (hist.messages ?? []) as SlackMsg[];
+    // İmleci olmayan sohbet (ilk turda seçilmemiş ya da sonradan listeye girmiş): oldest verilmedi, son mesajlar geldi —
+    // yalnız bağlandıktan sonra yazılanlar canlı (eskiler bildirim/okunmamış üretmesin)
+    const known = this.lastTs.has(c.id);
+    const live = !first && !older;
     for (const m of [...msgs].reverse()) {
-      await this.ingest(c.id, m, !first && !older);
+      await this.ingest(c.id, m, live && (known || Number(m.ts) * 1000 > this.startedAt));
       const prev = this.lastTs.get(c.id);
       if (!older && m.ts && (!prev || Number(m.ts) > Number(prev))) this.lastTs.set(c.id, String(m.ts));
     }
@@ -409,16 +428,34 @@ export class SlackConnector extends BaseConnector {
       const latest = String(m.latest_reply ?? m.reply_count);
       if (this.threadsSeen.get(key) === latest) continue;
       n++;
-      await this.fetchReplies(c.id, String(m.ts), latest);
+      await this.fetchReplies(c.id, String(m.ts), latest, live);
     }
   }
 
-  private async fetchReplies(channel: string, parentTs: string, latest?: string): Promise<void> {
+  /**
+   * Yanıtlar eskiden yeniye gelir: tek 40'lık istekte uzun dizilerin yeni yanıtları hiç alınmıyordu. Artık alınmış en yeni
+   * yanıttan (oldest) sonrası, imleçle en çok 5 sayfa. live: yalnız depoda olmayan ve bağlandıktan sonra yazılan yanıtlar canlı.
+   */
+  private async fetchReplies(channel: string, parentTs: string, latest?: string, live = true): Promise<void> {
+    const key = `${channel}/${parentTs}`;
     try {
-      const rep = await this.web.conversations.replies({ channel, ts: parentTs, limit: 40 });
-      const list = (rep.messages ?? []) as SlackMsg[];
-      for (const x of list) if (String(x.ts) !== parentTs) await this.ingest(channel, { ...x, thread_ts: parentTs }, true);
-      this.threadsSeen.set(`${channel}/${parentTs}`, latest ?? String(list[0]?.latest_reply ?? list.length));
+      const all: SlackMsg[] = [];
+      let cursor: string | undefined;
+      const oldest = this.threadLast.get(key);
+      for (let page = 0; page < 5; page++) {
+        const rep = await this.web.conversations.replies({ channel, ts: parentTs, limit: 200, ...(oldest ? { oldest, inclusive: false } : {}), ...(cursor ? { cursor } : {}) });
+        all.push(...((rep.messages ?? []) as SlackMsg[]));
+        cursor = (rep as { response_metadata?: { next_cursor?: string } }).response_metadata?.next_cursor || undefined;
+        if (!cursor) break;
+      }
+      for (const x of all) {
+        if (!x.ts || String(x.ts) === parentTs) continue;
+        const isLive = live && !this.hasMessage(channel, String(x.ts)) && Number(x.ts) * 1000 > this.startedAt;
+        await this.ingest(channel, { ...x, thread_ts: parentTs }, isLive);
+        const prev = this.threadLast.get(key);
+        if (!prev || Number(x.ts) > Number(prev)) this.threadLast.set(key, String(x.ts));
+      }
+      this.threadsSeen.set(key, latest ?? String(all[0]?.latest_reply ?? all.length));
     } catch {
       /* yanıtlar alınamadı; sonraki olay/yoklamada yeniden */
     }

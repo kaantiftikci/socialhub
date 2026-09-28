@@ -254,13 +254,19 @@ export default function App() {
   const [, tick] = useState(0);
   const selectedRef = useRef<string | null>(null);
   selectedRef.current = selected;
+  /** Ekranda gerçekten açık sohbet: Takvim/Odak görünümünde seçim korunur ama sohbet görünmez (okundu/bildirim için) */
+  const visibleChatRef = useRef<string | null>(null);
+  visibleChatRef.current = view === 'inbox' ? selected : null;
   /** sohbet → son yeniden 'okundu' işaretleme zamanı */
   const reReadAt = useRef(new Map<string, number>());
   const searchRef = useRef<HTMLInputElement>(null);
 
+  const toastTimer = useRef<number | undefined>(undefined);
   const notify = useCallback((text: string, err = false) => {
     setToast({ text, err });
-    window.setTimeout(() => setToast(null), 3500);
+    // önceki bildirimin zamanlayıcısı yenisini erken kapatmasın
+    clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), 3500);
   }, []);
 
   const refresh = useCallback(async () => {
@@ -361,7 +367,7 @@ export default function App() {
           queueChat(ev.chat);
           // Açık ve önde olan sohbete platform yoklaması 'okunmamış' geri yazdıysa (platform okunduyu geç işledi) yeniden işaretle;
           // sohbet başına en çok dakikada bir (döngü olmasın)
-          if (ev.chat.id === selectedRef.current && ev.chat.unread > 0 && Date.now() - (reReadAt.current.get(ev.chat.id) ?? 0) > 60_000) {
+          if (ev.chat.id === visibleChatRef.current && ev.chat.unread > 0 && Date.now() - (reReadAt.current.get(ev.chat.id) ?? 0) > 60_000) {
             reReadAt.current.set(ev.chat.id, Date.now());
             void windowFocused().then((f) => f && api.markRead(ev.chat.id)).catch(() => undefined);
           }
@@ -440,7 +446,7 @@ export default function App() {
           if (ev.live && !ev.message.fromMe && !ev.chat.muted && !ev.chat.hidden && !ev.chat.archived && Date.now() - bootTs > 60_000 && Date.now() - ev.message.ts < 120_000) {
             void windowFocused().then((focused) => {
               // uygulamanın bildirimi kapalıysa ne kart ne ses
-              if ((!focused || ev.message.chatId !== selectedRef.current) && platformNotifyOn(ev.chat.platform) && (ev.chat.kind === 'direct' || groupsNotify())) {
+              if ((!focused || ev.message.chatId !== visibleChatRef.current) && platformNotifyOn(ev.chat.platform) && (ev.chat.kind === 'direct' || groupsNotify())) {
                 const body = (ev.message.text || ev.message.attachments?.[0]?.name || 'Yeni mesaj').slice(0, 140);
                 // pencere öndeyse sistem bildirimi yerine uygulama içi kart (hangi platformdan geldiği belli olsun)
                 if (focused) pushInToast(ev.chat, body);
@@ -461,7 +467,7 @@ export default function App() {
               return [...prev, ev.message].sort((x, y) => x.ts - y.ts);
             });
             // pencere arka plandaysa okundu sayma (rozet/okunmamış sayacı korunur)
-            if (!ev.message.fromMe) void windowFocused().then((f) => f && api.markRead(ev.message.chatId)).catch(() => undefined);
+            if (!ev.message.fromMe && ev.message.chatId === visibleChatRef.current) void windowFocused().then((f) => f && api.markRead(ev.message.chatId)).catch(() => undefined);
           }
           break;
       }
@@ -511,6 +517,13 @@ export default function App() {
     };
   }, [selected, notify]);
 
+
+  // Takvim/Odak'tan gelen kutusuna dönünce, arada okunmamış mesaj almış açık sohbeti okundu işaretle
+  useEffect(() => {
+    if (view !== 'inbox' || !selected) return;
+    if ((chatsRef.current.get(selected)?.unread ?? 0) > 0) api.markRead(selected).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
 
   // ---- türetilmiş listeler ----
   const allChats = useMemo(() => [...chats.values()], [chats]);
@@ -584,6 +597,8 @@ export default function App() {
   useEffect(() => setComposeOpen(false), [selected]);
   const archivedCount = useMemo(() => activeChats.filter((c) => c.platform === platformFilter && !!c.meta?.archived).length, [activeChats, platformFilter]);
   const waitingChats = useMemo(() => inboxChats.filter(isWaiting).sort((a, b) => b.lastMessageAt - a.lastMessageAt), [inboxChats]);
+  /** Odak yalnız birebir sohbetleri listeler (gruplar/kanallar "odak dışında" kartında sayılır) */
+  const focusWaiting = useMemo(() => waitingChats.filter((c) => c.kind === 'direct'), [waitingChats]);
   const [storyPlatform, setStoryPlatform] = useState<Platform | null>(null);
   const storyChats = useMemo(() => (storyPlatform ? waitingChats.filter((c) => c.platform === storyPlatform) : waitingChats), [waitingChats, storyPlatform]);
   const storyPlatforms = useMemo(() => [...new Set(waitingChats.map((c) => c.platform))], [waitingChats]);
@@ -697,10 +712,18 @@ export default function App() {
   }, [totals.unread]);
   useEffect(() => {
     let un = () => undefined as void;
+    let cancelled = false;
     void onDesktopEvent('navigate', (to) => {
       if (to === 'focus') setView('focus');
-    }).then((u) => (un = u));
-    return () => un();
+    }).then((u) => {
+      // temizlik dinleyici kurulmadan çalıştıysa hemen kaldır (sızıntı olmasın)
+      if (cancelled) u();
+      else un = u;
+    });
+    return () => {
+      cancelled = true;
+      un();
+    };
   }, []);
 
   // ---- klavye kısayolları ----
@@ -964,7 +987,7 @@ export default function App() {
         </button>
         <div className="nav">
           <NavItem icon="inbox" label="Gelen kutusu" count={totals.unread} active={view === 'inbox' && filter === 'all' && !platformFilter && !tagFilter} onClick={() => goInbox('all')} />
-          <NavItem icon="sparkle" label="Odak" badge="AI" count={totals.waiting} active={view === 'focus'} onClick={() => setView('focus')} />
+          <NavItem icon="sparkle" label="Odak" badge="AI" count={focusWaiting.length} active={view === 'focus'} onClick={() => setView('focus')} />
           <NavItem icon="archive" label="Okunmamış" count={totals.unread} active={view === 'inbox' && filter === 'unread' && !platformFilter && !tagFilter} onClick={() => goInbox('unread')} />
           <NavItem icon="calendar" label="Takvim" title="Mivelo takvimi: mesajlardan eklenenler ve kendi etkinliklerin" count={todayEvents} active={view === 'calendar'} onClick={() => setView('calendar')} />
           {FLAG_VIEWS.filter((f) => f.view === 'archived' || flagged[f.flag].length > 0).map((f) => (
@@ -1130,7 +1153,7 @@ export default function App() {
             onOpenChat={(chatId, messageId) => (setView('inbox'), setSelected(chatId), setFocusMsg(messageId ? { chatId, id: messageId, ts: Date.now() } : null))}
           />
         ) : view === 'focus' ? (
-          <Focus waiting={waitingChats} chats={inboxChats} ai={ai} notify={notify} onOpen={openChat} onBack={() => setView('inbox')} onMenu={isMobile ? () => setNavOpen(true) : undefined} />
+          <Focus waiting={focusWaiting}chats={inboxChats} ai={ai} notify={notify} onOpen={openChat} onBack={() => setView('inbox')} onMenu={isMobile ? () => setNavOpen(true) : undefined} />
         ) : (
           <>
             <section className="list" aria-label="Sohbet listesi">

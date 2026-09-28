@@ -667,7 +667,8 @@ function ftsQuery(q: string): string {
 }
 
 function localDate(start: string): Date | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?$/.exec(start);
+  // eski kayıtlar "YYYY-MM-DD HH:mm" (boşluklu) olabilir: parseStart ile aynı biçimleri kabul et
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?$/.exec(start.trim());
   if (!m) return null;
   return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4] ?? 0), Number(m[5] ?? 0));
 }

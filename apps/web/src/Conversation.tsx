@@ -139,6 +139,24 @@ async function cancelScheduled(id: string): Promise<void> {
   startScheduledSends();
 }
 
+/**
+ * Sohbet başına gönderim zinciri ve gönderilemeyen metinler modül düzeyinde: Conversation her sohbette yeniden kurulur
+ * (key=chat.id), bileşen durumu sohbet değişince kaybolurdu. Zincir art arda gönderimlerin sırasını sohbet değişse de korur;
+ * başarısız metin açık kompozöre döner, sohbet açık değilse bekler ve sohbet yeniden açılınca kompozöre konur.
+ */
+const sendChains = new Map<string, Promise<unknown>>();
+const failedDrafts = new Map<string, string>();
+/** Açık (takılı) kompozörlerin metin ayarlayıcısı, sohbet kimliğine göre */
+const composers = new Map<string, (fn: (t: string) => string) => void>();
+function restoreFailed(chatId: string, body: string): void {
+  const set = composers.get(chatId);
+  if (set) set((t) => (t.trim() ? t : body));
+  else {
+    const prev = failedDrafts.get(chatId);
+    failedDrafts.set(chatId, prev ? `${prev}\n${body}` : body);
+  }
+}
+
 function tomorrowAt(hour: number): number {
   const d = new Date();
   d.setDate(d.getDate() + 1);
@@ -198,10 +216,17 @@ export function Conversation({
   // (WS message.upsert) aynı metinle gelir ve bu kopya gizlenir. Hata olursa balon kalkar, metin kutuya geri döner.
   const [outbox, setOutbox] = useState<Message[]>([]);
   const messages = useMemo(() => {
-    const mine = outbox.filter((o) => o.chatId === chat.id && !stored.some((m) => m.fromMe && m.text.trim() === o.text && m.ts >= o.ts - 10_000));
+    // bire bir eşleşme: aynı metin art arda gönderilince ilk gerçek kayıt iki balonu birden gizlemesin
+    const used = new Set<string>();
+    const mine = outbox.filter((o) => {
+      if (o.chatId !== chat.id) return false;
+      const hit = stored.find((m) => m.fromMe && !used.has(m.id) && m.text.trim() === o.text && m.ts >= o.ts - 10_000);
+      if (!hit) return true;
+      used.add(hit.id);
+      return false;
+    });
     return mine.length ? [...stored, ...mine] : stored;
   }, [stored, outbox, chat.id]);
-  const sendChain = useRef<Promise<unknown>>(Promise.resolve());
   // aramadan gelinen mesaj: yüklenince ortala ve 2,4 sn vurgula (otomatik "en alta kaydır"dan sonra)
   const focusDoneRef = useRef(onFocusDone);
   focusDoneRef.current = onFocusDone;
@@ -219,21 +244,38 @@ export function Conversation({
     }, 80);
     return () => clearTimeout(t);
   }, [focusMessageId, stored]);
-  const openChatRef = useRef(chat.id);
-  openChatRef.current = chat.id;
   const [search, setSearch] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (search !== null) searchRef.current?.focus();
   }, [search]);
-  const [text, setText] = useState('');
+  // gönderilemeyip bu sohbet kapalıyken bekleyen metin varsa kompozöre geri gelir
+  const [text, setText] = useState(() => {
+    const t = failedDrafts.get(chat.id) ?? '';
+    failedDrafts.delete(chat.id);
+    return t;
+  });
+  useEffect(() => {
+    const id = chat.id;
+    composers.set(id, setText);
+    return () => {
+      if (composers.get(id) === setText) composers.delete(id);
+    };
+  }, [chat.id]);
+  // bileşen kalkınca (sohbet değişti) bekleyen mikrofon isteği sonuçlanırsa akış hemen kapatılsın
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
   const [draft, setDraft] = useState<DraftResult | null>(null);
   const [drafting, setDrafting] = useState(false);
   // Ayarlar → AI: kapalı özellikler gizlenir; taslak kapalıyken üretilen sonuçtan yalnızca özet/aksiyonlar kullanılır
   const aiP = useAiPrefs();
   const draftOn = ai && aiP.drafts;
   const draftShown = draftOn && draft?.draft ? draft : null;
-  const [sending, setSending] = useState(false);
   const [tone, setTone] = useState<Tone>('default');
   const [tagInput, setTagInput] = useState('');
   const [addingTag, setAddingTag] = useState(false);
@@ -384,6 +426,11 @@ export function Conversation({
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') return notify('Bu ortamda ses kaydı desteklenmiyor', true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      // izin penceresi açıkken sohbet değiştiyse: kayıt başlatılmaz, mikrofon hemen bırakılır
+      if (!aliveRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
       const mime = recMime();
       const r = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 48_000 } : undefined);
       const chunks: Blob[] = [];
@@ -483,8 +530,12 @@ export function Conversation({
       })
       .catch((e) => notify((e as Error).message, true));
   }
-  async function sendFile(file: File, voice = false) {
-    if (file.size > 50 * 1024 * 1024) return notify('Dosya 50 MB\'tan büyük', true);
+  /** true: gönderildi (bekleyen ek ancak o zaman atılır; hata olursa ek kompozörde kalır, yeniden denenebilir) */
+  async function sendFile(file: File, voice = false): Promise<boolean> {
+    if (file.size > 50 * 1024 * 1024) {
+      notify('Dosya 50 MB\'tan büyük', true);
+      return false;
+    }
     setUploading(file.name);
     try {
       const data = await new Promise<string>((res, rej) => {
@@ -496,8 +547,10 @@ export function Conversation({
       await api.sendFile(chat.id, { name: file.name, mime: file.type || 'application/octet-stream', data, caption: text.trim() || undefined, voice: voice || undefined });
       setText('');
       notify(voice ? 'Sesli mesaj gönderildi' : `${file.name} gönderildi`);
+      return true;
     } catch (e) {
       notify((e as Error).message, true);
+      return false;
     } finally {
       setUploading(null);
     }
@@ -611,31 +664,42 @@ export function Conversation({
 
   async function send() {
     if (pending) {
-      if (sending || uploading) return;
+      if (uploading) return;
       const f = pending.file;
       const voice = !!pending.voice;
-      clearPending();
-      await sendFile(f, voice);
+      // ek ancak gönderim başarılıysa kompozörden kalkar (hata olursa kayıt/dosya kaybolmasın)
+      if (await sendFile(f, voice))
+        setPending((prev) => {
+          if (prev?.file !== f) return prev;
+          if (prev.url) URL.revokeObjectURL(prev.url);
+          return null;
+        });
       return;
     }
     const body = (text || draftShown?.draft || '').trim();
-    if (!body || sending) return;
+    if (!body) return;
     const chatId = chat.id;
     const threadId = threadFocus ?? undefined;
     const id = `out-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     setOutbox((x) => [...x, { id, chatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text: body, ts: Date.now(), status: 'pending', threadId }]);
     setText('');
     setDraft(null);
-    // art arda gönderimler sırasını korusun (her biri bir öncekini bekler; arayüz beklemez)
-    const run = sendChain.current.then(() => api.send(chatId, body, threadId));
-    sendChain.current = run.catch(() => undefined);
+    // art arda gönderimler sırasını korusun (her biri bir öncekini bekler; arayüz beklemez). Zincir modül düzeyinde,
+    // sohbet kimliğine göre: sohbetten çıkıp dönünce yeni mesaj yoldaki eskisini geçmesin
+    const run = (sendChains.get(chatId) ?? Promise.resolve()).then(() => api.send(chatId, body, threadId));
+    const tail = run.catch(() => undefined);
+    sendChains.set(chatId, tail);
+    void tail.then(() => {
+      if (sendChains.get(chatId) === tail) sendChains.delete(chatId);
+    });
     try {
       await run;
       setOutbox((x) => x.map((o) => (o.id === id ? { ...o, status: 'sent' } : o)));
       setTimeout(() => setOutbox((x) => x.filter((o) => o.id !== id)), 5000);
     } catch (e) {
       setOutbox((x) => x.filter((o) => o.id !== id));
-      if (chatId === openChatRef.current) setText((t) => (t.trim() ? t : body));
+      // açık kompozöre (bu sohbet hâlâ açıksa) ya da sohbet yeniden açılınca kompozöre geri gelsin
+      restoreFailed(chatId, body);
       notify((e as Error).message, true);
     }
   }
@@ -1160,8 +1224,8 @@ export function Conversation({
                 <span className="kbd">Tab</span> kabul et
               </span>
             )}
-            <button className="btn primary b" onClick={send} disabled={sending || !!uploading || !!rec || !(pending || text.trim() || draftShown?.draft)}>
-              {sending || uploading ? <span className="spin" /> : <Icon name="send" size={15} sw={1.9} />} Gönder
+            <button className="btn primary b" onClick={send} disabled={!!uploading || !!rec || !(pending || text.trim() || draftShown?.draft)}>
+              {uploading ?<span className="spin" /> : <Icon name="send" size={15} sw={1.9} />} Gönder
             </button>
           </div>
         </div>

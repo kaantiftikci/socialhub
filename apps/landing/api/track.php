@@ -40,7 +40,7 @@ if ($src === '') {
 }
 // yaygın kaynakları tek ada topla
 foreach (['instagram' => 'instagram', 'facebook' => 'facebook', 't.co' => 'x', 'twitter' => 'x', 'x.com' => 'x', 'linkedin' => 'linkedin', 'google' => 'google', 'youtube' => 'youtube', 'whatsapp' => 'whatsapp', 'wa.me' => 'whatsapp', 'bing' => 'bing'] as $needle => $name) {
-    if (str_contains($src, $needle)) {
+    if (strpos($src, $needle) !== false) {
         $src = $name;
         break;
     }
@@ -58,34 +58,70 @@ if (!is_dir($sdir)) {
     @mkdir($sdir, 0700, true);
 }
 $day = date('Y-m-d');
+// IPv6'da tek bağlantı /64 önekinin tamamını kullanabilir: sınır ve tekil sayımı /64'e göre
+$ip = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+if (strpos($ip, ':') !== false) {
+    $bin = @inet_pton($ip);
+    if ($bin !== false && strlen($bin) === 16) {
+        $ip = bin2hex(substr($bin, 0, 8)) . '::/64';
+    }
+}
 $salt = $dir . '/.stats-salt';
 if (!is_file($salt)) {
-    file_put_contents($salt, bin2hex(random_bytes(16)));
+    // 'x': eşzamanlı ilk iki istekten yalnız biri yazar
+    $sh = @fopen($salt, 'x');
+    if ($sh !== false) {
+        fwrite($sh, bin2hex(random_bytes(16)));
+        fclose($sh);
+    }
 }
-$vid = substr(hash('sha256', trim((string) file_get_contents($salt)) . '|' . $day . '|' . ($_SERVER['REMOTE_ADDR'] ?? '') . '|' . $ua), 0, 16);
+$saltVal = trim((string) @file_get_contents($salt));
+if (strlen($saltVal) !== 32) {
+    exit('{}'); // tuz henüz yazılıyor/okunamadı: bu ziyareti sayma
+}
+$vid = substr(hash('sha256', $saltVal . '|' . $day . '|' . $ip . '|' . $ua), 0, 16);
 
-$fh = fopen($sdir . '/' . date('Y-m') . '.json', 'c+');
-if ($fh === false) {
+$path = $sdir . '/' . date('Y-m') . '.json';
+$lh = @fopen($path . '.lock', 'c');
+if ($lh === false || !flock($lh, LOCK_EX)) {
     exit('{}');
 }
-flock($fh, LOCK_EX);
-$raw = stream_get_contents($fh);
-$data = ($raw !== false && $raw !== '') ? json_decode($raw, true) : null;
-if (!is_array($data)) {
-    $data = ['days' => []];
+clearstatcache(true, $path);
+$data = ['days' => []];
+if (file_exists($path)) {
+    $raw = @file_get_contents($path);
+    if ($raw === false) {
+        exit('{}');
+    }
+    if (trim($raw) !== '') {
+        $data = json_decode($raw, true);
+        // bozuk dosya sıfırlanıp üstüne yazılmaz (ayın tüm sayımları giderdi)
+        if (!is_array($data)) {
+            exit('{}');
+        }
+    }
+}
+if (!isset($data['days']) || !is_array($data['days'])) {
+    $data['days'] = [];
+}
+// Tekil kümesi (ids) ve dakikalık sınır (rl) yalnız bugün için gerekir: eski günlerinkini at (dosya her ziyarette
+// baştan yazılıyor; ay boyu 50 000'er kimlik birikince her istek MB'larca JSON işliyor, panel bellek sınırına takılıyordu)
+foreach ($data['days'] as $k => $v) {
+    if ($k !== $day && is_array($v)) {
+        unset($data['days'][$k]['ids'], $data['days'][$k]['rl']);
+    }
 }
 $d = $data['days'][$day] ?? ['v' => 0, 'u' => 0, 'ids' => [], 'src' => [], 'dev' => [], 'page' => []];
+$d['ids'] = is_array($d['ids'] ?? null) ? $d['ids'] : [];
 // tekil kümesi anahtar olarak tutulur (O(1)); eski biçim (liste) dönüştürülür
-if (array_is_list($d['ids'])) {
+if ($d['ids'] !== [] && $d['ids'] === array_values($d['ids'])) {
     $d['ids'] = array_fill_keys($d['ids'], 1);
 }
-// IP başına dakikalık sınır (sahte UA ile şişirmeye karşı): aynı IP'den dakikada en çok 30 kayıt
-$ipKey = substr(hash('sha256', ($_SERVER['REMOTE_ADDR'] ?? '') . '|' . date('Y-m-d H:i')), 0, 12);
-$d['rl'] = ($d['rl']['m'] ?? '') === date('H:i') ? $d['rl'] : ['m' => date('H:i'), 'c' => []];
+// IP başına dakikalık sınır (sahte UA ile şişirmeye karşı): aynı IP'den (IPv6: /64) dakikada en çok 30 kayıt
+$ipKey = substr(hash('sha256', $ip . '|' . date('Y-m-d H:i')), 0, 12);
+$d['rl'] = (($d['rl']['m'] ?? '') === date('H:i') && is_array($d['rl']['c'] ?? null)) ? $d['rl'] : ['m' => date('H:i'), 'c' => []];
 $d['rl']['c'][$ipKey] = ($d['rl']['c'][$ipKey] ?? 0) + 1;
 if ($d['rl']['c'][$ipKey] > 30) {
-    flock($fh, LOCK_UN);
-    fclose($fh);
     exit('{}');
 }
 $d['v']++;
@@ -99,10 +135,20 @@ if (!isset($d['ids'][$vid]) && count($d['ids']) < 50000) {
 }
 $d['page'][$page] = ($d['page'][$page] ?? 0) + 1;
 $data['days'][$day] = $d;
-ftruncate($fh, 0);
-rewind($fh);
-fwrite($fh, (string) json_encode($data, JSON_UNESCAPED_UNICODE));
-fflush($fh);
-flock($fh, LOCK_UN);
-fclose($fh);
+// önce kodla (hata → dosyaya dokunma), sonra geçici dosya + rename
+$json = json_encode($data, JSON_UNESCAPED_UNICODE);
+if ($json === false) {
+    exit('{}');
+}
+$tmp = $path . '.tmp-' . bin2hex(random_bytes(4));
+$fh = @fopen($tmp, 'x');
+$ok = $fh !== false && fwrite($fh, $json) === strlen($json) && fflush($fh);
+if ($fh !== false) {
+    fclose($fh);
+}
+if (!$ok || !@rename($tmp, $path)) {
+    @unlink($tmp);
+}
+flock($lh, LOCK_UN);
+fclose($lh);
 echo '{}';

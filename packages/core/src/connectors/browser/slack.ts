@@ -290,7 +290,7 @@ function slackReactions(list: J[] | undefined): Reaction[] | undefined {
   return out.length ? out : undefined;
 }
 /** Yanıtları çekilen iş parçacıkları: üst ts → latest_reply (değişmediyse yeniden istenmez) */
-const threadsSeen = new Map<string, string>();
+const threadsSeen = new Map<string, { latest: string; newest: string }>();
 
 async function toMsg(page: Page, m: J): Promise<Msg | undefined> {
   if (m.subtype && SKIP_SUBTYPES.has(String(m.subtype))) return undefined;
@@ -418,15 +418,31 @@ export const slackStrategy: Strategy = {
       if (!m.reply_count || !m.ts) continue;
       const key = `${threadId}/${m.ts}`;
       const latest = String(m.latest_reply ?? m.reply_count);
-      if (threadsSeen.get(key) === latest) continue;
+      const prev = threadsSeen.get(key);
+      if (prev?.latest === latest) continue;
       try {
-        const rep = await slack(page, 'conversations.replies', { channel: threadId, ts: String(m.ts), limit: 40 });
-        for (const x of (rep.messages ?? []) as J[]) {
-          if (String(x.ts) === String(m.ts)) continue;
-          const msg = await toMsg(page, x);
-          if (msg) msgs.push({ ...msg, threadId: String(m.ts) });
+        // conversations.replies eskiden yeniye döner: sabit limitle uzun dizilerde yeni yanıtlar hiç gelmiyordu.
+        // Son alınan yanıttan sonrası (oldest) istenir ve imleçle sayfalanır (en çok 5 × 200).
+        let newest = prev?.newest ?? '';
+        let cursor = '';
+        for (let page_ = 0; page_ < 5; page_++) {
+          const rep = await slack(page, 'conversations.replies', {
+            channel: threadId,
+            ts: String(m.ts),
+            limit: 200,
+            ...(prev?.newest ? { oldest: prev.newest, inclusive: false } : {}),
+            ...(cursor ? { cursor } : {}),
+          });
+          for (const x of (rep.messages ?? []) as J[]) {
+            if (String(x.ts) === String(m.ts)) continue;
+            if (!newest || Number(x.ts) > Number(newest)) newest = String(x.ts);
+            const msg = await toMsg(page, x);
+            if (msg) msgs.push({ ...msg, threadId: String(m.ts) });
+          }
+          cursor = String(rep.response_metadata?.next_cursor ?? '');
+          if (!cursor || !rep.has_more) break;
         }
-        threadsSeen.set(key, latest);
+        threadsSeen.set(key, { latest, newest });
       } catch {
         /* yanıtlar alınamadı; sonraki yoklamada yeniden denenir */
       }
@@ -537,6 +553,7 @@ export function _resetSlackState(): void {
   users.clear();
   chans.clear();
   lastRead.clear();
+  threadsSeen.clear();
   meId = '';
   listLoadedAt = 0;
   learned.base = '';

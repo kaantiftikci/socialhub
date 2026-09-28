@@ -193,6 +193,7 @@ export class IMessageConnector extends BaseConnector {
     this.watcher = undefined;
     if (this.watchDebounce) clearTimeout(this.watchDebounce);
     if (this.timer) clearInterval(this.timer);
+    this.pendingAtt.clear();
     this.db?.close();
     this.db = undefined;
     this.setStatus('disconnected');
@@ -396,7 +397,7 @@ export class IMessageConnector extends BaseConnector {
   }
 
   /** Mesajın ekleri: message_attachment_join → attachment. Dosya yerelde yoksa (iCloud'a taşınmış) bağlantı verilmez. */
-  private attachmentsOf(r: Row): Attachment[] | undefined {
+  private attachmentsOf(r: Row, onMissing?: () => void): Attachment[] | undefined {
     if (!r.cache_has_attachments) return undefined;
     let rows: AttRow[] = [];
     try {
@@ -413,6 +414,7 @@ export class IMessageConnector extends BaseConnector {
       const kind = attachmentKind(mime, name);
       const file = expandHome(a.filename);
       const present = !!file && fs.existsSync(file);
+      if (!present) onMissing?.();
       const proxied = present ? `${this.mediaBase()}im:${a.rowid}` : undefined;
       out.push({
         kind,
@@ -588,6 +590,8 @@ export class IMessageConnector extends BaseConnector {
       // Tanı: gönderenin zamanından Mivelo'da görünene kadar. "yedek" tetik → klasör izleyicisi olayı kaçırdı;
       // "izleyici" tetikle yüksek gecikme → mesaj bu Mac'in chat.db'sine geç yazıldı (Apple teslimi / iCloud eşitlemesi)
       if (fresh) bus.log('info', `imessage: gecikme ${((Date.now() - oldest) / 1000).toFixed(1)} sn (${fresh} yeni mesaj) — tetik: ${trigger}`);
+      // ek indirmesi chat.db'ye (attachment satırı) yazar → izleyici poll'u tetikler; yeni ROWID olmasa da bekleyenlere bakılır
+      this.recheckPendingAttachments();
       // zamana bağlı işler (yoklama artık olayla da tetikleniyor, tur sayısı süre ölçmez)
       const now = Date.now();
       if (now - this.retractAt >= 60_000) {
@@ -603,12 +607,46 @@ export class IMessageConnector extends BaseConnector {
     }
   }
 
+  /** Eki henüz diske inmemiş canlı mesajlar: ROWID → ilk görülme (ms). En çok 200, her biri en çok 10 dk izlenir. */
+  private pendingAtt = new Map<number, number>();
+  private static readonly PENDING_ATT_MS = 10 * 60_000;
+
+  private trackPendingAttachment(rowid: number): void {
+    if (this.pendingAtt.has(rowid)) return;
+    if (this.pendingAtt.size >= 200) this.pendingAtt.delete(this.pendingAtt.keys().next().value!);
+    this.pendingAtt.set(rowid, Date.now());
+  }
+
+  /** Bekleyen eklere yeniden bak: dosyaların hepsi indiyse mesaj yeniden yazılır (bağlantı/önizleme gelir); 10 dk sonra vazgeçilir */
+  private recheckPendingAttachments(): void {
+    if (!this.db || !this.pendingAtt.size) return;
+    const now = Date.now();
+    const one = this.db.prepare(`${this.selectSql} WHERE m.ROWID = ?`);
+    for (const [rowid, since] of [...this.pendingAtt]) {
+      if (now - since > IMessageConnector.PENDING_ATT_MS) {
+        this.pendingAtt.delete(rowid);
+        continue;
+      }
+      const r = one.get(rowid) as Row | undefined;
+      if (!r) {
+        this.pendingAtt.delete(rowid);
+        continue;
+      }
+      let missing = false;
+      this.attachmentsOf(r, () => (missing = true));
+      if (missing) continue;
+      this.pendingAtt.delete(rowid);
+      this.ingest(r, false);
+    }
+  }
+
   private ingest(r: Row, live: boolean): void {
     if (r.item_type !== 0) return; // grup olayları, isim değişiklikleri vb.
     if (isAssociatedReaction(r.associated_message_type)) return; // tapback: ayrı mesaj değil
     // U+FFFC: ekin metindeki yer tutucusu
     let text = (r.text ?? '').replace(/\uFFFC/g, '').trim() || decodeAttributedBody(r.attributedBody);
-    const attachments = this.attachmentsOf(r);
+    // Mesajlar satırı ek dosyası inmeden yazar: canlı mesajın eki henüz yoksa ROWID beklemeye alınır, poll yeniden bakar
+    const attachments = this.attachmentsOf(r, live ? () => this.trackPendingAttachment(r.rowid) : undefined);
     if (!text && !attachments) return;
     const deleted = !!r.date_retracted;
     if (deleted) text = `🗑 ${text || '(ek)'}`; // Mesajlar → Son Silinenler

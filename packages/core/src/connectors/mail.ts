@@ -409,9 +409,10 @@ export class MailConnector extends BaseConnector {
         lock.release();
       }
     }
+    // Belirteç istemci kurulmadan ÖNCE tazelenir: ImapFlow auth nesnesini kurulurken alır (sonra tazelenen belirteci görmez)
+    if (this.cfg.accessToken) await this.ensureOAuth();
     const client = new ImapFlow({ host: this.cfg.host!, port: this.cfg.port!, secure: this.cfg.secure ?? true, auth: this.auth(), logger: false });
     try {
-      if (this.cfg.accessToken) await this.ensureOAuth();
       await client.connect();
       const lock = await client.getMailboxLock('INBOX');
       try {
@@ -547,9 +548,9 @@ export class MailConnector extends BaseConnector {
   /** \\Sent ve \\Junk kutuları (imapflow specialUse); yoksa adla (Sent, Gönderilmiş, Junk, Spam) */
   private async pollFolders(): Promise<void> {
     if (this.stopping) return;
+    if (this.cfg.accessToken) await this.ensureOAuth(); // istemciden önce (bkz. withInbox)
     const client = new ImapFlow({ host: this.cfg.host!, port: this.cfg.port!, secure: this.cfg.secure ?? true, auth: this.auth(), logger: false });
     try {
-      if (this.cfg.accessToken) await this.ensureOAuth();
       await client.connect();
       const boxes = await client.list();
       const pick = (use: string, re: RegExp) => boxes.find((b) => (b as { specialUse?: string }).specialUse === use) ?? boxes.find((b) => re.test(b.path));
@@ -580,7 +581,17 @@ export class MailConnector extends BaseConnector {
     const fromMe = from.address === me;
     const refs = Array.isArray(m.references) ? m.references : m.references ? [m.references] : [];
     const chain = [...refs, m.inReplyTo].filter((x): x is string => !!x);
-    let thread = gmThread ? `gm:${gmThread}` : chain.map((r) => this.threadOf.get(r)).find(Boolean) ?? (chain[0] ? `msg:${chain[0]}` : `msg:${m.messageId ?? `uid-${uid}`}`);
+    let thread: string | undefined;
+    if (gmThread) {
+      // Mivelo'dan yazılan (compose) dizi msg:<Message-ID> ile açılır; Gmail'in dizi kimliği (Gönderilmiş kopyası / yanıtlar)
+      // o sohbete bağlanır (takma ad "gm:<thrid>" → msg:…), yoksa aynı yazışma iki sohbete bölünüyordu
+      thread = this.threadOf.get(`gm:${gmThread}`);
+      if (!thread) {
+        const composed = [m.messageId, ...chain].map((r) => (r ? this.threadOf.get(r) : undefined)).find((t) => t?.startsWith('msg:'));
+        if (composed) this.threadOf.set(`gm:${gmThread}`, composed);
+        thread = composed ?? `gm:${gmThread}`;
+      }
+    } else thread = chain.map((r) => this.threadOf.get(r)).find(Boolean) ?? (chain[0] ? `msg:${chain[0]}` : `msg:${m.messageId ?? `uid-${uid}`}`);
     if (!thread) thread = `uid-${uid}`;
     if (m.messageId) this.threadOf.set(m.messageId, thread);
     const people = [...addrs(m.from), ...addrs(m.to), ...addrs(m.cc)];
@@ -592,8 +603,10 @@ export class MailConnector extends BaseConnector {
     const remoteId = thread;
     const chatKey = `${this.account.id}/${remoteId}`;
     const existing = this.store.getChat(chatKey);
-    const unreadDelta = !seen && !fromMe ? 1 : 0;
-    if (unreadDelta && folder === 'inbox') this.unseen.set(remoteId, (this.unseen.get(remoteId) ?? new Set()).add(uid));
+    // Yalnız ilk kez alınan e-posta sayılır: Gereksiz kutusu her 8. yoklamada yeniden okunuyor, UIDVALIDITY sıfırlanınca
+    // gelen kutusu da; aynı okunmamış ileti sayacı her seferinde artırıyordu
+    const unreadDelta = !seen && !fromMe && !this.hasMessage(remoteId, m.messageId ?? `uid-${uid}`) ? 1 : 0;
+    if (!seen && !fromMe && folder === 'inbox') this.unseen.set(remoteId, (this.unseen.get(remoteId) ?? new Set()).add(uid));
     this.upsertChat({
       remoteId,
       name: subject,
@@ -609,7 +622,9 @@ export class MailConnector extends BaseConnector {
     const text = (m.text ?? htmlToText(m.html || '')).replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim();
     const attachments: Attachment[] = [];
     for (const [i, a] of (m.attachments ?? []).entries()) {
-      const key = createHash('sha1').update(`${uid}/${i}/${a.filename ?? ''}`).digest('hex');
+      // UID yalnız kendi kutusunda tekil: Gönderilmiş/Gereksiz'in UID 5'i gelen kutusunun UID 5'inin ekini ezmesin
+      // (gelen kutusu anahtarı eskisiyle aynı kalır; kayıtlı bağlantılar bozulmaz)
+      const key = createHash('sha1').update(`${folder === 'inbox' ? '' : folder + '/'}${uid}/${i}/${a.filename ?? ''}`).digest('hex');
       const dir = path.join(sessionDir(this.account.id), 'media');
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, key), a.content);

@@ -16,14 +16,21 @@ export class PollTimer {
   start(): this {
     this.on = true;
     this.next();
+    // not: next() önceki zamanlayıcıyı temizler ve zincir kimliğini yeniler (çift start tek zincir)
     return this;
   }
 
   stop(): void {
     this.on = false;
+    this.gen++; // çalışan turun geri çağrısı yeniden planlamasın
     if (this.t) clearTimeout(this.t);
     this.t = undefined;
   }
+
+  /** Tur sürüyor mu: sürerken backoff yeniden planlamaz (turun sonundaki next() pauseUntil'e uyar; tek zincir kalır) */
+  private running = false;
+  /** Zincir kimliği: start/stop/yeniden planlamada artar; eski geri çağrılar kendini tanır ve çıkar */
+  private gen = 0;
 
   private pauseUntil = 0;
   private hits = 0;
@@ -39,18 +46,26 @@ export class PollTimer {
     this.hitAt = now;
     const ms = Math.min(30 * 60_000, Math.max(sec, 30) * 1000 * 2 ** (this.hits - 1)) * (1 + Math.random() * 0.3);
     this.pauseUntil = Math.max(this.pauseUntil, now + ms);
-    if (this.on) {
-      if (this.t) clearTimeout(this.t);
-      this.next();
-    }
+    // tur sürüyorsa dokunma: turun sonundaki next() bekleme süresini zaten uzatır (ikinci zincir doğmasın)
+    if (this.on && !this.running) this.next();
   }
 
   private next(): void {
+    if (this.t) clearTimeout(this.t);
+    this.t = undefined;
     if (!this.on) return;
+    const gen = ++this.gen;
     const wait = Math.max(this.delay(), this.pauseUntil - Date.now());
     this.t = setTimeout(async () => {
-      await this.fn().catch(() => undefined);
-      this.next();
+      if (gen !== this.gen || !this.on) return;
+      this.t = undefined;
+      this.running = true;
+      try {
+        await this.fn().catch(() => undefined);
+      } finally {
+        this.running = false;
+      }
+      if (gen === this.gen) this.next();
     }, Math.round(wait));
     this.t.unref?.();
   }

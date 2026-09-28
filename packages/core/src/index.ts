@@ -92,11 +92,20 @@ async function main(): Promise<void> {
   }
   await registry.bootAll();
 
+  let closing = false;
   const shutdown = async () => {
+    if (closing) return; // ikinci SIGINT/SIGTERM kapanışı yeniden başlatmasın
+    closing = true;
     bus.log('info', 'Kapatılıyor…');
+    // son çare: connector'lar (her biri ≤10 sn) takılsa da süreç 20 sn içinde çıkar
+    setTimeout(() => process.exit(0), 20_000).unref();
     await registry.stopAll();
     server.close();
-    store.close();
+    try {
+      store.close();
+    } catch {
+      /* zaten kapalı */
+    }
     process.exit(0);
   };
   process.on('SIGINT', shutdown);

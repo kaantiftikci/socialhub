@@ -38,6 +38,19 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 
 export class Registry {
   private connectors = new Map<string, Connector>();
+  /** Hesap başına sıralı yaşam döngüsü (restart/add/remove): eşzamanlı iki "Yeniden bağlan" iki connector başlatmasın */
+  private locks = new Map<string, Promise<unknown>>();
+
+  private serial<T>(id: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.locks.get(id) ?? Promise.resolve();
+    const run = prev.then(fn, fn);
+    const tail = run.catch(() => undefined);
+    this.locks.set(id, tail);
+    void tail.then(() => {
+      if (this.locks.get(id) === tail) this.locks.delete(id);
+    });
+    return run;
+  }
 
   constructor(private store: Store) {}
 
@@ -64,7 +77,12 @@ export class Registry {
     }
   }
 
-  async add(platform: Platform, opts: { token?: string; label?: string } = {}): Promise<Account> {
+  add(platform: Platform, opts: { token?: string; label?: string } = {}): Promise<Account> {
+    // aynı platforma eşzamanlı iki "Bağlan": ikincisi birincinin açtığı hesabı görsün (kopya hesap açılmasın)
+    return this.serial(`add:${platform}`, () => this.addNow(platform, opts));
+  }
+
+  private async addNow(platform: Platform, opts: { token?: string; label?: string }): Promise<Account> {
     // Tek hesaplı platformlar: ikinci kez "Bağlan" denirse kopya hesap açma, var olanı yeniden başlat
     const SINGLE: Platform[] = ['whatsapp', 'telegram', 'slack', 'imessage', 'linkedin', 'x', 'instagram', 'messenger', 'shopier', 'trendyol', 'hepsiburada', 'etsy', 'shopify', 'n11', 'amazon'];
     const existing = SINGLE.includes(platform) ? this.list().find((a) => a.platform === platform) : undefined;
@@ -93,7 +111,11 @@ export class Registry {
     return account;
   }
 
-  async remove(id: string): Promise<void> {
+  remove(id: string): Promise<void> {
+    return this.serial(id, () => this.removeNow(id));
+  }
+
+  private async removeNow(id: string): Promise<void> {
     if (!this.store.getAccount(id) && !this.connectors.has(id)) throw new Error('Hesap yok');
     const c = this.connectors.get(id);
     if (c) {
@@ -106,13 +128,20 @@ export class Registry {
     bus.log('info', `Hesap kaldırıldı: ${id}`);
   }
 
-  async restart(id: string): Promise<void> {
+  restart(id: string): Promise<void> {
+    return this.serial(id, () => this.restartNow(id));
+  }
+
+  private async restartNow(id: string): Promise<void> {
     const a = this.store.getAccount(id);
     if (!a) throw new Error('Hesap yok');
     const c = this.connectors.get(id);
     // PIN gibi kullanıcı eylemi bekleniyorsa yeni bağlantı pencereyi doğrudan açar (görünmez denetim turu yok)
     const window = !!(c as { attention?: string } | undefined)?.attention;
-    if (c) await withTimeout(c.stop(), 15_000).catch(() => undefined);
+    if (c) {
+      this.connectors.delete(id);
+      await withTimeout(c.stop(), 15_000).catch(() => undefined);
+    }
     await this.spawn(a, true, window);
   }
 
@@ -236,13 +265,20 @@ export class Registry {
       default:
         throw new Error(`${account.platform} için connector henüz yok`);
     }
+    // aynı hesabın hâlâ çalışan bir connector'ı varsa (yarış/yeniden deneme) önce durdur: aynı oturumla iki bağlantı olmasın
+    const old = this.connectors.get(account.id);
+    if (old && old !== c) {
+      this.connectors.delete(account.id);
+      await withTimeout(old.stop(), 15_000).catch(() => undefined);
+    }
     this.connectors.set(account.id, c);
     // start() uzun sürebilir (QR bekleme vb.); arka planda çalışsın
     void c.start({ interactive, window }).catch((e) => bus.log('error', `${account.platform} hata: ${(e as Error).message}`));
   }
 
   async stopAll(): Promise<void> {
-    await Promise.all([...this.connectors.values()].map((c) => c.stop().catch(() => undefined)));
+    // tek bir asılı stop() kapanışı sonsuza dek bekletmesin
+    await Promise.all([...this.connectors.values()].map((c) => withTimeout(c.stop(), 10_000).catch(() => undefined)));
   }
 }
 

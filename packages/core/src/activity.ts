@@ -6,11 +6,34 @@
 const ACTIVE_FOR = 150_000; // son sinyalden bu kadar sonra (kapanan pencere sinyal gönderemeyebilir) boşta sayılır
 let lastActive = 0;
 const listeners = new Set<() => void>();
+const idleListeners = new Set<() => void>();
+let idleTimer: NodeJS.Timeout | undefined;
+
+function fireIdle(): void {
+  for (const fn of idleListeners) {
+    try {
+      fn();
+    } catch {
+      /* dinleyici hatası diğerlerini durdurmasın */
+    }
+  }
+}
 
 export function markActive(active: boolean, now = Date.now()): void {
   const was = isUiActive(now);
   lastActive = active ? now : 0;
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = undefined;
+  if (active) {
+    // sinyal kesilirse (pencere kapandı, Mac uyudu) ACTIVE_FOR sonunda boşa geçiş bildirilir
+    idleTimer = setTimeout(() => {
+      idleTimer = undefined;
+      if (!isUiActive()) fireIdle();
+    }, ACTIVE_FOR + 1000);
+    idleTimer.unref?.();
+  }
   if (active && !was) for (const fn of listeners) fn();
+  if (!active && was) fireIdle();
 }
 
 export function isUiActive(now = Date.now()): boolean {
@@ -21,4 +44,10 @@ export function isUiActive(now = Date.now()): boolean {
 export function onUiActive(fn: () => void): () => void {
   listeners.add(fn);
   return () => void listeners.delete(fn);
+}
+
+/** Etkinden boşa geçişte (açık {active:false} ya da sinyal kesilmesi) çağrılır; dönen işlev aboneliği kaldırır */
+export function onUiInactive(fn: () => void): () => void {
+  idleListeners.add(fn);
+  return () => void idleListeners.delete(fn);
 }

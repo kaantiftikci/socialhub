@@ -68,6 +68,10 @@ class N11AuthError extends Error {}
 class N11RateLimit extends Error {}
 class N11BadRequest extends Error {}
 
+/** Cevap gönderildi işareti (seen değeri): API cevabı yansıtana dek (≤30 dk) soru yeniden "bekliyor/okunmamış" olmasın */
+const ANSWERED_SENTINEL_PREFIX = 'answered:';
+const answeredSentinel = () => `${ANSWERED_SENTINEL_PREFIX}${Date.now()}`;
+const answeredRecently = (prev: string | undefined) => !!prev && prev.startsWith(ANSWERED_SENTINEL_PREFIX) && Date.now() - Number(prev.slice(ANSWERED_SENTINEL_PREFIX.length)) < 30 * 60_000;
 const money = (v: unknown, cur: string) => `${Number(v ?? 0).toFixed(2).replace('.', ',')} ${cur === 'TRY' || !cur ? '₺' : cur}`;
 const shorten = (s: string, n = 40) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s);
 
@@ -470,6 +474,8 @@ export class N11Connector extends BaseConnector {
     const sig = JSON.stringify([q.question, q.answer, q.status, q.answeredDate]);
     const prev = this.state.seen[rid];
     if (prev === sig) return false;
+    // az önce cevapladık ama liste cevabı henüz göstermiyor (onay/gecikme): soruyu yeniden açma
+    if (!answered && answeredRecently(prev)) return false;
     this.state.seen[rid] = sig;
 
     const created = q.questionDate ?? Date.now();
@@ -518,7 +524,7 @@ export class N11Connector extends BaseConnector {
       const q = (chat?.meta?.question ?? {}) as J;
       this.upsertChat({ remoteId: remoteChatId, name: chat?.name ?? remoteChatId, lastMessageAt: now, meta: { ...chat?.meta, question: { ...q, status: 'ANSWERED', statusLabel: 'Cevaplandı' } } });
       // sonraki yoklama API'nin kaydettiği cevabı getirince imza değişsin, ayrıntı yeniden çekilsin
-      delete this.state.seen[remoteChatId];
+      this.state.seen[remoteChatId] = answeredSentinel();
       if (this.state.questions[qid]) this.state.questions[qid].listSig = undefined;
       this.saveState();
       bus.log('info', `n11: soru #${qid} cevaplandı`);

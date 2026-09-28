@@ -323,28 +323,16 @@ export const outlook: Strategy = {
         // OWA hesabın adresini localStorage'da tutar (olk-login_hint, olk-mail_LAST_SELECTED_PIVOT<adres>)
         const btn = document.querySelector<HTMLElement>('#O365_MainLink_Me, button[aria-label*="Hesap yöneticisi"], button[aria-label*="Account manager"]');
         const label = btn?.getAttribute('aria-label') ?? btn?.innerText ?? '';
-        // Sıra: OWA'nın giriş ipucu → hesap düğmesi → sayfadaki outlook/hotmail/live adresi → localStorage anahtarları
-        // (anahtarlar "olk-…Enabled_adres", "olk-mail_LAST_SELECTED_PIVOTadres" gibi ön ekle yapışık: bilinen ön ekler atılır)
+        // Sıra: OWA'nın giriş ipucu → hesap düğmesi
         let email = '';
         try {
           email = pick(localStorage.getItem('olk-login_hint'));
         } catch {
           /* yok */
         }
-        email ||= pick(label) || (document.body.innerText.match(/[\w.+-]+@(outlook|hotmail|live|msn)\.[a-z.]+/i) ?? [])[0] || '';
-        if (!email) {
-          try {
-            const cands: string[] = [];
-            for (let i = 0; i < localStorage.length; i++) {
-              const c = pick(localStorage.key(i)).toLowerCase().replace(/^.*?(?:enabled_|pivot|hint_|selected_)/, '');
-              if (c && c.includes('@')) cands.push(c);
-            }
-            cands.sort((x, y) => x.length - y.length);
-            email = cands[0] ?? '';
-          } catch {
-            /* yok */
-          }
-        }
+        // Yalnızca hesaba ait kaynaklar: sayfa metnindeki ilk adres bir yazışanınki olabilir (fromMe ters döner) →
+        // bulunamazsa boş kalır (tahmin yok)
+        email ||= pick(label);
         return { email, name: label.replace(/[\w.+-]+@[\w.-]+/, '').replace(/^(Hesap yöneticisi|Account manager)( for)?:?/i, '').trim() };
       })
       .catch(() => ({ email: '', name: '' }));
@@ -375,6 +363,7 @@ export const outlook: Strategy = {
     const raw = await readListRows(page);
     for (const r of raw) listed.add(r.id);
     const out: Thread[] = raw.map((r) => ({ ...rawToThread(r), meta: { folder: 'inbox' } }));
+    const ids = new Set(out.map((t) => t.id));
     // Gönderilenler ve Gereksiz klasörleri: her 8. yoklamada okunur, sonra gelen kutusuna dönülür
     if (folderTick++ % 8 === 0) {
       for (const [path, folder] of [['sentitems', 'sent'], ['junkemail', 'junk']] as const) {
@@ -384,7 +373,12 @@ export const outlook: Strategy = {
           await page.waitForTimeout(800);
           const rows = ok ? await readListRows(page) : [];
           bus.log('info', `Outlook: ${folder} klasörü → ${rows.length} satır${ok ? '' : ' (liste yüklenmedi)'}`);
-          for (const r of rows) out.push({ ...rawToThread(r), unread: 0, meta: { folder } });
+          // gelen kutusunda da olan konuşma (yanıtladığım) ikinci kez yazılmasın: unread:0 gelen kutusunun okunmamışını ezerdi
+          for (const r of rows) {
+            if (ids.has(r.id)) continue;
+            ids.add(r.id);
+            out.push({ ...rawToThread(r), unread: 0, meta: { folder } });
+          }
         } catch (e) {
           bus.log('warn', `Outlook: ${folder} klasörü okunamadı: ${(e as Error).message.split('\n')[0].slice(0, 120)}`);
         }
@@ -501,7 +495,8 @@ export const outlook: Strategy = {
     await body.click();
     await body.fill(text);
     await clickSend(page);
-    return hashId(threadId + '|' + text + '|' + Date.now());
+    // gerçek ileti yoklamayla gelir: undefined → köprü local- kimliği yazar, gerçek kayıt gelince metinle eşleşip silinir
+    return undefined;
   },
 
   /**
@@ -543,7 +538,7 @@ export const outlook: Strategy = {
       await body.fill(caption);
     }
     await clickSend(page);
-    return hashId(threadId + '|' + file.name + '|' + Date.now());
+    return undefined;
   },
 };
 

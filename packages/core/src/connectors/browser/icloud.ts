@@ -108,64 +108,16 @@ export const icloud: Strategy = {
       return [];
     }
     if (!meEmail) await this.me(page, {});
-    const rows = await f.evaluate(() => {
-      const out: Array<{ id: string; label: string; unread: boolean; lines: string[] }> = [];
-      const items = Array.from(document.querySelectorAll<HTMLElement>('[role="listbox"] [role="option"], [role="list"] [role="listitem"], [role="grid"] [role="row"]'));
-      items.forEach((el, i) => {
-        const label = el.getAttribute('aria-label') ?? '';
-        const id = (el.getAttribute('data-id') ?? el.getAttribute('data-message-id') ?? el.id) || `row-${i}-${label.slice(0, 40)}`;
-        const unread = /okunmamış|unread/i.test(label) || !!el.querySelector('[aria-label*="Okunmamış"], [aria-label*="Unread"], .unread');
-        const lines = el.innerText.split('\n').map((t) => t.trim()).filter(Boolean);
-        out.push({ id, label, unread, lines });
-      });
-      return out;
-    });
+    const rows = await readRows(f);
     return rows.map((r) => {
       const [sender = '', subject = '(konu yok)', ...rest] = r.lines;
       const time = r.lines.find((l) => /\d{1,2}[:.]\d{2}|\d{1,2}\.\d{1,2}\.\d{4}/.test(l)) ?? '';
-      return { id: hashId(r.id), name: subject, kind: 'direct' as const, lastTs: parseOutlookDate(time) ?? 0, preview: `${sender}: ${rest.filter((l) => l !== time).join(' ')}`.slice(0, 200), unread: r.unread ? 1 : 0, participants: sender ? [{ id: sender, name: sender }] : undefined };
+      return { id: hashId(r.key), name: subject, kind: 'direct' as const, lastTs: parseOutlookDate(time) ?? 0, preview: `${sender}: ${rest.filter((l) => l !== time).join(' ')}`.slice(0, 200), unread: r.unread ? 1 : 0, participants: sender ? [{ id: sender, name: sender }] : undefined };
     });
   },
 
   async messages(page, _cookies, threadId, limit): Promise<Msg[]> {
-    const f = await ensureInbox(page);
-    if (!f) return [];
-    // satırı bul ve tıkla (kimlik hash'i satır metninden türetildiği için satırlar yeniden taranır)
-    const idx = await f.evaluate((hashTarget) => {
-      const items = Array.from(document.querySelectorAll<HTMLElement>('[role="listbox"] [role="option"], [role="list"] [role="listitem"], [role="grid"] [role="row"]'));
-      const h = (s: string) => {
-        let x = 2166136261;
-        for (let i = 0; i < s.length; i++) {
-          x ^= s.charCodeAt(i);
-          x = Math.imul(x, 16777619);
-        }
-        return (x >>> 0).toString(36);
-      };
-      return items.findIndex((el, i) => {
-        const label = el.getAttribute('aria-label') ?? '';
-        const id = (el.getAttribute('data-id') ?? el.getAttribute('data-message-id') ?? el.id) || `row-${i}-${label.slice(0, 40)}`;
-        return h(id) === hashTarget;
-      });
-    }, threadId);
-    if (idx < 0) return [];
-    await f.locator('[role="listbox"] [role="option"], [role="list"] [role="listitem"], [role="grid"] [role="row"]').nth(idx).click({ timeout: 8000 }).catch(() => undefined);
-    await page.waitForTimeout(2500);
-    const rows: Array<{ text: string; from: string; time: string }> = [];
-    for (const fr of page.frames()) {
-      const got = await fr
-        .evaluate(() => {
-          const arts = Array.from(document.querySelectorAll<HTMLElement>('[role="article"], article, [role="document"]'));
-          return arts.map((a) => ({ text: a.innerText.trim(), from: (a.innerText.match(/[\w.+-]+@[\w.-]+/) ?? [])[0] ?? '', time: (a.innerText.match(/\d{1,2}\.\d{1,2}\.\d{4}[^\n]*\d{1,2}:\d{2}|\d{1,2}:\d{2}/) ?? [])[0] ?? '' }));
-        })
-        .catch(() => [] as Array<{ text: string; from: string; time: string }>);
-      rows.push(...got.filter((r) => r.text.length > 0));
-    }
-    return rows
-      .map((r, i) => {
-        const fromMe = !!meEmail && r.from.toLowerCase() === meEmail;
-        return { id: hashId(threadId + '|' + r.from + '|' + r.text.slice(0, 120)), text: r.text.slice(0, 8000), ts: parseOutlookDate(r.time) ?? Date.now() - (rows.length - i) * 60_000, fromMe, senderId: fromMe ? 'me' : r.from || threadId, senderName: fromMe ? 'Ben' : r.from || 'Gönderen' };
-      })
-      .slice(-limit);
+    return readThread(page, threadId, limit, true);
   },
 
   async send(page, _cookies, threadId, text) {
@@ -173,7 +125,8 @@ export const icloud: Strategy = {
     await box.click();
     await box.fill(text);
     await clickSend(page);
-    return hashId(threadId + '|' + text + '|' + Date.now());
+    // gerçek ileti yoklamayla gelir: undefined → köprü local- kimliği yazar, gerçek kayıt gelince metinle eşleşip silinir
+    return undefined;
   },
 
   /**
@@ -215,13 +168,107 @@ export const icloud: Strategy = {
       await box.fill(caption);
     }
     await clickSend(page);
-    return hashId(threadId + '|' + file.name + '|' + Date.now());
+    return undefined;
   },
 };
 
+const ROW_SEL = '[role="listbox"] [role="option"], [role="list"] [role="listitem"], [role="grid"] [role="row"]';
+
+interface IcloudRow {
+  /** kararlı anahtar: DOM kimliği; yoksa satır içeriği (zaman ifadeleri hariç) — satır sırası DEĞİL (yeni posta gelince kayardı) */
+  key: string;
+  label: string;
+  unread: boolean;
+  lines: string[];
+}
+
+/** Liste satırlarını DOM sırasıyla oku (threads ve messages aynı anahtarı üretsin diye tek yerde) */
+function readRows(f: Frame): Promise<IcloudRow[]> {
+  return f.evaluate((sel) => {
+    const out: IcloudRow[] = [];
+    const seen = new Map<string, number>();
+    const timeRe = /\d{1,2}[:.]\d{2}(\s*(AM|PM|ÖÖ|ÖS))?|\d{1,2}[./]\d{1,2}[./]\d{2,4}|^(Dün|Yesterday|Bugün|Today)$/gi;
+    for (const el of Array.from(document.querySelectorAll<HTMLElement>(sel))) {
+      const label = el.getAttribute('aria-label') ?? '';
+      const lines = el.innerText.split('\n').map((t) => t.trim()).filter(Boolean);
+      const unread = /okunmamış|unread/i.test(label) || !!el.querySelector('[aria-label*="Okunmamış"], [aria-label*="Unread"], .unread');
+      let key = el.getAttribute('data-id') ?? el.getAttribute('data-message-id') ?? el.id ?? '';
+      if (!key) {
+        // içerikten: gönderen + konu + önizleme başı; zaman ve okunmamış işaretleri atılır (zamanla/okununca değişmesin)
+        const content = lines
+          .map((l) => l.replace(timeRe, '').replace(/okunmamış|unread/gi, '').trim())
+          .filter(Boolean)
+          .slice(0, 3)
+          .join('|')
+          .slice(0, 200);
+        const base = 'c:' + content;
+        // aynı içerikli satırlar (ör. aynı otomatik bildirim) ayrılsın
+        const n = seen.get(base) ?? 0;
+        seen.set(base, n + 1);
+        key = n ? `${base}#${n}` : base;
+      }
+      out.push({ key, label, unread, lines });
+    }
+    return out;
+  }, ROW_SEL);
+}
+
+/**
+ * Satırı bul, tıkla ve okuma bölmesindeki iletileri oku. Tıklamak iCloud'da iletiyi okundu yapar: restore=true ise
+ * (yoklama) satır okunmamışsa okuduktan sonra "Okunmadı olarak işaretle" ile geri alınır.
+ */
+async function readThread(page: Page, threadId: string, limit: number, restore: boolean): Promise<Msg[]> {
+  const f = await ensureInbox(page);
+  if (!f) return [];
+  const list = await readRows(f).catch(() => [] as IcloudRow[]);
+  const idx = list.findIndex((r) => hashId(r.key) === threadId);
+  if (idx < 0) return [];
+  const wasUnread = list[idx].unread;
+  await f.locator(ROW_SEL).nth(idx).click({ timeout: 8000 }).catch(() => undefined);
+  await page.waitForTimeout(2500);
+  const rows: Array<{ text: string; from: string; time: string }> = [];
+  for (const fr of page.frames()) {
+    const got = await fr
+      .evaluate(() => {
+        const arts = Array.from(document.querySelectorAll<HTMLElement>('[role="article"], article, [role="document"]'));
+        return arts.map((a) => ({ text: a.innerText.trim(), from: (a.innerText.match(/[\w.+-]+@[\w.-]+/) ?? [])[0] ?? '', time: (a.innerText.match(/\d{1,2}\.\d{1,2}\.\d{4}[^\n]*\d{1,2}:\d{2}|\d{1,2}:\d{2}/) ?? [])[0] ?? '' }));
+      })
+      .catch(() => [] as Array<{ text: string; from: string; time: string }>);
+    rows.push(...got.filter((r) => r.text.length > 0));
+  }
+  if (restore && wasUnread) await markUnread(page, threadId);
+  return rows
+    .map((r, i) => {
+      const fromMe = !!meEmail && r.from.toLowerCase() === meEmail;
+      return { id: hashId(threadId + '|' + r.from + '|' + r.text.slice(0, 120)), text: r.text.slice(0, 8000), ts: parseOutlookDate(r.time) ?? Date.now() - (rows.length - i) * 60_000, fromMe, senderId: fromMe ? 'me' : r.from || threadId, senderName: fromMe ? 'Ben' : r.from || 'Gönderen' };
+    })
+    .slice(-limit);
+}
+
+/** Açık iletiyi yeniden okunmadı yap (tüm çerçevelerde düğme aranır; bulunamazsa günlüğe yazılır) */
+async function markUnread(page: Page, threadId: string): Promise<void> {
+  await page.waitForTimeout(600);
+  let done = false;
+  for (const fr of page.frames()) {
+    done = await fr
+      .evaluate(() => {
+        const re = /^(Okunmadı olarak işaretle|Okunmamış olarak işaretle|Mark as Unread)$/i;
+        const b = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], [role="menuitem"], ui-button')).find(
+          (e) => re.test((e.getAttribute('aria-label') ?? e.getAttribute('title') ?? e.innerText ?? '').trim()) && e.getBoundingClientRect().width > 0,
+        );
+        if (!b) return false;
+        b.click();
+        return true;
+      })
+      .catch(() => false);
+    if (done) break;
+  }
+  if (!done) bus.log('info', `iCloud Mail: okunmamış durumu geri alınamadı (${threadId.slice(0, 10)}…)`);
+}
+
 /** İletiyi aç, Yanıtla'ya bas, düzenleyici kutusunu döndür */
 async function openReply(page: Page, threadId: string): Promise<Locator> {
-  await icloud.messages(page, {}, threadId, 1); // iletiyi aç
+  await readThread(page, threadId, 1, false); // iletiyi aç (yanıtlanacak: okunmamışa geri alınmaz)
   const btn = page.locator('[aria-label="Yanıtla"], [aria-label="Reply"], button:has-text("Yanıtla"), button:has-text("Reply")').first();
   await btn.click({ timeout: 8000 });
   const box = page.locator('[contenteditable="true"][role="textbox"], [contenteditable="true"]').last();

@@ -297,7 +297,8 @@ export class AmazonConnector extends BaseConnector {
       await this.poll(true);
       this.setApiStatus('connected', this.marketplace.country);
       if (this.timer) clearInterval(this.timer);
-      this.timer = setInterval(() => void this.poll(false), POLL_MS);
+      // poll AuthError'u yeniden fırlatır (durumu zaten 'error' yapıp zamanlayıcıyı durdurur): burada yutulur, söz reddi yakalanmamış kalmasın
+      this.timer = setInterval(() => void this.poll(false).catch(() => undefined), POLL_MS);
     } catch (e) {
       this.setApiStatus('error', (e as Error).message.split('\n')[0]);
       return;

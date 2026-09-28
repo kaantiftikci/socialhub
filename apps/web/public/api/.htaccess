@@ -1,0 +1,10 @@
+# FTP-Deploy-Action durum dosyası (deploy-demo.yml state-name) burada tutulur: yayımlanan tüm dosyaların listesi, dışarıya kapalı
+<Files ".ftp-deploy-sync-state.json">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+  </IfModule>
+</Files>

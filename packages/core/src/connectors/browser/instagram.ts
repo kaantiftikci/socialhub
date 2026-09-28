@@ -400,6 +400,9 @@ export const instagram: Strategy = {
     // taklidi (visibilityState=hidden) istemcinin okundu göndermesini engelliyordu → #mivelo-visible ile taklit kapatılır.
     await page.goto(`https://www.instagram.com/direct/t/${threadId}/#mivelo-visible`, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
     await page.waitForTimeout(7000);
+    // Açık tutulan sayfa görünür sohbette kalmasın: yoksa sonraki gelen mesajlar kendiliğinden "Görüldü" olur.
+    // Gelen kutusuna (#mivelo-visible olmadan → gizli sekme taklidi geri gelir) dön; sayfa başka yere gittiyse dokunma.
+    if (page.url().includes('mivelo-visible')) await page.goto(this.home, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
   },
 
   /** API tabanlı: mesaj çağrıları paralel yapılabilir (köprü 4'lü paralel çağırır) */

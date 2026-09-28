@@ -107,6 +107,19 @@ Dil: arayüz ve yorumlar Türkçe.
   "gelişmiş". Yandex ayrı platform (`yandex`, imap.yandex.com, uygulama şifresi). "Diğer e-posta" yalnız e-posta+şifre: sunucu
   `mail-discover.ts` (bilinen sağlayıcılar → Thunderbird autoconfig → imap.<alan>); elle giriş "gelişmiş". Yahoo "Command failed": OBJECTID
   bildiren sunucuda imapflow THREADID istiyordu → threadId yalnız Gmail'de, reddedilirse onsuz yeniden.
+- **Genel hata denetimi (Eylül 2026, satır satır)** sonrası kurallar:
+  - WhatsApp telefon bildirimleri: gönderim/okundu/tepki sonrası HEMEN "unavailable" (+20–40 sn yedek), arayüz boşa geçince
+    (`activity.ts onUiInactive`, ≥60 sn arayla), uykudan uyanma (30 sn saat sıçraması >90 sn) ve kapanışta. Düzenli presence YOK.
+  - WhatsApp oturumu yalnız sunucu reddinde (428, ağ hatası değil) sayılır; 408/ağ kopması asla oturum silmez. Profil fotoğrafları tek
+    sıralı kuyruk (0,5–1,5 sn, oturum başına ≤300, `avatars.json` 3 gün); ayrılınan grup metadata hatası 24 sa negatif önbellek; önbellekler hesap başına.
+  - Sunucu: Host başlığı izin listesi (DNS rebinding), `/api/lan` belirteci yalnız yerelden; IPv6-içi IPv4 SSRF engeli; registry restart/remove
+    hesap başına sıralı; send-guard anahtarı sha256.
+  - PollTimer tek zincir (429 backoff çift yoklama üretmez). Trendyol paketleri sipariş başına durum dosyasında birleşir (≤2000).
+  - Tarayıcı köprüsü `ensureOpen` tek uçuş; mesaj başına 429/checkpoint de backoff'a gider; markRead sonrası görünür sayfa terk edilir
+    (IG/X/Messenger "Görüldü" sızmasın). Gmail/iCloud yoklama okunmamışı geri işaretler. E-posta tarayıcı gönderimleri `local-` kimlik.
+  - Masaüstü bekçisi: 60 sn açılış payı, çökmede üstel bekleme ≤5 dk, SIGTERM→bekle→kill; `core-bundle/node-abi.json` ile uyumlu Node seçilir.
+  - PHP depoları: önce kodla, tmp+rename, ayrı `.lock`; bozuk dosya 500 (asla sıfırlama); admin varsayılan şifreye asla düşmez; IPv6 /64 sınırı.
+    Deploy durum dosyası `api/.ftp-deploy-sync-state.json` (sunucu kökündeki eskisi elle silinmeli).
 - **Kendi mesajının yankısı**: `store.isOwnEcho` (aynı sohbette ±3 dk, ≥12 kr. aynı metinli fromMe) → base.upsertMessage gelen saymaz (tüm
   platformlar); WhatsApp'ta katılımcı kimliği `meIds` ise fromMe. Uyarıdaki "QR'ı göster" Bağlan'ı o hesabın eşleştirme alanıyla açar (`focus`).
 

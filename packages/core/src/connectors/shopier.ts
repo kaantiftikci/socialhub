@@ -86,7 +86,9 @@ export class ShopierConnector extends BaseConnector {
     this.polling = true;
     try {
       const orders: J[] = [];
-      const pages = first ? 4 : 1;
+      // Shopier listesi yalnız oluşturma tarihine göre sıralı (güncellenme filtresi belgelenmemiş): her yoklamada en yeni 200
+      // siparişe bakılır ki eski siparişin kargo/iade/kapanma değişimi de görülsün (4 istek/dk; sınır 200/dk)
+      const pages = 4;
       for (let page = 1; page <= pages; page++) {
         const { data, headers } = await this.api('GET', `/orders?limit=50&page=${page}&sort=dateDesc`);
         const list = Array.isArray(data) ? data : (data.orders ?? data.data ?? []);
@@ -212,8 +214,14 @@ export class ShopierConnector extends BaseConnector {
       },
     };
     const { data } = await this.api('PUT', `/orders/${encodeURIComponent(remoteChatId)}`, body);
-    this.seen.delete(remoteChatId);
-    this.ingest(data.id ? data : { ...data, id: remoteChatId }, false);
+    // PUT yanıtı tam sipariş olmayabilir: siparişi yeniden çek; olmazsa yanıtı yalnız tam siparişse kullan. seen silinmez
+    // (silinirse "yeni sipariş" yeniden yazılır, okunmamış olur ve "kapatıldı" olayı hiç yazılmaz)
+    const full = await this.api('GET', `/orders/${encodeURIComponent(remoteChatId)}`)
+      .then((r) => (r.data?.id ? r.data : undefined))
+      .catch(() => undefined);
+    const order = full ?? (data?.id && Array.isArray(data.lineItems) ? data : undefined);
+    if (order) this.ingest(order, false);
+    else void this.poll(false); // sipariş okunamadı: sonraki tam yoklama güncellesin
     this.saveState();
   }
 }

@@ -2,7 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import os from 'node:os';
 import QRCode from 'qrcode';
 import { DATA_DIR } from './config.js';
@@ -16,9 +16,9 @@ import type { Registry } from './registry.js';
 import type { Connector } from './connectors/base.js';
 import { resolveOAuth } from './connectors/mail.js';
 import { bus } from './bus.js';
-import { aiEnabled, aiKey, aiKeySource, draftReply, setAiKey } from './ai.js';
+import { AiError, aiEnabled, aiKey, aiKeySource, draftReply, isAiTone, setAiKey } from './ai.js';
 import { analyzeStyle, describeStyle } from './style.js';
-import { buildIcs, parseStart } from './calendar.js';
+import { buildIcs, formatStart, parseStart } from './calendar.js';
 import { openExternal } from './platform.js';
 import { ALL_PLATFORMS } from './model.js';
 import { MEDIA_HOSTS, PLATFORM_MEDIA_HOSTS, MEDIA_MAX } from './media-hosts.js';
@@ -80,6 +80,7 @@ function lanAddresses(): string[] {
   return out;
 }
 const isLoopback = (addr: string | undefined) => !addr || addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
+const hasForwarded = (req: http.IncomingMessage) => !!(req.headers['x-forwarded-for'] || req.headers['cf-connecting-ip'] || req.headers['x-forwarded-host']);
 
 /** Kalıcı hatayla dönen medya istekleri (hesap|adres → zaman, kod) */
 const mediaFailures = new Map<string, { at: number; code: number }>();
@@ -101,26 +102,50 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     const u = new URL(req.url ?? '/', 'http://x');
     return (req.headers['x-kavsak-token'] as string | undefined) ?? u.searchParams.get('token') ?? '';
   };
+  /** Belirteç karşılaştırması sabit sürede (zamanlama ile tahmin edilemesin) */
+  const tokenBuf = Buffer.from(token);
+  const tokenOk = (req: http.IncomingMessage): boolean => {
+    const g = Buffer.from(String(givenToken(req)));
+    return g.length === tokenBuf.length && timingSafeEqual(g, tokenBuf);
+  };
+  /**
+   * DNS yeniden bağlama (rebinding) önlemi: kötü niyetli bir site adını 127.0.0.1'e çevirip aynı-kaynak GET'le (Origin'siz)
+   * API'yi okuyamasın. Host yalnız yerel adlar (çekirdek portu ya da Vite 5173 vekili — vekil Host'u değiştirmez), Tauri ve
+   * LAN açıkken bu makinenin ağ adresleri olabilir. Tünel/vekil istekleri (forwarded başlıklar) ayrıca belirteç ister.
+   */
+  const hostAllowed = (req: http.IncomingMessage): boolean => {
+    if (hasForwarded(req)) return true;
+    const raw = req.headers.host;
+    if (!raw) return true; // tarayıcılar Host'u her zaman gönderir; Host'suz istek tarayıcıdan gelmez
+    const m = /^(\[[^\]]+\]|[^:]+)(?::(\d+))?$/.exec(raw.trim().toLowerCase());
+    if (!m) return false;
+    const host = m[1];
+    const p = m[2] ? Number(m[2]) : 80;
+    if (host === 'tauri.localhost') return true;
+    if ((host === 'localhost' || host === '127.0.0.1' || host === '[::1]') && (p === port || p === 5173)) return true;
+    return lanEnabled && p === port && lanAddresses().includes(host);
+  };
   /**
    * Yerel (loopback) istemci: Origin yoksa ya da yerel origin ise serbest; diğer origin'ler (null dahil) belirteç ister.
    * Uzak istemci (telefon): yalnızca LAN modu açıksa ve belirteç doğruysa.
    */
   const authorized = (req: http.IncomingMessage): boolean => {
+    if (!hostAllowed(req)) return false;
     if (!isLoopback(req.socket.remoteAddress)) {
       if (!lanEnabled) return false;
       // arayüz dosyaları (index, assets) belirteçsiz inebilir; veri (/api, /ws) belirteç ister
       const p = new URL(req.url ?? '/', 'http://x').pathname;
       if (req.method === 'GET' && !p.startsWith('/api/') && p !== '/ws') return true;
-      return givenToken(req) === token;
+      return tokenOk(req);
     }
     // Tünel/vekil üzerinden gelen istekler (cloudflared, ngrok) loopback görünür: bunlar uzak sayılır, belirteç şart
-    if (req.headers['x-forwarded-for'] || req.headers['cf-connecting-ip'] || req.headers['x-forwarded-host']) return givenToken(req) === token;
+    if (hasForwarded(req)) return tokenOk(req);
     const origin = req.headers.origin;
     if (!origin || LOCAL_ORIGIN.test(origin)) return true;
-    return givenToken(req) === token;
+    return tokenOk(req);
   };
   /** Uzak (LAN/tünel) istemciden hesap ekleme/silme/LAN ayarı yapılamaz: belirteç sızsa da yıkıcı işlemler bu Mac'te kalır */
-  const isRemote = (req: http.IncomingMessage) => !isLoopback(req.socket.remoteAddress) || !!(req.headers['x-forwarded-for'] || req.headers['cf-connecting-ip'] || req.headers['x-forwarded-host']);
+  const isRemote = (req: http.IncomingMessage) => !isLoopback(req.socket.remoteAddress) || hasForwarded(req);
   const localOnly = (req: http.IncomingMessage) => {
     if (isRemote(req)) throw new HttpError(403, 'Bu işlem yalnızca bu bilgisayardan yapılabilir');
   };
@@ -132,6 +157,8 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     }
   };
   let lanServer: http.Server | undefined;
+  /** LAN'dan (uzak adresten) bağlanan WS istemcileri: telefondan erişim kapatılınca hemen koparılır */
+  const lanClients = new WeakSet<WebSocket>();
   const openLan = () => {
     if (lanServer) return;
     lanServer = http.createServer(onRequest);
@@ -142,10 +169,14 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   };
   const closeLan = () => {
     lanServer?.close();
+    // close() yalnız yeni bağlantıları durdurur: açık keep-alive soketleri ve WS istemcileri de kesilsin
+    lanServer?.closeAllConnections();
     lanServer = undefined;
+    for (const client of wss.clients) if (lanClients.has(client)) client.terminate();
   };
-  const lanInfo = async () => {
-    const urls = lanAddresses().map((ip) => `http://${ip}:${port}/#token=${token}`);
+  /** withToken: yalnız bu bilgisayardan istenince (QR/bağlantı belirteci taşır); uzak istemciye belirteç geri verilmez */
+  const lanInfo = async (withToken: boolean) => {
+    const urls = lanAddresses().map((ip) => `http://${ip}:${port}/${withToken ? `#token=${token}` : ''}`);
     return { enabled: lanEnabled, urls, qr: urls[0] ? await QRCode.toDataURL(urls[0], { margin: 1, width: 220 }) : undefined };
   };
   // Bekleyen QR kodları: arayüz sonradan açılsa da eşleşme ekranı boş kalmasın
@@ -153,6 +184,11 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   bus.on((ev) => {
     if (ev.type === 'account.qr') pendingQr.set(ev.accountId, ev.qrDataUrl);
     if (ev.type === 'account.status' && ev.account.status !== 'pairing') pendingQr.delete(ev.account.id);
+    // sohbet silindi: bekleyen zamanlanmış gönderimleri de at
+    if (ev.type === 'chat.delete' && scheduled.list(ev.chatId).length) {
+      scheduled.removeChat(ev.chatId);
+      bus.emit({ type: 'scheduled.update' });
+    }
   });
 
   // ---------- routes ----------
@@ -166,11 +202,18 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     localOnly(r);
     const b = body as { platform?: Platform; token?: string; label?: string };
     if (!b.platform || !ALL_PLATFORMS.includes(b.platform)) throw new HttpError(400, 'Geçersiz platform');
+    // arayüzde "Yakında" olan platformlar (Shopier, ePttAVM): connector yok → anlaşılır 400
+    if (b.platform === 'pttavm') throw new HttpError(400, 'Bu kanal henüz desteklenmiyor');
     return registry.add(b.platform, { token: typeof b.token === 'string' ? b.token : undefined, label: typeof b.label === 'string' ? b.label.slice(0, 80) : undefined });
   });
   route('DELETE', '/api/accounts/:id', async (r, _s, p) => {
     localOnly(r);
-    await registry.remove(dec(p.id));
+    const id = dec(p.id);
+    await registry.remove(id);
+    // hesabın sohbetlerine zamanlanmış gönderimler de gitsin (yoksa 404 → "kaçırıldı" olarak 7 gün kalırdı)
+    const gone = new Set(scheduled.list().filter((s) => s.chatId.startsWith(`${id}/`)).map((s) => s.chatId));
+    for (const cid of gone) scheduled.removeChat(cid);
+    if (gone.size) bus.emit({ type: 'scheduled.update' });
     return { ok: true };
   });
   route('POST', '/api/accounts/:id/restart', async (r, _s, p) => {
@@ -351,7 +394,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   route('GET', '/api/preview', async (req) => {
     // Dış istek başlatan uç: başka bir sitenin <img src> ile (Origin'siz GET) tetiklemesine izin verme.
     // Arayüz her istekte x-mivelo-client gönderir (özel başlık → çapraz sitede ön kontrol + Origin → belirteç şart)
-    if (!req.headers['x-mivelo-client'] && givenToken(req) !== token) throw new HttpError(403, 'İstemci doğrulanamadı');
+    if (!req.headers['x-mivelo-client'] && !tokenOk(req)) throw new HttpError(403, 'İstemci doğrulanamadı');
     const url = new URL(req.url ?? '/', 'http://x').searchParams.get('url') ?? '';
     if (!/^https?:\/\//i.test(url) || url.length > 2048) throw new HttpError(400, 'url gerekli');
     return (await fetchPreview(url)) ?? { url, none: true };
@@ -389,10 +432,16 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     const id = dec(p.id);
     const chat = store.getChat(id);
     if (!chat) throw new HttpError(404, 'Sohbet yok');
-    const tone = (body as { tone?: 'default' | 'short' | 'formal' | 'en' }).tone;
+    const t = (body as { tone?: unknown }).tone;
+    if (t !== undefined && t !== null && !isAiTone(t)) throw new HttpError(400, 'Geçersiz ton');
+    const tone = isAiTone(t) ? t : undefined;
     const style = analyzeStyle([...store.myTexts(chat.platform, 250), ...store.myTexts(undefined, 250)]);
     const pairs = store.styleSamples(id, chat.platform, 12);
-    const result = await draftReply({ chat, messages: store.listMessages(id, 30), pairs, style, tone });
+    const result = await draftReply({ chat, messages: store.listMessages(id, 30), pairs, style, tone }).catch((e: unknown) => {
+      // model hatası (geçersiz anahtar, sınır, yoğunluk) arayüze anlamlı dönsün; genel 500 değil
+      if (e instanceof AiError) throw new HttpError(e.status, e.message);
+      throw e;
+    });
     if (!result) throw new HttpError(503, 'AI taslak kapalı: ANTHROPIC_API_KEY tanımlı değil');
     return result;
   });
@@ -444,9 +493,14 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   route('POST', '/api/events', async (req, _s, _p, body) => {
     const b = (body ?? {}) as Partial<CalEvent> & { device?: boolean; calendar?: string };
     const title = String(b.title ?? '').trim().slice(0, 200);
-    const start = String(b.start ?? '');
-    const pv = parseStart(start);
+    const pv = parseStart(String(b.start ?? ''));
     if (!title || !pv) throw new HttpError(400, 'Başlık ve geçerli tarih gerekli');
+    // kanonik biçim ("YYYY-MM-DDTHH:mm" / "YYYY-MM-DD"): boşluklu/kırpılmamış giriş hatırlatmayı sessizce kapatmasın
+    const start = formatStart(pv);
+    const rawRemind = b.remindMin as unknown;
+    const noRemind = rawRemind === null || rawRemind === undefined || rawRemind === '';
+    const remindNum = noRemind ? undefined : Number(rawRemind);
+    if (remindNum !== undefined && !Number.isFinite(remindNum)) throw new HttpError(400, 'Geçersiz hatırlatma süresi');
     const prev = b.id ? store.getEvent(String(b.id)) : undefined;
     const ev: CalEvent = {
       id: prev?.id ?? crypto.randomUUID(),
@@ -458,11 +512,13 @@ export function createServer(store: Store, registry: Registry, port: number): ht
       location: b.location ? String(b.location).slice(0, 200) : undefined,
       chatId: prev?.chatId ?? (b.chatId && store.getChat(String(b.chatId)) ? String(b.chatId) : undefined),
       messageId: prev?.messageId ?? (b.messageId ? String(b.messageId).slice(0, 300) : undefined),
-      remindMin: b.remindMin === null || b.remindMin === undefined || (b.remindMin as unknown) === '' ? undefined : Math.max(0, Math.min(7 * 24 * 60, Number(b.remindMin))),
+      remindMin: remindNum === undefined ? undefined : Math.max(0, Math.min(7 * 24 * 60, remindNum)),
       createdAt: prev?.createdAt ?? Date.now(),
     };
     let device: { added?: boolean; calendar?: string; denied?: boolean; error?: string } | undefined;
-    if (b.device && !isRemote(req) && deviceCalendarApp()) {
+    // güncellemede cihaz takvimine yeniden ekleme (kopya etkinlik) yok: yalnız henüz eklenmemişse
+    if (prev?.deviceCalendar && b.device) device = { added: true, calendar: prev.deviceCalendar };
+    else if (b.device && !isRemote(req) && deviceCalendarApp()) {
       try {
         ev.deviceCalendar = await addToDeviceCalendar(ev, b.calendar ? String(b.calendar).slice(0, 200) : undefined);
         device = { added: true, calendar: ev.deviceCalendar };
@@ -533,7 +589,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   });
   route('GET', '/api/logs', () => bus.recent.slice(-200));
   // Telefondan erişim (aynı Wi‑Fi): bağlantı + QR; açma/kapama
-  route('GET', '/api/lan', () => lanInfo());
+  route('GET', '/api/lan', (r) => lanInfo(!isRemote(r)));
   route('POST', '/api/lan', async (r, _s, _p, body) => {
     localOnly(r);
     lanEnabled = !!(body as { enabled?: boolean }).enabled;
@@ -541,7 +597,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     if (lanEnabled) openLan();
     else closeLan();
     bus.log('info', lanEnabled ? `Telefondan erişim açıldı: ${lanAddresses().map((ip) => `http://${ip}:${port}`).join(', ')}` : 'Telefondan erişim kapatıldı');
-    return lanInfo();
+    return lanInfo(true);
   });
   route('GET', '/api/search', (req) => {
     const sp = new URL(req.url ?? '/', 'http://x').searchParams;
@@ -674,7 +730,8 @@ export function createServer(store: Store, registry: Registry, port: number): ht
       wss.handleUpgrade(req, socket, head, (client) => wss.emit('connection', client, req));
     });
   attachUpgrade(server);
-  wss.on('connection', (client) => {
+  wss.on('connection', (client, req: http.IncomingMessage) => {
+    if (!isLoopback(req.socket.remoteAddress)) lanClients.add(client);
     // Yeni bağlanan arayüze bekleyen QR'ları hemen gönder
     for (const [accountId, qrDataUrl] of pendingQr) client.send(JSON.stringify({ type: 'account.qr', accountId, qrDataUrl }));
   });

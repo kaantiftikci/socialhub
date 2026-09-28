@@ -334,6 +334,7 @@ export const gmail: Strategy = {
     }
     if (!meEmail) await this.me(page, {});
     const out = (await readInboxRows(page)).map((r) => ({ ...gmailRowToThread(r, meEmail), meta: { folder: 'inbox' } }));
+    const ids = new Set(out.map((t) => t.id));
     // Gönderilenler ve Spam: her 8. yoklamada (ilk yoklama dahil) #sent / #spam listeleri de okunur, sonra gelen kutusuna dönülür
     if (folderTick++ % 8 === 0) {
       for (const [hash, folder, titleRe] of [['#sent', 'sent', /Gönderil|Sent/i], ['#spam', 'junk', /Spam|Gereksiz|İstenmeyen/i]] as const) {
@@ -346,7 +347,12 @@ export const gmail: Strategy = {
           await page.waitForTimeout(800);
           const rows = ok ? await readInboxRows(page) : [];
           bus.log('info', `Gmail: ${folder} klasörü → ${rows.length} satır${ok ? '' : ' (liste yüklenmedi)'}`);
-          for (const r of rows) out.push({ ...gmailRowToThread(r, meEmail), unread: 0, meta: { folder } });
+          // gelen kutusunda da olan dizi (yanıtladığım) ikinci kez yazılmasın: unread:0 gelen kutusunun okunmamışını ezerdi
+          for (const r of rows) {
+            if (ids.has(r.id)) continue;
+            ids.add(r.id);
+            out.push({ ...gmailRowToThread(r, meEmail), unread: 0, meta: { folder } });
+          }
         } catch (e) {
           bus.log('warn', `Gmail: ${folder} klasörü okunamadı: ${(e as Error).message.split('\n')[0].slice(0, 120)}`);
         }
@@ -389,6 +395,13 @@ export const gmail: Strategy = {
   },
 
   async messages(page, _cookies, threadId, limit, before): Promise<Msg[]> {
+    // Diziyi açmak Gmail'de okundu sayar: yoklama okunmamış e-postayı okundu yapmasın (Outlook'taki gibi okuduktan sonra geri al)
+    const wasUnread = await page
+      .evaluate((tid) => {
+        const idEl = Array.from(document.querySelectorAll<HTMLElement>('tr.zA [data-legacy-thread-id]')).find((e) => e.getAttribute('data-legacy-thread-id') === tid);
+        return !!idEl?.closest('tr.zA')?.classList.contains('zE');
+      }, threadId)
+      .catch(() => false);
     if (!(await openThread(page, threadId))) return [];
     if (!meEmail) meEmail = (await readMe(page).catch(() => ({ email: '' }))).email.toLowerCase();
     const rows = await page.evaluate(() => {
@@ -426,6 +439,7 @@ export const gmail: Strategy = {
           attachments: attachments.length ? attachments : undefined,
         };
       });
+    if (wasUnread) await markUnread(page, threadId);
     // dizinin tamamı tek seferde gelir: "before" ile yalnızca daha eski iletiler (yoksa boş → sayfalama biter)
     return (before ? msgs.filter((m) => m.ts < before) : msgs).slice(-limit);
   },
@@ -439,7 +453,8 @@ export const gmail: Strategy = {
     await body.click();
     await body.fill(text);
     await clickSend(page);
-    return hashId(threadId + '|' + text + '|' + Date.now());
+    // gerçek ileti kimliği yoklamayla gelir: undefined → köprü local- kimliği yazar, gerçek kayıt gelince metinle eşleşip silinir
+    return undefined;
   },
 
   /**
@@ -481,9 +496,29 @@ export const gmail: Strategy = {
       await body.fill(caption);
     }
     await clickSend(page);
-    return hashId(threadId + '|' + file.name + '|' + Date.now());
+    return undefined;
   },
 };
+
+/**
+ * Açık diziyi yeniden okunmadı yap: araç çubuğundaki "Okunmadı olarak işaretle" düğmesi (tr/en); bulunamazsa
+ * Gmail kısayolu Shift+U (kısayollar ayarlarda kapalıysa etkisiz; o zaman günlüğe yazılır).
+ */
+async function markUnread(page: Page, threadId: string): Promise<void> {
+  const clicked = await page
+    .evaluate(() => {
+      const sel = '[role="button"][aria-label="Okunmadı olarak işaretle"], [role="button"][aria-label="Mark as unread"], [role="button"][data-tooltip="Okunmadı olarak işaretle"], [role="button"][data-tooltip="Mark as unread"]';
+      const b = Array.from(document.querySelectorAll<HTMLElement>(sel)).find((e) => e.offsetParent !== null);
+      if (!b) return false;
+      for (const type of ['mousedown', 'mouseup', 'click']) b.dispatchEvent(new MouseEvent(type, { bubbles: true }));
+      return true;
+    })
+    .catch(() => false);
+  if (!clicked) await page.keyboard.press('Shift+U').catch(() => undefined);
+  await page.waitForTimeout(600);
+  // düğme/kısayol dizi görünümünden listeye döndürür; hâlâ dizideyse işe yaramamış olabilir
+  if (!clicked && page.url().includes(`/${threadId}`)) bus.log('info', `Gmail: okunmamış durumu geri alınamadı (${threadId.slice(0, 10)}…)`);
+}
 
 /** Diziyi aç, son iletinin "Yanıtla" bağlantısına bas, gövde düzenleyicisini döndür */
 async function openReply(page: Page, threadId: string) {

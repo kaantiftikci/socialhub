@@ -178,6 +178,8 @@ function withConversation(template: string, conversationUrn: string): string {
 }
 
 let olderCaptureTried = false;
+/** Şablon yakalamak için açılabilecek (okunmuş) bir sohbet: okunmamış sohbeti açmak görüldü bildirimi gönderirdi */
+let readThreadId = '';
 let templateCapture: Promise<void> | undefined;
 
 /**
@@ -643,7 +645,9 @@ export const linkedin: Strategy = {
         // mesaj şablonu henüz yoksa tek bir sohbeti şimdi açtır: yoklama mesajları 4'lü paralel ister,
         // her biri ayrı ayrı sayfa gezdirmesin. Okunmuş bir sohbet seçilir: web istemcisi açılan sohbete
         // görüldü bildirimi gönderir, okunmamış bir sohbet platformda (ve burada) okunmuş sayılmasın.
-        if (!captured.messages) await ensureMessagesTemplate(page, (out.find((t) => !t.unread) ?? out[0]).id);
+        const read = out.find((t) => !t.unread);
+        if (read) readThreadId = read.id;
+        if (!captured.messages && readThreadId) await ensureMessagesTemplate(page, readThreadId);
         return out;
       }
       if (els.length) return out; // hepsi sponsorluysa liste gerçekten boş
@@ -673,8 +677,10 @@ export const linkedin: Strategy = {
 
   async messages(page, cookies, threadId, limit, before): Promise<Msg[]> {
     install(page);
-    // bir sohbeti açtır ki istemci mesaj sorgusunu yapsın; URL şablonunu yakala (paralel çağrılar tek uçuşu bekler)
-    await ensureMessagesTemplate(page, threadId);
+    // Şablon yoksa bir sohbeti açtır ki istemci mesaj sorgusunu yapsın (paralel çağrılar tek uçuşu bekler). Yalnız
+    // OKUNMUŞ bir sohbet açılır: web istemcisi açılan sohbete görüldü bildirimi gönderir, okunmamış sohbet (yoklamanın
+    // istediği tam da odur) platformda okunmuş sayılmasın. Okunmuş sohbet bilinmiyorsa şablonsuz yedek yola düşülür.
+    if (!captured.messages && readThreadId) await ensureMessagesTemplate(page, readThreadId);
     if (captured.messages) {
       let url = before ? (olderUrl(threadId, before, limit) ?? withConversation(captured.messages, threadId)) : withConversation(captured.messages, threadId);
       let data: J | undefined;
@@ -723,7 +729,8 @@ export const linkedin: Strategy = {
         .sort((a: Msg, b: Msg) => a.ts - b.ts);
     }
     // yedek: eski API
-    const data = await voyager(page, cookies, `/messaging/conversations/${encodeURIComponent(threadId.split(':').pop() ?? threadId)}/events?count=${limit}${before ? `&createdBefore=${before}` : ''}`);
+    // msg_conversation URN'inde son ':' parçası "ABC,2-XYZ==)" olur; konuşma kimliği convId ile alınır
+    const data = await voyager(page, cookies, `/messaging/conversations/${encodeURIComponent(convId(threadId))}/events?count=${limit}${before ? `&createdBefore=${before}` : ''}`);
     return (data.elements ?? []).map((ev: J) => {
       const mp = ev.from?.['com.linkedin.voyager.messaging.MessagingMember']?.miniProfile ?? {};
       const c = ev.eventContent?.['com.linkedin.voyager.messaging.event.MessageEvent'] ?? {};

@@ -43,7 +43,8 @@ export function guessWhen(text: string, now = new Date()): GuessedWhen {
   }
   if (!date) {
     // "12.10", "12/10/2026" (gün önce; saatle karışmasın diye ayraçtan sonra 1-12 ay ve saat bağlamı yoksa)
-    const m = U(/\b(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?\b(?!\s*'?(?:de|da|te|ta)\b)/).exec(t);
+    // ondalık miktar/tutar ("2.5 kg", "1.5 yıl", "10.10 TL") tarih sayılmaz
+    const m = U(/\b(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?\b(?!\s*'?(?:de|da|te|ta)\b)(?!\s*(?:kg|gr|g|lt|l|ml|km|m|cm|tl|₺|lira|\$|usd|eur|€|yıl|ay|hafta|gün|saat|dk|dakika|%)(?![a-zçğıöşü\d]))/).exec(t);
     if (m && Number(m[2]) >= 1 && Number(m[2]) <= 12 && Number(m[1]) <= 31 && (m[3] || !U(/\bsaat\b/).test(t))) {
       const y = m[3] ? (m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3])) : now.getFullYear();
       const d = new Date(y, Number(m[2]) - 1, Number(m[1]));
@@ -68,10 +69,14 @@ export function guessWhen(text: string, now = new Date()): GuessedWhen {
   const hm = U(/\b([01]?\d|2[0-3])[:.]([0-5]\d)\b(?!\s*(?:tl|₺|lira|\$|usd|eur|€))/).exec(rest.replace(/\d{1,2}[./]\d{1,2}[./]\d{2,4}/g, ''));
   if (hm) time = `${pad(Number(hm[1]))}:${hm[2]}`;
   else {
-    const h = U(/\b(?:saat\s+)?(sabah|öğlen|öğleden sonra|akşam|gece)?\s*(\d{1,2})\s*(?:'?(?:de|da|te|ta)\b|\s*gibi\b)/).exec(rest) ?? U(/\bsaat\s+(sabah|öğlen|akşam|gece)?\s*(\d{1,2})\b/).exec(rest);
+    const h = U(/\b(?:saat\s+)?(sabah|öğleden sonra|öğlen|akşam|gece)?\s*(\d{1,2})\s*(?:'?(?:de|da|te|ta)\b|\s*gibi\b)/).exec(rest) ?? U(/\bsaat\s+(sabah|öğleden sonra|öğlen|akşam|gece)?\s*(\d{1,2})\b/).exec(rest);
     if (h && Number(h[2]) <= 23) {
       let hour = Number(h[2]);
-      if (h[1] && U(/öğleden sonra|akşam|gece/).test(h[1]) && hour < 12) hour += 12;
+      if (h[1] === 'gece') {
+        // "gece 12" = 00:00, "gece 2" = 02:00, "gece 11" = 23:00
+        if (hour === 12) hour = 0;
+        else if (hour >= 6 && hour < 12) hour += 12;
+      } else if (h[1] && U(/öğleden sonra|öğlen|akşam/).test(h[1]) && hour >= 1 && hour < 12) hour += 12;
       else if (!h[1] && hour >= 1 && hour <= 7) hour += 12; // "3'te" iş saati olarak 15:00
       time = `${pad(hour)}:00`;
     }

@@ -132,8 +132,11 @@ export function rowsToMessages(threadId: string, rows: RawMessageRow[], meName: 
     const parsed = parseEtsyTime(r.time, now);
     const ts = parsed ?? (cursor = cursor !== undefined ? cursor + 1 : now.getTime());
     if (parsed !== undefined) cursor = parsed;
-    const minute = Math.floor(ts / 60_000);
-    const key = r.id ? `etsy-msg-${r.id}` : `${threadId}|${minute}|${fromMe ? 'me' : sender}|${text.slice(0, 120)}`;
+    // kimlikte zaman: mutlak zamanda dakika; göreli ("3h", "5m") ya da çözülemeyen/boş zamanda ham metin (hesaplanan değer her
+    // yoklamada kayar → aynı mesaj yeni kimlikle yeniden yazılırdı)
+    const stable = parsed !== undefined && parseEtsyTime(r.time, new Date(now.getTime() + 60_000)) === parsed;
+    const timeKey = stable ? String(Math.floor(ts / 60_000)) : `t:${r.time.trim()}`;
+    const key = r.id ? `etsy-msg-${r.id}` : `${threadId}|${timeKey}|${fromMe ? 'me' : sender}|${text.slice(0, 120)}`;
     const n = dupes.get(key) ?? 0;
     dupes.set(key, n + 1);
     msgs.push({

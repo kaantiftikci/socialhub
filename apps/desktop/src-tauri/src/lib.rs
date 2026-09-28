@@ -11,7 +11,9 @@
 //! Platformlar: macOS (asıl hedef) ve Windows. Mac'e özgü kodlar `#[cfg(target_os = "macos")]` ile korunur.
 
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -41,7 +43,52 @@ fn home_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(home.unwrap_or_else(|_| ".".into()))
 }
 
-struct CoreProcess(Mutex<Option<Child>>);
+/// Çekirdek süreci + bekçi durumu
+#[derive(Default)]
+struct CoreState {
+    child: Option<Child>,
+    /// son başlatma anı (açılış süresi / kararlılık için)
+    started: Option<Instant>,
+    /// art arda çöküş sayısı (kararlı çalışınca sıfırlanır)
+    crashes: u32,
+    /// çöküşten sonra bir sonraki başlatma bu andan önce yapılmaz (üstel bekleme)
+    retry_at: Option<Instant>,
+}
+
+struct CoreProcess(Mutex<CoreState>);
+
+/// Uygulama kapanıyor: bekçi artık çekirdek başlatmaz
+static EXITING: AtomicBool = AtomicBool::new(false);
+
+/// Açılışta çekirdeğe dinlemeye başlaması için tanınan süre (Anahtar Zinciri penceresi, DPAPI/PowerShell, büyük DB göçü…)
+const STARTUP_GRACE: Duration = Duration::from_secs(60);
+/// Bu kadar süre ayakta kalan çekirdek "kararlı" sayılır, çöküş sayacı sıfırlanır
+const STABLE_AFTER: Duration = Duration::from_secs(120);
+/// Yeniden başlatma beklemesi: 10 sn, 20, 40 … en çok 5 dk
+fn backoff(crashes: u32) -> Duration {
+    let secs = 10u64.saturating_mul(1u64 << crashes.saturating_sub(1).min(5));
+    Duration::from_secs(secs.min(300))
+}
+
+/// Süreci sonlandır ve topla (zombi kalmasın). Unix'te önce SIGTERM: çekirdeğin `shutdown`u (registry.stopAll)
+/// çalışabilsin; `grace` içinde çıkmazsa SIGKILL. Windows'ta konsolsuz node'a nazik kapatma iletilemez → doğrudan sonlandır.
+fn stop_child(mut child: Child, grace: Duration) {
+    #[cfg(unix)]
+    {
+        let _ = Command::new("kill").args(["-TERM", &child.id().to_string()]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+        let until = Instant::now() + grace;
+        while Instant::now() < until {
+            if matches!(child.try_wait(), Ok(Some(_))) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = grace;
+    let _ = child.kill();
+    let _ = child.wait();
+}
 
 /// Çekirdek zaten dinliyorsa (npm run dev) tekrar başlatma.
 fn core_is_up() -> bool {
@@ -55,24 +102,48 @@ fn core_is_up() -> bool {
 /// Finder'dan açılan uygulamanın PATH'i kısıtlıdır (nvm/homebrew node görünmez); yaygın yerleri ve
 /// kullanıcının kabuğunu deneyerek node'u bul. KAVSAK_NODE ile elle verilebilir; pakette gömülü node
 /// (Resources/core/bin/node[.exe], CI'da KAVSAK_BUNDLE_NODE=1 ile) varsa önce o kullanılır.
-fn find_node(bundled: Option<std::path::PathBuf>) -> String {
+///
+/// Yerel modüller (better-sqlite3…) paketlenirken kullanılan node'un ABI'siyle derlenir; `bundle-core.mjs` bunu
+/// `core/node-abi.json`a yazar ({modules, version, execPath}). ABI biliniyorsa önce paketleyen node'un kendisi, sonra
+/// adaylar arasında ABI'si tutan ilk node seçilir (Homebrew'daki başka ana sürüm NODE_MODULE_VERSION hatasıyla
+/// çekirdeği düşürüyordu); hiçbiri tutmazsa eski sıra (ilk bulunan) kullanılır.
+fn find_node(bundled: Option<std::path::PathBuf>, abi: Option<&NodeAbi>) -> String {
     if let Ok(n) = std::env::var("KAVSAK_NODE") {
         return n;
     }
     if let Some(b) = bundled.filter(|p| p.exists()) {
         return b.to_string_lossy().to_string();
     }
-    for c in &node_candidates() {
-        if std::path::Path::new(c).exists() {
+    let mut list: Vec<String> = Vec::new();
+    if let Some(p) = abi.and_then(|a| a.exec_path.clone()) {
+        list.push(p);
+    }
+    list.extend(node_candidates());
+    let mut seen = std::collections::HashSet::new();
+    list.retain(|c| std::path::Path::new(c).exists() && seen.insert(c.clone()));
+    if let Some(want) = abi.map(|a| a.modules.as_str()) {
+        if let Some(c) = list.iter().find(|c| node_modules_abi(c).as_deref() == Some(want)) {
             return c.clone();
         }
+        if let Some(s) = shell_node() {
+            if node_modules_abi(&s).as_deref() == Some(want) {
+                return s;
+            }
+        }
     }
-    // son çare: giriş kabuğuna sor
+    if let Some(c) = list.into_iter().next() {
+        return c;
+    }
+    shell_node().unwrap_or_else(|| NODE_BIN.into())
+}
+
+/// Son çare: kullanıcının kabuğuna / PATH'ine sor
+fn shell_node() -> Option<String> {
     // -i: .zshrc de okunsun (PATH çoğunlukla orada); -l yalnız .zprofile okur
     #[cfg(unix)]
-    if let Ok(out) = Command::new("/bin/zsh").args(["-ilc", "command -v node"]).output() {
-        let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !p.is_empty() {
+    if let Ok(out) = Command::new("/bin/zsh").args(["-ilc", "command -v node"]).stdin(Stdio::null()).output() {
+        let p = String::from_utf8_lossy(&out.stdout).lines().map(str::trim).filter(|l| l.starts_with('/')).last().map(str::to_string);
+        if p.is_some() {
             return p;
         }
     }
@@ -82,11 +153,66 @@ fn find_node(bundled: Option<std::path::PathBuf>) -> String {
         use std::os::windows::process::CommandExt;
         if let Ok(out) = Command::new("where").arg("node").creation_flags(CREATE_NO_WINDOW).output() {
             if let Some(p) = String::from_utf8_lossy(&out.stdout).lines().map(str::trim).find(|l| !l.is_empty()) {
-                return p.to_string();
+                return Some(p.to_string());
             }
         }
     }
-    NODE_BIN.into()
+    None
+}
+
+/// Paketleyen node'un bilgisi (core/node-abi.json)
+struct NodeAbi {
+    modules: String,
+    version: String,
+    exec_path: Option<String>,
+}
+
+fn read_node_abi(core_dir: &std::path::Path) -> Option<NodeAbi> {
+    let raw = std::fs::read_to_string(core_dir.join("node-abi.json")).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let modules = v.get("modules")?.as_str()?.to_string();
+    if modules.is_empty() {
+        return None;
+    }
+    Some(NodeAbi {
+        modules,
+        version: v.get("version").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+        exec_path: v.get("execPath").and_then(|x| x.as_str()).filter(|s| !s.is_empty()).map(str::to_string),
+    })
+}
+
+/// Bir node ikilisinin yerel modül ABI'si (process.versions.modules), çalıştırılamazsa None
+fn node_modules_abi(node: &str) -> Option<String> {
+    let mut cmd = Command::new(node);
+    cmd.args(["-p", "process.versions.modules"]).stdin(Stdio::null()).stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let out = cmd.output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!s.is_empty()).then_some(s)
+}
+
+/// "v22.10.1" → (22, 10, 1); sürüm olmayan adlar en sona düşer
+fn version_key(name: &str) -> (u64, u64, u64) {
+    let mut it = name.trim_start_matches('v').split('.').map(|p| p.parse::<u64>().unwrap_or(0));
+    (it.next().unwrap_or(0), it.next().unwrap_or(0), it.next().unwrap_or(0))
+}
+
+/// nvm klasöründeki sürümler, en yenisi önce (sözlük sırası değil: v9 > v22 sanılmasın)
+fn nvm_versions(dir: &str, bin: &str) -> Vec<String> {
+    let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut vers: Vec<((u64, u64, u64), String)> = rd
+        .flatten()
+        .map(|e| (version_key(&e.file_name().to_string_lossy()), e.path().join(bin).to_string_lossy().to_string()))
+        .collect();
+    vers.sort_by(|a, b| b.0.cmp(&a.0));
+    vers.into_iter().map(|(_, p)| p).collect()
 }
 
 /// macOS/Linux: Finder/Dock'tan açılınca PATH launchd'nin kısıtlı yolu: terminalden çalışan `node` görünmez. Bilinen kurulum yerleri:
@@ -103,12 +229,7 @@ fn node_candidates() -> Vec<String> {
         format!("{home}/.asdf/shims/node"),
     ];
     // nvm: en yeni sürüm
-    if let Ok(rd) = std::fs::read_dir(format!("{home}/.nvm/versions/node")) {
-        let mut vers: Vec<String> = rd.flatten().map(|e| e.path().join("bin/node").to_string_lossy().to_string()).collect();
-        vers.sort();
-        vers.reverse();
-        candidates.extend(vers);
-    }
+    candidates.extend(nvm_versions(&format!("{home}/.nvm/versions/node"), "bin/node"));
     candidates
 }
 
@@ -133,12 +254,7 @@ fn node_candidates() -> Vec<String> {
     ]);
     // nvm-windows: en yeni sürüm (%APPDATA%\nvm\v22.x.y\node.exe)
     let nvm_home = if env("NVM_HOME").is_empty() { format!("{roaming}\\nvm") } else { env("NVM_HOME") };
-    if let Ok(rd) = std::fs::read_dir(&nvm_home) {
-        let mut vers: Vec<String> = rd.flatten().map(|e| e.path().join("node.exe").to_string_lossy().to_string()).collect();
-        vers.sort();
-        vers.reverse();
-        candidates.extend(vers);
-    }
+    candidates.extend(nvm_versions(&nvm_home, "node.exe"));
     candidates.into_iter().filter(|c| !c.starts_with('\\')).collect()
 }
 
@@ -176,14 +292,24 @@ fn spawn_core(app: &AppHandle) -> Option<Child> {
         log(app, &format!("çekirdek dosyası bulunamadı (resources: {rd}); paket eksik ya da geliştirme modunda KAVSAK_CORE verilmedi"));
         return None;
     };
-    let bundled = entry.parent().and_then(|d| d.parent()).map(|core| core.join("bin").join(NODE_BIN));
-    let node = find_node(bundled);
-    log(app, &format!("node: {node} · çekirdek: {}", entry.display()));
     let core_dir = entry.parent().and_then(|d| d.parent()).map(|p| p.to_path_buf());
+    let bundled = core_dir.as_ref().map(|core| core.join("bin").join(NODE_BIN));
+    let abi = core_dir.as_deref().and_then(read_node_abi);
+    let node = find_node(bundled, abi.as_ref());
+    log(app, &format!("node: {node} · çekirdek: {}", entry.display()));
+    if let Some(a) = &abi {
+        match node_modules_abi(&node) {
+            Some(m) if m == a.modules => {}
+            got => log(app, &format!(
+                "uyarı: çekirdek node {} (ABI {}) ile paketlendi, seçilen node'un ABI'si {}: yerel modüller yüklenemeyebilir (KAVSAK_NODE ile doğru node'u ver)",
+                a.version, a.modules, got.unwrap_or_else(|| "?".into())
+            )),
+        }
+    }
     // çekirdek çıktısı ~/.kavsak/core.log'a (Finder'dan açılınca terminal yok)
     let logfile = std::fs::OpenOptions::new().create(true).append(true).open(kavsak_dir().join("core.log")).ok();
-    let (out, err) = match logfile {
-        Some(f) => (Stdio::from(f.try_clone().unwrap()), Stdio::from(f)),
+    let (out, err) = match logfile.and_then(|f| f.try_clone().ok().map(|c| (c, f))) {
+        Some((c, f)) => (Stdio::from(c), Stdio::from(f)),
         None => (Stdio::inherit(), Stdio::inherit()),
     };
     let mut cmd = Command::new(&node);
@@ -327,41 +453,91 @@ pub fn run() {
                 })
                 .build(),
         )
-        .manage(CoreProcess(Mutex::new(None)))
+        .manage(CoreProcess(Mutex::new(CoreState::default())))
         .invoke_handler(tauri::generate_handler![set_badge, focus_window, core_url, core_info, core_token, open_external])
         .setup(|app| {
             let handle = app.handle().clone();
 
             // Çekirdek
             let child = spawn_core(&handle);
-            *app.state::<CoreProcess>().0.lock().unwrap() = child;
+            {
+                let state = app.state::<CoreProcess>();
+                let mut st = state.0.lock().unwrap_or_else(|p| p.into_inner());
+                st.started = child.as_ref().map(|_| Instant::now());
+                st.child = child;
+            }
 
-            // Bekçi: çekirdek düşerse (çökme vb.) yeniden başlat
+            // Bekçi: çekirdek düşerse (çökme vb.) yeniden başlat. Açılışta STARTUP_GRACE boyunca "dinlemiyor" diye
+            // öldürülmez; art arda çöküşlerde bekleme üstel artar (10 sn → ≤5 dk), sonsuz hızlı döngü yok.
             let wd = handle.clone();
             std::thread::spawn(move || loop {
-                std::thread::sleep(std::time::Duration::from_secs(10));
+                std::thread::sleep(Duration::from_secs(5));
+                if EXITING.load(Ordering::SeqCst) {
+                    break;
+                }
                 let state = wd.state::<CoreProcess>();
-                let mut guard = state.0.lock().unwrap();
-                let owned = guard.is_some();
-                let exited = guard.as_mut().map(|c| matches!(c.try_wait(), Ok(Some(_)))).unwrap_or(false);
-                // Açılışta başka bir çekirdek (önceki sürüm vb.) çalışıyordu ve biz başlatmamıştık: o kapanınca kendimizinkini başlat
-                if !owned {
-                    if !core_is_up() {
-                        log(&wd, "dışarıdaki çekirdek kapanmış; kendi çekirdeğimiz başlatılıyor");
-                        *guard = spawn_core(&wd);
+                let mut st = state.0.lock().unwrap_or_else(|p| p.into_inner());
+                if EXITING.load(Ordering::SeqCst) {
+                    break;
+                }
+                let now = Instant::now();
+                let alive_for = st.started.map(|s| now.duration_since(s)).unwrap_or_default();
+                if let Some(c) = st.child.as_mut() {
+                    let exited = match c.try_wait() {
+                        Ok(Some(status)) => Some(status.to_string()),
+                        Ok(None) => None,
+                        Err(e) => Some(format!("durum okunamadı: {e}")),
+                    };
+                    let reason = if let Some(status) = exited {
+                        st.child = None; // try_wait süreci topladı
+                        Some(format!("çekirdek süreci sonlandı ({status})"))
+                    } else if alive_for >= STARTUP_GRACE && !core_is_up() {
+                        if let Some(c) = st.child.take() {
+                            stop_child(c, Duration::from_secs(3));
+                        }
+                        Some("çekirdek yanıt vermiyor; durduruldu".to_string())
+                    } else {
+                        if alive_for >= STABLE_AFTER && st.crashes > 0 {
+                            st.crashes = 0;
+                        }
+                        None
+                    };
+                    if let Some(reason) = reason {
+                        // kısa sürede düşen çekirdek art arda çöküş sayılır; uzun çalıştıysa sayaç baştan
+                        st.crashes = if alive_for >= STABLE_AFTER { 1 } else { st.crashes.saturating_add(1) };
+                        let wait = backoff(st.crashes);
+                        st.retry_at = Some(now + wait);
+                        st.started = None;
+                        log(&wd, &format!("{reason}; {} sn sonra yeniden başlatılacak (art arda {}. kez)", wait.as_secs(), st.crashes));
                     }
                     continue;
                 }
-                if owned && (exited || !core_is_up()) {
-                    if exited {
-                        log(&wd, "çekirdek süreci sonlanmış; yeniden başlatılıyor");
-                    } else {
-                        log(&wd, "çekirdek yanıt vermiyor; yeniden başlatılıyor");
-                        if let Some(c) = guard.as_mut() {
-                            let _ = c.kill();
-                        }
+                if st.retry_at.is_some_and(|t| now < t) {
+                    continue;
+                }
+                // Sahipsiz: ya çöküş sonrası bekleme bitti ya da açılışta başka bir çekirdek (npm run dev, önceki sürüm)
+                // çalışıyordu: o da kapandıysa kendimizinkini başlat
+                if core_is_up() {
+                    st.retry_at = None;
+                    continue;
+                }
+                if st.retry_at.is_none() {
+                    log(&wd, "dışarıdaki çekirdek kapanmış; kendi çekirdeğimiz başlatılıyor");
+                }
+                st.retry_at = None;
+                match spawn_core(&wd) {
+                    Some(c) => {
+                        st.child = Some(c);
+                        st.started = Some(Instant::now());
                     }
-                    *guard = spawn_core(&wd);
+                    None if !core_is_up() => {
+                        // başlatılamadı (node/çekirdek dosyası yok): aynı üstel beklemeyle tekrar dene
+                        st.crashes = st.crashes.saturating_add(1);
+                        let wait = backoff(st.crashes);
+                        st.retry_at = Some(Instant::now() + wait);
+                        log(&wd, &format!("çekirdek başlatılamadı; {} sn sonra yeniden denenecek", wait.as_secs()));
+                    }
+                    None => {}
                 }
             });
 
@@ -423,8 +599,12 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             RunEvent::Reopen { .. } => show_main(app),
             RunEvent::ExitRequested { .. } | RunEvent::Exit => {
-                if let Some(mut child) = app.state::<CoreProcess>().0.lock().unwrap().take() {
-                    let _ = child.kill();
+                // önce bayrak: bekçi bundan sonra yeni çekirdek başlatmaz (kilidi tutarken başlattıysa aşağıda alınıp durdurulur)
+                EXITING.store(true, Ordering::SeqCst);
+                let child = app.state::<CoreProcess>().0.lock().unwrap_or_else(|p| p.into_inner()).child.take();
+                if let Some(child) = child {
+                    // SIGTERM → çekirdek connector'ları düzgün kapatır; 4 sn'de çıkmazsa zorla
+                    stop_child(child, Duration::from_secs(4));
                 }
             }
             _ => {}

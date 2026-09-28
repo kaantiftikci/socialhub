@@ -90,6 +90,10 @@ interface State {
 const money = (v: unknown, cur: string) => `${Number(v ?? 0).toFixed(2).replace('.', ',')} ${cur === 'TRY' ? '₺' : cur}`;
 const amount = (v: unknown): number => (typeof v === 'object' && v !== null ? Number((v as J).amount ?? 0) : Number(v ?? 0));
 const currencyOf = (v: unknown, fallback = 'TRY'): string => (typeof v === 'object' && v !== null ? String((v as J).currency ?? fallback) : fallback);
+/** Cevap gönderildi işareti (seen değeri): API cevabı yansıtana dek (≤30 dk) "bekliyor" durumu soruyu yeniden açmasın */
+const ANSWERED_SENTINEL_PREFIX = 'answered:';
+const answeredSentinel = () => `${ANSWERED_SENTINEL_PREFIX}${Date.now()}`;
+const answeredRecently = (prev: string | undefined) => !!prev && prev.startsWith(ANSWERED_SENTINEL_PREFIX) && Date.now() - Number(prev.slice(ANSWERED_SENTINEL_PREFIX.length)) < 30 * 60_000;
 const short = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s);
 const ORDER_RANK: Record<PackageInfo['status'], number> = { packaged: 1, shipped: 2, undelivered: 2, delivered: 3 };
 const STATUS_TR: Record<string, string> = {
@@ -219,11 +223,31 @@ export class HepsiburadaConnector extends BaseConnector {
     if (this.polling || this.stopping) return;
     this.polling = true;
     try {
-      // sipariş sohbetleri isteğe bağlı (varsayılan kapalı: yalnız müşteri soruları)
-      const o = this.ordersOn ? await this.pollOrders(first) : 0;
-      const q = await this.pollQuestions(first);
+      // OMS ve Satıcıya Sor ayrı servisler (ayrı yetki): biri çökerse öteki yine işlensin. Sıralı (aynı durum nesnesine yazıyorlar).
+      const settle = async (f: () => Promise<number>): Promise<PromiseSettledResult<number>> => {
+        try {
+          return { status: 'fulfilled', value: await f() };
+        } catch (reason) {
+          return { status: 'rejected', reason };
+        }
+      };
+      const ro = this.ordersOn ? await settle(() => this.pollOrders(first)) : ({ status: 'fulfilled', value: 0 } as PromiseSettledResult<number>);
+      const rq = await settle(() => this.pollQuestions(first));
+      const o = ro.status === 'fulfilled' ? ro.value : 0;
+      const q = rq.status === 'fulfilled' ? rq.value : 0;
       if (o || q) bus.log('info', `Hepsiburada: ${o} sipariş, ${q} soru güncellendi`);
       this.saveState();
+      const isAuth = (r: PromiseSettledResult<number>) => r.status === 'rejected' && ((r.reason as HbError).status === 401 || (r.reason as HbError).status === 403);
+      if (ro.status === 'rejected') {
+        // yalnız sipariş tarafı reddedildiyse: uyar, sorular çalışmaya devam etsin
+        bus.log('warn', `Hepsiburada siparişler: ${(ro.reason as Error).message}${isAuth(ro) ? ' (OMS yetkisi yok olabilir; sorular sürüyor)' : ''}`);
+      }
+      if (rq.status === 'rejected') {
+        // iki taraf da kimlik hatası → gerçek kimlik sorunu; yalnız sorular çöktüyse ve siparişler kapalı/çökmüşse de hata
+        if (isAuth(rq) && (!this.ordersOn || ro.status === 'rejected')) throw rq.reason;
+        if (first && (!this.ordersOn || ro.status === 'rejected')) throw rq.reason;
+        bus.log('warn', `Hepsiburada sorular: ${(rq.reason as Error).message}`);
+      }
     } catch (e) {
       const err = e as HbError;
       if (err.status === 401 || err.status === 403) {
@@ -550,6 +574,8 @@ export class HepsiburadaConnector extends BaseConnector {
     const key = `q-${n}`;
     const prev = this.state.seen[key];
     if (prev === sig) return false;
+    // az önce cevapladık ama API hâlâ "bekliyor" diyor: soruyu yeniden açma (işaret kalsın, sonraki yoklama yeniden bakar)
+    if (status === 'WaitingForAnswer' && answeredRecently(prev)) return false;
     this.state.seen[key] = sig;
 
     const product = String(q.product?.name ?? q.productName ?? '');
@@ -630,14 +656,16 @@ export class HepsiburadaConnector extends BaseConnector {
         if (err.status === 401 || err.status === 403) this.setStatus('error', err.message);
         throw new Error(err.status === 409 || err.status === 400 ? `Hepsiburada cevabı kabul etmedi (süre dolmuş olabilir): ${err.message}` : err.message);
       }
-      const id = `ans-${Date.now()}`;
+      // local-: yoklama gerçek yazışmayı (c-<id>) getirince store.dropLocalDuplicates bu kopyayı siler
+      const id = `local-ans-${Date.now()}`;
       const ts = Date.now();
       this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text: answer, ts, status: 'sent' });
       // sohbet meta'sında durumu "cevaplandı" yap; sonraki yoklama gerçek yazışmayı getirir
       const chat = this.store.getChat(`${this.account.id}/${remoteChatId}`);
       const qm = (chat?.meta?.question ?? {}) as J;
       this.upsertChat({ remoteId: remoteChatId, name: chat?.name ?? remoteChatId, lastMessageAt: ts, meta: { ...(chat?.meta ?? {}), question: { ...qm, status: 'Answered', statusLabel: 'Cevaplandı' } } });
-      delete this.state.seen[remoteChatId];
+      // silmek yerine işaret: API cevabı henüz yansıtmadıysa soru yeniden "okunmamış/bekliyor" olmasın
+      this.state.seen[remoteChatId] = answeredSentinel();
       this.saveState();
       bus.log('info', `Hepsiburada: soru #${n} cevaplandı`);
       return { remoteId: id };

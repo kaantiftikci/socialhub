@@ -443,10 +443,13 @@ export function ConnectModal({
                     Bağlan
                   </button>
                 </div>
-                <label className="row-toggle" style={{ marginTop: 10, gap: 8 }}>
-                  <span style={{ fontSize: 12.5, color: 'var(--text2)' }}>Siparişleri de göster (kapatırsan yalnız müşteri soruları gelir)</span>
-                  <input type="checkbox" checked={sf('ordersOff') !== 'true'} onChange={(e) => setSf('ordersOff', e.target.checked ? '' : 'true')} />
-                </label>
+                {/* yalnız soru-cevap kanalı olan pazaryerlerinde: Etsy/Shopify/Amazon'da siparişler kapanırsa hesap boş kalır */}
+                {(p === 'trendyol' || p === 'hepsiburada' || p === 'n11') && (
+                  <label className="row-toggle" style={{ marginTop: 10, gap: 8 }}>
+                    <span style={{ fontSize: 12.5, color: 'var(--text2)' }}>Siparişleri de göster (kapatırsan yalnız müşteri soruları gelir)</span>
+                    <input type="checkbox" checked={sf('ordersOff') !== 'true'} onChange={(e) => setSf('ordersOff', e.target.checked ? '' : 'true')} />
+                  </label>
+                )}
               </div>
             </div>
           ) : null,
@@ -654,7 +657,8 @@ export function ConnectModal({
             const meta = PLATFORMS[p];
             const acc = accounts.filter((a) => a.platform === p);
             const isConn = connected.includes(p);
-            const isActive = acc.some((a) => a.id === active) || active === `${p}:new`;
+            // ':choose' (Gmail/iCloud giriş yolu seçimi) de bu kartın panelini açar
+            const isActive = acc.some((a) => a.id === active) || active === `${p}:new` || active === `${p}:choose`;
             const macOnly = macOnlyOff(p);
             // yalnız Mac kanalı: yeni bağlantı kapalı; eskiden kalan hesap varsa kaldırılabilsin
             const available = meta.available && (!macOnly || acc.length > 0);

@@ -622,6 +622,9 @@ export const messenger: Strategy & PinHooks = {
     await page.goto(`${threadUrl(threadId)}#mivelo-visible`, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
     await waitForRows(page, 15_000);
     await page.waitForTimeout(2500);
+    // Görünür belgede kalınmasın: sohbet açık ve görünür kaldıkça sonraki gelen mesajlar anında "Görüldü" olur (goInbox/openThread
+    // aynı adreste gezinmez, yumuşak yenileme hash'i korur). Yalnız hash değişimi aynı belgede kalır → gerçek gezinme (gelen kutusu).
+    await page.goto(`${cur().base}${cur().prefix}/`, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
   },
 
   async send(page, _cookies, threadId, text) {

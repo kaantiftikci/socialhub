@@ -98,6 +98,12 @@ export function parseWhen(s: string, now = Date.now()): number | undefined {
   return undefined;
 }
 
+/** Zaman metni "şimdi"ye göreli mi ("5 dk", "now"): çözülen değer saat ilerleyince kayıyorsa true */
+export function isRelativeWhen(s: string, now = Date.now()): boolean {
+  const a = parseWhen(s, now);
+  return a !== undefined && a !== parseWhen(s, now + 60_000);
+}
+
 // ─────────── Belge seçimi: ana sayfa ya da Inbox iframe'i ───────────
 type Doc = Page | Frame;
 
@@ -261,7 +267,9 @@ export function toMessages(threadId: string, threadName: string, rows: RawMsg[],
     // zaman çözülemedi: önceki mesajın zamanı + 1 ms (sıra korunur), hiç yoksa "şimdi"
     const ts = parsed ?? (cursor = cursor !== undefined ? cursor + 1 : now);
     const fromMe = r.me === true;
-    const key = `${threadId}|${parsed ?? r.when}|${fromMe ? 'me' : r.sender ?? threadName}|${r.text}`;
+    // kimlikte zaman: mutlak zamanda çözülen ms; göreli ("5 dk", "şimdi") ya da çözülemeyen zamanda ham metin — göreli değer
+    // her yoklamada kayar ve aynı mesaj yeni kimlikle yeniden yazılırdı
+    const key = `${threadId}|${parsed !== undefined && !isRelativeWhen(r.when, now) ? parsed : r.when}|${fromMe ? 'me' : r.sender ?? threadName}|${r.text}`;
     const n = dupes.get(key) ?? 0;
     dupes.set(key, n + 1);
     msgs.push({

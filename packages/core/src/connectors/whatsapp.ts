@@ -13,18 +13,33 @@ import { FFMPEG_HINT } from '../platform.js';
 import { sessionDir } from '../config.js';
 import { chatId as chatIdOf, messageId as messageIdOf, type Attachment, type Message, type Participant } from '../model.js';
 import { macContacts } from '../contacts-mac.js';
+import { onUiInactive } from '../activity.js';
 import { newerVersion, TtlCache, useAtomicAuthState } from './wa-auth.js';
 
 // Yeniden bağlanmalar arasında korunan Baileys önbellekleri (WAHA/Evolution): her sokette sıfırlanırsa yeniden deneme
 // sayaçları kaybolur → şifre çözme/yeniden deneme döngüleri
-const msgRetryCounterCache = new TtlCache(60 * 60_000);
-const placeholderResendCache = new TtlCache(60 * 60_000);
-const userDevicesCache = new TtlCache(5 * 60_000);
+// Hesap başına AYRI: userDevicesCache kullanıcı numarasıyla anahtarlanır ve Baileys sorgulayan hesabın kendi cihazını listeden
+// çıkarır; paylaşılırsa (iki WhatsApp hesabı aynı çekirdekte) A'nın kendi listesi B'nin A'ya gönderiminde kullanılır ve A'nın
+// Mivelo cihazı mesajı hiç almaz. Mesaj kimliğiyle anahtarlanan önbellekler de hesaplar arasında karışmasın.
+const waCaches = new Map<string, { msgRetryCounterCache: TtlCache; placeholderResendCache: TtlCache; userDevicesCache: TtlCache }>();
+function cachesFor(accountId: string) {
+  let c = waCaches.get(accountId);
+  if (!c) {
+    c = { msgRetryCounterCache: new TtlCache(60 * 60_000), placeholderResendCache: new TtlCache(60 * 60_000), userDevicesCache: new TtlCache(5 * 60_000) };
+    waCaches.set(accountId, c);
+  }
+  return c;
+}
+/** Profil fotoğrafı önbelleği süresi (avatars.json) ve oturum başına en çok istek (ban önleme: toplu profilePictureUrl sorgusu) */
+const AVATAR_TTL = 3 * 86_400_000;
+const AVATAR_BUDGET = 300;
+/** Alınamayan grup bilgisi (ayrılınan grup vb.) bu süre yeniden sorulmaz */
+const GROUP_FAIL_TTL = 86_400_000;
 
 // Baileys CJS olarak yayınlanıyor; ESM'den yüklenince default export iç içe gelebilir.
 const B = Baileys as unknown as Record<string, unknown>;
 const makeWASocket = ((B.default as { default?: unknown })?.default ?? B.default ?? B.makeWASocket) as typeof Baileys.default;
-const { fetchLatestBaileysVersion, fetchLatestWaWebVersion, makeCacheableSignalKeyStore, DisconnectReason, jidNormalizedUser, downloadMediaMessage, BufferJSON, generateMessageID } = Baileys;
+const { fetchLatestBaileysVersion, fetchLatestWaWebVersion, makeCacheableSignalKeyStore, DisconnectReason, jidNormalizedUser, downloadMediaMessage, BufferJSON, generateMessageID, isRealMessage, shouldIncrementChatUnread } = Baileys;
 const WAProto = (B.proto ?? (B.default as { proto?: unknown })?.proto) as typeof Baileys.proto;
 /** Baileys günlüğünden yakalanan, elimizde olmayan uygulama durumu anahtarları (telefondan istenecek) */
 const missingSyncKeys = new Set<string>();
@@ -119,6 +134,37 @@ export class WhatsAppConnector extends BaseConnector {
   /** contacts.upsert tek tek (kişi başına bir olay) gelir: günlüğe özet yazılır */
   private contactTally = { total: 0, named: 0 };
   private contactLogTimer?: NodeJS.Timeout;
+  /** start() kuşağı: stop() ya da yeni start() eski, hâlâ sürmekte olan start()'ın soketini geçersiz kılar (öksüz soket → 440) */
+  private gen = 0;
+  /** 'open' sonrası kurulan gecikmeli işler (grup eşitleme, uyarı, uygulama durumu); stop'ta temizlenir */
+  private openTimers = new Set<NodeJS.Timeout>();
+  /** Profil fotoğrafı: jid → alınma zamanı (avatars.json); kuyruk tek, sıralı, sapmalı aralıklı */
+  private avatarAt = new Map<string, number>();
+  private avatarQueue: string[] = [];
+  private avatarQueued = new Set<string>();
+  private avatarRunning = false;
+  private avatarBudget = AVATAR_BUDGET;
+  private avatarPauseUntil = 0;
+  private avatarTimer?: NodeJS.Timeout;
+  private avatarSaveTimer?: NodeJS.Timeout;
+  private avatarsLoaded = false;
+  /** Alınamayan grup bilgileri: jid → zaman (GROUP_FAIL_TTL boyunca yeniden sorulmaz; names.json'da kalıcı) */
+  private groupFailed = new Map<string, number>();
+  /** Çevrimdışı (unavailable) bildirimi: uyku/uyanma algılama ve boşa geçiş aboneliği */
+  private wakeTimer?: NodeJS.Timeout;
+  private wakeTick = 0;
+  private lastIdleOffline = 0;
+  private offIdle?: () => void;
+
+  /** start() ve open zamanlayıcıları için: yalnız bu soket hâlâ geçerliyse çalışır */
+  private later(sock: WASocket, ms: number, fn: () => void): void {
+    const t = setTimeout(() => {
+      this.openTimers.delete(t);
+      if (this.sock === sock && !this.stopping) fn();
+    }, ms);
+    t.unref?.();
+    this.openTimers.add(t);
+  }
 
   private authDir(): string {
     return path.join(sessionDir(this.account.id), 'auth');
@@ -170,9 +216,7 @@ export class WhatsAppConnector extends BaseConnector {
       version: version as [number, number, number] | undefined,
       // anahtar okumalarını bellekte önbellekle (Baileys örneği, WAHA, Evolution)
       auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, baileysLogger()) },
-      msgRetryCounterCache,
-      placeholderResendCache,
-      userDevicesCache,
+      ...cachesFor(this.account.id),
       logger: baileysLogger(),
       // DİKKAT: browser[0] 'Mac OS'/'Windows' + syncFullHistory birleşimi Baileys'i yerel masaüstü uygulaması
       // (DARWIN/WIN32) gibi tanıtır; WhatsApp bunu web sürüm numarasıyla kabul etmeyip bağlantıyı hemen kapatır (428).
@@ -206,8 +250,10 @@ export class WhatsAppConnector extends BaseConnector {
         saved?: string[];
         wire?: Array<[string, string]>;
         lidGroups?: string[];
+        groupFailed?: Array<[string, number]>;
       };
       this.loadingNames = true;
+      for (const [g, t] of raw.groupFailed ?? []) if (Date.now() - t < GROUP_FAIL_TTL) this.groupFailed.set(g, t);
       for (const [k, v] of raw.names ?? []) this.nameCache.set(k, v);
       for (const k of raw.saved ?? []) this.savedNames.add(k);
       for (const [k, v] of raw.wire ?? []) this.wireJid.set(k, v);
@@ -235,7 +281,14 @@ export class WhatsAppConnector extends BaseConnector {
       const alias = [...this.alias.entries()].filter(([k]) => k.endsWith('@lid'));
       fs.writeFileSync(
         this.namesFile(),
-        JSON.stringify({ alias, names: [...this.nameCache.entries()], saved: [...this.savedNames], wire: [...this.wireJid.entries()], lidGroups: [...this.lidGroups] }),
+        JSON.stringify({
+          alias,
+          names: [...this.nameCache.entries()],
+          saved: [...this.savedNames],
+          wire: [...this.wireJid.entries()],
+          lidGroups: [...this.lidGroups],
+          groupFailed: [...this.groupFailed.entries()].filter(([, t]) => Date.now() - t < GROUP_FAIL_TTL),
+        }),
       );
     } catch {
       /* diske yazılamadı */
@@ -245,7 +298,8 @@ export class WhatsAppConnector extends BaseConnector {
   private retry(ms: number): void {
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = setTimeout(() => {
-      if (!this.stopping) void this.start();
+      this.retryTimer = undefined;
+      if (!this.stopping) void this.start().catch((e) => bus.log('warn', `WhatsApp yeniden bağlanamadı: ${(e as Error).message}`));
     }, ms);
   }
 
@@ -254,14 +308,27 @@ export class WhatsAppConnector extends BaseConnector {
     this.historySeen = false;
     this.opened = false;
     this.account.label = 'WhatsApp';
+    const gen = ++this.gen;
     const dir = this.authDir();
     if (this.alias.size === 0 && this.nameCache.size === 0) this.loadNames();
+    this.loadAvatars();
+    this.avatarBudget = AVATAR_BUDGET;
+    this.avatarBudgetLogged = false;
+    this.startPresenceGuards();
 
     this.setStatus('connecting');
     const { sock, state } = await this.makeSocket(true);
+    // makeSocket sürüm sorgusunda 16 sn'ye dek bekleyebilir: bu arada stop() ya da yeni start() geldiyse bu soket öksüz kalmasın
+    // (aynı kimlikle iki bağlantı → sunucu birini 440 ile atar; görünmeyen soket depoya yazmaya devam eder)
+    if (this.stopping || gen !== this.gen) {
+      sock.end(undefined);
+      return;
+    }
     this.sock = sock;
 
     sock.ev.on('connection.update', async (u) => {
+      // değiştirilmiş (eski) soketin olayları yeni bağlantının durumunu/yeniden denemesini bozmasın
+      if (this.sock !== sock) return;
       if (u.qr) {
         this.setStatus('pairing', 'QR kodunu telefonundan okut');
         const qrDataUrl = await QRCode.toDataURL(u.qr, { margin: 1, width: 320 });
@@ -296,11 +363,14 @@ export class WhatsAppConnector extends BaseConnector {
         }
         if (this.presenceTimer) clearTimeout(this.presenceTimer);
         this.presenceTimer = undefined;
-        void sock.sendPresenceUpdate('unavailable').catch(() => undefined);
+        this.sendOffline('bağlantı');
         void this.syncGroups(sock);
-        setTimeout(() => void this.syncGroups(sock), 20_000);
+        this.later(sock, 20_000, () => void this.syncGroups(sock));
         // Rehber adları uygulama durumu (app state) eşitlemesindeki contactAction kayıtlarından gelir; bazı hesaplarda
-        // bağlantıda kendiliğinden gelmiyor — açıkça iste
+        // bağlantıda kendiliğinden gelmiyor — açıkça iste. Ban önleme / yük: tam anlık görüntü (sürüm sıfırlama) her yeniden
+        // bağlanmada DEĞİL, eşleşme başına bir kez (appstate-sync.json: hangi kimlik için yapıldı) ya da rehber adı hiç yoksa (≥24 sa arayla).
+        const pairKey = sock.authState.creds.me?.id ?? me;
+        this.pumpAvatars(3000);
         const resync = async (attempt: number): Promise<void> => {
           if (this.sock !== sock || this.stopping) return;
           try {
@@ -334,20 +404,21 @@ export class WhatsAppConnector extends BaseConnector {
                 },
               );
               bus.log('info', `WhatsApp: ${keyIds.length} uygulama durumu anahtarı telefondan istendi (deneme ${attempt}); 20 sn sonra yeniden eşitlenecek`);
-              setTimeout(() => void resync(attempt + 1), 20_000);
+              this.later(sock, 20_000, () => void resync(attempt + 1));
               return;
             }
+            this.writeResyncFlag(pairKey);
             bus.log('info', `WhatsApp: uygulama durumu (rehber/sohbet ayarları) baştan eşitlendi${missingSyncKeys.size ? ' (eksik anahtar kaldı)' : ''}`);
           } catch (e) {
             bus.log('warn', `WhatsApp uygulama durumu eşitlenemedi: ${(e as Error).message}`);
           }
         };
-        setTimeout(() => void resync(1), 8_000);
-        setTimeout(() => {
+        if (this.needsFullResync(pairKey)) this.later(sock, 8_000, () => void resync(1));
+        this.later(sock, 90_000, () => {
           // geçmiş yalnızca ilk eşleşmede gelir; depoda sohbet varsa uyarı gereksiz
           if (!this.historySeen && !this.stopping && this.sock === sock && this.store.listChatsOf(this.account.id).length === 0)
             bus.log('warn', 'WhatsApp: 90 sn geçti, telefondan sohbet geçmişi gelmedi. Telefonda WhatsApp → Bağlı cihazlar → bu cihazı kaldır, sonra kanala sağ tık → Kaldır → yeniden bağlan.');
-        }, 90_000);
+        });
       }
       if (u.receivedPendingNotifications) bus.log('info', 'WhatsApp: bekleyen bildirimler alındı');
       if (u.connection === 'close') {
@@ -392,9 +463,12 @@ export class WhatsAppConnector extends BaseConnector {
           this.setStatus('error', 'Başka bir yerde WhatsApp Web açıldı; Yeniden bağlan de');
           return;
         }
-        if (!this.opened) {
+        // Yalnız GERÇEK sunucu reddi sayılır: telefonda "bağlı cihazı kaldır" yapıldıysa sunucu 401 yerine bağlantıyı kapatır
+        // (428 Connection Terminated) ve kimlik hiç açılmaz. Ağ hataları (çevrimdışı/uyku/DNS: Baileys 408, ya da 500 "WebSocket
+        // Error") ASLA sayılmaz — eskiden 15-30 sn'lik Wi-Fi kesintisi 3 denemede oturumu silip QR istiyordu.
+        const netErr = code === DisconnectReason.timedOut || /WebSocket Error|ENOTFOUND|EAI_AGAIN|ECONN|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|timed out/i.test(err?.message ?? '');
+        if (!this.opened && code === DisconnectReason.connectionClosed && !netErr) {
           this.failedBeforeOpen += 1;
-          // telefonda "bağlı cihazı kaldır" yapıldıysa sunucu 401 yerine 428 ile kapatır ve kimlik hiç açılmaz
           if (this.failedBeforeOpen >= 3 && fs.existsSync(path.join(dir, 'creds.json'))) {
             resetAuth(`kayıtlı kimlikle ${this.failedBeforeOpen} denemede bağlanılamadı (${code ?? '?'})`);
             return;
@@ -480,7 +554,7 @@ export class WhatsAppConnector extends BaseConnector {
       }
       this.scheduleRefresh();
       if (!onDemand && (isLatest || (progress ?? 0) >= 100)) this.scheduleGapFill(20_000);
-      void this.fetchAvatars(sock, (chats ?? []).map((c) => c.id).filter((id): id is string => !!id && isChatJid(id)).map((id) => this.canon(id)).slice(0, 60));
+      this.enqueueAvatars((chats ?? []).map((c) => c.id).filter((id): id is string => !!id && isChatJid(id)).map((id) => this.canon(id)).slice(0, 60), true);
     });
 
     // Baileys 7: uygulama durumundaki her contactAction ayrı bir contacts.upsert olayı (1 kişi) olarak gelir; id numara ya da LID
@@ -510,7 +584,7 @@ export class WhatsAppConnector extends BaseConnector {
       this.scheduleRefresh();
     });
     sock.ev.on('groups.upsert', (gs) => {
-      for (const g of gs) (this.groupMetaCache.set(g.id, g), this.applyGroup(g.id, g.subject, g.participants, g.addressingMode));
+      for (const g of gs) (this.groupFailed.delete(g.id), this.groupMetaCache.set(g.id, g), this.applyGroup(g.id, g.subject, g.participants, g.addressingMode));
     });
     // üyelik değişince önbellekteki grup bilgisi bayatlar: sil, sıradaki gönderimde Baileys taze bilgiyi kendisi çeker
     sock.ev.on('group-participants.update', ({ id }) => {
@@ -522,9 +596,12 @@ export class WhatsAppConnector extends BaseConnector {
     // contacts.update: gelen her mesajın profil adı (notify) ve profil fotoğrafı değişimi (imgUrl 'changed'/'removed')
     sock.ev.on('contacts.update', (cs) => {
       for (const c of cs) {
-        if (c.id && c.imgUrl !== undefined) {
+        if (c.id && c.imgUrl !== undefined && c.id.includes('@')) {
           const jid = this.canon(jidNormalizedUser(c.id));
           this.avatarCache.delete(jid);
+          this.avatarAt.delete(jid);
+          // yalnız listede sohbeti olan kişi için yeniden sor (kuyruk sıralı ve bütçeli)
+          if (this.store.getChat(chatIdOf(this.account.id, jid))) this.enqueueAvatars([jid], true);
         }
         this.learnContact(c);
       }
@@ -560,8 +637,8 @@ export class WhatsAppConnector extends BaseConnector {
       // "Sohbetleri arşivde tut" kapalıysa (unarchiveChats) arşivdeki sohbete yeni mesaj gelince telefonda arşivden çıkar; burada da
       if (type === 'notify' && this.sock?.authState.creds.accountSettings?.unarchiveChats === true)
         for (const m of messages) if (m.key.remoteJid && !m.key.fromMe && isChatJid(m.key.remoteJid)) this.setArchived(this.canon(m.key.remoteJid), false);
-      if (messages.length > 1) this.store.transaction(() => messages.forEach((m) => this.ingest(m, type === 'notify')));
-      else for (const m of messages) this.ingest(m, type === 'notify');
+      if (messages.length > 1) this.store.transaction(() => messages.forEach((m) => this.ingest(m, type === 'notify', true)));
+      else for (const m of messages) this.ingest(m, type === 'notify', true);
     });
 
     /**
@@ -855,8 +932,34 @@ export class WhatsAppConnector extends BaseConnector {
   }
 
   async stop(): Promise<void> {
+    // kapanırken cihaz "etkin" kalmasın (telefon bildirimleri): en çok 1,5 sn beklenir
+    const live = this.sock;
+    if (live && this.opened && live.ws.isOpen && !this.stopping) {
+      let t: NodeJS.Timeout | undefined;
+      await Promise.race([
+        live
+          .sendPresenceUpdate('unavailable')
+          .then(() => bus.log('info', 'WhatsApp: çevrimdışı bildirildi (kapanış)'))
+          .catch(() => undefined),
+        new Promise<void>((r) => (t = setTimeout(r, 1500))),
+      ]);
+      if (t) clearTimeout(t);
+    }
     this.stopping = true;
+    this.gen++;
+    this.stopPresenceGuards();
+    for (const t of this.openTimers) clearTimeout(t);
+    this.openTimers.clear();
+    this.groupPending.clear();
+    if (this.avatarTimer) clearTimeout(this.avatarTimer);
+    this.avatarTimer = undefined;
+    if (this.avatarSaveTimer) {
+      clearTimeout(this.avatarSaveTimer);
+      this.avatarSaveTimer = undefined;
+      this.saveAvatars();
+    }
     if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = undefined;
     if (this.gapTimer) clearTimeout(this.gapTimer);
     this.gapTimer = undefined;
     if (this.presenceTimer) clearTimeout(this.presenceTimer);
@@ -883,15 +986,19 @@ export class WhatsAppConnector extends BaseConnector {
   }
 
   /**
-   * Gönderim/okundu sonrası cihazın "çevrimdışı" durumunu tek sefer yinele (20-40 sn sonra; art arda işler tek bildirime iner).
-   * Düzenli zamanlayıcı yok: sinyal yalnız kullanıcı bir iş yaptığında gider.
+   * Gönderim/okundu sonrası "çevrimdışı" güvenlik tekrarı (20-40 sn sonra; art arda işler tek tekrara iner). Asıl bildirim
+   * afterActivity ile işin hemen ardından gider. Düzenli zamanlayıcı yok: sinyal yalnız kullanıcı bir iş yaptığında gider.
    */
   private offlineSoon(): void {
     if (this.presenceTimer) clearTimeout(this.presenceTimer);
     const sock = this.sock;
     this.presenceTimer = setTimeout(() => {
       this.presenceTimer = undefined;
-      if (sock && sock === this.sock && sock.ws.isOpen) void sock.sendPresenceUpdate('unavailable').catch(() => undefined);
+      if (sock && sock === this.sock && sock.ws.isOpen)
+        void sock
+          .sendPresenceUpdate('unavailable')
+          .then(() => bus.log('info', 'WhatsApp: çevrimdışı bildirimi yinelendi (güvenlik tekrarı)'))
+          .catch(() => undefined);
     }, 20_000 + Math.random() * 20_000);
     this.presenceTimer.unref?.();
   }
@@ -909,7 +1016,7 @@ export class WhatsAppConnector extends BaseConnector {
     await this.gateSend();
     const sent = await this.sock.sendMessage(remoteChatId, { text });
     this.rememberSent(sent);
-    this.offlineSoon();
+    this.afterActivity('gönderim');
     const id = sent?.key.id ?? `local-${Date.now()}`;
     this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent' });
     return { remoteId: id };
@@ -933,7 +1040,7 @@ export class WhatsAppConnector extends BaseConnector {
     await this.gateSend();
     const sent = await this.sock.sendMessage(remoteChatId, content);
     this.rememberSent(sent);
-    this.offlineSoon();
+    this.afterActivity('dosya gönderimi');
     const id = sent?.key?.id ?? `local-${Date.now()}`;
     if (sent?.key?.id && sent.message) {
       // sendMessage'ın döndürdüğü mesajda remoteJid bizim verdiğimiz jid; ingest LID→numara eşlemesini kendisi yapar
@@ -969,22 +1076,211 @@ export class WhatsAppConnector extends BaseConnector {
       participant: remoteChatId.endsWith('@g.us') ? this.participantOf(remoteChatId, !m || m.fromMe ? 'me' : m.senderId) : undefined,
     };
     await this.sock.sendMessage(this.wireOf(remoteChatId), { react: { text: remove ? '' : emoji, key } });
+    this.afterActivity('tepki');
   }
 
-  /** En yeni sohbetlerin profil fotoğraflarını (varsa) çek. */
-  private async fetchAvatars(sock: WASocket, jids: string[]): Promise<void> {
-    for (const jid of jids) {
-      if (this.avatarCache.has(jid)) continue;
-      try {
-        const url = await sock.profilePictureUrl(jid, 'preview');
-        if (url) {
-          this.avatarCache.set(jid, url);
-          this.upsertChat({ remoteId: jid, name: this.nameOf(jid), avatarUrl: url });
-        }
-      } catch {
-        this.avatarCache.set(jid, '');
+  // ---------- profil fotoğrafları ----------
+  // Ban önleme: eskiden her grup için ayrı döngü aynı tick'te başlıyordu (≈163 eşzamanlı profilePictureUrl, açılış başına binlerce;
+  // önbellek yalnız bellekteydi). Şimdi: tek sıralı kuyruk + bekleyen tekilleştirme, istekler arası 0,5–1,5 sn sapma, oturum başına
+  // en çok AVATAR_BUDGET istek, sonuçlar (yoksa da) avatars.json'da AVATAR_TTL süre saklanır. Yalnız mevcut sohbetler güncellenir.
+  private avatarSinceRefresh = 0;
+  private avatarBudgetLogged = false;
+
+  private avatarsFile(): string {
+    return path.join(sessionDir(this.account.id), 'avatars.json');
+  }
+
+  private loadAvatars(): void {
+    if (this.avatarsLoaded) return;
+    this.avatarsLoaded = true;
+    try {
+      const raw = JSON.parse(fs.readFileSync(this.avatarsFile(), 'utf8')) as Array<[string, string, number]>;
+      const now = Date.now();
+      for (const [jid, url, at] of raw) {
+        if (typeof jid !== 'string' || typeof at !== 'number' || now - at >= AVATAR_TTL || avatarUrlExpired(url, now)) continue;
+        this.avatarCache.set(jid, url ?? '');
+        this.avatarAt.set(jid, at);
       }
+    } catch {
+      /* yok ya da bozuk */
     }
+  }
+
+  private scheduleSaveAvatars(): void {
+    if (this.avatarSaveTimer) return;
+    this.avatarSaveTimer = setTimeout(() => {
+      this.avatarSaveTimer = undefined;
+      this.saveAvatars();
+    }, 5000);
+    this.avatarSaveTimer.unref?.();
+  }
+
+  private saveAvatars(): void {
+    const now = Date.now();
+    const rows: Array<[string, string, number]> = [];
+    for (const [jid, at] of this.avatarAt) if (now - at < AVATAR_TTL) rows.push([jid, this.avatarCache.get(jid) ?? '', at]);
+    fs.promises.writeFile(this.avatarsFile(), JSON.stringify(rows)).catch(() => undefined);
+  }
+
+  private avatarFresh(jid: string): boolean {
+    const at = this.avatarAt.get(jid);
+    return at !== undefined && Date.now() - at < AVATAR_TTL && this.avatarCache.has(jid) && !avatarUrlExpired(this.avatarCache.get(jid) ?? '');
+  }
+
+  /** Profil fotoğrafı istenecek kimlikleri ortak kuyruğa ekle (front: sohbet listesi önce, grup üyeleri sonra) */
+  private enqueueAvatars(jids: string[], front = false): void {
+    const add = [...new Set(jids)].filter((j) => !!j && j.includes('@') && !this.avatarQueued.has(j) && !this.avatarFresh(j));
+    if (!add.length) return;
+    for (const j of add) this.avatarQueued.add(j);
+    if (front) this.avatarQueue.unshift(...add);
+    else this.avatarQueue.push(...add);
+    this.pumpAvatars();
+  }
+
+  private pumpAvatars(delay = 0): void {
+    if (this.avatarRunning || this.avatarTimer || this.stopping || !this.avatarQueue.length) return;
+    const wait = Math.max(delay, this.avatarPauseUntil - Date.now(), 0);
+    this.avatarTimer = setTimeout(() => {
+      this.avatarTimer = undefined;
+      void this.avatarStep();
+    }, wait);
+    this.avatarTimer.unref?.();
+  }
+
+  private async avatarStep(): Promise<void> {
+    const sock = this.sock;
+    // bağlı değilse kuyruk korunur; 'open'da yeniden pompalanır
+    if (this.stopping || !sock || !this.opened || !sock.ws.isOpen) return;
+    if (this.avatarBudget <= 0) {
+      if (!this.avatarBudgetLogged) {
+        this.avatarBudgetLogged = true;
+        bus.log('info', `WhatsApp: profil fotoğrafı sınırına ulaşıldı (oturum başına ${AVATAR_BUDGET}); kalan ${this.avatarQueue.length} kişi sonraki bağlantıda`);
+      }
+      return;
+    }
+    const jid = this.avatarQueue.shift();
+    if (!jid) return;
+    this.avatarQueued.delete(jid);
+    if (this.avatarFresh(jid)) {
+      this.pumpAvatars();
+      return;
+    }
+    this.avatarRunning = true;
+    this.avatarBudget--;
+    try {
+      const url = await sock.profilePictureUrl(jid, 'preview');
+      this.setAvatar(jid, url ?? '');
+    } catch (e) {
+      const err = e as { output?: { statusCode?: number }; data?: unknown; message?: string };
+      const code = err.output?.statusCode ?? (typeof err.data === 'number' ? err.data : undefined);
+      if (code === 429 || /rate-overlimit/i.test(err.message ?? '')) {
+        this.avatarQueue.unshift(jid);
+        this.avatarQueued.add(jid);
+        this.avatarPauseUntil = Date.now() + 10 * 60_000;
+        bus.log('warn', 'WhatsApp: profil fotoğrafı hız sınırı; 10 dk ara verildi');
+      } else if (sock.ws.isOpen) {
+        this.setAvatar(jid, ''); // fotoğraf yok / gizlilik: TTL boyunca yeniden sorma
+      } else {
+        this.avatarQueue.unshift(jid);
+        this.avatarQueued.add(jid);
+      }
+    } finally {
+      this.avatarRunning = false;
+    }
+    this.pumpAvatars(500 + Math.random() * 1000);
+  }
+
+  private setAvatar(jid: string, url: string): void {
+    this.avatarCache.set(jid, url);
+    this.avatarAt.set(jid, Date.now());
+    this.scheduleSaveAvatars();
+    if (url) {
+      const chat = this.store.getChat(chatIdOf(this.account.id, jid));
+      if (chat && chat.avatarUrl !== url) this.upsertChat({ remoteId: jid, name: chat.name, avatarUrl: url });
+    }
+    // katılımcı listeleri/mesaj gönderen fotoğrafları toplu yenilensin (refreshNames tam tarama: her fotoğrafta değil)
+    if (++this.avatarSinceRefresh >= 20 || !this.avatarQueue.length) {
+      this.avatarSinceRefresh = 0;
+      this.scheduleRefresh();
+    }
+  }
+
+  // ---------- çevrimdışı (unavailable) bildirimi ----------
+  // Telefon bildirimleri: bağlı cihaz "etkin" kalırsa WhatsApp telefona bildirim göndermez. Düzenli presence YOK (ban kuralı);
+  // 'unavailable' yalnız olaylarda gider: bağlanınca, her gönderim/tepki/okundu işleminin HEMEN ardından (+20–40 sn sonra tek
+  // güvenlik tekrarı), arayüz boşa geçince (≥60 sn arayla), Mac uykudan uyanınca (30 sn'lik saat sıçraması >90 sn) ve kapanırken.
+  // Eskiden yalnız 20–40 sn sonra gidiyordu: Mac o arada uyursa cihaz "etkin" kalıyor, telefon bildirimleri gelmiyordu.
+  private sendOffline(reason: string): void {
+    const sock = this.sock;
+    if (!sock || !this.opened || !sock.ws.isOpen) return;
+    void sock
+      .sendPresenceUpdate('unavailable')
+      .then(() => bus.log('info', `WhatsApp: çevrimdışı bildirildi (${reason})`))
+      .catch(() => undefined);
+  }
+
+  /** Cihazı etkin gösterebilecek bir işten sonra: hemen çevrimdışı + gecikmeli tek tekrar */
+  private afterActivity(reason: string): void {
+    this.sendOffline(reason);
+    this.offlineSoon();
+  }
+
+  private startPresenceGuards(): void {
+    if (!this.offIdle) {
+      this.offIdle = onUiInactive(() => {
+        if (Date.now() - this.lastIdleOffline < 60_000) return;
+        this.lastIdleOffline = Date.now();
+        this.sendOffline('arayüz boşta');
+      });
+    }
+    if (!this.wakeTimer) {
+      this.wakeTick = Date.now();
+      this.wakeTimer = setInterval(() => {
+        const now = Date.now();
+        const gap = now - this.wakeTick;
+        this.wakeTick = now;
+        if (gap <= 90_000 || this.stopping) return;
+        const sock = this.sock;
+        if (sock?.ws.isOpen) {
+          this.sendOffline(`uykudan uyanma, ${Math.round(gap / 1000)} sn`);
+        } else if (sock && this.opened && sock.ws.isClosed && !this.retryTimer) {
+          // soket kapanmış ama Baileys kapanışı bildirmemiş: bağlantıyı bitir → olağan yeniden bağlanma yolu
+          bus.log('info', `WhatsApp: uykudan uyanıldı (${Math.round(gap / 1000)} sn), bağlantı kapalı; yeniden bağlanılıyor`);
+          sock.end(undefined);
+        } else {
+          bus.log('info', `WhatsApp: uykudan uyanıldı (${Math.round(gap / 1000)} sn); bağlantı yenilenince çevrimdışı bildirilecek`);
+        }
+      }, 30_000);
+      this.wakeTimer.unref?.();
+    }
+  }
+
+  private stopPresenceGuards(): void {
+    if (this.wakeTimer) clearInterval(this.wakeTimer);
+    this.wakeTimer = undefined;
+    this.offIdle?.();
+    this.offIdle = undefined;
+  }
+
+  // ---------- uygulama durumu tam eşitlemesi (eşleşme başına bir kez) ----------
+  private resyncFile(): string {
+    return path.join(sessionDir(this.account.id), 'appstate-sync.json');
+  }
+
+  /** pairKey: creds.me.id (cihaz numarasıyla; her eşleşmede değişir) */
+  private needsFullResync(pairKey: string): boolean {
+    try {
+      const f = JSON.parse(fs.readFileSync(this.resyncFile(), 'utf8')) as { me?: string; at?: number };
+      if (f.me !== pairKey) return true;
+      // rehber adı hiç gelmediyse (anahtar eksikti vb.) en çok günde bir yeniden dene
+      return this.savedNames.size === 0 && Date.now() - (f.at ?? 0) > 86_400_000;
+    } catch {
+      return true;
+    }
+  }
+
+  private writeResyncFlag(pairKey: string): void {
+    fs.promises.writeFile(this.resyncFile(), JSON.stringify({ me: pairKey, at: Date.now() })).catch(() => undefined);
   }
 
   /** Katılınan tüm grupların adını ve üyelerini çek (geçmiş paketinde grup adı gelmeyebiliyor) */
@@ -1007,15 +1303,28 @@ export class WhatsAppConnector extends BaseConnector {
   /** Adı bilinmeyen bir grup görülünce meta verisini tek tek çek (toplu çağrı başarısızsa yedek yol) */
   private ensureGroupMeta(jid: string): void {
     if (!jid.endsWith('@g.us') || this.nameCache.has(jid) || this.groupPending.has(jid) || !this.sock) return;
+    // Ban önleme: alınamayan grup (ayrılınan grup vb.) her geçmiş parçasında/mesajda yeniden sorulmasın — 24 sa negatif önbellek
+    const failedAt = this.groupFailed.get(jid);
+    if (failedAt && Date.now() - failedAt < GROUP_FAIL_TTL) return;
     this.groupPending.add(jid);
     const sock = this.sock;
-    setTimeout(() => {
+    const t = setTimeout(() => {
+      this.openTimers.delete(t);
+      if (this.sock !== sock || this.stopping) {
+        this.groupPending.delete(jid);
+        return;
+      }
       sock
         .groupMetadata(jid)
-        .then((g) => (this.groupMetaCache.set(g.id, g), this.applyGroup(g.id, g.subject, g.participants, g.addressingMode)))
-        .catch((e) => bus.log('warn', `WhatsApp grup bilgisi alınamadı (${jid}): ${(e as Error).message}`))
+        .then((g) => (this.groupFailed.delete(jid), this.groupMetaCache.set(g.id, g), this.applyGroup(g.id, g.subject, g.participants, g.addressingMode)))
+        .catch((e) => {
+          this.groupFailed.set(jid, Date.now());
+          this.scheduleSaveNames();
+          bus.log('warn', `WhatsApp grup bilgisi alınamadı (${jid}; 24 sa yeniden sorulmayacak): ${(e as Error).message}`);
+        })
         .finally(() => this.groupPending.delete(jid));
     }, 300 * this.groupPending.size);
+    this.openTimers.add(t);
   }
 
   private applyGroup(
@@ -1045,16 +1354,8 @@ export class WhatsAppConnector extends BaseConnector {
       return { id: jid, name: this.nameOf(jid), handle: jid.endsWith('@s.whatsapp.net') ? '+' + jid.split('@')[0] : undefined, avatarUrl: this.avatarCache.get(jid) || undefined, admin: !!p.admin };
     });
     if (this.store.getChat(chatIdOf(this.account.id, id)) || subject) this.upsertChat({ remoteId: id, name: subject ?? this.nameOf(id), kind: 'group', participants: members, link: undefined });
-    // üye fotoğrafları (arka planda, sınırlı)
-    if (members && this.sock) {
-      const sock = this.sock;
-      void this.fetchAvatars(sock, members.map((m) => m.id).slice(0, 40)).then(() => {
-        const chat = this.store.getChat(chatIdOf(this.account.id, id));
-        if (!chat?.participants) return;
-        this.upsertChat({ remoteId: id, name: chat.name, participants: chat.participants.map((m) => ({ ...m, name: this.nameOf(m.id), avatarUrl: this.avatarCache.get(m.id) || m.avatarUrl })) });
-        this.scheduleRefresh();
-      });
-    }
+    // üye fotoğrafları: ortak sıralı kuyruğa (bütçeli); gelenler refreshNames ile katılımcı listesine ve mesajlara işlenir
+    if (members) this.enqueueAvatars(members.map((m) => m.id).slice(0, 40));
   }
 
   async openDirect(p: Participant): Promise<string> {
@@ -1095,7 +1396,14 @@ export class WhatsAppConnector extends BaseConnector {
   /** Son gelen mesajları telefonda da okundu işaretle (mavi tik / okunmamış rozeti düşer) */
   async markRead(remoteChatId: string): Promise<void> {
     if (!this.sock) return;
-    const msgs = this.store.listMessages(chatIdOf(this.account.id, remoteChatId), 40).filter((m) => !m.fromMe && !m.remoteId.startsWith('local-'));
+    // Yalnız gerçekten okunmamış olanlar: son kendi mesajımdan sonra gelen ve henüz "okundu" alındısı gitmemiş/gelmemiş mesajlar
+    // (eskiden her açılışta son 40 mesajın tümüne yeniden okundu alındısı gidiyordu)
+    const recent = this.store.listMessages(chatIdOf(this.account.id, remoteChatId), 40);
+    let lastMine = -1;
+    recent.forEach((m, i) => {
+      if (m.fromMe) lastMine = i;
+    });
+    const msgs = recent.slice(lastMine + 1).filter((m) => !m.fromMe && !m.remoteId.startsWith('local-') && m.status !== 'read');
     if (!msgs.length) return;
     const remoteJid = this.wireOf(remoteChatId);
     const keys = msgs.map((m) => ({
@@ -1105,7 +1413,8 @@ export class WhatsAppConnector extends BaseConnector {
       participant: remoteChatId.endsWith('@g.us') && m.senderId !== 'me' ? this.participantOf(remoteChatId, m.senderId) : undefined,
     }));
     await this.sock.readMessages(keys);
-    this.offlineSoon();
+    for (const m of msgs) this.store.updateStatus(m.id, 'read');
+    this.afterActivity('okundu');
   }
 
   /**
@@ -1400,7 +1709,11 @@ export class WhatsAppConnector extends BaseConnector {
     this.upsertChat({ remoteId: jid, name: existing.name, meta: { ...(existing.meta ?? {}), archived } });
   }
 
-  private ingest(m: WAMessage, live: boolean): void {
+  /**
+   * upsert: mesaj 'messages.upsert' olayından geldi (Baileys processMessage bu mesaj için chats.update unreadCount +1 yayınlamış
+   * olabilir). Gösterilemeyip atlanan mesajlarda o artış mahsup edilir; geçmiş paketi mesajları için artış yoktur.
+   */
+  private ingest(m: WAMessage, live: boolean, upsert = false): void {
     const raw = m.key.remoteJid;
     if (!raw || !m.key.id || !isChatJid(raw)) return;
     // Sunucu her mesajda karşı kimliği de verir (lid sohbette sender_pn, numaralı sohbette sender_lid;
@@ -1481,7 +1794,7 @@ export class WhatsAppConnector extends BaseConnector {
           },
           { live },
         );
-      }
+      } else if (upsert) this.cancelBaileysUnread(m, jid);
       return;
     }
     const bizName = (m as WAMessage & { verifiedBizName?: string | null }).verifiedBizName ?? undefined;
@@ -1540,6 +1853,17 @@ export class WhatsAppConnector extends BaseConnector {
       },
       { live },
     );
+  }
+
+  /**
+   * Baileys'in okunmamış artışı verdiği (isRealMessage && karşıdan && stub'sız) ama bizim gösteremediğimiz mesaj (albümMessage
+   * başlığı, pin/keepInChat, encReaction…): chats.update +1 mahsup edilmezse sohbette görünür mesaj olmadan sayaç artıyordu.
+   */
+  private cancelBaileysUnread(m: WAMessage, jid: string): void {
+    if (typeof isRealMessage !== 'function' || typeof shouldIncrementChatUnread !== 'function') return;
+    if (!isRealMessage(m) || !shouldIncrementChatUnread(m)) return;
+    this.liveBumped.set(jid, (this.liveBumped.get(jid) ?? 0) + 1);
+    this.scheduleUnreadSettle();
   }
 
   private isMe(jid: string): boolean {
@@ -1650,6 +1974,12 @@ export class WhatsAppConnector extends BaseConnector {
 }
 
 const seenUnknown = new Set<string>();
+
+/** WhatsApp profil fotoğrafı adresindeki imza süresi (oe=<onaltılık unix sn>) geçtiyse true */
+function avatarUrlExpired(url: string, now = Date.now()): boolean {
+  const m = url.match(/[?&]oe=([0-9a-fA-F]+)/);
+  return !!m && parseInt(m[1], 16) * 1000 < now;
+}
 
 /** Baileys zaman damgaları saniye gelir (number, Long ya da JSON'dan dönmüş {low,high} nesnesi) → ms */
 function toMs(v: number | string | { toNumber?: () => number; low?: number; high?: number } | null | undefined): number {

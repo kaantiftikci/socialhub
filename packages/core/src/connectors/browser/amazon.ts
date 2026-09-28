@@ -1,6 +1,6 @@
 import type { Page } from 'playwright';
 import { hashId, type Msg, type Strategy, type Thread } from './bridge.js';
-import { parseWhen } from './shopify.js';
+import { isRelativeWhen, parseWhen } from './shopify.js';
 import { bus } from '../../bus.js';
 
 /**
@@ -248,7 +248,9 @@ export function toMessages(threadId: string, threadName: string, rows: RawMsg[],
     if (parsed !== undefined) cursor = parsed;
     const ts = parsed ?? (cursor = cursor !== undefined ? cursor + 1 : now);
     const fromMe = r.me === true;
-    const key = `${threadId}|${parsed ?? r.when}|${fromMe ? 'me' : r.sender ?? threadName}|${r.text}`;
+    // kimlikte zaman: mutlak zamanda çözülen ms; göreli ("5 dk", "şimdi") ya da çözülemeyen zamanda ham metin — göreli değer
+    // her yoklamada kayar ve aynı mesaj yeni kimlikle yeniden yazılırdı
+    const key = `${threadId}|${parsed !== undefined && !isRelativeWhen(r.when, now) ? parsed : r.when}|${fromMe ? 'me' : r.sender ?? threadName}|${r.text}`;
     const n = dupes.get(key) ?? 0;
     dupes.set(key, n + 1);
     msgs.push({

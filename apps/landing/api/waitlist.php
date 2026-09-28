@@ -3,14 +3,16 @@ declare(strict_types=1);
 
 /**
  * Bekleme listesi: POST {email, ref} → {position, code}. Kayıtlar web kökünün dışında ~/mivelo-data/waitlist.json.
- * Aynı e-posta ikinci kez gelirse yeni kayıt açılmaz, mevcut sıra ve kod döner. `ref` davet kodu; davet edenin `refs` sayacı artar.
+ * Aynı e-posta ikinci kez gelirse yeni kayıt açılmaz; yanıt yeni kayıtla aynı biçimde ama uydurma (sıra = liste sonu, rastgele
+ * kod): kimin listede olduğu ve başkasının davet kodu dışarı sızmaz. `ref` davet kodu; davet edenin `refs` sayacı artar.
+ * Yazım admin/api.php ile aynı düzen: waitlist.json.lock üzerinde kilit, önce kodla, geçici dosya + rename.
  */
 
 header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
 header('Cache-Control: no-store');
 
-function fail(int $code, string $msg): never
+function fail(int $code, string $msg)
 {
     http_response_code($code);
     echo json_encode(['error' => $msg], JSON_UNESCAPED_UNICODE);
@@ -27,6 +29,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
 }
 
 $body = json_decode((string) file_get_contents('php://input', false, null, 0, 4096), true);
+if (!is_array($body)) {
+    $body = [];
+}
 $email = strtolower(trim((string) ($body['email'] ?? '')));
 $ref = preg_replace('/[^a-z0-9]/', '', strtolower((string) ($body['ref'] ?? '')));
 // nereden geldi: utm_source ya da yönlendiren alan adı (landing gönderir); admin panelinde kaynak kırılımı için
@@ -51,30 +56,63 @@ function data_dir(): string
     fail(500, 'Kayıt alanı açılamadı');
 }
 
-$fh = fopen(data_dir() . '/waitlist.json', 'c+');
-if ($fh === false) {
-    fail(500, 'Kayıt alanı açılamadı');
-}
-flock($fh, LOCK_EX);
-$raw = stream_get_contents($fh);
-$data = ($raw !== false && $raw !== '') ? json_decode($raw, true) : null;
-if (!is_array($data) || !isset($data['entries']) || !is_array($data['entries'])) {
-    $data = ['entries' => []];
+/** Hız sınırı anahtarı: IPv4 tam adres, IPv6 /64 önek */
+function client_key(string $ip): string
+{
+    if (strpos($ip, ':') !== false) {
+        $bin = @inet_pton($ip);
+        if ($bin !== false && strlen($bin) === 16) {
+            return bin2hex(substr($bin, 0, 8)) . '::/64';
+        }
+    }
+    return $ip;
 }
 
-$ip = $_SERVER['REMOTE_ADDR'] ?? '';
-$out = null;
-foreach ($data['entries'] as $i => $e) {
-    if ($e['email'] === $email) {
-        $out = ['position' => $i + 1, 'code' => $e['code']];
+$path = data_dir() . '/waitlist.json';
+$lh = @fopen($path . '.lock', 'c');
+if ($lh === false || !flock($lh, LOCK_EX)) {
+    fail(500, 'Kayıt alanı açılamadı');
+}
+clearstatcache(true, $path);
+$data = ['entries' => []];
+if (file_exists($path)) {
+    $raw = @file_get_contents($path);
+    if ($raw === false) {
+        fail(500, 'Kayıt alanı okunamadı');
+    }
+    if (trim($raw) !== '') {
+        $data = json_decode($raw, true);
+        // bozuk dosya "boş liste" sayılıp üstüne yazılmaz (tüm liste silinirdi)
+        if (!is_array($data) || !isset($data['entries']) || !is_array($data['entries'])) {
+            fail(500, 'Kayıt alanı geçici olarak kullanılamıyor');
+        }
+    }
+}
+
+$ip = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+$ipKey = client_key($ip);
+$codes = array_column($data['entries'], 'code');
+$newCode = function () use ($codes) {
+    do {
+        $code = substr(bin2hex(random_bytes(4)), 0, 6);
+    } while (in_array($code, $codes, true));
+    return $code;
+};
+$exists = false;
+foreach ($data['entries'] as $e) {
+    if (($e['email'] ?? null) === $email) {
+        $exists = true;
         break;
     }
 }
-if ($out === null) {
-    // Kaba kötüye kullanım sınırı: aynı IP'den son bir saatte en fazla 20 kayıt
+if ($exists) {
+    // yeni kayıttan ayırt edilemeyen yanıt (sıra/kod sızmasın)
+    $out = ['position' => count($data['entries']) + 1, 'code' => $newCode()];
+} else {
+    // Kaba kötüye kullanım sınırı: aynı IP'den (IPv6: aynı /64) son bir saatte en fazla 20 kayıt
     $recent = 0;
     foreach ($data['entries'] as $e) {
-        if (($e['ip'] ?? '') === $ip && ($e['at'] ?? 0) > time() - 3600) {
+        if (client_key((string) ($e['ip'] ?? '')) === $ipKey && ($e['at'] ?? 0) > time() - 3600) {
             $recent++;
         }
     }
@@ -85,17 +123,12 @@ if ($out === null) {
         $today++;
     }
     if ($recent >= 20 || $today >= 2000) {
-        flock($fh, LOCK_UN);
-        fclose($fh);
         fail(429, 'Çok fazla deneme, biraz sonra tekrar dene.');
     }
-    $codes = array_column($data['entries'], 'code');
-    do {
-        $code = substr(bin2hex(random_bytes(4)), 0, 6);
-    } while (in_array($code, $codes, true));
+    $code = $newCode();
     if ($ref !== '') {
         foreach ($data['entries'] as &$e) {
-            if ($e['code'] === $ref) {
+            if (($e['code'] ?? null) === $ref) {
                 $e['refs'] = (int) ($e['refs'] ?? 0) + 1;
                 break;
             }
@@ -103,13 +136,26 @@ if ($out === null) {
         unset($e);
     }
     $data['entries'][] = ['email' => $email, 'code' => $code, 'ref' => $ref, 'refs' => 0, 'at' => time(), 'ip' => $ip, 'src' => $src !== '' ? $src : ($ref !== '' ? 'davet' : 'doğrudan'), 'status' => 'waiting'];
+    // önce kodla (hata → dosyaya dokunma), sonra geçici dosya + rename (yarım yazım listeyi bozmaz)
     $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
-    ftruncate($fh, 0);
-    rewind($fh);
-    fwrite($fh, $json === false ? '{"entries":[]}' : $json);
-    fflush($fh);
+    if ($json === false) {
+        fail(500, 'Kayıt yapılamadı');
+    }
+    $tmp = $path . '.tmp-' . bin2hex(random_bytes(4));
+    $fh = @fopen($tmp, 'x');
+    $ok = $fh !== false && fwrite($fh, $json) === strlen($json) && fflush($fh);
+    if ($ok && function_exists('fsync')) {
+        $ok = fsync($fh);
+    }
+    if ($fh !== false) {
+        fclose($fh);
+    }
+    if (!$ok || !@rename($tmp, $path)) {
+        @unlink($tmp);
+        fail(500, 'Kayıt yapılamadı');
+    }
     $out = ['position' => count($data['entries']), 'code' => $code];
 }
-flock($fh, LOCK_UN);
-fclose($fh);
+flock($lh, LOCK_UN);
+fclose($lh);
 echo json_encode($out);

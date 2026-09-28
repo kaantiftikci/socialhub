@@ -2,6 +2,8 @@
 #   apps/landing  → ~/mivelo.app/       (bekleme listesi sayfası; kayıtlar api/waitlist.php → ~/mivelo-data/waitlist.json)
 #   apps/web demo → ~/demo.mivelo.app/  (VITE_STATIC_DEMO=1; demo hesapları ~/mivelo-data/users.json)
 # Gizli: FTP_PASSWORD (GitHub → Settings → Secrets and variables → Actions). Sunucuda SSH/SFTP kapalı, FTP+TLS açık.
+# Eşitleme durum dosyası (yayımlanan her dosyanın listesi) web kökünde herkese açık kalıyordu: api/ altına alındı ve
+# oradaki .htaccess ile erişime kapatıldı. Kökteki eski .ftp-deploy-sync-state.json dosyaları sunucudan elle silinmeli.
 name: deploy-demo
 on:
   workflow_dispatch:
@@ -23,6 +25,7 @@ jobs:
           protocol: ftps
           local-dir: apps/landing/
           server-dir: mivelo.app/
+          state-name: api/.ftp-deploy-sync-state.json
           exclude: '**/.git*'
   demo:
     runs-on: ubuntu-latest
@@ -47,4 +50,5 @@ jobs:
           protocol: ftps
           local-dir: apps/web/dist/
           server-dir: demo.mivelo.app/
+          state-name: api/.ftp-deploy-sync-state.json
           exclude: '**/.git*'

@@ -81,6 +81,41 @@ export const QUESTION_STATUS: Record<string, string> = {
 class TrendyolAuthError extends Error {}
 class TrendyolRateLimit extends Error {}
 
+/** Cevap gönderildi işareti (seen değeri): API cevabı yansıtana dek (≤30 dk) soru yeniden "bekliyor/okunmamış" olmasın */
+const ANSWERED_SENTINEL_PREFIX = 'answered:';
+const answeredSentinel = () => `${ANSWERED_SENTINEL_PREFIX}${Date.now()}`;
+const answeredRecently = (prev: string | undefined) => !!prev && prev.startsWith(ANSWERED_SENTINEL_PREFIX) && Date.now() - Number(prev.slice(ANSWERED_SENTINEL_PREFIX.length)) < 30 * 60_000;
+/** Durum dosyasında paketleri saklanan en fazla sipariş (en son güncellenenler) */
+const MAX_STORED_ORDERS = 2000;
+
+const pick = (o: J | undefined, keys: string[]): J | undefined => {
+  if (!o || typeof o !== 'object') return undefined;
+  const out: J = {};
+  for (const k of keys) if (o[k] !== undefined && o[k] !== null) out[k] = o[k];
+  return out;
+};
+
+/** Paketi ingestOrder'ın kullandığı alanlara indir (durum dosyası küçük kalsın) */
+export function stripPackage(p: J): J {
+  const out = pick(p, ['id', 'orderNumber', 'status', 'shipmentPackageStatus', 'cargoTrackingNumber', 'cargoTrackingLink', 'cargoProviderName', 'customerFirstName', 'customerLastName', 'customerEmail', 'customerPhone', 'customerId', 'currencyCode', 'orderDate', 'totalPrice', 'grossAmount', 'totalDiscount', 'totalTyDiscount', 'deliveryType', 'lastModifiedDate', 'estimatedDeliveryEndDate'])!;
+  const addr = pick(p.shipmentAddress, ['fullName', 'fullAddress', 'address1', 'address2', 'neighborhood', 'district', 'city', 'phone']);
+  if (addr) out.shipmentAddress = addr;
+  const hist: J[] | undefined = p.packageHistories ?? p.packageHistory;
+  if (Array.isArray(hist)) out.packageHistories = hist.map((h) => pick(h, ['status', 'createdDate']));
+  if (Array.isArray(p.lines)) out.lines = p.lines.map((l: J) => pick(l, ['quantity', 'productName', 'productSize', 'productColor', 'amount', 'price', 'currencyCode', 'merchantSku', 'barcode', 'orderLineItemStatusName']));
+  return out;
+}
+
+/**
+ * İki paket listesini paket kimliğine göre birleştir: `primary`deki kayıt kazanır, `secondary`de olup primary'de olmayanlar
+ * eklenir. Sonuç kimliğe göre sıralı (gelen alt küme değişince imza/ilk paket oynamasın).
+ */
+export function mergePackages(primary: J[], secondary: J[]): J[] {
+  const byId = new Map<string, J>();
+  for (const p of [...primary, ...secondary]) if (!byId.has(String(p.id))) byId.set(String(p.id), p);
+  return [...byId.values()].sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
+}
+
 const money = (v: unknown, cur: string) => `${Number(v ?? 0).toFixed(2).replace('.', ',')} ${cur === 'TRY' || !cur ? '₺' : cur}`;
 const shorten = (s: string, n = 40) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s);
 
@@ -108,6 +143,11 @@ export class TrendyolConnector extends BaseConnector {
   private gw = 0;
   /** sohbet remoteId (order-…/q-…) → son görülen imza */
   private seen = new Map<string, string>();
+  /**
+   * siparişNo → bilinen paketler (yalnız ingestOrder'ın kullandığı alanlar). Yoklama penceresi yalnız son değişen paketleri
+   * döndürdüğü için çok paketli siparişte gelen paketler bunlarla birleştirilir; yoksa sohbet meta'sı eksik paketle ezilirdi.
+   */
+  private packages = new Map<string, J[]>();
   private stateFile: string;
 
   constructor(account: BaseConnector['account'], store: BaseConnector['store'], config: string) {
@@ -116,8 +156,9 @@ export class TrendyolConnector extends BaseConnector {
     this.ordersOn = ordersFlag(config);
     this.stateFile = path.join(sessionDir(account.id), 'trendyol-state.json');
     try {
-      const st = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) as { seen?: Record<string, string>; gw?: number };
+      const st = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) as { seen?: Record<string, string>; gw?: number; packages?: Record<string, J[]> };
       for (const [k, v] of Object.entries(st.seen ?? {})) this.seen.set(k, v);
+      for (const [k, v] of Object.entries(st.packages ?? {})) if (Array.isArray(v)) this.packages.set(k, v);
       if (typeof st.gw === 'number' && GATEWAYS[st.gw]) this.gw = st.gw;
     } catch {
       /* ilk çalıştırma */
@@ -204,7 +245,8 @@ export class TrendyolConnector extends BaseConnector {
       const spans = (n: number): Array<[number, number]> => (first ? Array.from({ length: n }, (_, i) => [now - (i + 1) * FIRST_WINDOW, now - i * FIRST_WINDOW] as [number, number]) : [[startDate, now]]);
       const allOrders = async () => {
         const m = new Map<string, J[]>();
-        for (const [a, b] of spans(6)) for (const [k, v] of await this.fetchOrders(a, b, first ? 50 : 5)) if (!m.has(k)) m.set(k, v);
+        // dilimler birleşir (aynı siparişin paketleri farklı dilimlere düşebilir); önce görülen (daha yeni dilim) kazanır
+        for (const [a, b] of spans(6)) for (const [k, v] of await this.fetchOrders(a, b, first ? 50 : 5)) m.set(k, mergePackages(m.get(k) ?? [], v));
         return m;
       };
       const allQuestions = async () => {
@@ -214,7 +256,9 @@ export class TrendyolConnector extends BaseConnector {
         return out;
       };
       const [ro, rq] = await Promise.allSettled([this.ordersOn ? allOrders() : Promise.resolve(new Map<string, J[]>()), allQuestions()]);
-      for (const r of [ro, rq]) if (r.status === 'rejected' && r.reason instanceof TrendyolAuthError) throw r.reason;
+      // kimlik hatası ancak soru tarafı da reddedildiyse ölümcül; yalnız sipariş ucu reddederse (yetki kapsamı) sorular sürsün
+      if (rq.status === 'rejected' && rq.reason instanceof TrendyolAuthError) throw rq.reason;
+      if (ro.status === 'rejected' && ro.reason instanceof TrendyolAuthError && rq.status === 'rejected') throw ro.reason;
       const orders = ro.status === 'fulfilled' ? ro.value : new Map<string, J[]>();
       const questions = rq.status === 'fulfilled' ? rq.value : [];
       let failed: Error | undefined;
@@ -224,7 +268,13 @@ export class TrendyolConnector extends BaseConnector {
         if (!(r.reason instanceof TrendyolRateLimit)) failed = r.reason as Error;
       }
       let changedOrders = 0;
-      for (const group of orders.values()) if (this.ingestOrder(group, !first)) changedOrders++;
+      for (const [k, group] of orders) {
+        // bilinen paketlerle birleştir (gelen güncel olanı kazanır), en yeni kullanılan sona taşınsın (sınır eskileri atar)
+        const merged = mergePackages(group.map(stripPackage), this.packages.get(k) ?? []);
+        this.packages.delete(k);
+        this.packages.set(k, merged);
+        if (this.ingestOrder(merged, !first)) changedOrders++;
+      }
       let changedQuestions = 0;
       for (const q of questions.reverse()) if (this.ingestQuestion(q, !first)) changedQuestions++;
       if (changedOrders || changedQuestions || first) {
@@ -280,8 +330,10 @@ export class TrendyolConnector extends BaseConnector {
   private saveState(): void {
     const seen: Record<string, string> = {};
     for (const [k, v] of [...this.seen.entries()].slice(-4000)) seen[k] = v;
+    const keep = [...this.packages.entries()].slice(-MAX_STORED_ORDERS);
+    if (keep.length < this.packages.size) this.packages = new Map(keep);
     try {
-      fs.writeFileSync(this.stateFile, JSON.stringify({ seen, gw: this.gw }));
+      fs.writeFileSync(this.stateFile, JSON.stringify({ seen, gw: this.gw, packages: Object.fromEntries(keep) }));
     } catch (e) {
       bus.log('warn', `Trendyol durum dosyası yazılamadı: ${(e as Error).message}`);
     }
@@ -382,9 +434,11 @@ export class TrendyolConnector extends BaseConnector {
     const sig = JSON.stringify([q.status, q.answer?.text, q.answer?.creationDate, q.rejectedAnswer?.text, q.reportReason]);
     const prev = this.seen.get(rid);
     if (prev === sig) return false;
+    const status = String(q.status ?? 'WAITING_FOR_ANSWER');
+    // az önce cevapladık ama API hâlâ "cevap bekliyor" diyor: soruyu yeniden açma
+    if (status === 'WAITING_FOR_ANSWER' && answeredRecently(prev)) return false;
     this.seen.set(rid, sig);
 
-    const status = String(q.status ?? 'WAITING_FOR_ANSWER');
     const created = Number(q.creationDate) || Date.now();
     const name = (q.showUserName === false ? '' : q.userName) || 'Müşteri';
     const participant: Participant = { id: String(q.customerId ?? id), name };
@@ -431,7 +485,7 @@ export class TrendyolConnector extends BaseConnector {
       const q = (chat?.meta?.question ?? {}) as J;
       this.upsertChat({ remoteId: remoteChatId, name: chat?.name ?? remoteChatId, lastMessageAt: now, meta: { ...chat?.meta, question: { ...q, status: 'ANSWERED', statusLabel: `${QUESTION_STATUS.ANSWERED} (onay bekliyor)` } } });
       // bir sonraki yoklama API'nin kaydettiği cevabı getirince imza değişsin ve mesaj güncellensin
-      this.seen.delete(remoteChatId);
+      this.seen.set(remoteChatId, answeredSentinel());
       this.saveState();
       return { remoteId: rid };
     }

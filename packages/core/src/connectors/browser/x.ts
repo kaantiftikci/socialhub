@@ -3,7 +3,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import Database from 'better-sqlite3';
 import type { Page } from 'playwright';
-import type { Msg, Strategy, Thread } from './bridge.js';
+import { RATE_RE, type Msg, type Strategy, type Thread } from './bridge.js';
 import type { Attachment, Participant } from '../../model.js';
 import { bus } from '../../bus.js';
 
@@ -955,6 +955,8 @@ async function legacyMessages(page: Page, cookies: Record<string, string>, threa
     collectUsers(tl);
     return fromEntries(tl.entries ?? [], id).reverse();
   } catch (e) {
+    // hız sınırı yutulmasın: köprü üstel geri çekilsin (ban önleme)
+    if (RATE_RE.test((e as Error).message)) throw e;
     if (/X 404/.test((e as Error).message)) apiMissing.add(id);
     else bus.log('warn', `X eski DM ucu (${id}): ${(e as Error).message}`);
     return [];
@@ -1085,6 +1087,7 @@ export const x: Strategy & { fetchMedia(page: Page, cookies: Record<string, stri
     try {
       for (const t of await legacyInbox(page, cookies)) byId.set(t.id, t);
     } catch (e) {
+      if (RATE_RE.test((e as Error).message)) throw e; // her yoklamada yinelenmesin: köprü geri çekilir
       bus.log('warn', `X eski gelen kutusu okunamadı: ${(e as Error).message}`);
     }
     // 2) Yerel XChat veritabanı: güncel liste, gerçek zaman ve okunmamış sayısı (aynı sohbette DB kazanır)
@@ -1175,6 +1178,8 @@ export const x: Strategy & { fetchMedia(page: Page, cookies: Record<string, stri
     await page.waitForTimeout(500);
     readMarks.set(convOf(threadId), Date.now());
     await saveReadMarks(page);
+    // Görünür sohbette kalınmasın (sonraki gelen mesajlar kendiliğinden okunurdu): #mivelo-visible olmadan listeye dön
+    if (page.url().includes('mivelo-visible')) await page.goto(this.home, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
   },
 
   async openDirect(_page, _cookies, p) {

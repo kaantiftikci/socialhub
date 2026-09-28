@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import type { Platform } from './model.js';
 
 /**
@@ -78,7 +79,8 @@ export function checkSend(o: { accountId: string; platform: Platform; chatId: st
   let key = '';
   let list: Array<{ at: number; chat: string }> = [];
   if (text.length >= DUP_MIN_LEN) {
-    key = `${o.accountId}|${text}`;
+    // metnin kendisi değil özeti: send-guard.json'a mesaj içeriği düz yazılmasın (veritabanı şifreli)
+    key = `${o.accountId}|${createHash('sha256').update(text).digest('hex')}`;
     list = (recent.get(key) ?? []).filter((r) => now - r.at < DUP_WINDOW_MS);
     const chats = new Set(list.map((r) => r.chat));
     if (!chats.has(o.chatId) && chats.size >= DUP_MAX_CHATS)
@@ -108,11 +110,16 @@ export function sendUsage(accountId: string, platform: Platform, now = Date.now(
  * 30 dk içindeki tekrar kayıtları saklanır.
  */
 export function persistSendGuard(file: string): void {
+  let legacy = false;
   try {
     const raw = JSON.parse(fs.readFileSync(file, 'utf8')) as { daily?: Array<[string, Rec]>; recent?: Array<[string, Array<{ at: number; chat: string }>]> };
     const today = dayOf(Date.now());
     for (const [k, v] of raw.daily ?? []) if (v?.day === today) daily.set(k, { day: v.day, count: v.count ?? 0, fresh: v.fresh ?? [] });
-    for (const [k, v] of raw.recent ?? []) recent.set(k, v.filter((r) => Date.now() - r.at < DUP_WINDOW_MS));
+    // eski sürüm anahtarı düz metin içeriyordu (accountId|metin): yalnız özetli anahtarlar yüklenir, dosya hemen yeniden yazılır
+    for (const [k, v] of raw.recent ?? []) {
+      if (/\|[0-9a-f]{64}$/.test(k) && Array.isArray(v)) recent.set(k, v.filter((r) => Date.now() - r.at < DUP_WINDOW_MS));
+      else legacy = true;
+    }
   } catch {
     /* ilk çalıştırma */
   }
@@ -130,6 +137,7 @@ export function persistSendGuard(file: string): void {
     }, 2000);
     timer.unref?.();
   };
+  if (legacy) dirty();
 }
 
 /** Testler için sıfırla */

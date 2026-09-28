@@ -38,19 +38,23 @@ export function EmojiPicker({ onPick, onClose, compact = false }: { onPick: (e: 
   const [recent, setRecent] = useState<string[]>(() => readRecent());
   const ref = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // onClose her çizimde yeni işlev olabilir: ref'te tut, etki yalnız açılışta çalışsın
+  // (yoksa üst bileşen her yeniden çizildiğinde odak arama kutusuna kaçıyordu)
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     inputRef.current?.focus();
     const close = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) onClose?.();
+      if (!ref.current?.contains(e.target as Node)) onCloseRef.current?.();
     };
-    const key = (e: KeyboardEvent) => e.key === 'Escape' && onClose?.();
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && onCloseRef.current?.();
     window.addEventListener('mousedown', close);
     window.addEventListener('keydown', key);
     return () => {
       window.removeEventListener('mousedown', close);
       window.removeEventListener('keydown', key);
     };
-  }, [onClose]);
+  }, []);
   const list = useMemo(() => {
     const s = q.trim().toLocaleLowerCase('tr-TR');
     if (s) {

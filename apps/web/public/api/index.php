@@ -16,8 +16,18 @@ if ($origin !== '') {
     }
 }
 
+// Çerez 60 gün: oturum dosyası da o kadar yaşamalı (varsayılan gc_maxlifetime 24 dk'da "beni hatırla" hiç çalışmıyordu;
+// paylaşımlı klasörü barındırıcının temizleyicisi kendi süresine göre siliyordu). Özel klasörde GC'yi PHP yapar.
+const SESSION_LIFETIME = 60 * 60 * 24 * 60;
+$sessDir = dirname(__DIR__, 2) . '/mivelo-data/sessions-demo';
+if (is_dir($sessDir) || @mkdir($sessDir, 0700, true)) {
+    session_save_path($sessDir);
+    ini_set('session.gc_probability', '1');
+    ini_set('session.gc_divisor', '100');
+}
+ini_set('session.gc_maxlifetime', (string) SESSION_LIFETIME);
 session_set_cookie_params([
-    'lifetime' => 60 * 60 * 24 * 60,
+    'lifetime' => SESSION_LIFETIME,
     'path' => '/',
     'secure' => (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'),
     'httponly' => true,
@@ -81,7 +91,7 @@ function seed_users(array &$data): bool
     return $changed;
 }
 
-function fail(int $code, string $message): never
+function fail(int $code, string $message)
 {
     http_response_code($code);
     echo json_encode(['error' => $message], JSON_UNESCAPED_UNICODE);
@@ -98,31 +108,89 @@ function data_dir(): string
     fail(500, 'Kayıt alanı açılamadı');
 }
 
+/**
+ * JSON deposu (admin/api.php ile aynı düzen): <dosya>.lock üzerinde özel kilit; boş olmayan ama çözülemeyen dosya
+ * "boş" sayılıp üstüne yazılmaz (500); yazım önce kodlanır, geçici dosya + rename ile atomik.
+ * @return resource kilit tanıtıcısı
+ */
+function store_lock(string $path)
+{
+    $lh = @fopen($path . '.lock', 'c');
+    if ($lh === false || !flock($lh, LOCK_EX)) {
+        fail(500, 'Kayıt alanı kilitlenemedi');
+    }
+    return $lh;
+}
+
+function store_read(string $path, array $empty): array
+{
+    clearstatcache(true, $path);
+    if (!file_exists($path)) {
+        return $empty;
+    }
+    $raw = @file_get_contents($path);
+    if ($raw === false) {
+        fail(500, 'Kayıt alanı okunamadı');
+    }
+    if (trim($raw) === '') {
+        return $empty;
+    }
+    $d = json_decode($raw, true);
+    if (!is_array($d)) {
+        fail(500, 'Kayıt alanı bozuk');
+    }
+    return $d;
+}
+
+function store_write(string $path, array $data): void
+{
+    $json = json_encode($data, JSON_UNESCAPED_UNICODE);
+    if ($json === false) {
+        fail(500, 'Kayıt kodlanamadı');
+    }
+    $tmp = $path . '.tmp-' . bin2hex(random_bytes(4));
+    $fh = @fopen($tmp, 'x');
+    $ok = $fh !== false && fwrite($fh, $json) === strlen($json) && fflush($fh);
+    if ($ok && function_exists('fsync')) {
+        $ok = fsync($fh);
+    }
+    if ($fh !== false) {
+        fclose($fh);
+    }
+    if (!$ok || !@rename($tmp, $path)) {
+        @unlink($tmp);
+        fail(500, 'Kayıt yazılamadı');
+    }
+}
+
+/** Hız sınırı anahtarı: IPv4 tam adres, IPv6 /64 önek */
+function client_key(string $ip): string
+{
+    if (strpos($ip, ':') !== false) {
+        $bin = @inet_pton($ip);
+        if ($bin !== false && strlen($bin) === 16) {
+            return bin2hex(substr($bin, 0, 8)) . '::/64';
+        }
+    }
+    return $ip;
+}
+
 /** @param callable(array): array $fn */
-function with_users(callable $fn): mixed
+function with_users(callable $fn)
 {
     $path = data_dir() . '/users.json';
-    $fh = fopen($path, 'c+');
-    if ($fh === false) {
-        fail(500, 'Kayıt alanı açılamadı');
-    }
-    flock($fh, LOCK_EX);
-    $raw = stream_get_contents($fh);
-    $data = ($raw !== false && $raw !== '') ? json_decode($raw, true) : ['users' => []];
-    if (!is_array($data) || !isset($data['users']) || !is_array($data['users'])) {
-        $data = ['users' => []];
+    $lh = store_lock($path);
+    $data = store_read($path, ['users' => []]);
+    if (!isset($data['users']) || !is_array($data['users'])) {
+        fail(500, 'Kayıt alanı bozuk');
     }
     $seeded = seed_users($data);
     $result = $fn($data);
     if (!empty($result['write']) || $seeded) {
-        $json = json_encode($data, JSON_UNESCAPED_UNICODE);
-        ftruncate($fh, 0);
-        rewind($fh);
-        fwrite($fh, $json === false ? '{"users":[]}' : $json);
-        fflush($fh);
+        store_write($path, $data);
     }
-    flock($fh, LOCK_UN);
-    fclose($fh);
+    flock($lh, LOCK_UN);
+    fclose($lh);
     return $result['out'] ?? null;
 }
 
@@ -145,7 +213,7 @@ function current_user(array $data): ?array
     return null;
 }
 
-function clean_accounts(mixed $list): array
+function clean_accounts($list): array
 {
     if (!is_array($list)) {
         fail(400, 'Uygulama listesi geçersiz');
@@ -206,19 +274,27 @@ if ($action === 'register') {
 if ($action === 'login' && $method === 'POST') {
     $username = strtolower(trim((string) ($body['username'] ?? $body['email'] ?? '')));
     $password = (string) ($body['password'] ?? '');
-    usleep(250000); // kaba kuvvete karşı küçük gecikme
-    // IP başına kilit: 8 hatalı denemede 10 dakika (demo-auth.json, kayıt alanında)
+    // IP (IPv6: /64) başına kilit: 8 denemede 10 dakika (demo-auth.json, kayıt alanında). Deneme, şifre doğrulanmadan
+    // ÖNCE aynı kilitli bölümde sayılır: paralel istekler sınırı aşamaz; başarılı girişte sayaç silinir.
     $authFile = data_dir() . '/demo-auth.json';
-    $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
-    $auth = is_file($authFile) ? (json_decode((string) file_get_contents($authFile), true) ?: []) : [];
+    $ipKey = client_key((string) ($_SERVER['REMOTE_ADDR'] ?? ''));
+    $now = time();
+    $alh = store_lock($authFile);
+    $auth = store_read($authFile, []);
     foreach ($auth as $k => $v) {
-        if (($v['last'] ?? 0) < time() - 3600) {
+        if (!is_array($v) || ((int) ($v['last'] ?? 0) < $now - 3600 && (int) ($v['until'] ?? 0) < $now)) {
             unset($auth[$k]);
         }
     }
-    if (($auth[$ip]['until'] ?? 0) > time()) {
+    if ((int) ($auth[$ipKey]['until'] ?? 0) > $now) {
         fail(429, 'Çok fazla hatalı deneme. Birkaç dakika sonra tekrar dene.');
     }
+    $f = (int) ($auth[$ipKey]['fails'] ?? 0) + 1;
+    $auth[$ipKey] = ['fails' => $f >= 8 ? 0 : $f, 'last' => $now, 'until' => $f >= 8 ? $now + 600 : 0];
+    store_write($authFile, $auth);
+    flock($alh, LOCK_UN);
+    fclose($alh);
+    usleep(250000); // kaba kuvvete karşı küçük gecikme
     $user = with_users(function (array &$data) use ($username, $password) {
         foreach ($data['users'] as &$u) {
             if (strtolower((string) ($u['username'] ?? $u['email'] ?? '')) === $username && password_verify($password, (string) ($u['pass'] ?? ''))) {
@@ -232,15 +308,16 @@ if ($action === 'login' && $method === 'POST') {
         return ['write' => false, 'out' => null];
     });
     if ($user === null) {
-        $f = (int) ($auth[$ip]['fails'] ?? 0) + 1;
-        $auth[$ip] = ['fails' => $f >= 8 ? 0 : $f, 'last' => time(), 'until' => $f >= 8 ? time() + 600 : 0];
-        @file_put_contents($authFile, json_encode($auth), LOCK_EX);
         fail(401, 'Kullanıcı adı veya şifre hatalı');
     }
-    if (isset($auth[$ip])) {
-        unset($auth[$ip]);
-        @file_put_contents($authFile, json_encode($auth), LOCK_EX);
+    $alh = store_lock($authFile);
+    $auth = store_read($authFile, []);
+    if (isset($auth[$ipKey])) {
+        unset($auth[$ipKey]);
+        store_write($authFile, $auth);
     }
+    flock($alh, LOCK_UN);
+    fclose($alh);
     session_regenerate_id(true);
     $_SESSION['uid'] = $user['id'];
     echo json_encode(['user' => user_public($user)], JSON_UNESCAPED_UNICODE);

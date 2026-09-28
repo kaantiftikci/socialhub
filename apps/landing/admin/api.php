@@ -20,12 +20,12 @@ header('X-Content-Type-Options: nosniff');
 header('X-Robots-Tag: noindex, nofollow');
 header('Referrer-Policy: same-origin');
 
-function out(mixed $v): never
+function out($v)
 {
     echo json_encode($v, JSON_UNESCAPED_UNICODE);
     exit;
 }
-function fail(int $code, string $msg): never
+function fail(int $code, string $msg)
 {
     http_response_code($code);
     out(['error' => $msg]);
@@ -37,11 +37,6 @@ if ($origin !== '' && strtolower((string) parse_url($origin, PHP_URL_HOST)) !== 
     fail(403, 'İstek reddedildi');
 }
 
-$secure = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
-session_name('mvadmin');
-session_set_cookie_params(['lifetime' => 0, 'path' => '/admin', 'secure' => $secure, 'httponly' => true, 'samesite' => 'Strict']);
-session_start();
-
 function data_dir(): string
 {
     $d = dirname(__DIR__, 2) . '/mivelo-data';
@@ -51,46 +46,130 @@ function data_dir(): string
     return $d;
 }
 
-/** JSON dosyasını kilitli oku-değiştir-yaz. $fn(array &$data): mixed; $fn false dönerse yazılmaz. */
-function with_json(string $name, array $empty, callable $fn): mixed
+$secure = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+// Oturumlar kendi klasöründe ve IDLE kadar yaşar (varsayılan gc_maxlifetime 24 dk'da "12 saat" hiç çalışmıyordu;
+// paylaşımlı klasörü barındırıcının temizleyicisi kendi süresine göre siliyordu). Özel klasörde GC'yi PHP yapar.
+$sessDir = data_dir() . '/sessions-admin';
+if (is_dir($sessDir) || @mkdir($sessDir, 0700, true)) {
+    session_save_path($sessDir);
+    ini_set('session.gc_probability', '1');
+    ini_set('session.gc_divisor', '100');
+}
+ini_set('session.gc_maxlifetime', (string) IDLE);
+session_name('mvadmin');
+session_set_cookie_params(['lifetime' => 0, 'path' => '/admin', 'secure' => $secure, 'httponly' => true, 'samesite' => 'Strict']);
+session_start();
+
+/**
+ * JSON deposu. Yazım: önce kodlanır (hata → 500, dosyaya dokunulmaz), geçici dosyaya yazılıp rename ile atomik
+ * değiştirilir; okuyucular (kilitsiz read_json) hep eski ya da yeni tam dosyayı görür. Boş olmayan ama çözülemeyen
+ * dosya ASLA "boş" sayılıp üstüne yazılmaz (500; elle bakılmalı). $strict: var olan boş dosya da bozuk sayılır.
+ */
+function store_read(string $path, array $empty, bool $strict = false): array
 {
-    $fh = fopen(data_dir() . '/' . $name, 'c+');
+    clearstatcache(true, $path);
+    if (!file_exists($path)) {
+        return $empty;
+    }
+    $raw = @file_get_contents($path);
+    if ($raw === false) {
+        fail(500, 'Kayıt dosyası okunamadı');
+    }
+    if (trim($raw) === '') {
+        if ($strict) {
+            fail(500, 'Kayıt dosyası boş/bozuk: ' . basename($path));
+        }
+        return $empty;
+    }
+    $d = json_decode($raw, true);
+    if (!is_array($d)) {
+        fail(500, 'Kayıt dosyası bozuk: ' . basename($path));
+    }
+    return $d;
+}
+
+function store_write(string $path, array $data, int $flags = 0): void
+{
+    $json = json_encode($data, $flags | JSON_UNESCAPED_UNICODE);
+    if ($json === false) {
+        fail(500, 'Kayıt kodlanamadı');
+    }
+    $tmp = $path . '.tmp-' . bin2hex(random_bytes(4));
+    $fh = @fopen($tmp, 'x');
     if ($fh === false) {
-        fail(500, 'Dosya açılamadı');
+        fail(500, 'Geçici dosya açılamadı');
     }
-    flock($fh, LOCK_EX);
-    $raw = stream_get_contents($fh);
-    $data = ($raw !== false && $raw !== '') ? json_decode($raw, true) : null;
-    if (!is_array($data)) {
-        $data = $empty;
+    $ok = fwrite($fh, $json) === strlen($json) && fflush($fh);
+    if ($ok && function_exists('fsync')) {
+        $ok = fsync($fh);
     }
+    fclose($fh);
+    if (!$ok || !@rename($tmp, $path)) {
+        @unlink($tmp);
+        fail(500, 'Kayıt yazılamadı');
+    }
+}
+
+/** Dosyanın yanındaki .lock üzerinde özel kilit (asıl dosya rename ile değiştiği için onun üstünde kilit tutulamaz) */
+function store_lock(string $path)
+{
+    $lh = @fopen($path . '.lock', 'c');
+    if ($lh === false || !flock($lh, LOCK_EX)) {
+        fail(500, 'Kayıt kilitlenemedi');
+    }
+    return $lh;
+}
+
+/** Kilitli oku-değiştir-yaz: $fn(array &$data); veri değiştiyse atomik yazılır. */
+function with_json(string $name, array $empty, callable $fn)
+{
+    $path = data_dir() . '/' . $name;
+    $lh = store_lock($path);
+    $data = store_read($path, $empty, $name === 'admin.json');
     $before = $data;
     $res = $fn($data);
     if ($data !== $before) {
-        ftruncate($fh, 0);
-        rewind($fh);
-        fwrite($fh, (string) json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
-        fflush($fh);
+        store_write($path, $data, JSON_PRETTY_PRINT);
     }
-    flock($fh, LOCK_UN);
-    fclose($fh);
+    flock($lh, LOCK_UN);
+    fclose($lh);
     return $res;
 }
 
 function read_json(string $name, array $empty): array
 {
-    $p = data_dir() . '/' . $name;
-    if (!is_file($p)) {
-        return $empty;
-    }
-    $d = json_decode((string) file_get_contents($p), true);
-    return is_array($d) ? $d : $empty;
+    return store_read(data_dir() . '/' . $name, $empty, $name === 'admin.json');
 }
 
+/**
+ * Geçerli şifre karması. Kapalı başarısızlık: admin.json var ama okunamıyor/boş/bozuksa ya da şifre değiştirilmiş
+ * (changedAt) ama karma yoksa varsayılana DÜŞÜLMEZ, 500 döner (eskiden bozuk dosya varsayılan şifreyi geri açıyordu).
+ */
 function admin_hash(): string
 {
     $a = read_json('admin.json', []);
-    return is_string($a['hash'] ?? null) && $a['hash'] !== '' ? $a['hash'] : DEFAULT_HASH;
+    if (array_key_exists('hash', $a)) {
+        if (is_string($a['hash']) && $a['hash'] !== '') {
+            return $a['hash'];
+        }
+        fail(500, 'Yönetici şifre kaydı bozuk');
+    }
+    if (!empty($a['changedAt'])) {
+        fail(500, 'Yönetici şifre kaydı eksik');
+    }
+    return DEFAULT_HASH;
+}
+
+/** Hız sınırı anahtarı: IPv4 tam adres, IPv6 /64 önek (tek bağlantı milyarlarca adres verir) */
+function client_key(string $ip): string
+{
+    if (strpos($ip, ':') !== false) {
+        $bin = @inet_pton($ip);
+        if ($bin !== false && strlen($bin) === 16) {
+            return bin2hex(substr($bin, 0, 8)) . '::/64';
+        }
+    }
+    return $ip;
 }
 
 function authed(): bool
@@ -103,7 +182,7 @@ function authed(): bool
 }
 
 /** CSV formül enjeksiyonu: = + - @ sekme/CR ile başlayan hücreler Excel/LibreOffice'te formül olarak çalışır → başına ' */
-function csv_safe(mixed $v): mixed
+function csv_safe($v)
 {
     if (is_string($v) && $v !== '' && strpbrk($v[0], "=+-@\t\r") !== false) {
         return "'" . $v;
@@ -113,7 +192,7 @@ function csv_safe(mixed $v): mixed
 
 function mask_ip(string $ip): string
 {
-    if (str_contains($ip, ':')) {
+    if (strpos($ip, ':') !== false) {
         $p = explode(':', $ip);
         return implode(':', array_slice($p, 0, 3)) . ':…';
     }
@@ -137,27 +216,46 @@ if ($a === 'me') {
 
 if ($a === 'login' && $method === 'POST') {
     $now = time();
-    $lock = with_json('admin-auth.json', ['ips' => []], function (array &$d) use ($ip, $now) {
+    $key = client_key($ip);
+    // Deneme, şifre doğrulanmadan ÖNCE aynı kilitli bölümde sayılır: paralel istekler 5 sınırını aşamaz.
+    // Anahtar başına 5 deneme / 15 dk kilit; ayrıca tüm anahtarlar için saatte en çok GLOBAL_FAILS başarısız deneme.
+    $lock = with_json('admin-auth.json', ['ips' => []], function (array &$d) use ($key, $now) {
+        $d['ips'] = is_array($d['ips'] ?? null) ? $d['ips'] : [];
         foreach ($d['ips'] as $k => $v) {
-            if (($v['until'] ?? 0) < $now && ($v['last'] ?? 0) < $now - 3600) {
+            if ((int) ($v['until'] ?? 0) < $now && (int) ($v['last'] ?? 0) < $now - 3600) {
                 unset($d['ips'][$k]);
             }
         }
-        return (int) ($d['ips'][$ip]['until'] ?? 0);
+        $g = array_values(array_filter(is_array($d['global'] ?? null) ? $d['global'] : [], function ($t) use ($now) {
+            return (int) $t > $now - 3600;
+        }));
+        $d['global'] = $g;
+        $e = $d['ips'][$key] ?? ['fails' => 0, 'last' => 0, 'until' => 0];
+        if ((int) ($e['until'] ?? 0) > $now) {
+            return (int) $e['until'];
+        }
+        if (count($g) >= 100) {
+            return (int) min($g) + 3600;
+        }
+        $f = (int) ($e['fails'] ?? 0) + 1;
+        $d['ips'][$key] = ['fails' => $f >= 5 ? 0 : $f, 'last' => $now, 'until' => $f >= 5 ? $now + 900 : 0];
+        $d['global'][] = $now;
+        return 0;
     });
     if ($lock > $now) {
         fail(429, 'Çok fazla hatalı deneme. ' . (int) ceil(($lock - $now) / 60) . ' dakika sonra tekrar dene.');
     }
     usleep(300000);
     if (!password_verify((string) ($body['password'] ?? ''), admin_hash())) {
-        with_json('admin-auth.json', ['ips' => []], function (array &$d) use ($ip, $now) {
-            $f = (int) ($d['ips'][$ip]['fails'] ?? 0) + 1;
-            $d['ips'][$ip] = ['fails' => $f >= 5 ? 0 : $f, 'last' => $now, 'until' => $f >= 5 ? $now + 900 : 0];
-        });
         fail(401, 'Şifre hatalı');
     }
-    with_json('admin-auth.json', ['ips' => []], function (array &$d) use ($ip) {
-        unset($d['ips'][$ip]);
+    // başarılı: bu anahtarın sayacı ve bu denemenin genel kaydı silinir
+    with_json('admin-auth.json', ['ips' => []], function (array &$d) use ($key, $now) {
+        unset($d['ips'][$key]);
+        $i = array_search($now, is_array($d['global'] ?? null) ? $d['global'] : [], true);
+        if ($i !== false) {
+            array_splice($d['global'], (int) $i, 1);
+        }
     });
     session_regenerate_id(true);
     $_SESSION['admin'] = true;

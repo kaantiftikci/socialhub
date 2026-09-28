@@ -39,9 +39,17 @@ export function parseStart(start: string): { date: Date; allDay: boolean } | nul
   const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?$/.exec(start.trim());
   if (!m) return null;
   const [, y, mo, d, h, mi] = m;
+  if (h !== undefined && (Number(h) > 23 || Number(mi) > 59)) return null;
   const date = new Date(Number(y), Number(mo) - 1, Number(d), Number(h ?? 0), Number(mi ?? 0));
   if (Number.isNaN(date.getTime()) || date.getMonth() !== Number(mo) - 1) return null;
   return { date, allDay: h === undefined };
+}
+
+/** parseStart sonucunu kanonik biçime çevir: "YYYY-MM-DDTHH:mm" ya da tüm gün "YYYY-MM-DD" (depo/hatırlatma bunu bekler) */
+export function formatStart(p: { date: Date; allDay: boolean }): string {
+  const d = p.date;
+  const ymd = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return p.allDay ? ymd : `${ymd}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 export function buildIcs(ev: CalendarEvent, now = new Date()): string {

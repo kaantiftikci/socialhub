@@ -39,19 +39,38 @@ const bundlePkg = { name: 'kavsak-core-bundle', version: pkg.version, private: t
 const pkgPath = path.join(out, 'package.json');
 const prev = fs.existsSync(pkgPath) ? fs.readFileSync(pkgPath, 'utf8') : '';
 const next = JSON.stringify(bundlePkg, null, 2);
-const depsChanged = prev !== next || !fs.existsSync(path.join(out, 'node_modules'));
+// Yerel modüller (better-sqlite3…) bu node'un ABI'siyle kurulur. Masaüstü kabuğu core/node-abi.json'u okuyup ABI'si
+// tutan node'u seçer (önce execPath). Node sürümü değişince (ABI farklı) node_modules yeniden kurulur.
+const abiPath = path.join(out, 'node-abi.json');
+const abi = { modules: process.versions.modules, version: process.version, platform: process.platform, arch: process.arch, execPath: process.execPath };
+let prevAbi = null;
+try {
+  prevAbi = JSON.parse(fs.readFileSync(abiPath, 'utf8'));
+} catch {
+  /* ilk paketleme */
+}
+const abiChanged = !prevAbi || prevAbi.modules !== abi.modules || prevAbi.platform !== abi.platform || prevAbi.arch !== abi.arch;
+const depsChanged = prev !== next || abiChanged || !fs.existsSync(path.join(out, 'node_modules'));
 fs.writeFileSync(pkgPath, next);
 
 if (depsChanged) {
-  console.log('[bundle-core] üretim bağımlılıkları kuruluyor (ilk seferde birkaç dakika sürebilir)…');
+  console.log(`[bundle-core] üretim bağımlılıkları kuruluyor (node ${process.version}, ABI ${abi.modules}; ilk seferde birkaç dakika sürebilir)…`);
   fs.rmSync(path.join(out, 'node_modules'), { recursive: true, force: true });
   fs.rmSync(path.join(out, 'package-lock.json'), { force: true });
-  execSync('npm install --omit=dev --no-audit --no-fund --loglevel=error', { cwd: out, stdio: 'inherit', env: { ...process.env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1' } });
+  fs.rmSync(abiPath, { force: true }); // kurulum yarıda kalırsa bir sonraki çalıştırma yeniden kursun
+  // npm, PATH'teki node ile değil bu betiği çalıştıran node ile derlesin/ikili seçsin (ABI tutarlılığı)
+  // (Windows'ta anahtar "Path" olabilir: var olan adla yaz, ikinci bir PATH ekleme)
+  const pathKey = Object.keys(process.env).find((k) => k.toUpperCase() === 'PATH') ?? 'PATH';
+  const env = { ...process.env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1' };
+  env[pathKey] = [path.dirname(process.execPath), process.env[pathKey] ?? ''].join(path.delimiter);
+  execSync('npm install --omit=dev --no-audit --no-fund --loglevel=error', { cwd: out, stdio: 'inherit', env });
 } else {
   console.log('[bundle-core] bağımlılıklar güncel, yalnızca dist kopyalandı');
 }
 // .bin altındaki sembolik bağlar paketlemede sorun çıkarabilir; çalışma zamanında gerekmez
 for (const dir of ['node_modules/.bin']) fs.rmSync(path.join(out, dir), { recursive: true, force: true });
+
+fs.writeFileSync(abiPath, JSON.stringify(abi, null, 2));
 
 // İsteğe bağlı gömülü node (Windows CI paketi): kabuk Resources/core/bin/node[.exe]'yi önce dener
 const nodeOut = path.join(out, 'bin', process.platform === 'win32' ? 'node.exe' : 'node');

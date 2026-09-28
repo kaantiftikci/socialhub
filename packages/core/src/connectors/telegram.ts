@@ -41,6 +41,8 @@ export class TelegramConnector extends BaseConnector {
   private meId = '';
   private watchTimer?: NodeJS.Timeout;
   private polling = false;
+  /** stop() çağrıldı: sürmekte olan start() zamanlayıcı kurmadan çıksın */
+  private stopped = false;
 
   private get sessionFile(): string {
     return path.join(sessionDir(this.account.id), 'session.txt');
@@ -79,6 +81,7 @@ export class TelegramConnector extends BaseConnector {
       systemLangCode: 'tr',
     });
     this.client = client;
+    this.stopped = false;
     this.setStatus('connecting');
 
     try {
@@ -104,12 +107,16 @@ export class TelegramConnector extends BaseConnector {
         );
       }
     } catch (e) {
+      if (this.stopped || this.client !== client) return; // durdurulurken kopan bağlantı hata sayılmaz
       this.setStatus('error', (e as Error).message);
       return;
     }
+    // start sürerken stop() çağrıldıysa (ya da yeni istemci kurulduysa) devam etme: zamanlayıcı/olay işleyicisi sızmasın
+    if (this.stopped || this.client !== client) return;
 
     fs.writeFileSync(this.sessionFile, String(client.session.save()), { mode: 0o600 });
     const me = await client.getMe();
+    if (this.stopped || this.client !== client) return;
     this.meId = String(me.id);
     this.account.label = me.username ? `@${me.username}` : [me.firstName, me.lastName].filter(Boolean).join(' ');
     this.setStatus('connected');
@@ -122,6 +129,7 @@ export class TelegramConnector extends BaseConnector {
     await this.backfill(client);
     // güncelleme durumunu (pts/qts) başlat: bundan sonra kopmada kaçanlar getDifference ile olay olarak gelir
     await client.catchUp().catch(() => undefined);
+    if (this.stopped || this.client !== client) return;
     this.lastDialogScan = Date.now();
     // Bekçi (60 sn): bağlantı koptuysa bağlan + catchUp (kaçan güncellemeler olay akışından gelir). Eskiden 30 sn'de bir
     // getDialogs + getHistory yapılıyordu (saatte 120+ çağrı; yeni api_id'ler için FLOOD_WAIT ve anomali riski). Artık tam
@@ -163,16 +171,19 @@ export class TelegramConnector extends BaseConnector {
         const rid = String(d.id);
         this.entities.set(rid, d.entity);
         const chat = this.store.getChat(`${this.account.id}/${rid}`);
-        if (chat && (d.unreadCount ?? 0) !== chat.unread) this.upsertChat({ remoteId: rid, name: chat.name, unread: d.unreadCount ?? 0 });
-        if (this.hasMessage(rid, String(d.message.id))) continue;
-        const name = chat?.name || d.title || d.name || rid;
-        const msgs = await client.getMessages(d.entity, { limit: 20 });
-        for (const m of [...msgs].reverse()) {
-          if (this.hasMessage(rid, String(m.id))) continue;
-          let senderName: string | undefined;
-          if (!m.out && !d.isUser) senderName = entityName((m as { sender?: unknown }).sender) || undefined;
-          this.ingest(m, rid, name, true, senderName);
+        if (!this.hasMessage(rid, String(d.message.id))) {
+          const name = chat?.name || d.title || d.name || rid;
+          const msgs = await client.getMessages(d.entity, { limit: 20 });
+          for (const m of [...msgs].reverse()) {
+            if (this.hasMessage(rid, String(m.id))) continue;
+            let senderName: string | undefined;
+            if (!m.out && !d.isUser) senderName = entityName((m as { sender?: unknown }).sender) || undefined;
+            this.ingest(m, rid, name, true, senderName);
+          }
         }
+        // Sayaç kaçan mesajlar yazıldıktan SONRA platformunkine eşitlenir: önce yazılınca canlı ingest aynı mesajları bir kez daha sayıyordu
+        const cur = this.store.getChat(`${this.account.id}/${rid}`);
+        if (cur && (d.unreadCount ?? 0) !== cur.unread) this.upsertChat({ remoteId: rid, name: cur.name, unread: d.unreadCount ?? 0 });
       }
     } catch (e) {
       bus.log('warn', `Telegram yoklama: ${(e as Error).message}`);
@@ -182,6 +193,7 @@ export class TelegramConnector extends BaseConnector {
   }
 
   async stop(): Promise<void> {
+    this.stopped = true;
     if (this.presenceTimer) clearTimeout(this.presenceTimer);
     if (this.watchTimer) clearInterval(this.watchTimer);
     this.watchTimer = undefined;

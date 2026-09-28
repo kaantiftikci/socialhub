@@ -603,7 +603,13 @@ export class BrowserConnector extends BaseConnector {
   }
 
   /** Sayfa yoksa ve kanal boşta kapatılmışsa tarayıcıyı yeniden aç (Gmail/Outlook: yoklamalar arasında kapalı tutulur) */
-  private async ensureOpen(): Promise<boolean> {
+  private opening?: Promise<boolean>;
+  private ensureOpen(): Promise<boolean> {
+    if (this.page && !this.page.isClosed()) return Promise.resolve(true);
+    // Eşzamanlı çağrılar (yoklama + okundu + medya) aynı profille iki Chromium açmasın: süren açılışı paylaş
+    return (this.opening ??= this.openNow().finally(() => (this.opening = undefined)));
+  }
+  private async openNow(): Promise<boolean> {
     if (this.page && !this.page.isClosed()) return true;
     if (!(this.idleClosed || this.pageless) || this.stopping || !this.chromium) return false;
     if (this.pageless) {
@@ -714,8 +720,10 @@ export class BrowserConnector extends BaseConnector {
       this.urgentQ.push(() => fn().then(resolve, reject));
     });
   }
-  private async runUrgent(): Promise<void> {
+  private async runUrgent(clearFlag = false): Promise<void> {
     while (this.urgentQ.length) await this.urgentQ.shift()!();
+    // kuyruk boşken bayrak AYNI eşzamanlı adımda iner: arada urgent() kuyruğa yazıp sahipsiz kalmasın
+    if (clearFlag) this.inPoll = false;
   }
 
   async sendText(remoteChatId: string, text: string, opts?: SendOptions): Promise<{ remoteId: string }> {
@@ -927,7 +935,7 @@ export class BrowserConnector extends BaseConnector {
           this.logFresh(turnStart);
         } finally {
           // turun sonunda bekleyen kullanıcı işlemi kalmasın (boşaltma ile bayrak arasında await yok)
-          await this.runUrgent().catch(() => undefined);
+          await this.runUrgent(true).catch(() => undefined);
           this.inPoll = false;
         }
       });
@@ -1004,6 +1012,8 @@ export class BrowserConnector extends BaseConnector {
       const batch = changed.slice(0, first ? 16 : 8);
       const failed: string[] = [];
       let firstErr = '';
+      /** sohbet mesajlarında doğrulama/hız sınırı: tur sonunda yeniden fırlatılır → aşağıdaki catch durdurur/geri çekilir */
+      let fatalErr = '';
       // API stratejileri en çok 2'li paralel (patlamalı istek deseni hız sınırı/otomasyon algısını tetikler); DOM okuyanlar sıralı
       const width = this.strategy.parallel ? 2 : 1;
       for (let i = 0; i < batch.length; i += width) {
@@ -1016,28 +1026,33 @@ export class BrowserConnector extends BaseConnector {
               this.known.set(t.id, t.lastTs);
             } catch (e) {
               failed.push(t.id);
-              firstErr ||= (e as Error).message;
+              const em = (e as Error).message;
+              firstErr ||= em;
+              if (!fatalErr && (VERIFY_RE.test(em) || RATE_RE.test(em))) fatalErr = em;
             }
           }),
         );
+        if (fatalErr) break; // hız sınırı/doğrulamada kalan sohbetlere istek atma
       }
       // aynı hata her sohbet için ayrı satır basmasın: yoklama başına tek özet
       if (failed.length) bus.log('warn', `${this.account.platform} mesajlar alınamadı: ${failed.length}/${batch.length} sohbet (ilk: ${failed[0]}): ${firstErr}`);
+      if (fatalErr) throw new Error(fatalErr);
       if (first) bus.log('info', `${this.account.platform}: ${threads.length} sohbet yüklendi`);
-      this.rateHits = 0;
+      // yalnız en az bir sohbet başarılıysa (ya da istenecek sohbet yoksa) başarılı tur sayılır
+      if (!batch.length || failed.length < batch.length) this.rateHits = 0;
     } catch (e) {
       bus.log('warn', `${this.account.platform} yoklama: ${(e as Error).message}`);
       const msg = (e as Error).message;
       // Doğrulama/kilit sayfası (checkpoint, captcha, X /account/access, Google "kimliğinizi doğrulayın"): ısrar etmek
       // kısıtlamayı yasağa çevirebilir → otomatik yoklamayı tamamen durdur, kullanıcı görünür pencerede çözsün
-      if (/checkpoint|challenge_required|captcha|account\/access|\/authwall|verify it'?s you/i.test(msg)) {
+      if (VERIFY_RE.test(msg)) {
         this.unschedule();
         bus.log('warn', `${this.account.platform}: platform doğrulama istedi, otomatik yoklama durduruldu`);
         this.setStatus('pairing', 'Platform güvenlik doğrulaması istiyor; kanala sağ tıklayıp "Yeniden bağlan" de ve doğrulamayı tamamla');
         return;
       }
       // 429 / LinkedIn 999 / Slack ratelimited: üstel geri çekilme (5 dk, 10, 20 … ≤ 2 sa)
-      if (/\b(429|999)\b|rate.?limit|too many/i.test(msg)) {
+      if (RATE_RE.test(msg)) {
         this.rateHits += 1;
         const mins = Math.min(5 * 2 ** (this.rateHits - 1), 120);
         this.backoffUntil = Date.now() + mins * 60_000;
@@ -1104,6 +1119,10 @@ function isMediaFile(u: string | undefined): boolean {
   // fbsbx.com: Instagram/Messenger sesli mesaj ve dosyaları; ton.x.com: X eski DM medyası; linkedin.com/dms: LinkedIn ekleri (çerez ister)
   return /(ton\.(x|twitter)\.com|video\.twimg\.com|pbs\.twimg\.com|cdninstagram\.com|fbcdn\.net|fbsbx\.com|licdn\.com|linkedin\.com\/dms\/|giphy\.com|tenor\.com|mail\.google\.com\/mail\/|googleusercontent\.com|outlook\.(live|office)\.com|icloud\.com|icloud-content\.com)/.test(u);
 }
+
+/** Platform doğrulama/kilit sayfası (yoklama durur) ve hız sınırı (üstel geri çekilme) hata kalıpları */
+export const VERIFY_RE = /checkpoint|challenge_required|captcha|account\/access|\/authwall|verify it'?s you/i;
+export const RATE_RE = /\b(429|999)\b|rate.?limit|too many/i;
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

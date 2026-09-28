@@ -58,16 +58,26 @@ const REACT_PLATFORMS = new Set<Platform>(['whatsapp', 'instagram', 'linkedin', 
 const REACT_EMOJI = ['👍', '❤️', '😂', '🔥', '👏'];
 export const isReactionText = (t: string) => /^(👍|❤️|😂|🔥|👏|😮) .+ (bir mesajı beğendi|mesajına tepki verdi)$/.test(t);
 
+/** Sohbet sırası sayacı (zaman damgaları buna göre kademelenir); yeni eklenen hesap kaldığı yerden devam eder */
+let seedK = 0;
+
+/** Tüm hesapların örnek verisini baştan kur (açılışta) */
 function seed(): void {
   const now = Date.now();
   chats = [];
   messages = [];
-  let k = 0;
-  for (const acc of accounts) {
+  seedK = 0;
+  for (const acc of accounts) seedAccount(acc, now);
+}
+
+/** Tek hesabın örnek sohbetlerini EKLE (var olan sohbetlere, okundu/etiket/gönderilen mesajlara dokunmaz) */
+function seedAccount(acc: Account, now = Date.now()): void {
+  {
     const scripts = SCRIPTS[acc.platform];
-    if (!scripts) continue;
+    if (!scripts) return;
     scripts.forEach((s, i) => {
-      k += 1;
+      seedK += 1;
+      const k = seedK;
       const id = `${acc.id}/${s.remoteId}`;
       const lastAt = now - k * 4 * 3_600_000 - i * 25 * 60_000;
       const members = new Set<string>();
@@ -330,7 +340,8 @@ export const staticApi = {
       throw e;
     }
     emit({ type: 'account.status', account: withDemoAttention(account) });
-    seed();
+    // yalnız yeni hesabın sohbetleri eklenir: seed() tüm demoyu sıfırlıyordu (okunanlar yeniden okunmamış, gönderilenler/etiketler kayıp)
+    seedAccount(account);
     for (const c of chats.filter((x) => x.accountId === account.id)) emit({ type: 'chat.upsert', chat: c });
     return account;
   },

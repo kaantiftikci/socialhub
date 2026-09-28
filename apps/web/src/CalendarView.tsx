@@ -108,7 +108,8 @@ export function EventEditor({
         title: title.trim(),
         start: time ? `${date}T${time}` : date,
         durationMin: duration,
-        remindMin: remind ?? undefined,
+        // tüm gün etkinlikte hatırlatma yok (seçici saat yokken devre dışı ama değeri kalıyordu)
+        remindMin: time ? remind ?? undefined : undefined,
         location: location.trim() || undefined,
         notes: notes.trim() || undefined,
         chatId: initial.chatId,
@@ -358,7 +359,20 @@ export function CalendarView({
     return m;
   }, [events]);
   const dayEvents = byDay.get(sel) ?? [];
-  const upcoming = useMemo(() => events.filter((e) => e.start.slice(0, 10) >= today).sort((a, b) => a.start.localeCompare(b.start)).slice(0, 6), [events, today]);
+  // Yaklaşan: görünen aydan bağımsız, bugünden itibaren 60 gün (ay değiştirince boşalmasın / uzak ay öne geçmesin)
+  const [upcomingAll, setUpcomingAll] = useState<CalEvent[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const d = new Date();
+    api
+      .events(ymd(d), ymd(new Date(d.getFullYear(), d.getMonth(), d.getDate() + 60)))
+      .then((l) => alive && setUpcomingAll(l))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [refreshKey, today]);
+  const upcoming = useMemo(() => upcomingAll.filter((e) => e.start.slice(0, 10) >= today).sort((a, b) => a.start.localeCompare(b.start)).slice(0, 6), [upcomingAll, today]);
 
   const go = (delta: number) => setMonth((m) => new Date(m.getFullYear(), m.getMonth() + delta, 1));
   const goToday = () => {
