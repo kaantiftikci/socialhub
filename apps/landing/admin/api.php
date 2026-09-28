@@ -777,11 +777,14 @@ if ($a === 'smtp_save' && $method === 'POST') {
         @unlink(mv_smtp_path());
         out(['ok' => true, 'configured' => false]);
     }
+    if ($host === '') {
+        fail(400, 'SMTP sunucusu boş: Türkticaret için smtp.turkticaret.net yaz');
+    }
     if (!preg_match('/^[a-z0-9.-]{3,253}$/i', $host)) {
-        fail(400, 'Sunucu adı geçersiz');
+        fail(400, 'SMTP sunucu adı geçersiz (ör. smtp.turkticaret.net)');
     }
     if (!filter_var($from, FILTER_VALIDATE_EMAIL) || $user === '') {
-        fail(400, 'Kullanıcı adı ve gönderen adresi gerekli');
+        fail(400, 'Kullanıcı adı (e-posta adresinin tamamı) ve gönderen adresi gerekli');
     }
     $pass = (string) ($body['pass'] ?? '');
     $cfg = ['host' => $host, 'port' => $port, 'secure' => $secure, 'user' => $user, 'pass' => $pass !== '' ? $pass : (string) ($old['pass'] ?? ''), 'from' => $from, 'fromName' => mb_substr(trim((string) ($body['fromName'] ?? 'Mivelo')), 0, 60) ?: 'Mivelo'];
@@ -800,7 +803,7 @@ if ($a === 'smtp_save' && $method === 'POST') {
 if ($a === 'smtp_test' && $method === 'POST') {
     $to = trim((string) ($body['to'] ?? ''));
     $res = mv_send_mail($to, 'Mivelo deneme e-postası', "Bu bir deneme e-postasıdır. Bunu aldıysan yönetim panelinin e-posta gönderimi çalışıyor.\n\nGönderim: " . date('d.m.Y H:i') . "\n");
-    out(['ok' => $res['ok'] && $res['via'] === 'smtp', 'via' => $res['via'], 'error' => $res['ok'] && $res['via'] === 'smtp' ? '' : ($res['error'] ?? ''), 'log' => $res['log'] ?? []]);
+    out(['ok' => $res['ok'] && $res['via'] === 'smtp', 'via' => $res['via'], 'error' => $res['ok'] && $res['via'] === 'smtp' ? '' : ($res['error'] ?? ''), 'note' => $res['note'] ?? '', 'log' => $res['log'] ?? []]);
 }
 
 if ($a === 'password' && $method === 'POST') {

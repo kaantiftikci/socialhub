@@ -38,7 +38,32 @@ if (!function_exists('mv_smtp_config')) {
         }
         $cfg = mv_smtp_config();
         if ($cfg) {
-            return mv_smtp_send($cfg, $to, $subject, $body, $replyTo);
+            // Paylaşımlı barındırmada giden SMTP portlarından biri kapalı olabiliyor ("Connection refused"): bağlantı kurulamazsa
+            // öteki standart porta (465 SSL ↔ 587 STARTTLS) geç. Kimlik reddi gibi sunucu yanıtlarında yeniden denenmez.
+            $res = mv_smtp_send($cfg, $to, $subject, $body, $replyTo);
+            if ($res['ok'] || empty($res['connectFailed'])) {
+                return $res;
+            }
+            $alts = [['port' => 587, 'secure' => 'tls'], ['port' => 465, 'secure' => 'ssl']];
+            $log = array_merge(['— ' . ($res['error'] ?? '')], $res['log'] ?? []);
+            foreach ($alts as $alt) {
+                if ((int) ($cfg['port'] ?? 0) === $alt['port']) {
+                    continue;
+                }
+                $try = mv_smtp_send(array_merge($cfg, $alt), $to, $subject, $body, $replyTo);
+                $log[] = '— ' . $alt['port'] . ' (' . $alt['secure'] . '): ' . ($try['ok'] ? 'başarılı' : ($try['error'] ?? ''));
+                $log = array_merge($log, $try['log'] ?? []);
+                if ($try['ok']) {
+                    // çalışan portu kaydet (sonraki gönderimler doğrudan onu kullansın)
+                    $saved = array_merge($cfg, $alt);
+                    @file_put_contents(mv_smtp_path(), json_encode($saved, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+                    return ['ok' => true, 'via' => 'smtp', 'log' => $log, 'note' => $alt['port'] . ' portuna geçildi ve kaydedildi'];
+                }
+                if (empty($try['connectFailed'])) {
+                    return ['ok' => false, 'via' => 'smtp', 'error' => $try['error'] ?? '', 'log' => $log];
+                }
+            }
+            return ['ok' => false, 'via' => 'smtp', 'error' => 'SMTP sunucusuna hiçbir porttan (465, 587) bağlanılamadı: barındırma sunucusu giden e-posta bağlantılarını engelliyor olabilir. Barındırma sağlayıcısından "giden SMTP (465/587) erişimi" açılmasını iste.', 'log' => $log];
         }
         $headers = implode("\r\n", [
             'From: Mivelo <hello@mivelo.app>',
@@ -74,7 +99,7 @@ if (!function_exists('mv_smtp_config')) {
         $remote = ($secure === 'ssl' ? 'ssl://' : 'tcp://') . $host . ':' . $port;
         $fp = @stream_socket_client($remote, $errno, $errstr, 15, STREAM_CLIENT_CONNECT, $ctx);
         if (!$fp) {
-            return ['ok' => false, 'via' => 'smtp', 'error' => "Sunucuya bağlanılamadı ($remote): $errstr", 'log' => $log];
+            return ['ok' => false, 'via' => 'smtp', 'connectFailed' => true, 'error' => "Sunucuya bağlanılamadı ($remote): $errstr", 'log' => $log];
         }
         stream_set_timeout($fp, 20);
         $read = function () use ($fp, &$log): array {

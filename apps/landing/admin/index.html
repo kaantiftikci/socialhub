@@ -239,6 +239,9 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 .fb-files{display:flex;gap:8px;flex-wrap:wrap}.fb-media{max-width:240px;max-height:170px;border-radius:10px;border:1px solid var(--line);display:block;background:#000}
+#smtpForm{max-width:none}
+.sm-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px 12px}.sm-grid .sm-host{grid-column:span 2}.sm-grid label{display:block;margin-bottom:4px}.sm-grid .input{width:100%;box-sizing:border-box}
+@media (max-width:760px){.sm-grid{grid-template-columns:1fr 1fr}.sm-grid .sm-host{grid-column:span 2}}
 </style>
 </head>
 <body>
@@ -375,22 +378,21 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
         </div>
         <div class="card" style="grid-column:1/-1">
           <h3>E-posta gönderimi (SMTP) <span class="sub" id="smtpState"></span></h3>
-          <p class="muted" style="margin:0 0 12px;font-size:13px;line-height:1.5">Üyelik onayı gibi e-postalar bir posta kutusuyla oturum açılarak gönderilir; sunucunun kendi <code>mail()</code> işlevi "gönderildi" dese de alıcıya ulaşmıyordu. cPanel → <b>E-posta Hesapları</b>'nda <b>hello@mivelo.app</b> oluştur; cPanel → <b>E-posta Teslim Edilebilirliği</b>'nde mivelo.app için SPF ve DKIM "Geçerli" olsun. Sunucu genelde <b>mail.mivelo.app</b>, bağlantı noktası <b>465 (SSL)</b>.</p>
+          <p class="muted" style="margin:0 0 12px;font-size:13px;line-height:1.5">Üyelik onayı ve geri bildirim e-postaları bir posta kutusuyla oturum açılarak gönderilir (Türkticaret sunucuları PHP <code>mail()</code> desteklemez). Türkticaret ayarları: sunucu <b>smtp.turkticaret.net</b>, <b>465 (SSL)</b> ya da 587 (STARTTLS); kullanıcı adı e-posta adresinin tamamı; <b>gönderen adresi kullanıcı adıyla aynı</b>. Şifreyi önce webmail.turkticaret.net'te dene.</p>
           <form class="form" id="smtpForm" autocomplete="off">
-            <div style="display:grid;grid-template-columns:2fr 90px 130px;gap:8px">
-              <div><label for="smHost">SMTP sunucusu</label><input class="input" id="smHost" placeholder="mail.mivelo.app"></div>
+            <div class="sm-grid">
+              <div class="sm-host"><label for="smHost">SMTP sunucusu</label><input class="input" id="smHost" value="smtp.turkticaret.net" autocomplete="off"></div>
               <div><label for="smPort">Port</label><input class="input" id="smPort" type="number" value="465"></div>
               <div><label for="smSec">Güvenlik</label><select class="input" id="smSec"><option value="ssl">SSL (465)</option><option value="tls">STARTTLS (587)</option><option value="none">Yok</option></select></div>
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-              <div><label for="smUser">Kullanıcı adı</label><input class="input" id="smUser" placeholder="hello@mivelo.app" autocomplete="off"></div>
-              <div><label for="smPass">Şifre</label><input class="input" id="smPass" type="password" autocomplete="new-password" placeholder="(değiştirmeyeceksen boş bırak)"></div>
-              <div><label for="smFrom">Gönderen adresi</label><input class="input" id="smFrom" placeholder="hello@mivelo.app"></div>
+              <div><label for="smUser">Kullanıcı adı (e-posta adresi)</label><input class="input" id="smUser" placeholder="hello@mivelo.app" autocomplete="off"></div>
+              <div><label for="smPass">Şifre</label><input class="input" id="smPass" type="password" autocomplete="new-password" placeholder="posta kutusu şifresi"></div>
+              <div><label for="smFrom">Gönderen adresi</label><input class="input" id="smFrom" placeholder="kullanıcı adıyla aynı"></div>
               <div><label for="smName">Gönderen adı</label><input class="input" id="smName" value="Mivelo"></div>
             </div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:4px">
               <button class="btn dark" type="submit">Kaydet</button>
-              <input class="input" id="smTo" type="email" placeholder="deneme için alıcı" style="max-width:240px">
+              <span class="sp" style="flex:1"></span>
+              <input class="input" id="smTo" type="email" placeholder="deneme için alıcı adresi" style="max-width:260px">
               <button class="btn" type="button" id="smTest">Deneme e-postası gönder</button>
             </div>
             <pre id="smLog" class="muted" style="display:none;white-space:pre-wrap;font-size:11.5px;max-height:220px;overflow:auto;background:var(--bg-2);padding:10px;border-radius:10px;margin:0"></pre>
@@ -696,16 +698,16 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     $('#sysBox').innerHTML='<dt>PHP</dt><dd>'+esc(s.php)+'</dd><dt>Sunucu saati</dt><dd>'+when(s.time)+' ('+esc(s.tz)+')</dd>'+Object.keys(s.files).map(function(f){ return '<dt>'+esc(f)+'</dt><dd>'+kb(s.files[f])+'</dd>'; }).join('')+'<dt>Boş disk</dt><dd>'+kb(s.diskFree)+'</dd><dt>Şifre değişti</dt><dd>'+(s.passwordChangedAt?ago(s.passwordChangedAt):'hiç (ilk şifre)')+'</dd>';
   }).catch(function(e){ toast(e.message,true); }); }
   function loadSmtp(){ api('smtp').then(function(c){
-    $('#smHost').value=c.host; $('#smPort').value=c.port||465; $('#smSec').value=c.secure||'ssl'; $('#smUser').value=c.user; $('#smFrom').value=c.from; $('#smName').value=c.fromName||'Mivelo';
+    $('#smHost').value=c.host||'smtp.turkticaret.net'; $('#smPort').value=c.port||465; $('#smSec').value=c.secure||'ssl'; $('#smUser').value=c.user; $('#smFrom').value=c.from; $('#smName').value=c.fromName||'Mivelo';
     $('#smPass').placeholder=c.hasPass?'(kayıtlı — değiştirmeyeceksen boş bırak)':'posta kutusu şifresi';
     $('#smtpState').textContent=c.configured?'ayarlı':'ayarlı değil — e-postalar gitmeyebilir';
   }).catch(function(e){ toast(e.message,true); }); }
   $('#smSec').addEventListener('change',function(){ $('#smPort').value=this.value==='tls'?587:this.value==='ssl'?465:25; });
   $('#smtpForm').addEventListener('submit',function(e){ e.preventDefault();
-    api('smtp_save',{host:$('#smHost').value.trim(),port:+$('#smPort').value,secure:$('#smSec').value,user:$('#smUser').value.trim(),pass:$('#smPass').value,from:$('#smFrom').value.trim(),fromName:$('#smName').value.trim()})
+    api('smtp_save',{host:$('#smHost').value.trim(),port:+$('#smPort').value,secure:$('#smSec').value,user:$('#smUser').value.trim(),pass:$('#smPass').value,from:$('#smFrom').value.trim()||$('#smUser').value.trim(),fromName:$('#smName').value.trim()})
       .then(function(){ $('#smPass').value=''; toast('SMTP kaydedildi'); loadSmtp(); }).catch(function(x){ toast(x.message,true); }); });
   $('#smTest').addEventListener('click',function(){ var b=this, to=$('#smTo').value.trim(); if(!to){ toast('Alıcı adresini yaz',true); return; } b.disabled=true; $('#smLog').style.display='none';
-    api('smtp_test',{to:to}).then(function(r){ toast(r.ok?'Deneme e-postası gönderildi: '+to:(r.error||'Gönderilemedi'),!r.ok); if(!r.ok||r.log&&r.log.length){ $('#smLog').textContent=(r.error?r.error+'\n\n':'')+(r.log||[]).join('\n'); $('#smLog').style.display=r.ok?'none':'block'; } })
+    api('smtp_test',{to:to}).then(function(r){ toast(r.ok?'Deneme e-postası gönderildi: '+to+(r.note?' ('+r.note+')':''):(r.error||'Gönderilemedi'),!r.ok); if(r.ok&&r.note) loadSmtp(); if(!r.ok||r.log&&r.log.length){ $('#smLog').textContent=(r.error?r.error+'\n\n':'')+(r.log||[]).join('\n'); $('#smLog').style.display=r.ok?'none':'block'; } })
       .catch(function(x){ toast(x.message,true); }).then(function(){ b.disabled=false; }); });
   $('#pwForm').addEventListener('submit',function(e){ e.preventDefault();
     api('password',{current:$('#pwCur').value,next:$('#pwNew').value}).then(function(){ $('#pwCur').value=''; $('#pwNew').value=''; toast('Şifre değiştirildi'); loaded.ayar=false; load('ayar'); }).catch(function(x){ toast(x.message,true); }); });

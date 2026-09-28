@@ -74,7 +74,9 @@ Dil: arayüz ve yorumlar Türkçe.
   `status:'pending'` → giriş 403 "onaylanmadı" (şifre doğrulandıktan sonra söylenir); e-postayla da giriş olur. Admin → Demo: Onayla/Reddet/
   E-posta/Sil (`demo_update`/`demo_mail`/`demo_delete`, u-admin korunur); onayda `send_approval_mail` → `apps/landing/api/lib-smtp.php`
   `mv_send_mail` (kimlik doğrulamalı SMTP, bağımlılıksız; ayar `~/mivelo-data/smtp.json` 0600, Admin → Ayarlar → E-posta gönderimi + deneme
-  e-postası + sunucu konuşma dökümü, şifre dökümde gizli). SMTP yoksa mail() yedeği — cPanel'de "gönderildi" deyip ULAŞMIYORDU (SPF/DKIM).
+  e-postası + sunucu konuşma dökümü, şifre dökümde gizli). Türkticaret: smtp.turkticaret.net 465 SSL / 587 STARTTLS, kullanıcı = gönderen
+  (varsayılan sunucu değeri bu). Bağlantı kurulamazsa ("Connection refused": barındırma bir giden portu kapatmış olabilir) öteki port
+  kendiliğinden denenir, çalışan kaydedilir; ikisi de kapalıysa sağlayıcıdan giden SMTP erişimi istenmeli. SMTP yoksa mail() yedeği — cPanel'de "gönderildi" deyip ULAŞMIYORDU (SPF/DKIM).
   Şifre e-postada YOK; sonuç `mailed`/`mailError` rozetinde. Her kullanıcının bağladığı uygulamalar kendi kaydında (bağımsız); reddedilenin oturumu düşer.
   Kayıtla gelen kullanıcı (`requestedAt`) `user_public.fresh` → demo BOŞ panelle açılır (`loadDemoAccounts(list, {fresh})`: varsayılan
   DEMO_APPS, örnek sohbet ve takvim etkinliği yok; bağladığı uygulamanın örnekleri gelir). admin örnek veriyle açılır.
