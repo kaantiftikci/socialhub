@@ -37,7 +37,7 @@ svg{flex-shrink:0}
 ::selection{background:var(--brand-soft-2)}
 :focus-visible{outline:2px solid var(--brand);outline-offset:3px;border-radius:8px}
 .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
-.h1{font-family:var(--serif);font-weight:500;font-size:clamp(44px,7vw,84px);line-height:1.02;letter-spacing:-.045em;margin:0}
+.h1{font-family:var(--serif);font-weight:500;font-size:clamp(44px,6.8vw,88px);line-height:1.02;letter-spacing:-.045em;margin:0;color:var(--ink)}
 .h2{font-family:var(--serif);font-weight:500;font-size:clamp(30px,4.2vw,48px);line-height:1.06;letter-spacing:-.045em;margin:0}
 .lead{font-size:17px;line-height:1.55;color:var(--ink-3);margin:0}
 .center{text-align:center}
@@ -113,7 +113,7 @@ svg{flex-shrink:0}
 /* kelime kelime açılma + alt metin süpürme (ana sayfayla aynı) */
 .words .wd{display:inline-block;opacity:0;filter:blur(10px);transform:translateY(.32em);
   transition:opacity 1.2s var(--ease),filter 1.2s var(--ease),transform 1.2s var(--ease);
-  transition-delay:calc(var(--d,0ms) + var(--i) * 140ms);will-change:opacity,filter,transform}
+  transition-delay:calc(var(--d,0ms) + var(--i) * 160ms);will-change:opacity,filter,transform}
 .words.in .wd{opacity:1;filter:blur(0);transform:none}
 .grad .wd{background:linear-gradient(92deg,#6C47FF 0%,#A06BFF 45%,#E26BB8 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
 .sub-rv{-webkit-mask-image:linear-gradient(90deg,#000 0 42%,transparent 58% 100%);mask-image:linear-gradient(90deg,#000 0 42%,transparent 58% 100%);
@@ -127,12 +127,10 @@ svg{flex-shrink:0}
 
 /* platform kartları */
 .plats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:48px}
-@media (max-width:900px){.plats{grid-template-columns:1fr}.card.rec{order:-1;margin-top:8px}}
+@media (max-width:900px){.plats{grid-template-columns:1fr}}
 .card{position:relative;text-align:left;background:var(--surface);border-radius:24px;padding:26px 24px 22px;display:flex;flex-direction:column;gap:12px;box-shadow:var(--card-sh),0 0 0 1px rgba(20,18,40,.05);
   transition:opacity .9s var(--ease),transform .5s var(--ease),box-shadow .35s ease;transition-delay:var(--rd,0s),0s,0s}
 .card.rv.in:hover{transform:translateY(-4px);box-shadow:0 2px 4px rgba(20,18,40,.06),0 28px 50px -20px rgba(40,30,110,.35),0 0 0 1px rgba(20,18,40,.05)}
-.card.rec{box-shadow:0 0 0 2px var(--brand),0 30px 60px -28px rgba(108,71,255,.55)}
-.card.rec::before{content:"Senin için önerilen";position:absolute;top:-11px;left:22px;height:22px;padding:0 10px;border-radius:999px;background:var(--brand);color:#fff;font-size:11.5px;font-weight:600;display:flex;align-items:center;box-shadow:0 6px 14px -6px rgba(108,71,255,.7)}
 .os{width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;background:var(--bg-2);color:var(--ink)}
 .os.win{background:#E9EEF6;color:#0B63D6}
 .os svg{width:24px;height:24px}
@@ -192,12 +190,53 @@ footer .sp{flex-grow:1}
 footer a{text-decoration:none}
 footer a:hover{color:var(--ink)}
 
+@media (max-width:640px){.h1{font-size:min(54px,13.2vw);line-height:1}}
 @media (max-width:600px){.wrap{padding:0 16px}.hero{padding:120px 0 70px}.sec{padding:80px 0}.key{padding:26px 20px}}
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation:none!important;transition:none!important}
   .words .wd,.rv,.steps li,.app-icon,.cta,.mesh{opacity:1!important;filter:none!important;transform:none!important}
   .sub-rv{-webkit-mask-image:none;mask-image:none;filter:none;transform:none}
 }
+
+/* ================= LIQUID GLASS (ana sayfadaki ../index.html ile aynı dil) =================
+   Yarı saydam cam: arkası bulanık + doygun; üst kenarda parlak yansıma, altta ışığın kırıldığı mor iç ton, köşelerde ışık kıran
+   çift kenar (::before). Seçili sekme: parlak, kabarık mercek; esneyerek kayar (.mv). */
+.seg,.big-dl,.card .btn{
+  background:radial-gradient(120% 90% at 20% 0%,rgba(255,255,255,.75),rgba(255,255,255,0) 60%),linear-gradient(180deg,rgba(255,255,255,.5),rgba(245,243,255,.26));
+  -webkit-backdrop-filter:blur(18px) saturate(210%) brightness(1.04);backdrop-filter:blur(18px) saturate(210%) brightness(1.04);
+  box-shadow:inset 0 1.5px 0 rgba(255,255,255,1),inset 0 -1px 0 rgba(255,255,255,.55),inset 0 -8px 14px -8px rgba(108,71,255,.16),inset 0 0 0 1px rgba(255,255,255,.35),
+    0 0 0 1px rgba(40,30,110,.1),0 16px 36px -14px rgba(40,30,110,.36),0 3px 8px -3px rgba(40,30,110,.14)}
+.seg::before,.big-dl::before,.card .btn::before{content:"";position:absolute;inset:0;border-radius:inherit;padding:1.5px;pointer-events:none;z-index:2;
+  background:linear-gradient(135deg,#fff,rgba(255,255,255,.1) 30%,rgba(255,255,255,0) 50%,rgba(190,170,255,.35) 72%,rgba(255,255,255,.95));
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0)}
+/* sekme rayı: gri-lila cam, seçili beyaz mercek öne çıksın; arkasında marka tonlarında bulanık leke (cam onu kırarak gösterir) */
+.seg{border-radius:18px;padding:5px;z-index:1;
+  background:radial-gradient(120% 100% at 15% 0%,rgba(255,255,255,.7),rgba(255,255,255,0) 55%),linear-gradient(180deg,rgba(232,229,246,.6),rgba(244,242,252,.34))}
+#kurulum .wrap{position:relative}
+#kurulum .wrap::before{content:"";position:absolute;left:50%;top:150px;width:min(420px,92%);height:70px;transform:translateX(-50%);border-radius:50%;pointer-events:none;z-index:0;
+  background:radial-gradient(40% 90% at 22% 50%,rgba(108,71,255,.55),transparent 70%),radial-gradient(35% 90% at 55% 40%,rgba(226,107,184,.45),transparent 70%),radial-gradient(35% 90% at 82% 60%,rgba(190,240,40,.6),transparent 70%);
+  filter:blur(22px);opacity:.75}
+.steps{z-index:1}
+.seg button{border-radius:13px;color:var(--ink-2);font-weight:500}
+.seg button[aria-selected="true"]{color:var(--ink)}
+.seg .pill{top:5px;left:5px;border-radius:13px;
+  background:radial-gradient(90% 70% at 30% 0%,#fff,rgba(255,255,255,.86) 60%),linear-gradient(180deg,#fff,rgba(250,249,255,.8));
+  box-shadow:inset 0 1.5px 0 #fff,inset 0 -3px 6px -2px rgba(108,71,255,.18),inset 0 0 0 .5px rgba(255,255,255,.9),
+    0 0 0 .5px rgba(40,30,110,.14),0 10px 22px -8px rgba(40,30,110,.5),0 2px 4px rgba(20,18,40,.12);
+  transition:transform .5s cubic-bezier(.3,1.12,.4,1),width .5s cubic-bezier(.3,1.12,.4,1)}
+.seg .pill::after{content:"";position:absolute;left:10%;right:10%;top:1.5px;height:48%;border-radius:12px 12px 50% 50%/12px 12px 100% 100%;
+  background:linear-gradient(180deg,rgba(255,255,255,.95),rgba(255,255,255,0));pointer-events:none}
+/* düğmeler: cam kapsül, koyu yazı; indirme oku marka moru */
+.big-dl{color:var(--ink);border-radius:18px}
+.big-dl::after{display:none}
+.big-dl:hover,.card .btn:hover{background:radial-gradient(120% 90% at 20% 0%,#fff,rgba(255,255,255,.2) 60%),linear-gradient(180deg,rgba(255,255,255,.85),rgba(245,243,255,.55));transform:translateY(-1px)}
+.big-dl .osic svg+svg{border-left-color:rgba(22,21,27,.18)}
+.big-dl .arr,.card .btn svg{color:var(--brand)}
+.card .btn{position:relative;color:var(--ink);border-radius:15px}
+.card .btn.off{opacity:.55}
+/* kart içindeki cam düğmenin arkasında hafif marka tonu (beyaz kartta camın kırdığı renk görünsün) */
+.card .btn{background:radial-gradient(120% 90% at 20% 0%,rgba(255,255,255,.85),rgba(255,255,255,0) 60%),linear-gradient(180deg,rgba(240,236,255,.75),rgba(228,222,255,.5))}
+@media (prefers-reduced-motion:reduce){.seg .pill.mv{animation:none}}
 </style>
 </head>
 <body>
@@ -214,7 +253,7 @@ footer a:hover{color:var(--ink)}
   <div class="mesh" aria-hidden="true"></div>
   <div class="wrap">
     <div class="app-icon" aria-hidden="true"><svg viewBox="0 0 28 28"><path d="M8 8c4.5 0 6 3 6 6s1.5 6 6 6M8 20c4.5 0 6-3 6-6" stroke="#FFFFFF" stroke-width="2.3" fill="none" stroke-linecap="round"/><circle class="dotl" cx="20" cy="8" r="2.5" fill="#D4FF3F"/></svg></div>
-    <h1 class="h1">Mivelo'yu <span class="grad">indir</span></h1>
+    <h1 class="h1">Mivelo'yu indir.</h1>
     <p class="lead">Tüm mesajların tek gelen kutusunda, kendi bilgisayarında. Hesapların kendi internetinden bağlanır; mesajların yalnız sende kalır.</p>
     <div class="cta">
       <a class="big-dl" id="bigDl" href="#surumler"><span class="osic" id="bigIc"></span><span id="bigTx">Sürümleri gör</span><svg class="arr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12M6 11l6 6 6-6M5 20h14"/></svg></a>
@@ -335,7 +374,7 @@ footer a:hover{color:var(--ink)}
   function show(h){ h.classList.add('in'); (h._subs||[]).forEach(function(p){ p.classList.add('in'); }); }
   var wio=new IntersectionObserver(function(es){ es.forEach(function(e){ if(e.isIntersecting){ show(e.target); wio.unobserve(e.target); } }); },{threshold:.3,rootMargin:'0px 0px -40px 0px'});
   document.querySelectorAll('.h1,.h2').forEach(function(h){
-    h.classList.add('words'); var n=split(h), d=h.classList.contains('h1')?250:0;
+    h.classList.add('words'); var n=split(h), d=0;
     h.style.setProperty('--d',d+'ms');
     var sib=h.nextElementSibling; h._subs=[];
     if(sib && sib.tagName==='P' && sib.classList.contains('lead')){ sib.classList.add('sub-rv'); sib.style.setProperty('--sd',(d+Math.min(n,5)*90+80)+'ms'); h._subs.push(sib); }
@@ -349,17 +388,15 @@ footer a:hover{color:var(--ink)}
 
   /* işletim sistemi: önerilen kart + büyük indirme düğmesi + kurulum sekmesi */
   var ua=navigator.userAgent, isWin=/Windows/i.test(ua), isMac=/Mac/i.test(ua)&&!/iPhone|iPad/i.test(ua);
-  var rec=isWin?'c-windows-x64':isMac?'c-mac-arm64':'';
   var APPLE='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04c-2.04.027-3.91 1.183-4.961 3.014c-2.117 3.675-.546 9.103 1.519 12.09c1.013 1.454 2.208 3.09 3.792 3.039c1.52-.065 2.09-.987 3.935-.987c1.831 0 2.35.987 3.96.948c1.637-.026 2.676-1.48 3.676-2.948c1.156-1.688 1.636-3.325 1.662-3.415c-.039-.013-3.182-1.221-3.22-4.857c-.026-3.04 2.48-4.494 2.597-4.559c-1.429-2.09-3.623-2.324-4.39-2.376c-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83c-1.207.052-2.662.805-3.532 1.818c-.78.896-1.454 2.338-1.273 3.714c1.338.104 2.715-.688 3.559-1.701"/></svg>';
   var WIN='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.1l7.4-1v7.2H3zm0 13.8l7.4 1v-7.1H3zm8.3 1.1L21 21.4v-8.6h-9.7zm0-15.9v7.3H21V2.6z"/></svg>';
-  if(rec) $('#'+rec).classList.add('rec');
   /* açılış düğmesi her cihazda aynı: Apple + Windows logosu, "Sürümleri gör" → kartlar (önerilen sistem kartta işaretli) */
   function bothIcons(){ $('#bigIc').innerHTML=APPLE+WIN; }
   bothIcons();
 
   /* Mac / Windows sekmesi: kayan hap (ana sayfadaki görünüm sekmeleri gibi) */
   var seg=$('#seg'), pill=$('#pill'), btns=[].slice.call(seg.querySelectorAll('button'));
-  function place(b,anim){ pill.style.width=b.offsetWidth+'px'; pill.style.transform='translateX('+(b.offsetLeft-4)+'px)';
+  function place(b,anim){ pill.style.width=b.offsetWidth+'px'; pill.style.transform='translateX('+(b.offsetLeft-5)+'px)';
     if(anim&&!reduce){ pill.classList.remove('mv'); void pill.offsetWidth; pill.classList.add('mv'); } }
   function setOs(os,anim){
     btns.forEach(function(b){ b.setAttribute('aria-selected',String(b.dataset.os===os)); if(b.dataset.os===os) place(b,anim); });

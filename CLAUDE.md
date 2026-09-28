@@ -131,7 +131,9 @@ Dil: arayüz ve yorumlar Türkçe.
   Mivelo-windows-x64-setup.exe, latest.json {version,date,files}; `deploy/indir/.htaccess`: json'da CORS *, indirme başlığı, liste kapalı). İndirme sayfası
   `apps/landing/indir/index.html` (ana sayfanın görsel dili: cam üst çubuk, hareketli gradyan, kelime kelime açılan başlık + süpürülen alt metin,
   kaydırınca beliren kartlar; açılışta HER CİHAZDA AYNI tek koyu "Sürümleri gör" düğmesi (Apple + Windows logosu → #surumler) + "Sürüm X" + "Tüm sürümler ↓"
-  (Kaan: mobil ve masaüstü aynı dursun; işletim sistemine göre "Mac/Windows için indir" YOK), önerilen sistem yalnız kartta ("Senin için önerilen") (telefonda en üstte), Mac/Windows kayan hap sekmeli
+  (Kaan: mobil ve masaüstü aynı dursun; işletim sistemine göre "Mac/Windows için indir" YOK); "Senin için önerilen" çerçevesi KALDIRILDI.
+  Başlık "Mivelo'yu indir." ana sayfa h1'iyle aynı (font/boyut/renk, 160 ms kelime açılışı, telefonda min(54px,13.2vw)); düğmeler ve Mac/Windows
+  sekmesi ana sayfanın LIQUID GLASS stilinde (cam + ::before kenar + esneyen beyaz mercek) (telefonda en üstte), Mac/Windows kayan hap sekmeli
   kurulum adımları, lisans bandı; latest.json'dan boyut/sürüm; `prefers-reduced-motion` uyar). `indir/.htaccess` HTML'e `no-cache` (tarayıcı eski
   tasarımı gösteriyordu; admin/ ile aynı kural). Kök `.htaccess` YAZILMAZ (sunucudaki cPanel PHP işleyicisini ezer). Chromium pakette YOK:
   `packages/core/src/browser-install.ts` `ensureChromium` — köprü `launch` öncesi yoksa `playwright install --no-shell chromium` (gömülü node ile,
