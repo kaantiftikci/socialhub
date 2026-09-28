@@ -64,7 +64,7 @@ Dil: arayüz ve yorumlar Türkçe.
   demo hesapları (demo `index.php` girişte `logins`/`lastLogin` yazar), görevler, şifre değiştirme, JSON yedek. Varsayılan şifre
   karması `api.php` `DEFAULT_HASH`; panelden değişince `~/mivelo-data/admin.json`. 5 hatalı girişte IP 15 dk kilitlenir.
   **Demo üyeliği**: hazır tek hesap `admin` (şifre karması `SEED_USERS`, `passVersion` artınca users.json'daki karma da güncellenir; editor/misafir
-  `REMOVED_USERS` ile silinir). Giriş ekranında "Üyelik oluştur" (`Auth.tsx`, `authRegister`) → `action=register`: ad, e-posta, kullanıcı adı
+  `REMOVED_USERS` ile silinir). Giriş ekranında "Üyelik oluştur" (`Auth.tsx`, `authRegister`) → `action=register`: ad + soyad (ayrı alanlar; `firstName`/`lastName`, `name` birleşik), e-posta, kullanıcı adı
   (a-z0-9._-, 3-24), şifre ≥8 (iki kez; not alanı YOK); IP başına saatte 5 (`demo-signup.json`), gizli `website` bot tuzağı, ≤300 bekleyen. Kayıt users.json'da
   `status:'pending'` → giriş 403 "onaylanmadı" (şifre doğrulandıktan sonra söylenir); e-postayla da giriş olur. Admin → Demo: Onayla/Reddet/
   E-posta/Sil (`demo_update`/`demo_mail`/`demo_delete`, u-admin korunur); onayda `send_approval_mail` (PHP mail(), From hello@mivelo.app,

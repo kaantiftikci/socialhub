@@ -73,7 +73,8 @@ function AuthScreen({
   const [mode, setMode] = useState<'login' | 'signup' | 'sent'>('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password2, setPassword2] = useState('');
   const [website, setWebsite] = useState('');
@@ -94,7 +95,7 @@ function AuthScreen({
     try {
       if (mode === 'signup') {
         if (password !== password2) throw new Error('Şifreler aynı değil');
-        await authRegister({ name: name.trim(), username: username.trim().toLowerCase(), email: email.trim(), password, website });
+        await authRegister({ name: `${firstName.trim()} ${lastName.trim()}`.trim(), firstName: firstName.trim(), lastName: lastName.trim(), username: username.trim().toLowerCase(), email: email.trim(), password, website });
         setPassword('');
         setPassword2('');
         setMode('sent');
@@ -148,10 +149,16 @@ function AuthScreen({
         {mode === 'signup' && (
           <>
             <p className="auth-note">Demoyu denemek için üyelik talebi gönder. Onaylanınca e-posta ile haber veririz; demo sana özel olur.</p>
-            <label>
-              Adın
-              <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" required minLength={2} maxLength={60} />
-            </label>
+            <div className="auth-row">
+              <label>
+                Ad
+                <input value={firstName} onChange={(e) => setFirstName(e.target.value)} autoComplete="given-name" required minLength={1} maxLength={40} />
+              </label>
+              <label>
+                Soyad
+                <input value={lastName} onChange={(e) => setLastName(e.target.value)} autoComplete="family-name" required minLength={1} maxLength={40} />
+              </label>
+            </div>
             <label>
               E-posta
               <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" autoComplete="email" autoCapitalize="none" required maxLength={120} />

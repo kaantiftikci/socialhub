@@ -51,6 +51,6 @@ export function authSaveAccounts(accounts: Array<Record<string, unknown>>): Prom
 }
 
 /** Üyelik talebi: onaylanana kadar giriş yapılamaz (admin panelinden onaylanınca e-posta gider) */
-export function authRegister(form: { name: string; username: string; email: string; password: string; website?: string }): Promise<{ ok: boolean; pending: boolean }> {
+export function authRegister(form: { name: string; firstName?: string; lastName?: string; username: string; email: string; password: string; website?: string }): Promise<{ ok: boolean; pending: boolean }> {
   return call('register', 'POST', form);
 }

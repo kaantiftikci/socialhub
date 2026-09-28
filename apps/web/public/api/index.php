@@ -295,7 +295,10 @@ if ($method === 'POST' || $method === 'PUT') {
  * bekleyen talep; gizli "website" alanı bot tuzağı (doluysa sessizce başarılı görünür, kaydedilmez).
  */
 if ($action === 'register' && $method === 'POST') {
-    $name = trim(preg_replace('/\s+/u', ' ', (string) ($body['name'] ?? '')) ?? '');
+    $clean = fn ($v) => trim(preg_replace('/\s+/u', ' ', (string) $v) ?? '');
+    $firstName = $clean($body['firstName'] ?? '');
+    $lastName = $clean($body['lastName'] ?? '');
+    $name = $firstName !== '' || $lastName !== '' ? trim("$firstName $lastName") : $clean($body['name'] ?? '');
     $username = strtolower(trim((string) ($body['username'] ?? '')));
     $email = strtolower(trim((string) ($body['email'] ?? '')));
     $password = (string) ($body['password'] ?? '');
@@ -305,8 +308,8 @@ if ($action === 'register' && $method === 'POST') {
         exit;
     }
     $len = fn (string $x) => function_exists('mb_strlen') ? mb_strlen($x) : strlen($x);
-    if ($len($name) < 2 || $len($name) > 60) {
-        fail(400, 'Adını yaz (2-60 karakter)');
+    if ($len($name) < 2 || $len($name) > 81 || (isset($body['firstName']) && ($firstName === '' || $lastName === '' || $len($firstName) > 40 || $len($lastName) > 40))) {
+        fail(400, 'Adını ve soyadını yaz');
     }
     if (!preg_match('/^[a-z0-9._-]{3,24}$/', $username)) {
         fail(400, 'Kullanıcı adı 3-24 karakter olmalı; yalnız küçük harf, rakam, nokta, tire ve alt çizgi');
@@ -341,7 +344,7 @@ if ($action === 'register' && $method === 'POST') {
     flock($slh, LOCK_UN);
     fclose($slh);
     $hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]);
-    $err = with_users(function (array &$data) use ($name, $username, $email, $hash, $note) {
+    $err = with_users(function (array &$data) use ($name, $firstName, $lastName, $username, $email, $hash, $note) {
         $pending = 0;
         foreach ($data['users'] as $u) {
             if (strtolower((string) ($u['username'] ?? '')) === $username) {
@@ -361,6 +364,8 @@ if ($action === 'register' && $method === 'POST') {
             'id' => 'u-' . bin2hex(random_bytes(6)),
             'username' => $username,
             'name' => $name,
+            'firstName' => $firstName,
+            'lastName' => $lastName,
             'email' => $email,
             'pass' => $hash,
             'status' => 'pending',
