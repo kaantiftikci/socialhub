@@ -1,493 +1,828 @@
 <!doctype html>
 <html lang="tr">
 <head>
-<meta charset="utf-8" />
-<title>Mivelo — tanıtım (reels 1080×1920)</title>
+<meta charset="utf-8">
+<title>Mivelo reel</title>
 <!--
-  Kare kare çizilen tanıtım videosu (Instagram Reels / TikTok, 1080×1920). Tüm hareket window.render(t) ile zamanın
-  fonksiyonu (CSS geçişi yok) → Playwright her kareyi birebir çeker (render.mjs). Varlıklar ?a=<klasör>:
-  capture-assets.mjs (gerçek masaüstü ekranları, açık tema) + brand-tiles.py (pazaryeri logoları) + fonts/ (Inter, yerel).
-  Tarayıcıda izlemek: reel.html?a=assets&play=1
-  Yazı tipi: demo ve waitlist ile aynı — Inter (başlıklar 700, sıkı harf aralığı; waitlist .h1 gibi).
+  Mivelo tanıtım videosu (1080×1920, 30 fps). render.mjs bu sayfayı kare kare çizer:
+  - Kompozisyon (arka plan, başlıklar, kart, imleç, tuşlar) tamamen window.render(t) ile zamanın fonksiyonu.
+  - Kartın içindeki uygulama GERÇEK tek dosya demodur (/app/index.html, iframe): render.mjs sanal saati ilerletir ve
+    render(t)'nin döndürdüğü eylemleri (tıklama, yazma, tuş) Playwright'ın gerçek fare/klavyesiyle uygular.
+  - Yazı tipi: waitlist ile aynı yığın (-apple-system / SF Pro Display). SF Pro yoksa (Linux) Inter Display (opsz) kullanılır.
 -->
 <style>
-  :root { --v: #6c47ff; --v2: #9a7dff; --lime: #d4ff3f; --ink: #0c0b12; --card: #1b1924; --text: #f5f4fa; --text2: #b9b6c7; }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; width: 1080px; height: 1920px; overflow: hidden; background: var(--ink); font-family: Inter, sans-serif; color: var(--text); -webkit-font-smoothing: antialiased; font-feature-settings: 'cv11', 'ss01'; }
-  #stage { position: absolute; inset: 0; overflow: hidden; }
-  .a { position: absolute; left: 0; top: 0; will-change: transform, opacity; }
-  .bg { position: absolute; inset: -200px; }
-  .blob { position: absolute; border-radius: 50%; filter: blur(130px); }
-  .h1 { font-weight: 700; font-size: 100px; line-height: 1.02; letter-spacing: -0.035em; text-align: center; width: 1000px; }
-  .h1 em, .h2 em { font-style: normal; color: var(--lime); }
-  .h2 { font-weight: 700; font-size: 70px; line-height: 1.06; letter-spacing: -0.03em; text-align: center; width: 1000px; }
-  .sub { font-weight: 500; font-size: 36px; line-height: 1.35; color: var(--text2); text-align: center; width: 960px; letter-spacing: -0.01em; }
-  .kicker { font-weight: 700; font-size: 28px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--lime); text-align: center; white-space: nowrap; }
-  /* bildirim kartı */
-  .notif { width: 940px; display: flex; align-items: center; gap: 26px; padding: 26px 30px; border-radius: 38px; background: rgba(36, 33, 48, .94); border: 1px solid rgba(255,255,255,.09); box-shadow: 0 30px 60px -20px rgba(0,0,0,.75); }
-  .notif img, .notif .ico { width: 84px; height: 84px; flex: none; }
-  .notif .t { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-  .notif b { font-size: 33px; font-weight: 700; letter-spacing: -0.01em; }
-  .notif b span { color: var(--text2); font-weight: 500; font-size: 27px; margin-left: 12px; }
-  .notif i { font-style: normal; font-size: 33px; color: #dcd9e6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .chip { width: 150px; height: 150px; filter: drop-shadow(0 22px 34px rgba(0,0,0,.55)); }
-  /* masaüstü penceresi (kamera): içteki ekran görüntüsü cx/cy/z anahtarlarıyla yakınlaşır/kayar */
-  .win { width: 1000px; border-radius: 30px; overflow: hidden; background: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.09), 0 70px 130px -40px rgba(0,0,0,.95), 0 0 140px -30px rgba(108,71,255,.55); }
-  .win .bar { height: 50px; background: #ecebf1; display: flex; align-items: center; gap: 12px; padding: 0 22px; border-bottom: 1px solid #dcdae3; }
-  .win .bar i { width: 16px; height: 16px; border-radius: 50%; display: block; }
-  .win .bar b { margin-left: 18px; font-size: 20px; font-weight: 600; color: #6b6878; letter-spacing: -0.01em; }
-  .win .vp { position: relative; width: 1000px; height: 625px; overflow: hidden; background: #f7f6fa; }
-  .win .vp img { position: absolute; left: 0; top: 0; width: 1000px; transform-origin: 0 0; will-change: transform; }
-  .pill { display: inline-flex; align-items: center; gap: 18px; padding: 20px 32px 20px 22px; border-radius: 999px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.13); font-size: 38px; font-weight: 700; white-space: nowrap; letter-spacing: -0.01em; }
-  .pill .ics { display: inline-flex; }
-  .pill .ics img { width: 62px; height: 62px; margin-left: -12px; filter: drop-shadow(0 4px 8px rgba(0,0,0,.5)); }
-  .pill .ics img:first-child { margin-left: 0; }
-  .card { background: var(--card); border: 1px solid rgba(255,255,255,.09); border-radius: 44px; padding: 40px 44px; box-shadow: 0 40px 80px -30px rgba(0,0,0,.85); }
-  .bub { max-width: 860px; padding: 28px 36px; border-radius: 42px; font-size: 40px; line-height: 1.3; font-weight: 500; letter-spacing: -0.01em; white-space: nowrap; }
-  .bub.in { background: #f2f1f6; color: #15131c; border-bottom-left-radius: 12px; box-shadow: 0 24px 50px -20px rgba(0,0,0,.6); }
-  .bub.out { background: var(--v); color: #fff; border-bottom-right-radius: 12px; box-shadow: 0 24px 50px -16px rgba(108,71,255,.8); }
-  .toast { display: inline-flex; align-items: center; gap: 16px; padding: 22px 34px; border-radius: 999px; background: var(--lime); color: #1a2300; font-weight: 700; font-size: 35px; white-space: nowrap; letter-spacing: -0.01em; box-shadow: 0 20px 50px -14px rgba(212,255,63,.6); }
-  .toast img { width: 50px; height: 50px; }
-  .ai-h { display: flex; align-items: center; gap: 16px; font-size: 32px; font-weight: 700; color: var(--v2); letter-spacing: -0.01em; }
-  .caret::after { content: ''; display: inline-block; width: 4px; height: 1em; background: var(--lime); margin-left: 6px; vertical-align: -.12em; }
-  .li { display: flex; gap: 20px; align-items: flex-start; font-size: 36px; line-height: 1.35; color: #e8e5f1; }
-  .li::before { content: ''; flex: none; width: 13px; height: 13px; margin-top: 17px; border-radius: 50%; background: var(--lime); }
-  .tag { display: inline-flex; align-items: center; gap: 12px; padding: 15px 24px; border-radius: 999px; background: rgba(108,71,255,.24); color: #d3c7ff; font-weight: 600; font-size: 30px; white-space: nowrap; }
-  .key { width: 190px; height: 190px; border-radius: 44px; background: linear-gradient(#2f2c3b, #1c1a25); border: 2px solid #3d3a4a; box-shadow: 0 14px 0 #0a0910, 0 30px 60px -10px rgba(0,0,0,.8); display: flex; align-items: center; justify-content: center; font-size: 100px; font-weight: 700; color: #fff; }
-  .num { font-weight: 700; font-size: 280px; letter-spacing: -0.05em; line-height: .9; color: var(--lime); font-variant-numeric: tabular-nums; text-align: center; }
-  .row { display: flex; align-items: center; gap: 28px; font-size: 42px; font-weight: 700; white-space: nowrap; letter-spacing: -0.015em; }
-  .row .ic { width: 94px; height: 94px; border-radius: 28px; display: flex; align-items: center; justify-content: center; background: rgba(212,255,63,.14); color: var(--lime); flex: none; }
-  .row .ic.v { background: rgba(108,71,255,.24); color: #d3c7ff; }
-  .row small { display: block; font-size: 31px; font-weight: 500; color: #a9a6b8; margin-top: 6px; letter-spacing: 0; }
-  svg.i { fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
-  .tl { display: flex; flex-direction: column; gap: 22px; }
-  .tl .st { display: flex; align-items: center; gap: 24px; font-size: 40px; font-weight: 600; white-space: nowrap; color: #8a879a; }
-  .tl .st .ic { width: 84px; height: 84px; border-radius: 26px; display: flex; align-items: center; justify-content: center; background: rgba(108,71,255,.18); color: #b9a8ff; flex: none; }
-  .tl .st.on { color: #fff; }
-  .tl .st.on .ic { background: var(--lime); color: #1a2300; }
-  .cta { display: inline-flex; align-items: center; gap: 20px; padding: 34px 58px; border-radius: 999px; background: var(--lime); color: #1a2300; font-size: 46px; font-weight: 700; white-space: nowrap; letter-spacing: -0.02em; box-shadow: 0 30px 70px -20px rgba(212,255,63,.7); }
-  .cursor { width: 64px; height: 64px; filter: drop-shadow(0 6px 10px rgba(0,0,0,.5)); }
-  .ring { width: 120px; height: 120px; border-radius: 50%; border: 5px solid var(--lime); }
-  .grain { position: absolute; inset: 0; z-index: 55; pointer-events: none; opacity: .05; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='.9'/%3E%3C/svg%3E"); }
-  .progress { position: absolute; z-index: 60; left: 60px; right: 60px; top: 56px; height: 7px; border-radius: 8px; background: rgba(255,255,255,.12); overflow: hidden; }
-  .progress i { display: block; height: 100%; background: var(--lime); border-radius: 8px; }
+@font-face { font-family: 'Mivelo Display'; font-style: normal; font-weight: 100 900; font-display: block; src: url(assets/fonts/inter-latin-opsz-normal.woff2) format('woff2'); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2190-2199,U+2212,U+2215,U+2318,U+21E5,U+21B5,U+21E7,U+FEFF,U+FFFD; }
+@font-face { font-family: 'Mivelo Display'; font-style: normal; font-weight: 100 900; font-display: block; src: url(assets/fonts/inter-latin-ext-opsz-normal.woff2) format('woff2'); unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF; }
+:root {
+  --bg: #FBFBFD; --ink: #16151B; --ink2: #44424D; --ink3: #6E6C78; --ink4: #A3A1AC; --line: #E6E5EC;
+  --brand: #6C47FF; --brand-soft: #F0ECFF; --brand-soft2: #E2DAFF; --lime: #D4FF3F; --lime-ink: #1A2300;
+  --display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Mivelo Display', sans-serif;
+  --text: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Mivelo Display', sans-serif;
+}
+html, body { margin: 0; width: 1080px; height: 1920px; overflow: clip; background: var(--bg); }
+#stage { position: absolute; inset: 0; overflow: clip; font-family: var(--text); color: var(--ink); -webkit-font-smoothing: antialiased; font-optical-sizing: auto; }
+#stage * { box-sizing: border-box; }
+.a { position: absolute; left: 0; top: 0; pointer-events: none; }
+/* arka plan: tek renk + yavaş kayan iki yumuşak ışık (marka morunun açığı ve çok hafif lime) */
+.glow { position: absolute; border-radius: 50%; pointer-events: none; }
+/* başlıklar */
+.say { position: absolute; left: 0; width: 1080px; text-align: center; pointer-events: none; font-family: var(--display); }
+.say .kick { font-size: 30px; font-weight: 600; color: var(--brand); letter-spacing: -0.01em; margin-bottom: 14px; }
+.say .hl { font-weight: 700; letter-spacing: -0.035em; line-height: 1.04; color: var(--ink); }
+.say .sub { font-family: var(--text); font-size: 34px; font-weight: 500; color: var(--ink3); margin-top: 22px; letter-spacing: -0.01em; }
+.say .sub .it { transition: none; }
+.say .w { display: inline-block; white-space: pre; }
+.say em { font-style: normal; color: var(--brand); }
+/* kart: bildirim hapı → logo → uygulama penceresi (tek nesne, biçim değiştirir) */
+#vp { position: absolute; left: 0; top: 0; overflow: clip; pointer-events: auto; }
+#vp .appbox { position: absolute; left: 0; top: 0; width: 1440px; height: 900px; transform-origin: 0 0; }
+#vp iframe { border: 0; width: 1440px; height: 900px; display: block; background: #F7F6FA; }
+#vp .glyph, #vp .pilltxt { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+#vp .pilltxt { font-family: var(--display); font-weight: 650; font-size: 38px; letter-spacing: -0.02em; color: var(--ink); white-space: nowrap; }
+#vp .pilltxt b { color: var(--brand); font-weight: 700; }
+/* bildirimler */
+.notif { width: 820px; padding: 26px 30px; border-radius: 34px; background: rgba(255,255,255,.94); border: 1px solid rgba(230,229,236,.9);
+  box-shadow: 0 2px 4px rgba(20,18,40,.04), 0 24px 60px -18px rgba(40,30,110,.28); display: flex; gap: 24px; align-items: center; font-family: var(--text); }
+.notif img { width: 84px; height: 84px; border-radius: 22px; flex: none; }
+.notif .t { flex: 1; min-width: 0; }
+.notif .top { display: flex; justify-content: space-between; font-size: 24px; color: var(--ink3); font-weight: 500; }
+.notif .who { font-size: 31px; font-weight: 650; margin-top: 4px; letter-spacing: -0.01em; }
+.notif .msg { font-size: 29px; color: var(--ink2); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chipimg { width: 132px; height: 132px; border-radius: 34px; box-shadow: 0 16px 36px -14px rgba(40,30,110,.35); }
+/* destek baloncukları (kartın altında) */
+.pill { display: inline-flex; align-items: center; gap: 14px; padding: 20px 30px; border-radius: 999px; background: #fff; border: 1px solid var(--line);
+  box-shadow: 0 1px 2px rgba(20,18,40,.05), 0 18px 40px -18px rgba(40,30,110,.3); font-size: 30px; font-weight: 600; color: var(--ink); white-space: nowrap; letter-spacing: -0.01em; }
+.pill svg { color: var(--brand); }
+.pill.lime { background: var(--lime); border-color: transparent; color: var(--lime-ink); }
+.pill.lime svg { color: var(--lime-ink); }
+.pill.ink { background: var(--ink); border-color: transparent; color: #fff; }
+.pill.ink svg { color: var(--lime); }
+/* tuş kapakları */
+.key { min-width: 116px; height: 116px; padding: 0 28px; border-radius: 26px; background: #fff; border: 1px solid var(--line); display: grid; place-items: center;
+  font-family: var(--display); font-size: 52px; font-weight: 600; color: var(--ink); box-shadow: 0 7px 0 #E4E2EC, 0 18px 36px -14px rgba(40,30,110,.3); }
+.key.on { background: var(--lime); border-color: #C4EE2C; color: var(--lime-ink); box-shadow: 0 2px 0 #B7DF22, 0 10px 24px -12px rgba(40,30,110,.3); }
+.key small { font-size: 28px; font-weight: 600; }
+.sc { width: 900px; padding: 34px 40px; border-radius: 40px; background: #fff; border: 1px solid var(--line); box-shadow: 0 1px 2px rgba(20,18,40,.05), 0 30px 70px -28px rgba(40,30,110,.35);
+  display: grid; grid-template-columns: 1fr 1fr; gap: 22px 34px; font-size: 27px; color: var(--ink2); font-weight: 500; }
+.sc div { display: flex; align-items: center; gap: 16px; white-space: nowrap; }
+.sc kbd { font-family: var(--display); font-size: 25px; font-weight: 650; color: var(--ink); background: var(--brand-soft); border-radius: 12px; padding: 7px 13px; min-width: 52px; text-align: center; }
+/* son kart */
+.cta { padding: 34px 58px; border-radius: 999px; background: var(--brand); color: #fff; font-family: var(--display); font-size: 40px; font-weight: 650; letter-spacing: -0.015em; white-space: nowrap;
+  box-shadow: 0 24px 50px -18px rgba(108,71,255,.65); display: flex; align-items: center; gap: 16px; }
+.cta.done { background: var(--lime); color: var(--lime-ink); box-shadow: 0 24px 50px -18px rgba(150,190,20,.6); }
+.url { font-family: var(--display); font-size: 52px; font-weight: 700; letter-spacing: -0.03em; }
+.foot { font-size: 28px; color: var(--ink3); font-weight: 500; white-space: nowrap; }
+/* üst köşe işaretleri */
+.hud { font-size: 26px; font-weight: 600; color: var(--ink3); display: flex; align-items: center; gap: 12px; font-family: var(--display); letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.hud b { color: var(--ink); font-size: 30px; letter-spacing: -0.02em; }
+#cur { width: 46px; height: 46px; filter: drop-shadow(0 3px 5px rgba(0,0,0,.28)); z-index: 40; }
+#ring { width: 90px; height: 90px; border-radius: 50%; border: 5px solid var(--brand); z-index: 39; }
 </style>
 </head>
 <body>
 <div id="stage"></div>
 <script>
-/* ───────────────────────── altyapı ───────────────────────── */
+'use strict';
 const Q = new URLSearchParams(location.search);
-const A = (Q.get('a') || 'assets').replace(/\/$/, '');
-const DUR = 48;
-// Inter (yerel; Türkçe harfler latin-ext'te) — demo/waitlist ile aynı yazı tipi
-const LATIN = 'U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD';
-const LATIN_EXT = 'U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF';
-const fontCss = [400, 500, 600, 700, 800].flatMap((w) => [
-  `@font-face{font-family:Inter;font-weight:${w};font-display:block;src:url(${A}/fonts/inter-latin-ext-${w}-normal.woff2) format('woff2');unicode-range:${LATIN_EXT}}`,
-  `@font-face{font-family:Inter;font-weight:${w};font-display:block;src:url(${A}/fonts/inter-latin-${w}-normal.woff2) format('woff2');unicode-range:${LATIN}}`,
-]).join('\n');
-document.head.insertAdjacentHTML('beforeend', `<style>${fontCss}</style>`);
-
+const A = 'assets';
+const DUR = 46;
 const stage = document.getElementById('stage');
-const tracks = [];
-const hooks = [];
+
+/* ───────── motor ───────── */
 const ease = {
-  l: (p) => p,
-  o: (p) => 1 - Math.pow(1 - p, 3),
-  o5: (p) => 1 - Math.pow(1 - p, 5),
-  i: (p) => p * p * p,
-  io: (p) => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2),
-  back: (p) => { const c = 1.6, c3 = c + 1; return 1 + c3 * Math.pow(p - 1, 3) + c * Math.pow(p - 1, 2); },
-  el: (p) => (p === 0 || p === 1 ? p : Math.pow(2, -10 * p) * Math.sin((p * 10 - 0.75) * ((2 * Math.PI) / 3)) + 1),
+  lin: (x) => x,
+  io: (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2),
+  o: (x) => 1 - Math.pow(1 - x, 3),
+  i: (x) => x * x * x,
+  ox: (x) => (x >= 1 ? 1 : 1 - Math.pow(2, -10 * x)),
+  iox: (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x < 0.5 ? Math.pow(2, 20 * x - 10) / 2 : (2 - Math.pow(2, -20 * x + 10)) / 2),
+  back: (x) => { const c1 = 1.5, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); },
+  spring: (x) => (x >= 1 ? 1 : 1 - Math.exp(-7 * x) * Math.cos(10.5 * x)),
 };
-function mk(html, cls = '', parent = stage) {
-  const el = document.createElement('div');
-  el.className = 'a ' + cls;
-  el.innerHTML = html;
-  el.style.opacity = 0;
-  el.style.visibility = 'hidden';
-  parent.appendChild(el);
-  return el;
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, p) => a + (b - a) * p;
+const hooks = [];
+const hook = (fn) => (hooks.push(fn), fn);
+function el(html, cls = '', parent = stage) {
+  const d = document.createElement('div');
+  d.className = 'a ' + cls;
+  d.innerHTML = html;
+  parent.appendChild(d);
+  return d;
 }
-/** anahtar kareler: [t, {x,y,s,r,o,b, cx,cy,z,vh (pencere kamerası)}, kolaylık] */
-function anim(el, frames) { tracks.push({ el, frames: frames.map(([t, p, e]) => ({ t, p, e: e || 'io' })) }); return el; }
-// Bir karede tanımlanmayan anahtar ÖNCEKİ değerini korur (bekleme); ilk tanımdan önce varsayılan geçerli. Böylece
-// ör. yalnız çıkış karesinde verilen x/bulanıklık tüm sahneye yayılmaz, yalnız son aralıkta uygulanır.
-function at(frames, t, k, def) {
-  let cur = def;
-  const f = frames.map((x) => (x.p[k] === undefined ? { t: x.t, e: x.e, v: cur } : { t: x.t, e: x.e, v: (cur = x.p[k]) }));
-  if (!f.length || def === null && f.every((x) => x.v === null)) return def;
-  if (t <= f[0].t) return f[0].v;
-  for (let i = 1; i < f.length; i++) {
-    if (t <= f[i].t) {
-      const a = f[i - 1], b = f[i];
-      if (a.v === b.v) return a.v;
-      const p = ease[b.e]((t - a.t) / (b.t - a.t || 1));
-      return a.v + (b.v - a.v) * p;
+/**
+ * Anahtar kare izi: [[t, {özellik: değer}, kolaylık]]. Bir özellik tanımlandığı ilk kareden önce o ilk değeri, sonuncudan sonra
+ * son değeri taşır; aradaki geçişte bir SONRAKİ karenin kolaylığı kullanılır. S (ölçek) logaritmik aralıkta.
+ */
+function track(keys) {
+  const ks = keys.map(([t, p, e]) => ({ t, p, e: e || 'io' })).sort((a, b) => a.t - b.t);
+  // {f: hedef} anahtarı fx/fy'yi tanımlar (değer geçişin başında DOM'dan çözülür)
+  for (const k of ks) if (k.p.f) { if (!('fx' in k.p)) k.p.fx = undefined; if (!('fy' in k.p)) k.p.fy = undefined; }
+  const val = (prop, t, def) => {
+    let a = -1, b = -1;
+    for (let i = 0; i < ks.length; i++) {
+      if (!(prop in ks[i].p)) continue;
+      if (ks[i].t <= t) a = i;
+      else { b = i; break; }
     }
+    if (a < 0 && b < 0) return def;
+    if (a < 0) return resolve(ks[b], prop);
+    if (b < 0) return resolve(ks[a], prop);
+    const k0 = ks[a], k1 = ks[b];
+    const v0 = resolve(k0, prop), v1 = resolve(k1, prop);
+    const p = ease[k1.e](clamp((t - k0.t) / (k1.t - k0.t)));
+    return prop === 'S' ? Math.exp(lerp(Math.log(v0), Math.log(v1), p)) : lerp(v0, v1, p);
+  };
+  return { ks, val };
+}
+/* Kamera odağı / imleç hedefi: {f: hedef} alanlı anahtar ilk gerektiğinde (geçişin başında) uygulamanın DOM'undan çözülür */
+function resolve(k, prop) {
+  if ((prop === 'fx' || prop === 'fy') && k.p.f && !k.done) {
+    const r = rectOf(k.p.f);
+    k.p.fx = r ? r.x + r.width * (k.p.f.ax ?? 0.5) + (k.p.f.dx ?? 0) : k.p.fx ?? 720;
+    k.p.fy = r ? r.y + r.height * (k.p.f.ay ?? 0.5) + (k.p.f.dy ?? 0) : k.p.fy ?? 450;
+    k.done = true;
   }
-  return f[f.length - 1].v;
+  return k.p[prop];
 }
-const hook = (fn) => hooks.push(fn);
-function type(el, text, t0, dur, t) {
-  if (!el) return;
-  const n = Math.max(0, Math.min(text.length, Math.floor(((t - t0) / dur) * text.length)));
-  el.textContent = text.slice(0, n);
-  el.classList.toggle('caret', t >= t0 - 0.2 && t < t0 + dur + 0.5 && Math.floor(t * 2.4) % 2 === 0);
+
+/* ───────── uygulama (gerçek demo, iframe) ───────── */
+const doc = () => document.getElementById('app')?.contentDocument;
+/** Hedef: {sel, text, pick: 'first'|'last'|n} → iframe içi dikdörtgen (uygulama koordinatı = 1440×900) */
+function findEl(tg) {
+  const d = doc();
+  if (!d) return null;
+  let list = [...d.querySelectorAll(tg.sel)];
+  if (tg.text) list = list.filter((e) => e.textContent.replace(/\s+/g, ' ').includes(tg.text));
+  if (tg.visible !== false) list = list.filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+  if (!list.length) return null;
+  return tg.pick === 'last' ? list[list.length - 1] : typeof tg.pick === 'number' ? list[Math.min(tg.pick, list.length - 1)] : list[0];
 }
-window.render = (t) => {
-  for (const { el, frames } of tracks) {
-    const o = at(frames, t, 'o', 1);
-    el.style.opacity = o;
-    el.style.visibility = o <= 0.001 ? 'hidden' : 'visible';
-    if (o <= 0.001) continue;
-    const x = at(frames, t, 'x', 540), y = at(frames, t, 'y', 960), s = at(frames, t, 's', 1), r = at(frames, t, 'r', 0), b = at(frames, t, 'b', 0);
-    el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%) scale(${s}) rotate(${r}deg)`;
-    el.style.filter = b > 0.05 ? `blur(${b}px)` : '';
-    // pencere kamerası: ekran görüntüsünün (1440×900 CSS) (cx, cy) noktası görünüm alanının ortasına, z kat büyütülmüş
-    const vp = el.querySelector(':scope > .vp');
-    if (vp) {
-      const vh = at(frames, t, 'vh', 625), z = at(frames, t, 'z', 1), cx = at(frames, t, 'cx', 720), cy = at(frames, t, 'cy', 450);
-      vp.style.height = vh + 'px';
-      const k = (1000 / 1440) * z;
-      const im = vp.querySelector('img.on') || vp.querySelector('img');
-      for (const i of vp.querySelectorAll('img')) i.style.transform = `translate(${500 - cx * k}px, ${vh / 2 - cy * k}px) scale(${z})`;
-      void im;
-    }
-  }
-  for (const h of hooks) h(t);
-};
-const img = (n) => `${A}/${n}.png`;
-const chip = (n, style = '') => `<img src="${A}/chip-${n}.png" style="${style}">`;
-/** Mac penceresi; birden çok ekran görüntüsü üst üste (show(win, ad) ile değişir) */
-function win(title, shots) {
-  const el = mk(`<div class="bar"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i><b>${title}</b></div><div class="vp">${shots.map((s, i) => `<img data-n="${s}" src="${img(s)}" style="opacity:${i ? 0 : 1}">`).join('')}</div>`, 'win');
-  return el;
+function rectOf(tg) {
+  const e = findEl(tg);
+  return e ? e.getBoundingClientRect() : null;
 }
-/** pencerede ekran değişimi: t0'dan itibaren `name` görünür (0.18 sn çapraz geçiş) */
-function swap(w, schedule) {
-  hook((t) => {
-    let cur = schedule[0][1], prev = null, since = 99;
-    for (const [t0, n] of schedule) if (t >= t0) { prev = cur; cur = n; since = t - t0; }
-    const f = Math.min(1, since / 0.18);
-    for (const i of w.querySelectorAll('.vp img')) i.style.opacity = i.dataset.n === cur ? f : i.dataset.n === prev ? 1 - f : 0;
-    const bar = w.querySelector('.bar b');
-    if (bar && schedule.find((s) => s[1] === cur)?.[2]) bar.textContent = schedule.find((s) => s[1] === cur)[2];
-  });
-}
+
+/* ───────── eylemler (render.mjs gerçek fare/klavye ile uygular) ───────── */
+const ACTS = [];
+const CUES = []; // ses efektleri: {t, k}
+const cue = (t, k, v) => CUES.push({ t, k, v });
+const click = (t, sfx) => (ACTS.push({ t, k: 'down', sfx }), ACTS.push({ t: t + 0.08, k: 'up' }), CLICKS.push(t));
+const press = (t, key) => ACTS.push({ t, k: 'key', key });
+const typeText = (t0, text, cps = 17) => ACTS.push({ t: t0, k: 'type', text, cps, done: 0 });
+const inApp = (t, fn) => ACTS.push({ t, k: 'eval', fn });
+const SCROLLS = [];
+const scroll = (t0, t1, sel, to, e = 'io') => SCROLLS.push({ t0, t1, sel, to, e, from: null });
+const CLICKS = [];
+
+/* ───────── arka plan ───────── */
+const glows = [
+  el('', 'glow'), el('', 'glow'), el('', 'glow'),
+];
+glows[0].style.cssText += 'width:1500px;height:1500px;background:radial-gradient(circle, rgba(226,218,255,.95) 0%, rgba(226,218,255,0) 62%)';
+glows[1].style.cssText += 'width:1300px;height:1300px;background:radial-gradient(circle, rgba(212,255,63,.22) 0%, rgba(212,255,63,0) 60%)';
+glows[2].style.cssText += 'width:1200px;height:1200px;background:radial-gradient(circle, rgba(240,236,255,1) 0%, rgba(240,236,255,0) 60%)';
+hook((t) => {
+  const a = t * 0.11;
+  glows[0].style.transform = `translate(${-420 + Math.sin(a) * 120}px, ${-260 + Math.cos(a * 0.8) * 140}px)`;
+  glows[1].style.transform = `translate(${260 + Math.cos(a * 0.9) * 140}px, ${1080 + Math.sin(a * 1.1) * 160}px)`;
+  glows[2].style.transform = `translate(${-300 + Math.sin(a * 0.7 + 2) * 100}px, ${1250 + Math.cos(a) * 120}px)`;
+});
+
+/* ───────── ikonlar ───────── */
 const ICON = {
-  box: '<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>',
-  cart: '<path d="M3 4h2l2.4 11h10.2L20 7H6.3"/><circle cx="9.5" cy="19" r="1.4"/><circle cx="17" cy="19" r="1.4"/>',
   check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
-  receipt: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/>',
-  truck: '<path d="M3 6h11v10H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="17.5" r="1.6"/><circle cx="17" cy="17.5" r="1.6"/>',
   sparkle: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4"/><path d="M12 8.5 13.3 11 16 12l-2.7 1-1.3 2.5-1.3-2.5L8 12l2.7-1z"/>',
   calendar: '<rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
-  bell: '<path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 21h4"/>',
-  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
-  shield: '<path d="M12 3 5 6v6c0 4.5 3 7.5 7 9 4-1.5 7-4.5 7-9V6z"/><path d="m9 12 2 2 4-4"/>',
-  lock: '<rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/>',
-  device: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
-  gauge: '<path d="M4 16a8 8 0 1 1 16 0"/><path d="m12 16 4-5"/>',
-  eyeoff: '<path d="M3 3l18 18"/><path d="M10.6 6.1A9.5 9.5 0 0 1 12 6c5 0 8.5 4.5 9.5 6-.5.8-1.4 2-2.7 3.2M6.5 7.6C4.6 8.9 3.2 10.7 2.5 12c1 1.5 4.5 6 9.5 6 1.5 0 2.9-.4 4.1-1"/>',
-  mail: '<rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="m4 7 8 6 8-6"/>',
-  help: '<circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.5a2.5 2.5 0 1 1 3.6 2.2c-.8.4-1.2 1-1.2 1.8v.5"/><path d="M12 17h.01"/>',
-  target: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/>',
-  volume: '<path d="M4 10v4h3.5L12 18V6L7.5 10z"/><path d="M15.5 9.5a3.5 3.5 0 0 1 0 5"/><path d="M18 7a7 7 0 0 1 0 10"/>',
   send: '<path d="M4 12 20 4l-5 16-3.5-6.5z"/><path d="m11.5 13.5 3-3"/>',
+  quote: '<path d="M7 7h4v4c0 3-1.5 5-4 6M14 7h4v4c0 3-1.5 5-4 6"/>',
+  text: '<path d="M5 7h14M5 12h10M5 17h7"/>',
+  hand: '<path d="M8 13V6.5a1.5 1.5 0 0 1 3 0V12M11 11V5a1.5 1.5 0 0 1 3 0v6M14 11V6.5a1.5 1.5 0 0 1 3 0V14c0 3.5-2.5 6-6 6-2.2 0-3.8-1-5-3l-2-3.5a1.5 1.5 0 0 1 2.6-1.5L8 13"/>',
+  bell: '<path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 21h4"/>',
+  shield: '<path d="M12 3 5 6v6c0 4.5 3 7.5 7 9 4-1.5 7-4.5 7-9V6z"/><path d="m9 12 2 2 4-4"/>',
 };
-const ic = (n, s = 56) => `<svg class="i" width="${s}" height="${s}" viewBox="0 0 24 24">${ICON[n]}</svg>`;
-const LOGO = (s = 250) => `<svg width="${s}" height="${s}" viewBox="0 0 28 28"><rect width="28" height="28" rx="9" fill="#6C47FF"/><path d="M8 8c4.5 0 6 3 6 6s1.5 6 6 6M8 20c4.5 0 6-3 6-6" stroke="#fff" stroke-width="2.3" fill="none" stroke-linecap="round"/><circle cx="20" cy="8" r="2.5" fill="#D4FF3F"/></svg>`;
-const CURSOR = `<svg class="cursor" viewBox="0 0 24 24"><path d="M5 3l14 8.5-6.2 1.3 3.6 6.8-2.6 1.3-3.5-6.8L5 18.5z" fill="#fff" stroke="#111" stroke-width="1.3" stroke-linejoin="round"/></svg>`;
-/** tıklama halkası */
-function click(x, y, t) {
-  const r = mk('', 'ring');
-  anim(r, [[t - 0.01, { o: 0, x, y, s: 0.3 }], [t, { o: 1, s: 0.3 }], [t + 0.45, { o: 0, s: 1.4 }, 'o']]);
+const ic = (n, s = 34) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[n]}</svg>`;
+const GLYPH = (s) => `<svg width="${s}" height="${s}" viewBox="0 0 28 28"><path d="M8 8c4.5 0 6 3 6 6s1.5 6 6 6M8 20c4.5 0 6-3 6-6" stroke="#fff" stroke-width="2.3" fill="none" stroke-linecap="round"/><circle cx="20" cy="8" r="2.5" fill="#D4FF3F"/></svg>`;
+const LOGO = (s) => `<svg width="${s}" height="${s}" viewBox="0 0 28 28"><rect width="28" height="28" rx="9" fill="#6C47FF"/><path d="M8 8c4.5 0 6 3 6 6s1.5 6 6 6M8 20c4.5 0 6-3 6-6" stroke="#fff" stroke-width="2.3" fill="none" stroke-linecap="round"/><circle cx="20" cy="8" r="2.5" fill="#D4FF3F"/></svg>`;
+const chipSrc = (k) => `${A}/chip-${k}.png`;
+
+/* ───────── yardımcı: genel öğe izi (merkez koordinat) ───────── */
+function place(node, keys) {
+  const tr = track(keys);
+  hook((t) => {
+    const o = tr.val('o', t, 1);
+    if (o <= 0.001) { node.style.visibility = 'hidden'; return; }
+    node.style.visibility = 'visible';
+    node.style.opacity = o;
+    const b = tr.val('b', t, 0);
+    node.style.filter = b > 0.05 ? `blur(${b}px)` : 'none';
+    node.style.transform = `translate(${tr.val('x', t, 540)}px, ${tr.val('y', t, 960)}px) translate(-50%, -50%) scale(${tr.val('s', t, 1)}) rotate(${tr.val('r', t, 0)}deg)`;
+  });
+  return node;
 }
 
-/* ───────────────────────── arka plan ───────────────────────── */
-const bg = mk('', 'bg');
-bg.style.opacity = 1;
-bg.style.visibility = 'visible';
-bg.innerHTML = `<div class="blob" id="b1" style="width:900px;height:900px;background:#6c47ff"></div><div class="blob" id="b2" style="width:760px;height:760px;background:#2a1a7d"></div><div class="blob" id="b3" style="width:560px;height:560px;background:#d4ff3f;opacity:.16"></div>`;
-hook((t) => {
-  const b1 = document.getElementById('b1'), b2 = document.getElementById('b2'), b3 = document.getElementById('b3');
-  b1.style.transform = `translate(${260 + Math.sin(t * 0.5) * 240}px, ${160 + Math.cos(t * 0.4) * 320}px)`;
-  b1.style.opacity = 0.46 + 0.12 * Math.sin(t * 0.8);
-  b2.style.transform = `translate(${680 + Math.cos(t * 0.35) * 260}px, ${1420 + Math.sin(t * 0.45) * 260}px)`;
-  b3.style.transform = `translate(${200 + Math.sin(t * 0.6 + 2) * 320}px, ${1150 + Math.cos(t * 0.5) * 380}px)`;
-});
-// Geçiş: her kesmede ekranı çapraz süpüren şerit (lime / mor sırayla). Kesme anında ekranı tamamen örter → sahneler arası
-// boşluk görünmez, hızlı ve bağlantılı geçiş hissi. (Eskiden tam ekran parlama mor zeminle karışıp çamurlu yeşil oluyordu.)
-const CUTS = [3.2, 5.6, 13.2, 17.6, 21.6, 25.6, 28.4, 31.6, 34.8, 37.6, 41.2, 43.6];
-const wipe = document.createElement('div');
-wipe.style.cssText = 'position:absolute;left:0;top:0;width:2100px;height:2700px;pointer-events:none;will-change:transform;z-index:50';
-stage.appendChild(wipe);
-const WIPE = 0.34; // sn
-hook((t) => {
-  const i = CUTS.findIndex((c) => t >= c - WIPE / 2 && t < c + WIPE / 2);
-  if (i < 0) { wipe.style.visibility = 'hidden'; return; }
-  const p = ease.io((t - (CUTS[i] - WIPE / 2)) / WIPE);
-  const x = -1700 + p * 3400; // şerit merkezi: soldan sağa
-  wipe.style.visibility = 'visible';
-  wipe.style.background = i % 2 ? 'linear-gradient(90deg, #5a38f0, #7c5cff 40%, #6c47ff)' : 'linear-gradient(90deg, #c6ef2a, #d4ff3f 40%, #e3ff7a)';
-  wipe.style.transform = `translate(${x - 1050}px, ${960 - 1350}px) rotate(14deg)`;
-});
-const grain = document.createElement('div');
-grain.className = 'grain';
-stage.appendChild(grain);
-const prog = document.createElement('div');
-prog.className = 'progress';
-prog.innerHTML = '<i></i>';
-stage.appendChild(prog);
-hook((t) => (prog.firstChild.style.width = `${Math.min(100, (t / DUR) * 100)}%`));
+/* ───────── başlıklar: kelime kelime bulanıklıktan netleşme ───────── */
+/**
+ * say(t0, t1, {k: üst etiket, l: ['satır', '[vurgulu] kelimeler'], sub, y, size})
+ * Her kelime 55 ms arayla aşağıdan, 14 px bulanıktan netleşerek girer; t1'de yukarı doğru bulanıklaşarak çıkar.
+ */
+function say(t0, t1, o) {
+  const box = el('', 'say');
+  box.style.top = (o.y ?? 280) + 'px';
+  box.style.left = '0';
+  box.classList.remove('a');
+  const parts = [];
+  let i = 0;
+  const words = (s, parent, cls) => {
+    const line = document.createElement('div');
+    line.className = cls;
+    parent.appendChild(line);
+    let hl = false;
+    const tokens = s.split(/(\s+)/);
+    for (const tok of tokens) {
+      if (!tok) continue;
+      if (/^\s+$/.test(tok)) { line.appendChild(document.createTextNode(' ')); continue; }
+      let w = tok;
+      const open = w.startsWith('[');
+      if (open) (hl = true), (w = w.slice(1));
+      const close = w.endsWith(']');
+      if (close) w = w.slice(0, -1);
+      const sp = document.createElement('span');
+      sp.className = 'w';
+      sp.innerHTML = hl ? `<em>${w}</em>` : w;
+      line.appendChild(sp);
+      parts.push({ sp, d: i++ * 0.055 });
+      if (close) hl = false;
+    }
+    return line;
+  };
+  if (o.k) words(o.k, box, 'kick');
+  for (const l of o.l) { const d = words(l, box, 'hl'); d.style.fontSize = (o.size ?? 82) + 'px'; }
+  let subLine = null;
+  if (o.sub) { i += 2; subLine = words(o.sub, box, 'sub'); }
+  hook((t) => {
+    for (const { sp, d } of parts) {
+      const p = clamp((t - t0 - d) / 0.62);
+      const q = clamp((t - t1 - d * 0.35) / 0.38);
+      if (p <= 0 || q >= 1) { sp.style.visibility = 'hidden'; continue; }
+      const e = ease.ox(p), x = ease.i(q);
+      sp.style.visibility = 'visible';
+      sp.style.opacity = Math.min(1, e * 1.15) * (1 - x);
+      sp.style.transform = `translateY(${(1 - e) * 44 - x * 34}px)`;
+      const b = (1 - e) * 16 + x * 14;
+      sp.style.filter = b > 0.1 ? `blur(${b}px)` : 'none';
+    }
+  });
+  return { box, subLine, parts };
+}
 
-/* ═════════ S1 · bildirim fırtınası (0 – 3.2) ═════════ */
+/* ───────── kart (#vp) ───────── */
+const vp = el('<div class="appbox"><iframe id="app" src="/app/index.html" tabindex="-1"></iframe></div><div class="glyph"></div><div class="pilltxt"></div>');
+vp.id = 'vp';
+vp.classList.remove('a');
+const appbox = vp.querySelector('.appbox');
+const glyph = vp.querySelector('.glyph');
+const pilltxt = vp.querySelector('.pilltxt');
+glyph.innerHTML = GLYPH(200);
+pilltxt.innerHTML = '<span><b>213</b> yeni mesaj · 12 uygulama</span>';
+const FULL = 1000 / 1440; // pencerenin tamamı 1000 px genişlikte
+const CARD = [];
+const cam = (t, p, e) => CARD.push([t, p, e]);
+let camTrack = null;
+let camNow = null; // bu karedeki kart geometrisi (imleç eşlemesi için)
+function camHook(t) {
+  const v = (k, d) => camTrack.val(k, t, d);
+  const W = v('W', 1000), H = v('H', 625), cx = v('cx', 540), cy = v('cy', 1040), R = v('R', 28), bg = v('bg', 0), s = v('s', 1);
+  const S = v('S', FULL), fx = v('fx', 720), fy = v('fy', 450);
+  const vis = v('o', 1);
+  vp.style.visibility = vis <= 0.001 ? 'hidden' : 'visible';
+  vp.style.opacity = vis;
+  vp.style.width = W + 'px';
+  vp.style.height = H + 'px';
+  vp.style.borderRadius = R + 'px';
+  const col = (a, b) => Math.round(lerp(a, b, bg));
+  vp.style.background = `rgb(${col(255, 108)},${col(255, 71)},${col(255, 255)})`;
+  const sh = v('sh', 1);
+  vp.style.boxShadow = `0 2px 6px rgba(20,18,40,${0.05 * sh}), 0 50px 110px -30px rgba(40,30,110,${0.42 * sh}), 0 0 0 1px rgba(230,229,236,${0.9 * sh * (1 - bg)})`;
+  const rx = v('rx', 0), ry = v('ry', 0);
+  vp.style.transform = `translate(${cx - W / 2}px, ${cy - H / 2}px) perspective(2200px) rotateX(${rx}deg) rotateY(${ry}deg) scale(${s})`;
+  // uygulama: odak noktası kartın ortasına; kenarlar uygulamanın dışına taşmasın
+  const aw = 1440 * S, ah = 900 * S;
+  let left = W / 2 - fx * S, top = H / 2 - fy * S;
+  left = aw >= W ? clamp(left, W - aw, 0) : (W - aw) / 2;
+  top = ah >= H ? clamp(top, H - ah, 0) : (H - ah) / 2;
+  appbox.style.transform = `translate(${left}px, ${top}px) scale(${S})`;
+  const ao = v('ao', 1), ab = v('ab', 0);
+  appbox.style.opacity = ao;
+  appbox.style.filter = ab > 0.1 ? `blur(${ab}px)` : 'none';
+  appbox.style.visibility = ao <= 0.001 ? 'hidden' : 'visible';
+  const lg = v('lg', 0);
+  glyph.style.opacity = lg;
+  glyph.style.transform = `scale(${lerp(0.6, 1, lg) * Math.min(W, H) / 280})`;
+  glyph.style.filter = lg < 0.99 ? `blur(${(1 - lg) * 12}px)` : 'none';
+  const pl = v('pl', 0);
+  pilltxt.style.opacity = pl;
+  pilltxt.style.filter = pl < 0.99 ? `blur(${(1 - pl) * 10}px)` : 'none';
+  camNow = { left: cx - W / 2 + left, top: cy - H / 2 + top, S, W, H, cx, cy, flat: Math.abs(rx) + Math.abs(ry) < 0.01 && Math.abs(s - 1) < 0.001 };
+}
+
+/* ───────── imleç ───────── */
+const cur = el('<svg viewBox="0 0 24 24" width="46" height="46"><path d="M5.5 3.2 18.6 11.4l-6 1.3 3.5 6.6-2.7 1.4-3.4-6.6-4.5 4.2z" fill="#111016" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg>');
+cur.id = 'cur';
+const ring = el('');
+ring.id = 'ring';
+const CUR = [];
+/** İmleç anahtarı: at = uygulama hedefi {sel,text,…} ya da {x,y} (uygulama koord.) ya da {sx,sy} (sahne koord.) */
+const mv = (t, at, e = 'io') => CUR.push({ t, at, e });
+const hideCur = (t) => CUR.push({ t, hide: true });
+let lastPos = { x: 720, y: 450, stage: false };
+function curPos(k) {
+  if (k.at.sx != null) return { x: k.at.sx, y: k.at.sy, stage: true };
+  if (k.at.sel) {
+    const r = rectOf(k.at);
+    if (r) k.last = { x: r.x + r.width * (k.at.ax ?? 0.5) + (k.at.dx ?? 0), y: r.y + r.height * (k.at.ay ?? 0.5) + (k.at.dy ?? 0) };
+    return { ...(k.last ?? { x: 720, y: 450 }), stage: false };
+  }
+  return { x: k.at.x, y: k.at.y, stage: false };
+}
+const toStage = (pp) => (pp.stage ? pp : { x: camNow.left + pp.x * camNow.S, y: camNow.top + pp.y * camNow.S, stage: true });
+function curHook(t) {
+  let a = -1;
+  for (let i = 0; i < CUR.length; i++) if (CUR[i].t <= t) a = i;
+  const k0 = CUR[a];
+  if (!k0 || k0.hide) { cur.style.visibility = 'hidden'; ring.style.visibility = 'hidden'; return null; }
+  // geçiş k0.t'de, imlecin o anki konumundan başlar; hedef canlı izlenir (liste kayarsa imleç de kayar)
+  if (!k0.from) k0.from = { ...lastPos };
+  const dest = curPos(k0);
+  const p = ease[k0.e](clamp((t - k0.t) / (k0.dur ?? 0.55)));
+  let f = k0.from, d = dest;
+  if (f.stage !== d.stage) (f = toStage(f)), (d = toStage(d));
+  // hafif kavis: düz çizgi yerine el hareketi gibi
+  const arc = Math.sin(p * Math.PI) * 0.08;
+  const pos = { x: lerp(f.x, d.x, p) + (d.y - f.y) * arc, y: lerp(f.y, d.y, p) - (d.x - f.x) * arc, stage: d.stage };
+  lastPos = pos;
+  const sp = toStage(pos);
+  // basış: tıklamada kısa küçülme + genişleyen halka
+  let sc = 1, ro = 0, rs = 0.4;
+  for (const c of CLICKS) {
+    const dt = t - c;
+    if (dt >= -0.02 && dt < 0.16) sc = Math.min(sc, 0.8 + (0.2 * Math.abs(dt - 0.06)) / 0.1);
+    if (dt >= 0 && dt < 0.45) (ro = 0.55 * (1 - dt / 0.45)), (rs = 0.35 + (dt / 0.45) * 0.9);
+  }
+  cur.style.visibility = 'visible';
+  cur.style.transformOrigin = '11px 6px';
+  cur.style.transform = `translate(${sp.x - 11}px, ${sp.y - 6}px) scale(${sc})`;
+  ring.style.visibility = ro > 0 ? 'visible' : 'hidden';
+  ring.style.opacity = ro;
+  ring.style.transform = `translate(${sp.x - 45}px, ${sp.y - 45}px) scale(${rs})`;
+  return { x: sp.x, y: sp.y };
+}
+
+/* ───────── tuş kapakları ───────── */
+/** keys(t0, t1, [etiketler], y, basma zamanları) — basış anında lime + aşağı */
+function keycaps(t0, t1, labels, presses = [], y = 1610) {
+  const row = el(labels.map((l) => `<div class="key">${l}</div>`).join(''));
+  row.style.display = 'flex';
+  row.style.gap = '18px';
+  const keysEl = [...row.children];
+  place(row, [[t0 - 0.01, { o: 0, s: 0.85, y: y + 30, b: 10 }], [t0 + 0.35, { o: 1, s: 1, y, b: 0 }, 'back'], [t1, { o: 1, s: 1, y, b: 0 }], [t1 + 0.3, { o: 0, s: 0.92, y: y - 20, b: 10 }, 'i']]);
+  hook((t) => {
+    const on = presses.some((p) => t >= p && t < p + 0.22);
+    for (const k of keysEl) {
+      k.classList.toggle('on', on);
+      k.style.transform = on ? 'translateY(5px)' : 'none';
+    }
+  });
+  return row;
+}
+/** Kartın altındaki destek baloncuğu */
+function pill(t0, t1, html, x, y, cls = '') {
+  const n = el(html, 'pill ' + cls);
+  place(n, [[t0 - 0.01, { o: 0, s: 0.8, x, y: y + 24, b: 12 }], [t0 + 0.45, { o: 1, s: 1, x, y, b: 0 }, 'back'], [t1, { o: 1, s: 1, x, y, b: 0 }], [t1 + 0.3, { o: 0, s: 0.9, x, y: y - 16, b: 10 }, 'i']]);
+  return n;
+}
+
+/* ───────── üst köşe ───────── */
+const hudL = el(`${LOGO(40)}<b>mivelo</b>`, 'hud');
+place(hudL, [[0.2, { o: 0, x: 170, y: 150 }], [0.6, { o: 1, x: 170, y: 150 }], [40.2, { o: 1 }], [40.6, { o: 0 }]]);
+const hudR = el('<span id="chap">01</span><span style="color:var(--ink4)">/ 09</span>', 'hud');
+place(hudR, [[0.2, { o: 0, x: 935, y: 150 }], [0.6, { o: 1, x: 935, y: 150 }], [40.2, { o: 1 }], [40.6, { o: 0 }]]);
+const CH = [[0, '01'], [5.6, '02'], [9.9, '03'], [13.9, '04'], [17.9, '05'], [21.9, '06'], [27.9, '07'], [31.9, '08'], [35.9, '09']];
+hook((t) => { let c = '01'; for (const [a, v] of CH) if (t >= a) c = v; document.getElementById('chap').textContent = c; });
+
+/* ════════════════════════════════════════════════════════════════════
+   S0 · 0–4 · Mesajların her yerde mi? (bildirim fırtınası → tek hap)
+   ════════════════════════════════════════════════════════════════════ */
+say(0.15, 3.25, { l: ['Mesajların', '[her yerde] mi?'], y: 300, size: 96 });
 const NOTIFS = [
-  ['whatsapp', 'WhatsApp', 'Ayşe Demir', 'Çıkınca takip numarasını atar mısın?'],
-  ['instagram', 'Instagram', 'selin.ay', 'Bu ürün hâlâ var mı?'],
-  ['trendyol', 'Trendyol', 'Yeni sipariş', '#1042931 · Keten gömlek · 1.249 ₺'],
-  ['gmail', 'Gmail', 'Muhasebe', 'Eylül faturası ektedir'],
-  ['linkedin', 'LinkedIn', 'Mert Kaya', 'Görüşme için müsait misin?'],
+  ['whatsapp', 'WhatsApp', 'Ayşe Demir', 'Çıkınca takip numarasını atar mısınız?'],
+  ['instagram', 'Instagram', 'selin.tasarim', 'Keten gömleğin S bedeni kaldı mı?'],
+  ['trendyol', 'Trendyol', 'Yeni sipariş #1042931', 'Keten gömlek · 1.249,90 ₺'],
+  ['gmail', 'Gmail', 'Bulut Depo', 'Eylül faturanız hazır'],
+  ['linkedin', 'LinkedIn', 'Selin Arslan', 'Perşembe 14:00 uygun mu?'],
   ['slack', 'Slack', '#satış', 'Kampanya yarın 10:00’da çıkıyor'],
   ['telegram', 'Telegram', 'Operasyon', 'Stoklar güncellendi'],
   ['hepsiburada', 'Hepsiburada', 'Müşteri sorusu', 'Beden tablosu var mı?'],
+  ['imessage', 'Mesajlar', 'Anne', 'Akşam yemeğe geliyor musun?'],
+  ['outlook', 'Outlook', 'İK', 'Toplantı özeti ektedir'],
   ['messenger', 'Messenger', 'Cem Polat', 'Adres doğru mu?'],
-  ['outlook', 'Outlook', 'İK', 'Toplantı: Perşembe 14:00'],
+  ['x', 'X', 'deniz_87', 'Fiyat listesini atar mısın?'],
 ];
-NOTIFS.forEach(([k, app, who, txt], i) => {
-  const t0 = 0.12 + i * 0.21;
-  const el = mk(`${chip(k)}<div class="t"><b>${app}<span>${who}</span></b><i>${txt}</i></div>`, 'notif');
-  const y = 300 + i * 118;
-  const rot = (i % 2 ? 1 : -1) * (1 + (i % 3) * 0.8);
-  anim(el, [
-    [t0 - 0.01, { o: 0, x: 540 + (i % 2 ? 60 : -60), y: y - 140, s: 0.92, r: rot * 3 }],
-    [t0 + 0.24, { o: 1, x: 540 + (i % 2 ? 14 : -14), y, s: 1, r: rot }, 'back'],
-    [2.8, { x: 540 + (i % 2 ? 14 : -14), y, s: 1 }],
-    [3.2, { x: 540, y: 900, s: 0.16, o: 0, r: rot * 8, b: 8 }, 'i'],
+// dağınık yerleşim: yeniler öne, eskiler hafifçe geri çekilip bulanıklaşır (derinlik)
+const NPOS = [[540, 760, -2.5], [520, 1010, 2], [560, 1250, -1.5], [500, 880, 3], [580, 1130, -3], [530, 1380, 1.5], [560, 700, 2.5], [500, 1180, -2], [570, 950, 1], [510, 1320, -2.5], [550, 820, 2], [530, 1060, -1]];
+NOTIFS.forEach(([k, app, who, msg], i) => {
+  const n = el(`<img src="${chipSrc(k)}"><div class="t"><div class="top"><span>${app}</span><span>şimdi</span></div><div class="who">${who}</div><div class="msg">${msg}</div></div>`, 'notif');
+  const t0 = 0.45 + i * 0.24;
+  const [x, y, r] = NPOS[i];
+  n.style.zIndex = 10 + i;
+  const tr = track([
+    [t0 - 0.01, { o: 0, s: 0.86, x, y: y + 60, r: r * 2.2, b: 14 }],
+    [t0 + 0.42, { o: 1, s: 1, x, y, r, b: 0 }, 'back'],
+    [3.28, { o: 1, s: 1, x, y, r }],
+    [3.78, { o: 0, s: 0.3, x: 540, y: 1000, r: 0, b: 8 }, 'iox'],
   ]);
+  hook((t) => {
+    const o = tr.val('o', t, 0);
+    if (o <= 0.001) { n.style.visibility = 'hidden'; return; }
+    // üstüne yeni kart geldikçe geri çekil
+    const newer = NOTIFS.filter((_, j) => j > i && t > 0.45 + j * 0.24).length;
+    const depth = Math.min(newer, 5);
+    const b = tr.val('b', t, 0) + (t < 3.3 ? depth * 0.9 : 0);
+    n.style.visibility = 'visible';
+    n.style.opacity = o * (t < 3.3 ? 1 - depth * 0.08 : 1);
+    n.style.filter = b > 0.1 ? `blur(${b}px)` : 'none';
+    n.style.transform = `translate(${tr.val('x', t)}px, ${tr.val('y', t)}px) translate(-50%, -50%) scale(${tr.val('s', t) * (t < 3.3 ? 1 - depth * 0.025 : 1)}) rotate(${tr.val('r', t)}deg)`;
+  });
+  cue(t0, 'notif', i);
 });
-anim(mk('<span id="c1">0</span> bildirim · 10 uygulama', 'kicker'), [[0.15, { o: 0, y: 190 }], [0.35, { o: 1, y: 180 }], [2.9, { o: 1 }], [3.1, { o: 0 }]]);
-hook((t) => { const e = document.getElementById('c1'); if (e) e.textContent = Math.round(Math.min(1, Math.max(0, (t - 0.2) / 2.4)) * 213); });
-anim(mk('Mesajların <em>her yerde</em> mi?', 'h2'), [[0.7, { o: 0, y: 1620, s: 0.92 }], [1.0, { o: 1, y: 1580, s: 1 }, 'back'], [2.85, { o: 1 }], [3.15, { o: 0, y: 1530, b: 10 }]]);
+cue(3.28, 'whoosh');
+// hap: bildirimler tek hapta toplanır → hap logoya döner
+cam(0, { o: 0, W: 560, H: 130, R: 65, cx: 540, cy: 1000, bg: 0, pl: 0, lg: 0, ao: 0, ab: 20, sh: 0.8, s: 1 });
+cam(3.45, { o: 0, W: 560, H: 130, R: 65, pl: 0 });
+cam(3.72, { o: 1, W: 700, H: 132, R: 66, pl: 1 }, 'o');
+cam(3.98, { W: 700, H: 132, R: 66, pl: 1, bg: 0, lg: 0 });
+cam(4.32, { W: 220, H: 220, R: 62, pl: 0, bg: 1, lg: 1, cy: 1000 }, 'iox');
+cue(3.98, 'morph');
 
-/* ═════════ S2 · hepsi tek yerde (3.2 – 5.6) ═════════ */
+/* ════════════════════════════════════════════════════════════════════
+   S1 · 4–6 · Hepsi tek yerde (uygulamalar logoya akar → logo pencereye açılır)
+   ════════════════════════════════════════════════════════════════════ */
+cue(4.32, 'impact');
+say(4.35, 5.55, { l: ['Hepsi [tek yerde.]'], y: 400, size: 92 });
 const RING = ['whatsapp', 'instagram', 'telegram', 'slack', 'linkedin', 'x', 'messenger', 'imessage', 'gmail', 'outlook', 'icloudmail', 'yahoomail', 'trendyol', 'hepsiburada', 'n11', 'etsy', 'shopify', 'amazon'];
-const ringEls = RING.map((k) => mk(chip(k, 'width:150px;height:150px'), 'chip'));
-hook((t) => {
-  if (t < 3.0 || t > 7.2) { ringEls.forEach((e) => (e.style.visibility = 'hidden')); return; }
-  ringEls.forEach((el, i) => {
-    const n = RING.length;
-    const enter = ease.back(Math.min(1, Math.max(0, (t - 3.2) / 0.55)));
-    const into = ease.i(Math.min(1, Math.max(0, (t - 5.45) / 0.55)));
-    const radius = (400 + (i % 2) * 90) * enter * (1 - into) + 40 * into;
-    const ang = (i / n) * Math.PI * 2 + t * 0.85;
-    const cx = 540 + Math.cos(ang) * radius;
-    const cy = 860 + Math.sin(ang) * radius * 1.05 + into * 260;
-    const s = (0.62 + (i % 3) * 0.08) * (1 - into * 0.75);
-    const o = Math.min(1, (t - 3.2) / 0.3) * (1 - Math.min(1, Math.max(0, (t - 5.8) / 0.25)));
-    el.style.opacity = o;
-    el.style.visibility = o > 0.01 ? 'visible' : 'hidden';
-    el.style.transform = `translate(${cx}px, ${cy}px) translate(-50%, -50%) scale(${s}) rotate(${Math.sin(t * 2 + i) * 8}deg)`;
+RING.forEach((k, i) => {
+  const n = el(`<img class="chipimg" src="${chipSrc(k)}">`);
+  const a0 = (i / RING.length) * Math.PI * 2;
+  const tIn = 4.3 + (i % 6) * 0.03, tAbs = 5.05 + i * 0.022;
+  hook((t) => {
+    if (t < tIn || t > tAbs + 0.4) { n.style.visibility = 'hidden'; return; }
+    const pin = ease.ox(clamp((t - tIn) / 0.55));
+    const pab = ease.i(clamp((t - tAbs) / 0.38));
+    const rad = lerp(780, 350, pin) * (1 - pab);
+    const a = a0 + t * 0.35;
+    const x = 540 + Math.cos(a) * rad, y = 1000 + Math.sin(a) * rad * 0.98;
+    n.style.visibility = 'visible';
+    n.style.opacity = Math.min(1, pin * 1.4) * (1 - pab * 0.9);
+    n.style.filter = pab > 0.02 ? `blur(${pab * 6}px)` : pin < 0.98 ? `blur(${(1 - pin) * 10}px)` : 'none';
+    n.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%) scale(${lerp(0.9, 1, pin) * (1 - pab * 0.7)})`;
   });
 });
-anim(mk(LOGO()), [[3.3, { o: 0, s: 0.2, y: 860, r: -40 }], [3.75, { o: 1, s: 1.12, r: 0, y: 860 }, 'back'], [5.25, { o: 1, s: 1, y: 860 }], [5.7, { o: 0, s: 0.3, y: 1200 }, 'i']]);
-anim(mk('Hepsi <em>tek yerde.</em>', 'h1'), [[3.85, { o: 0, y: 1720, s: 0.85 }], [4.15, { o: 1, y: 1690, s: 1 }, 'back'], [5.35, { o: 1 }], [5.6, { o: 0, y: 1640, b: 10 }]]);
+// logo, her emilen uygulamada hafifçe nabız atar
+cam(4.32, { s: 1 });
+cam(4.55, { s: 1.06 }, 'o');
+cam(4.8, { s: 1 }, 'io');
+cam(5.2, { s: 1.08 }, 'o');
+cam(5.55, { s: 1 }, 'io');
+// logo → uygulama penceresi (içerik bulanıklıktan netleşerek belirir)
+cam(5.55, { W: 220, H: 220, R: 62, bg: 1, lg: 1, ao: 0, ab: 22, cy: 1000, S: FULL, fx: 720, fy: 450 });
+cam(6.25, { W: 1000, H: 625, R: 30, bg: 0, lg: 0, ao: 1, ab: 0, cy: 1060 }, 'iox');
+cue(5.55, 'morph2');
 
-/* ═════════ S3–S5 · tek pencere: gelen kutusu → sohbet → AI (5.6 – 17.6) ═════════ */
-const W1 = win('Mivelo · Gelen kutusu', ['dt-inbox', 'dt-chat']);
-swap(W1, [[0, 'dt-inbox', 'Mivelo · Gelen kutusu'], [9.7, 'dt-chat', 'Mivelo · WhatsApp · Ayşe Demir']]);
-anim(W1, [
-  [5.55, { o: 0, y: 1500, s: 0.5, r: 8, vh: 625, z: 1, cx: 720, cy: 450 }],
-  [6.15, { o: 1, y: 900, s: 1, r: 0 }, 'back'],
-  // gelen kutusu: tam görünüm → kenar çubuğundaki uygulama listesi boyunca aşağı
-  [6.9, { y: 900, vh: 625, z: 1, cx: 720, cy: 450 }],
-  [7.6, { y: 1000, vh: 1100, z: 2.1, cx: 150, cy: 250 }, 'io'],
-  [9.2, { y: 1000, vh: 1100, z: 2.1, cx: 150, cy: 620 }, 'io'],
-  // S4 sohbet: konuşma paneline yakınlaş
-  [9.6, { y: 1000, vh: 1100, z: 1.25, cx: 720, cy: 450 }, 'io'],
-  [10.3, { y: 980, vh: 1000, z: 2.25, cx: 860, cy: 640 }, 'io'],
-  [12.9, { y: 980, vh: 1000, z: 2.25, cx: 860, cy: 660 }],
-  // S5 AI: sağ paneldeki özete kay
-  [13.5, { y: 980, vh: 1000, z: 2.3, cx: 1275, cy: 720 }, 'io'],
-  [17.2, { y: 980, vh: 1000, z: 2.4, cx: 1275, cy: 800, o: 1, s: 1 }],
-  [17.6, { o: 0, y: 900, s: 0.85, b: 14 }, 'i'],
-]);
-anim(mk('20 uygulama', 'kicker'), [[6.2, { o: 0, y: 150 }], [6.45, { o: 1, y: 150 }], [9.3, { o: 1 }], [9.55, { o: 0 }]]);
-anim(mk('Tek <em>gelen kutusu</em>', 'h1'), [[6.25, { o: 0, y: 290, s: 0.9 }], [6.55, { o: 1, y: 270, s: 1 }, 'back'], [9.3, { o: 1 }], [9.55, { o: 0, y: 230, b: 10 }]]);
-[
-  ['Sosyal medya', ['whatsapp', 'instagram', 'telegram', 'linkedin', 'x', 'slack']],
-  ['E-posta', ['gmail', 'outlook', 'icloudmail', 'yahoomail']],
-  ['Pazaryeri', ['trendyol', 'hepsiburada', 'n11', 'amazon', 'etsy']],
-].forEach(([label, list], i) => {
-  const el = mk(`<span class="ics">${list.map((k) => chip(k)).join('')}</span>${label}`, 'pill');
-  const t0 = 7.7 + i * 0.4;
-  const y = 1640 + i * 0;
-  anim(el, [
-    [t0, { o: 0, x: i % 2 ? 1400 : -300, y: 1600 + i * 110, r: i % 2 ? 8 : -8 }],
-    [t0 + 0.35, { o: 1, x: 540, y: 1600 + i * 110, r: 0 }, 'back'],
-    [9.25, { o: 1, x: 540 }],
-    [9.55, { o: 0, x: i % 2 ? -300 : 1400, b: 8 }, 'i'],
-  ]);
-});
-// S4 · yanıt geldiği uygulamadan
-anim(mk('Yanıtla, <em>geldiği uygulamadan</em> gitsin', 'h2'), [[9.8, { o: 0, y: 290, s: 0.9 }], [10.1, { o: 1, y: 270, s: 1 }, 'back'], [12.95, { o: 1 }], [13.2, { o: 0, b: 10 }]]);
-anim(mk('Çıkınca takip numarasını atar mısın?', 'bub in'), [[10.5, { o: 0, x: 480, y: 1580, s: 0.6 }], [10.75, { o: 1, x: 480, y: 1580, s: 1 }, 'back'], [12.95, { o: 1 }], [13.2, { o: 0, x: 400 }]]);
-anim(mk('<span id="ty1"></span>', 'bub out'), [[11.0, { o: 0, x: 610, y: 1720, s: 0.8 }], [11.2, { o: 1, x: 610, y: 1720, s: 1 }, 'back'], [12.95, { o: 1 }], [13.2, { o: 0, x: 700 }]]);
-hook((t) => type(document.getElementById('ty1'), 'Tabii, 18:00’de gönderiyorum.', 11.2, 0.9, t));
-anim(mk(`${chip('whatsapp')} WhatsApp ile gönderildi ${ic('check', 40)}`, 'toast'), [[12.2, { o: 0, y: 1860, s: 0.6 }], [12.45, { o: 1, y: 1840, s: 1 }, 'back'], [13.0, { o: 1 }], [13.2, { o: 0, y: 1880 }]]);
-// S5 · AI
-anim(mk('AI <em>senin kontrolünde</em>', 'h1'), [[13.3, { o: 0, y: 270, s: 0.85 }], [13.6, { o: 1, y: 260, s: 1 }, 'back'], [17.3, { o: 1 }], [17.6, { o: 0, b: 10 }]]);
-const draft = mk(`<div class="ai-h">${ic('sparkle', 42)} Taslak · senin tarzında</div><div style="font-size:40px;line-height:1.38;margin-top:20px;font-weight:600;width:840px;letter-spacing:-0.01em" id="ty2"></div>`, 'card');
-anim(draft, [[13.9, { o: 0, y: 1620, s: 0.85, r: -3 }], [14.25, { o: 1, y: 1560, s: 1, r: 0 }, 'back'], [15.9, { o: 1, y: 1560 }], [16.2, { o: 0, y: 1500, s: 0.9, b: 8 }]]);
-hook((t) => type(document.getElementById('ty2'), 'Merhaba Ayşe Hanım, kargo kodunuzu 18:00’de buradan iletiyorum. Faturanız da yarın hazır.', 14.35, 1.4, t));
-const sum = mk(`<div class="ai-h">${ic('target', 42)} Özet · aksiyonlar</div><div style="display:flex;flex-direction:column;gap:12px;margin-top:20px;width:840px"><div class="li">Sipariş bugün Yurtiçi ile çıkıyor</div><div class="li">Kurumsal fatura: Demir Studio</div></div><div style="display:flex;gap:14px;margin-top:24px"><span class="tag">${ic('check', 32)} Kargo kodunu gönder</span><span class="tag">${ic('receipt', 32)} Fatura kes</span></div>`, 'card');
-anim(sum, [[16.05, { o: 0, y: 1640, s: 0.85, r: 3 }], [16.4, { o: 1, y: 1580, s: 1, r: 0 }, 'back'], [17.3, { o: 1 }], [17.6, { o: 0, y: 1640, b: 10 }]]);
-anim(mk('Kendi anahtarın · özet, taslak, aksiyon ayrı ayrı aç/kapat', 'sub'), [[13.8, { o: 0, y: 410 }], [14.1, { o: 1, y: 400 }], [17.3, { o: 1 }], [17.5, { o: 0 }]]);
-
-/* ═════════ S6 · mesajdan takvime (17.6 – 21.6) ═════════ */
-anim(mk('Mesajdan <em>takvime</em>', 'h1'), [[17.7, { o: 0, y: 270, s: 0.85 }], [18.0, { o: 1, y: 260, s: 1 }, 'back'], [21.3, { o: 1 }], [21.6, { o: 0, b: 10 }]]);
-const hov = mk(`<img src="${img('dt-hover')}" style="display:block;width:100%;border-radius:22px">`);
-hov.style.width = '1000px';
-anim(hov, [[17.8, { o: 0, y: 640, s: 0.8 }], [18.1, { o: 1, y: 600, s: 1 }, 'back'], [19.05, { o: 1, y: 600 }], [19.3, { o: 0, y: 560, s: 1.05 }]]);
-// imleç: takvim düğmesine gidip tıklar (dt-hover içinde düğme yaklaşık sağdan 2. sırada)
-const cur1 = mk(CURSOR);
-anim(cur1, [[18.2, { o: 0, x: 700, y: 900 }], [18.35, { o: 1, x: 700, y: 900 }], [18.75, { x: 902, y: 618 }, 'io'], [19.2, { o: 1 }], [19.35, { o: 0 }]]);
-click(890, 602, 18.8);
-const W2 = win('Mivelo · Takvim', ['dt-calendar']);
-anim(W2, [
-  [19.1, { o: 0, y: 1200, s: 0.7, vh: 1000, z: 1.9, cx: 560, cy: 520 }],
-  [19.45, { o: 1, y: 1080, s: 1 }, 'back'],
-  [21.2, { o: 1, z: 2.1, cx: 600, cy: 560 }, 'l'],
-  [21.6, { o: 0, s: 0.9, b: 12 }, 'i'],
-]);
-anim(mk(`<div class="ico" style="border-radius:24px;background:var(--v);display:flex;align-items:center;justify-content:center;color:#fff">${ic('bell', 46)}</div><div class="t"><b>Takvim<span>10 dk sonra</span></b><i>Görüşme · Ayşe Demir · 14:00</i></div>`, 'notif'), [[20.2, { o: 0, y: 1810, s: 0.8 }], [20.5, { o: 1, y: 1790, s: 1 }, 'back'], [21.35, { o: 1 }], [21.6, { o: 0, y: 1840 }]]);
-anim(mk('Hatırlatma · cihaz takvimine de eklenebilir', 'sub'), [[19.6, { o: 0, y: 420 }], [19.9, { o: 1, y: 400 }], [21.3, { o: 1 }], [21.5, { o: 0 }]]);
-
-/* ═════════ S7 · pazaryeri (21.6 – 25.6) ═════════ */
-anim(mk('Siparişler ve <em>müşteri soruları</em>', 'h2'), [[21.7, { o: 0, y: 250, s: 0.88 }], [22.0, { o: 1, y: 240, s: 1 }, 'back'], [25.3, { o: 1 }], [25.6, { o: 0, b: 10 }]]);
-anim(mk(`<span class="ics">${['trendyol', 'hepsiburada', 'n11', 'etsy', 'shopify', 'amazon'].map((k) => chip(k, 'width:92px;height:92px;margin-left:10px')).join('')}</span>`), [[21.8, { o: 0, y: 420, s: 0.7 }], [22.1, { o: 1, y: 400, s: 1 }, 'back'], [25.3, { o: 1 }], [25.6, { o: 0 }]]);
-const W3 = win('Mivelo · Trendyol · Sipariş #1042931', ['dt-order']);
-anim(W3, [
-  [21.75, { o: 0, x: 1400, y: 920, r: 10, vh: 760, z: 1.7, cx: 860, cy: 330 }],
-  [22.15, { o: 1, x: 540, r: 0 }, 'back'],
-  [23.2, { z: 1.9, cx: 860, cy: 520 }, 'io'],
-  [25.2, { z: 1.9, cx: 860, cy: 600 }, 'l'],
-  [25.6, { o: 0, x: -400, r: -8, b: 10 }, 'i'],
-]);
-const tl = mk(`<div class="tl">${[['cart', 'Yeni sipariş'], ['check', 'Doğrulandı'], ['box', 'Hazırlanıyor'], ['receipt', 'Faturalandı'], ['truck', 'Kargoya verildi']].map(([i, l]) => `<div class="st"><span class="ic">${ic(i, 46)}</span>${l}</div>`).join('')}</div>`, 'card');
-tl.style.width = '1000px';
-tl.querySelector('.tl').style.cssText = 'flex-direction:row;justify-content:space-between;gap:0';
-tl.querySelectorAll('.st').forEach((e) => (e.style.cssText = 'flex-direction:column;gap:14px;font-size:26px;text-align:center'));
-anim(tl, [[22.6, { o: 0, y: 1640, s: 0.8 }], [22.95, { o: 1, y: 1600, s: 1 }, 'back'], [25.3, { o: 1 }], [25.6, { o: 0, b: 8 }]]);
-hook((t) => { const k = Math.floor((t - 23.0) / 0.38); tl.querySelectorAll('.st').forEach((el, i) => el.classList.toggle('on', i <= k)); });
-anim(mk(`<span style="color:var(--lime);display:inline-flex">${ic('help', 42)}</span>Bağlı soru: “Beden tablosu var mı?”`, 'pill'), [[24.3, { o: 0, y: 1830, s: 0.8 }], [24.55, { o: 1, y: 1810, s: 1 }, 'back'], [25.35, { o: 1 }], [25.6, { o: 0 }]]);
-
-/* ═════════ S8 · e-posta (25.6 – 28.4) ═════════ */
-anim(mk('E-posta <em>anında</em>', 'h1'), [[25.7, { o: 0, y: 270, s: 0.85 }], [26.0, { o: 1, y: 260, s: 1 }, 'back'], [28.1, { o: 1 }], [28.4, { o: 0, b: 10 }]]);
-anim(mk(`<span class="ics">${['gmail', 'outlook', 'icloudmail', 'yahoomail'].map((k) => chip(k, 'width:92px;height:92px;margin-left:10px')).join('')}</span>`), [[25.8, { o: 0, y: 420, s: 0.7 }], [26.1, { o: 1, y: 400, s: 1 }, 'back'], [28.1, { o: 1 }], [28.4, { o: 0 }]]);
-const W4 = win('Mivelo · Gmail', ['dt-mail']);
-anim(W4, [
-  [25.7, { o: 0, y: 1300, s: 0.7, vh: 950, z: 1.5, cx: 860, cy: 430 }],
-  [26.05, { o: 1, y: 1060, s: 1 }, 'back'],
-  [28.0, { z: 1.75, cx: 880, cy: 400 }, 'l'],
-  [28.4, { o: 0, y: 1000, s: 1.15, b: 14 }, 'i'],
-]);
-anim(mk(`${ic('mail', 42)} Yeni e-posta 1 saniyede`, 'toast'), [[26.8, { o: 0, y: 1840, s: 0.7 }], [27.05, { o: 1, y: 1820, s: 1 }, 'back'], [28.1, { o: 1 }], [28.35, { o: 0 }]]);
-
-/* ═════════ S9 · her yerde ara (28.4 – 31.6) ═════════ */
-anim(mk('Her yerde <em>ara</em>', 'h1'), [[28.5, { o: 0, y: 270, s: 0.85 }], [28.8, { o: 1, y: 260, s: 1 }, 'back'], [31.3, { o: 1 }], [31.6, { o: 0, b: 10 }]]);
-anim(mk('⌘', 'key'), [[28.5, { o: 0, x: 420, y: 620, s: 0.5 }], [28.75, { o: 1, x: 420, y: 620, s: 1 }, 'back'], [28.95, { y: 636 }], [29.15, { y: 620 }], [29.55, { o: 1, s: 1 }], [29.8, { o: 0, s: 0.6, y: 560 }]]);
-anim(mk('K', 'key'), [[28.6, { o: 0, x: 660, y: 620, s: 0.5 }], [28.85, { o: 1, x: 660, y: 620, s: 1 }, 'back'], [29.0, { y: 636 }], [29.2, { y: 620 }], [29.55, { o: 1, s: 1 }], [29.8, { o: 0, s: 0.6, y: 560 }]]);
-const W5 = win('Mivelo · Her yerde ara', ['dt-search']);
-anim(W5, [
-  [29.45, { o: 0, y: 1250, s: 0.8, vh: 1000, z: 1.85, cx: 720, cy: 400 }],
-  [29.8, { o: 1, y: 1060, s: 1 }, 'back'],
-  [31.2, { z: 2.0, cx: 720, cy: 420 }, 'l'],
-  [31.6, { o: 0, s: 1.15, b: 14 }, 'i'],
-]);
-anim(mk('Tüm uygulamalar · dosya adları · mesaja gider', 'sub'), [[29.9, { o: 0, y: 420 }], [30.2, { o: 1, y: 400 }], [31.3, { o: 1 }], [31.5, { o: 0 }]]);
-
-/* ═════════ S10 · odak (31.6 – 34.8) ═════════ */
-anim(mk('Önemli olana <em>odaklan</em>', 'h2'), [[31.7, { o: 0, y: 250, s: 0.88 }], [32.0, { o: 1, y: 240, s: 1 }, 'back'], [34.5, { o: 1 }], [34.8, { o: 0, b: 10 }]]);
-anim(mk('<span id="n1">48</span>', 'num'), [[31.8, { o: 0, y: 560, s: 0.5 }], [32.15, { o: 1, y: 540, s: 1 }, 'back'], [34.5, { o: 1 }], [34.8, { o: 0, s: 0.6 }]]);
-anim(mk('kişi yanıtını bekliyor · gruplar ve bildirimler sessizde', 'sub'), [[32.0, { o: 0, y: 730 }], [32.3, { o: 1, y: 720 }], [34.5, { o: 1 }], [34.7, { o: 0 }]]);
-hook((t) => { const e = document.getElementById('n1'); if (e) e.textContent = t < 33.1 ? 48 : t < 33.6 ? 47 : t < 34.1 ? 46 : 45; });
-const W6 = win('Mivelo · Odak', ['dt-focus']);
-anim(W6, [
-  [31.8, { o: 0, y: 1500, s: 0.8, vh: 850, z: 1.55, cx: 760, cy: 560 }],
-  [32.2, { o: 1, y: 1340, s: 1 }, 'back'],
-  [34.4, { z: 1.7, cx: 760, cy: 620 }, 'l'],
-  [34.8, { o: 0, x: 1500, r: 10 }, 'i'],
-]);
-
-/* ═════════ S11 · hiçbir şey unutulmaz (34.8 – 37.6) ═════════ */
-anim(mk('Hiçbir şey <em>unutulmaz</em>', 'h1'), [[34.9, { o: 0, y: 440, s: 0.85 }], [35.2, { o: 1, y: 420, s: 1 }, 'back'], [37.3, { o: 1 }], [37.6, { o: 0, b: 10 }]]);
-[
-  ['bell', 'Takip hatırlatıcısı', '2 gün yanıt yoksa haber verir', 'v'],
-  ['clock', 'Zamanlanmış gönderim', 'Yarın 09:00 — pencere kapalıyken de', ''],
-  ['calendar', 'Etkinlik hatırlatması', 'Görüşmeden 10 dk önce', 'v'],
-].forEach(([i, h, s, c], k) => {
-  const el = mk(`<span class="ic ${c}">${ic(i, 52)}</span><span>${h}<small>${s}</small></span>`, 'row');
-  const t0 = 35.3 + k * 0.32;
-  anim(el, [[t0, { o: 0, x: 1400, y: 820 + k * 250 }], [t0 + 0.35, { o: 1, x: 540, y: 820 + k * 250 }, 'back'], [37.3, { o: 1 }], [37.6, { o: 0, x: -300, b: 8 }, 'i']]);
-});
-
-/* ═════════ S12 · güvenlik (37.6 – 41.2) ═════════ */
-anim(mk(`<div style="width:220px;height:220px;border-radius:64px;background:linear-gradient(145deg,#7c5cff,#4526c9);display:flex;align-items:center;justify-content:center;color:#fff;box-shadow:0 40px 90px -20px rgba(108,71,255,.9)">${ic('shield', 136)}</div>`), [
-  [37.7, { o: 0, y: 460, s: 0.3, r: -30 }], [38.1, { o: 1, y: 440, s: 1, r: 0 }, 'back'], [40.9, { o: 1 }], [41.2, { o: 0, s: 0.5 }],
-]);
-anim(mk('Mesajların <em>sende</em> kalır', 'h2'), [[38.0, { o: 0, y: 700, s: 0.88 }], [38.3, { o: 1, y: 690, s: 1 }, 'back'], [40.9, { o: 1 }], [41.2, { o: 0, b: 10 }]]);
-[
-  ['device', 'Veriler bu bilgisayarda', 'Bulut sunucusu yok'],
-  ['lock', 'Şifreli veritabanı', 'Anahtar, Anahtar Zinciri’nde'],
-  ['gauge', 'Ban koruması', 'Doğal aralıklar · gönderim sınırları'],
-  ['eyeoff', 'Reklam yok · izleme yok', 'Ücretsiz'],
-].forEach(([i, l, s], k) => {
-  const el = mk(`<span class="ic">${ic(i, 50)}</span><span>${l}<small>${s}</small></span>`, 'row');
-  el.style.width = '860px';
-  const t0 = 38.45 + k * 0.28;
-  anim(el, [[t0, { o: 0, x: 560, y: 930 + k * 205, s: 0.85 }], [t0 + 0.3, { o: 1, x: 540, y: 910 + k * 205, s: 1 }, 'back'], [40.9, { o: 1 }], [41.2, { o: 0, b: 8 }]]);
-});
-
-/* ═════════ S13 · bildirimler senin ayarında (41.2 – 43.6) ═════════ */
-anim(mk('Her uygulamaya <em>kendi sesi</em>', 'h2'), [[41.3, { o: 0, y: 270, s: 0.88 }], [41.6, { o: 1, y: 260, s: 1 }, 'back'], [43.3, { o: 1 }], [43.6, { o: 0, b: 10 }]]);
-anim(mk('Zil sesi · ses düzeyi · aç/kapat · grup bildirimleri', 'sub'), [[41.5, { o: 0, y: 400 }], [41.8, { o: 1, y: 390 }], [43.3, { o: 1 }], [43.5, { o: 0 }]]);
-const W7 = win('Mivelo · Uygulama ayarları', ['dt-appsettings']);
-anim(W7, [
-  [41.3, { o: 0, y: 1250, s: 0.8, vh: 1050, z: 1.7, cx: 520, cy: 330 }],
-  [41.65, { o: 1, y: 1100, s: 1 }, 'back'],
-  [43.2, { z: 1.85, cx: 600, cy: 360 }, 'l'],
-  [43.6, { o: 0, s: 0.85, b: 12 }, 'i'],
-]);
-anim(mk(`${ic('volume', 42)} Ses düzeyi: 60`, 'toast'), [[42.3, { o: 0, y: 1840, s: 0.7 }], [42.55, { o: 1, y: 1820, s: 1 }, 'back'], [43.35, { o: 1 }], [43.55, { o: 0 }]]);
-
-/* ═════════ S14 · kapanış (43.6 – 48) ═════════ */
-anim(mk(LOGO(220)), [[43.7, { o: 0, y: 560, s: 0.3, r: -40 }], [44.1, { o: 1, y: 540, s: 1, r: 0 }, 'back'], [48, { o: 1, y: 530 }]]);
-anim(mk('Tüm mesajların.', 'h1'), [[44.2, { o: 0, y: 820, s: 0.88 }], [44.5, { o: 1, y: 800, s: 1 }, 'back'], [48, { o: 1 }]]);
-anim(mk('<em>Tek yerde.</em>', 'h1'), [[44.45, { o: 0, y: 930, s: 0.88 }], [44.75, { o: 1, y: 910, s: 1 }, 'back'], [48, { o: 1 }]]);
-anim(mk(`<span class="ics">${['whatsapp', 'instagram', 'telegram', 'linkedin', 'x', 'slack', 'gmail', 'outlook', 'trendyol', 'hepsiburada', 'amazon'].map((k) => chip(k, 'width:68px;height:68px;margin:0 6px')).join('')}</span>`), [[44.9, { o: 0, y: 1080, s: 0.8 }], [45.2, { o: 1, y: 1060, s: 1 }, 'back'], [48, { o: 1 }]]);
-anim(mk('Sosyal medya · E-posta · Pazaryeri · AI · Takvim', 'sub'), [[45.1, { o: 0, y: 1170 }], [45.4, { o: 1, y: 1160 }], [48, { o: 1 }]]);
-const cta = anim(mk('Bekleme listesine katıl', 'cta'), [[45.5, { o: 0, y: 1400, s: 0.6 }], [45.9, { o: 1, y: 1370, s: 1 }, 'el'], [48, { o: 1 }]]);
-hook((t) => { if (t > 46.2) cta.style.boxShadow = `0 30px ${70 + 30 * Math.sin(t * 5)}px -20px rgba(212,255,63,.8)`; });
-anim(mk('mivelo.app', 'h2'), [[46.0, { o: 0, y: 1560 }], [46.3, { o: 1, y: 1540 }], [48, { o: 1 }]]);
-anim(mk('Ücretsiz · Mac · Windows yakında', 'sub'), [[46.3, { o: 0, y: 1650 }], [46.6, { o: 1, y: 1640 }], [48, { o: 1 }]]);
-
-/* ───────────────────────── hazırlık ───────────────────────── */
-window.DUR = DUR;
-window.ready = (async () => {
-  await Promise.all([400, 500, 600, 700, 800].map((w) => document.fonts.load(`${w} 40px Inter`, 'Şğİıçöü₺')));
-  await document.fonts.ready;
-  await Promise.all([...document.images].map((i) => (i.complete ? 0 : new Promise((r) => (i.onload = i.onerror = r)))));
-  render(0);
-  return document.fonts.check('700 40px Inter', 'Şğİ');
-})();
-if (Q.get('play')) {
-  const t0 = performance.now();
-  const loop = () => { render(((performance.now() - t0) / 1000) % DUR); requestAnimationFrame(loop); };
-  window.ready.then(loop);
+/* ════════════════════════════════════════════════════════════════════
+   S2 · 6–10 · Tek gelen kutusu (kenar çubuğu kayar: sosyal → e-posta → pazaryeri)
+   ════════════════════════════════════════════════════════════════════ */
+const s2 = say(5.7, 9.75, { k: 'Gelen kutusu', l: ['Tek [gelen kutusu.]'], sub: 'Sosyal medya · E-posta · Pazaryerleri', y: 280, size: 84 });
+// alt satırda bölüm vurgusu kaydırmayla eşzamanlı
+{
+  const spans = s2.subLine ? [...s2.subLine.querySelectorAll('.w')] : [];
+  // kelimeler: Sosyal medya · E-posta · Pazaryerleri → gruplar
+  const groups = [[0, 1], [3], [5]];
+  const at = [7.35, 8.15, 8.85];
+  hook((t) => {
+    let g = -1;
+    at.forEach((a, i) => { if (t >= a) g = i; });
+    spans.forEach((s) => (s.style.color = ''));
+    if (g >= 0) for (const j of groups[g]) if (spans[j]) spans[j].style.color = 'var(--brand)';
+  });
 }
+cam(6.9, { W: 1000, H: 625, R: 30, cy: 1060, S: FULL, fx: 720, fy: 450 });
+// kart kenar çubuğuna daralır ve uzar (tek nesne biçim değiştirir), kamera yaklaşır
+cam(7.55, { W: 600, H: 960, R: 34, cy: 1080, S: 2.25, fx: 134, fy: 520 }, 'iox');
+cam(9.0, { fy: 640 }, 'io');
+scroll(7.6, 9.0, '.side-scroll', 'max', 'io');
+cue(6.9, 'swish');
+// imleç kanalların üstünden geçer
+mv(7.7, { sel: '.chan', text: 'WhatsApp', ax: 0.3 });
+CUR[CUR.length - 1].dur = 0.5;
+mv(8.35, { sel: '.chan', text: 'Gmail', ax: 0.3 });
+CUR[CUR.length - 1].dur = 0.55;
+mv(8.95, { sel: '.chan', text: 'Trendyol', ax: 0.3 });
+CUR[CUR.length - 1].dur = 0.45;
+// Instagram'dan yeni mesaj düşer → liste en üstte gösterir; kart geri genişler, imleç sohbete gider
+inApp(9.05, () => window.frames[0].__miveloDemo?.incoming('selin.tasarim', 'Keten gömleğin S bedeni kaldı mı? 😍'));
+cue(9.05, 'pop');
+cam(9.1, { W: 600, H: 960, R: 34, cy: 1080, S: 2.25, fx: 134, fy: 640 });
+cam(9.75, { W: 1000, H: 760, R: 30, cy: 1070, S: 1.35, fx: 520, fy: 300 }, 'iox');
+mv(9.25, { sel: '.row', text: 'selin.tasarim', ax: 0.45 });
+CUR[CUR.length - 1].dur = 0.55;
+click(9.85);
+
+/* ════════════════════════════════════════════════════════════════════
+   S3 · 10–14 · Yanıtla, geldiği uygulamadan gitsin (gerçek yazma + gönderme)
+   ════════════════════════════════════════════════════════════════════ */
+say(9.95, 13.75, { k: 'Yanıt', l: ['Yanıtla,', 'geldiği [uygulamadan] gitsin.'], y: 270, size: 78 });
+cam(9.95, { W: 1000, H: 760, S: 1.35, fx: 520, fy: 300 });
+cam(10.55, { W: 1000, H: 820, cy: 1080, S: 2.1, fx: 860, fy: 740 }, 'iox');
+mv(10.4, { sel: 'section.conv textarea', ax: 0.25 });
+click(10.75);
+typeText(10.9, 'Kaldı! Hemen ayırıyorum 😊', 17);
+mv(12.45, { sel: 'section.conv button.btn.primary', text: 'Gönder' });
+CUR[CUR.length - 1].dur = 0.4;
+click(12.9, 'send');
+cam(12.9, { S: 2.1, fx: 860, fy: 740 });
+cam(13.55, { S: 1.55, fx: 860, fy: 330 }, 'io');
+pill(13.05, 13.75, `${ic('check', 34)} Instagram üzerinden gönderildi`, 540, 1590, 'ink');
+
+/* ════════════════════════════════════════════════════════════════════
+   S4 · 14–18 · AI senin tarzında yazar (Taslak yaz → Tab → Gönder)
+   ════════════════════════════════════════════════════════════════════ */
+say(13.95, 17.8, { k: 'AI', l: ['Senin [tarzında]', 'taslak yazar.'], y: 270, size: 78 });
+cam(13.6, { S: 1.55, fx: 860, fy: 330 });
+cam(14.1, { W: 1000, H: 800, S: 1.3, fx: 520, fy: 330 }, 'iox');
+mv(13.75, { sel: '.row', text: 'Ayşe Demir', ax: 0.45 });
+CUR[CUR.length - 1].dur = 0.45;
+click(14.25);
+cam(14.3, { S: 1.3, fx: 520, fy: 330 });
+cam(14.85, { W: 1000, H: 820, S: 1.95, fx: 860, fy: 730 }, 'iox');
+mv(14.55, { sel: 'button.aipill', text: 'Taslak yaz' });
+CUR[CUR.length - 1].dur = 0.45;
+click(15.05);
+pill(16.05, 17.75, `${ic('text', 32)} Kısa–orta cümleler`, 330, 1560);
+pill(16.2, 17.75, `${ic('quote', 32)} “Siz” diye hitap`, 760, 1560);
+pill(16.35, 17.75, `${ic('hand', 32)} “Merhaba” ile açılış`, 540, 1660);
+keycaps(16.45, 16.95, ['Tab'], [16.7], 1440);
+press(16.7, 'Tab');
+mv(16.95, { sel: 'section.conv button.btn.primary', text: 'Gönder' });
+CUR[CUR.length - 1].dur = 0.4;
+click(17.3, 'send');
+cam(17.3, { S: 1.95, fx: 860, fy: 730 });
+cam(17.85, { S: 1.7, fx: 860, fy: 560 }, 'io');
+
+/* ════════════════════════════════════════════════════════════════════
+   S5 · 18–22 · Mesajdan takvime (üstüne gel → takvim → kaydet → Takvim)
+   ════════════════════════════════════════════════════════════════════ */
+say(17.95, 21.8, { k: 'Takvim', l: ['Mesajdan', '[takvime,] tek tıkla.'], y: 270, size: 78 });
+inApp(17.95, () => window.frames[0].__miveloDemo?.incoming('Ayşe Demir', 'Teşekkürler 🙏 Yarın 14:00’te mağazaya uğrayabilir miyim?'));
+cue(17.95, 'pop');
+cam(18.05, { S: 1.7, fx: 860, fy: 560 });
+cam(18.5, { W: 1000, H: 780, S: 1.95, fx: 850, fy: 620 }, 'io');
+mv(18.3, { sel: 'section.conv .bwrap:not(.me)', pick: 'last', ax: 0.55, ay: 0.5 });
+CUR[CUR.length - 1].dur = 0.4;
+mv(18.75, { sel: 'section.conv .bwrap:not(.me) .rtrig[title="Takvime ekle"]', pick: 'last' });
+CUR[CUR.length - 1].dur = 0.3;
+click(19.1);
+cam(19.15, { S: 1.95, fx: 850, fy: 620 });
+cam(19.6, { W: 1000, H: 820, S: 1.62, f: { sel: '.cal-modal' } }, 'iox');
+mv(19.55, { sel: '.cal-modal button', text: 'Takvime ekle', pick: 'last' });
+CUR[CUR.length - 1].dur = 0.5;
+click(20.2, 'success');
+cam(20.3, { S: 1.62 });
+cam(20.75, { W: 1000, H: 760, S: 1.2, fx: 560, fy: 300 }, 'iox');
+mv(20.35, { sel: '.nav-item', text: 'Takvim', ax: 0.3 });
+CUR[CUR.length - 1].dur = 0.4;
+click(20.8);
+cam(20.9, { S: 1.2, fx: 560, fy: 300 });
+cam(21.5, { W: 1000, H: 780, S: 1.75, f: { sel: '.cv-cell.sel, .cv-cell.today, .cv-cell', text: 'Ayşe Demir', pick: 'last', ay: 0.3 } }, 'iox');
+mv(21.2, { sel: '.cv-chip', text: 'Ayşe Demir', pick: 'last' });
+CUR[CUR.length - 1].dur = 0.45;
+
+/* ════════════════════════════════════════════════════════════════════
+   S6 · 22–28 · Siparişler ve müşteri soruları (Trendyol → sipariş → soru → yanıt)
+   ════════════════════════════════════════════════════════════════════ */
+say(21.95, 25.75, { k: 'Pazaryerleri', l: ['Siparişler ve', '[müşteri soruları.]'], y: 270, size: 78 });
+cam(21.95, { S: 1.75 });
+cam(22.5, { W: 1000, H: 760, S: 1.3, fx: 300, fy: 520 }, 'iox');
+mv(22.15, { sel: '.chan', text: 'Trendyol', ax: 0.3 });
+CUR[CUR.length - 1].dur = 0.45;
+click(22.65);
+cam(22.7, { S: 1.3, fx: 300, fy: 520 });
+cam(23.15, { W: 1000, H: 800, S: 1.75, fx: 440, fy: 300 }, 'io');
+mv(22.85, { sel: 'section.list button', text: 'Siparişler', ax: 0.5 });
+CUR[CUR.length - 1].dur = 0.4;
+click(23.3);
+mv(23.5, { sel: '.row', text: '#1042931', ax: 0.5 });
+CUR[CUR.length - 1].dur = 0.35;
+click(23.95);
+cam(24.0, { S: 1.75, fx: 440, fy: 300 });
+cam(24.6, { W: 1000, H: 840, S: 1.95, f: { sel: '.op-card', text: 'Durum geçmişi', ay: 0.55 } }, 'iox');
+mv(24.4, { sel: '.op-card', text: 'Durum geçmişi', ax: 0.8, ay: 0.9 });
+CUR[CUR.length - 1].dur = 0.6;
+cam(25.1, { S: 1.95 });
+cam(25.45, { W: 1000, H: 820, S: 1.95, f: { sel: 'button', text: 'Soruyu aç', dx: -200 } }, 'io');
+mv(25.2, { sel: 'button', text: 'Soruyu aç' });
+CUR[CUR.length - 1].dur = 0.35;
+click(25.6);
+say(25.8, 27.75, { k: 'Pazaryerleri', l: ['Soruları da', '[buradan] yanıtla.'], y: 270, size: 78 });
+cam(25.7, { S: 1.95 });
+cam(26.15, { W: 1000, H: 820, S: 1.9, fx: 860, fy: 700 }, 'iox');
+mv(26.05, { sel: 'section.conv textarea', ax: 0.25 });
+CUR[CUR.length - 1].dur = 0.35;
+click(26.35);
+typeText(26.5, 'Kargonuz bugün yolda 📦', 18);
+mv(27.35, { sel: 'section.conv button.btn.primary', text: 'Gönder' });
+CUR[CUR.length - 1].dur = 0.3;
+click(27.65, 'send');
+
+/* ════════════════════════════════════════════════════════════════════
+   S7 · 28–32 · E-posta (Gmail → e-postayı aç → yanıtla)
+   ════════════════════════════════════════════════════════════════════ */
+say(27.95, 31.75, { k: 'E-posta', l: ['E-postalar da', '[aynı hızda.]'], y: 270, size: 78 });
+cam(27.8, { S: 1.9, fx: 860, fy: 700 });
+cam(28.35, { W: 1000, H: 760, S: 1.3, fx: 330, fy: 450 }, 'iox');
+mv(28.0, { sel: '.chan', text: 'Gmail', ax: 0.3 });
+CUR[CUR.length - 1].dur = 0.45;
+click(28.5);
+mv(28.7, { sel: '.row', text: 'Eylül faturanız', ax: 0.45 });
+CUR[CUR.length - 1].dur = 0.3;
+click(29.05);
+cam(29.1, { S: 1.3, fx: 330, fy: 450 });
+cam(29.7, { W: 1000, H: 840, S: 1.8, fx: 860, fy: 470 }, 'iox');
+cam(30.2, { S: 1.8, fx: 860, fy: 470 });
+cam(30.6, { S: 1.9, fx: 860, fy: 720 }, 'io');
+mv(30.1, { sel: 'section.conv textarea', ax: 0.25 });
+CUR[CUR.length - 1].dur = 0.4;
+click(30.5);
+typeText(30.6, 'Teşekkürler, ödeme cuma günü.', 20);
+press(31.45, 'Enter');
+cue(31.45, 'send');
+
+/* ════════════════════════════════════════════════════════════════════
+   S8 · 32–36 · Klavyeden ayrılma (⌘K ara, ↓↓ ↵, ⌘2 görünüm)
+   ════════════════════════════════════════════════════════════════════ */
+say(31.95, 35.8, { k: 'Kısayollar', l: ['Klavyeden', '[hiç ayrılma.]'], y: 270, size: 78 });
+hideCur(31.7);
+cam(31.7, { S: 1.9, fx: 860, fy: 720 });
+cam(32.3, { W: 1000, H: 700, R: 30, cy: 1020, S: 0.95, fx: 720, fy: 380 }, 'iox');
+keycaps(32.25, 32.95, ['⌘', 'K'], [32.55], 1500);
+press(32.55, 'Meta+k');
+typeText(32.8, 'fatura', 12);
+keycaps(33.55, 34.3, ['↓'], [33.7, 33.95], 1500);
+press(33.7, 'ArrowDown');
+press(33.95, 'ArrowDown');
+keycaps(34.35, 34.85, ['↵'], [34.55], 1500);
+press(34.55, 'Enter');
+keycaps(34.9, 35.45, ['⌘', '2'], [35.1], 1500);
+press(35.1, 'Meta+2');
+{
+  const sc = el(`<div><kbd>⌘K</kbd>Her yerde ara</div><div><kbd>⌘1–9</kbd>Görünümler</div><div><kbd>⌘⇧K</kbd>Mivelo’yu çağır</div><div><kbd>Tab</kbd>Taslağı kabul et</div><div><kbd>J K</kbd>Sohbetler arası</div><div><kbd>↵</kbd>Gönder</div>`, 'sc');
+  place(sc, [[35.45, { o: 0, s: 0.9, y: 1580, b: 14 }], [35.85, { o: 1, s: 1, y: 1560, b: 0 }, 'back'], [37.0, { o: 1, s: 1, y: 1560 }], [37.3, { o: 0, s: 0.95, y: 1540, b: 10 }, 'i']]);
+}
+cam(35.4, { S: 0.95, fx: 720, fy: 380 });
+cam(35.9, { W: 1000, H: 640, cy: 1010, S: FULL, fx: 720, fy: 450 }, 'io');
+
+/* ════════════════════════════════════════════════════════════════════
+   S9 · 36–40 · Odak: önce yanıt bekleyenler (Yanıtla → yaz → gönder)
+   ════════════════════════════════════════════════════════════════════ */
+say(35.95, 39.8, { k: 'Odak', l: ['Önce, [yanıt]', '[bekleyenler.]'], y: 270, size: 78 });
+press(36.0, 'Escape');
+mv(36.05, { sel: '.nav-item', text: 'Odak', ax: 0.3 });
+CUR[CUR.length - 1].dur = 0.4;
+click(36.5);
+cam(36.55, { W: 1000, H: 640, cy: 1010, S: FULL, fx: 720, fy: 450 });
+cam(37.1, { W: 1000, H: 820, cy: 1070, S: 1.25, fx: 700, fy: 300 }, 'iox');
+mv(37.1, { sel: '.fcard button.btn.primary', text: 'Yanıtla', pick: 0 });
+CUR[CUR.length - 1].dur = 0.4;
+click(37.55);
+cam(37.6, { S: 1.25, fx: 700, fy: 300 });
+cam(38.05, { W: 1000, H: 820, S: 1.55, fx: 660, fy: 400 }, 'io');
+typeText(37.8, 'Hemen iletiyorum 🙏', 17);
+press(38.95, 'Enter');
+cue(38.95, 'send');
+cam(39.0, { S: 1.55, fx: 660, fy: 400 });
+cam(39.5, { W: 1000, H: 800, S: 1.22, fx: 700, fy: 240 }, 'io');
+hideCur(39.2);
+
+/* ════════════════════════════════════════════════════════════════════
+   S10 · 40–46 · Tüm mesajların. Tek yerde. (pencere logoya döner → CTA)
+   ════════════════════════════════════════════════════════════════════ */
+cam(39.8, { W: 1000, H: 800, R: 30, cy: 1070, S: 1.35, bg: 0, lg: 0, ao: 1, ab: 0, s: 1 });
+cam(40.55, { W: 220, H: 220, R: 62, cy: 760, bg: 1, lg: 1, ao: 0, ab: 18 }, 'iox');
+cue(39.8, 'morph2');
+cam(40.9, { s: 1.07 }, 'o');
+cam(41.3, { s: 1 }, 'io');
+say(40.5, 99, { l: ['Tüm mesajların.', '[Tek yerde.]'], y: 960, size: 96 });
+{
+  const cta = el(`<span class="lbl">Bekleme listesine katıl</span>`, 'cta');
+  place(cta, [[41.3, { o: 0, s: 0.7, y: 1330, b: 12 }], [41.75, { o: 1, s: 1, y: 1310, b: 0 }, 'back'], [42.55, { s: 1 }], [42.65, { s: 0.94 }, 'o'], [42.85, { s: 1.04 }, 'o'], [43.05, { s: 1 }, 'io']]);
+  hook((t) => {
+    const done = t >= 42.65;
+    cta.classList.toggle('done', done);
+    cta.innerHTML = done ? `${ic('check', 40)}<span>Listedesin</span>` : 'Bekleme listesine katıl';
+  });
+  const url = el('mivelo.app', 'url');
+  place(url, [[43.05, { o: 0, y: 1470, b: 12 }], [43.5, { o: 1, y: 1450, b: 0 }, 'o']]);
+  const foot = el('Ücretsiz · Mesajların cihazında kalır · Mac', 'foot');
+  place(foot, [[43.3, { o: 0, y: 1530, b: 10 }], [43.75, { o: 1, y: 1515, b: 0 }, 'o']]);
+}
+mv(41.9, { sx: 820, sy: 1480 });
+mv(42.1, { sx: 640, sy: 1330 });
+CUR[CUR.length - 1].dur = 0.45;
+click(42.6, 'success');
+hideCur(43.4);
+cue(44.0, 'final');
+
+/* ───────── kurulum ───────── */
+camTrack = track(CARD);
+CUR.sort((a, b) => a.t - b.t);
+ACTS.sort((a, b) => a.t - b.t);
+// uygulamaya gitmeyen tıklamalar: sahne koordinatındaki imleç (CTA) için fare olayı gönderme
+for (const a of ACTS) if (a.k === 'down' || a.k === 'up') { const k = [...CUR].reverse().find((c) => c.t <= a.t); a.stage = !!(k && k.at && k.at.sx != null); }
+window.DUR = DUR;
+window.CUES_STATIC = CUES;
+
+let actIdx = 0;
+/**
+ * Bir kareyi çiz. Dönen: imleç konumu (sahne px, gizliyse null) + bu karede uygulanacak gerçek girişler
+ * (fare bas/bırak, tuş, yazılacak karakterler). render.mjs bunları Playwright ile uygular.
+ */
+window.render = (t) => {
+  const out = [];
+  // uygulama içi eylemler ve kaydırmalar (sıralı çizimde bir kez)
+  while (actIdx < ACTS.length && ACTS[actIdx].t <= t) {
+    const a = ACTS[actIdx++];
+    if (a.k === 'eval') { try { a.fn(); } catch (e) { console.error('eval', e); } }
+    else if (a.k === 'type') TYPING.push(a);
+    else if (a.k === 'down') out.push(guardClick(a, t));
+    else out.push(a);
+  }
+  for (const a of TYPING) {
+    const chars = [...a.text];
+    const n = Math.min(chars.length, Math.floor((t - a.t) * a.cps) + 1);
+    if (n > a.done) { out.push({ k: 'text', text: chars.slice(a.done, n).join('') }); a.done = n; }
+  }
+  const d = doc();
+  for (const s of SCROLLS) {
+    if (t < s.t0 || !d) continue;
+    const e = d.querySelector(s.sel);
+    if (!e) continue;
+    if (s.from == null) { s.from = e.scrollTop; s.target = s.to === 'max' ? e.scrollHeight - e.clientHeight : s.to; }
+    if (t <= s.t1 + 0.05) e.scrollTop = lerp(s.from, s.target, ease[s.e](clamp((t - s.t0) / (s.t1 - s.t0))));
+  }
+  camHook(t);
+  for (const h of hooks) h(t);
+  const c = curHook(t);
+  return { cursor: c, acts: out };
+};
+const TYPING = [];
+/**
+ * Tıklama güvencesi: imlecin altındaki öğe hedef değilse (kamera kayarken ıskalama) hedef DOM üzerinden tıklanır/odaklanır
+ * ve gerçek fare basışı atlanır. Böylece akış her çizimde aynı ilerler.
+ */
+function guardClick(a, t) {
+  if (a.stage) return a;
+  const k = [...CUR].reverse().find((c) => c.t <= t && c.at);
+  if (!k || !k.at.sel) return a;
+  const d = doc();
+  const target = findEl(k.at);
+  if (!d || !target) return a;
+  const hit = lastPos.stage ? null : d.elementFromPoint(lastPos.x, lastPos.y);
+  if (hit && (hit === target || target.contains(hit) || hit.contains(target))) return a;
+  console.warn('tıklama güvencesi', t.toFixed(2), k.at.sel, k.at.text || '');
+  if (/^(TEXTAREA|INPUT)$/.test(target.tagName)) target.focus();
+  else target.click();
+  return { ...a, skip: true };
+}
+
+/* iframe'deki CSS geçiş/animasyonlarını sanal zamana bağla (gerçek saat değil, video zamanı) */
+const seen = new WeakMap();
+window.syncAnims = (t) => {
+  // odaklanan öğeyi göstermek için tarayıcının kaydırdığı kapları geri al (kamera yalnız bizim dönüşümümüz)
+  for (const e of [document.scrollingElement, stage, vp]) if (e) (e.scrollTop = 0), (e.scrollLeft = 0);
+  const d = doc();
+  if (!d) return;
+  if (d.scrollingElement) (d.scrollingElement.scrollTop = 0), (d.scrollingElement.scrollLeft = 0);
+  for (const a of d.getAnimations()) {
+    if (!seen.has(a)) { seen.set(a, t); try { a.pause(); } catch {} }
+    try { a.currentTime = (t - seen.get(a)) * 1000; } catch {}
+  }
+};
+window.appReady = () => { const d = doc(); return !!(d && d.querySelector('.row') && d.fonts && d.fonts.status === 'loaded'); };
+window.ready = (async () => {
+  await document.fonts.load('700 80px "Mivelo Display"');
+  await document.fonts.load('500 30px "Mivelo Display"');
+  await Promise.all([...document.images].map((i) => (i.complete ? 0 : new Promise((r) => { i.onload = i.onerror = r; }))));
+  return document.fonts.check('700 80px "Mivelo Display"');
+})();
 </script>
 </body>
 </html>

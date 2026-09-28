@@ -53,10 +53,12 @@ Dil: arayüz ve yorumlar Türkçe.
   karması `api.php` `DEFAULT_HASH`; panelden değişince `~/mivelo-data/admin.json`. 5 hatalı girişte IP 15 dk kilitlenir.
   Demoda örnek AI açık (`demo-ai.ts`: sohbete özel taslak/özet/aksiyon/olay, model çağrısı yok); pazaryeri sipariş kartı `Script.order`.
   Tek dosya demo (`npm run demo:html`) profil adı "Mivelo".
-- **Tanıtım videosu (reels 1080×1920, 48 sn)** `scripts/promo/`: `capture-assets.mjs` (tek dosya demodan açık tema masaüstü ekranları +
-  saydam köşeli simgeler) → `brand-tiles.py` (pazaryeri logolarının beyaz zemini atılır, tek tip yuvarlak maske) → `reel.html`
-  (`window.render(t)` ile deterministik sahneler; yalnız masaüstü pencereleri, Inter yerel woff2, geçişler çapraz lime/mor silme) →
-  `render.mjs` (Playwright kare kare → ffmpeg H.264). Ayrıntı `scripts/promo/README.md`. Müzik yok (Instagram'da eklenir); MP4 depoya konmaz.
+- **Tanıtım videosu (reels 1080×1920, ~46 sn)** `scripts/promo/`: videodaki arayüz GERÇEK tek dosya demo (iframe, Playwright sanal saati
+  `clock.runFor`; imleç/klavye gerçek girişler, CSS animasyonları video zamanına bağlı `syncAnims`; ıskalanan tıklamada DOM güvencesi).
+  `reel.html` kompozisyon (tek nesne biçim değiştirir: bildirim hapı → logo → pencere → logo → CTA; Apple tarzı açık zemin, kelime kelime
+  bulanıklıktan açılan başlıklar; logolar yalnız ilk iki sahnede), `render.mjs` (--scale 2, --stills), `audio.mjs` (kodla üretilen 120 BPM
+  müzik + tık/tuş/gönder/bildirim efektleri, -14 LUFS). Başlık fontu -apple-system/SF Pro (Mac'te), yoksa Inter Display. Demo kancası
+  `window.__miveloDemo.incoming(ad, metin)` (static-demo.ts). Ayrıntı `scripts/promo/README.md`; MP4 depoya konmaz.
 - **Windows**: `tauri.windows.conf.json` (NSIS, currentUser, yerel başlık çubuğu) Tauri'nin platform yapılandırma birleştirmesiyle
   uygulanır; paket yalnız CI'da üretilir (`.github/workflows/build-windows.yml`: workflow_dispatch + `v*` etiketi, windows-latest,
   `KAVSAK_BUNDLE_NODE=1` ile node.exe `core-bundle/bin/`e gömülür, kabuk önce onu dener). `lib.rs`: kısayol Ctrl+Shift+K,

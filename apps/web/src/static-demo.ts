@@ -230,6 +230,30 @@ const LIVE_LINES: Record<string, string[]> = {
   ],
 };
 let liveTick = 0;
+/** Sohbete gerçekçi bir gelen mesaj düşür (canlı akış ve tanıtım videosu kancası aynı yolu kullanır) */
+function pushIncoming(chat: Chat, text: string): void {
+  const src = chat.kind === 'direct' ? undefined : messages.find((m) => m.chatId === chat.id && !m.fromMe && !isReactionText(m.text));
+  const who = chat.kind === 'direct' ? chat.name : (src?.senderName ?? chat.name);
+  const ts = Date.now();
+  const message: Message = {
+    id: `${chat.id}#live-${ts}`,
+    chatId: chat.id,
+    remoteId: `live-${ts}`,
+    senderId: chat.kind === 'direct' ? chat.remoteId : (src?.senderId ?? chat.remoteId),
+    senderName: who,
+    senderAvatarUrl: chat.kind === 'direct' ? chat.avatarUrl : src?.senderAvatarUrl,
+    fromMe: false,
+    text,
+    ts,
+    status: 'delivered',
+  };
+  messages.push(message);
+  const preview = chat.kind === 'direct' ? text : `${who.split(' ')[0]}: ${text}`;
+  const next = { ...touch(chat, preview, false, ts), unread: chat.unread + 1 };
+  chats = chats.map((c) => (c.id === chat.id ? next : c));
+  emit({ type: 'chat.upsert', chat: next });
+  emit({ type: 'message.upsert', message, chat: next, live: true });
+}
 if (STATIC_DEMO) {
   setInterval(() => {
     const pool = chats.filter((c) => REACT_PLATFORMS.has(c.platform) && c.kind !== 'channel');
@@ -238,29 +262,16 @@ if (STATIC_DEMO) {
     const chat = pool[(liveTick * 7) % pool.length];
     const tag = chat.tags.find((t) => LIVE_LINES[t]) ?? 'genel';
     const lines = LIVE_LINES[tag];
-    const text = lines[(liveTick * 3) % lines.length];
-    const src = chat.kind === 'direct' ? undefined : messages.find((m) => m.chatId === chat.id && !m.fromMe && !isReactionText(m.text));
-    const who = chat.kind === 'direct' ? chat.name : (src?.senderName ?? chat.name);
-    const ts = Date.now();
-    const message: Message = {
-      id: `${chat.id}#live-${ts}`,
-      chatId: chat.id,
-      remoteId: `live-${ts}`,
-      senderId: chat.kind === 'direct' ? chat.remoteId : (src?.senderId ?? chat.remoteId),
-      senderName: who,
-      senderAvatarUrl: chat.kind === 'direct' ? chat.avatarUrl : src?.senderAvatarUrl,
-      fromMe: false,
-      text,
-      ts,
-      status: 'delivered',
-    };
-    messages.push(message);
-    const preview = chat.kind === 'direct' ? text : `${who.split(' ')[0]}: ${text}`;
-    const next = { ...touch(chat, preview, false, ts), unread: chat.unread + 1 };
-    chats = chats.map((c) => (c.id === chat.id ? next : c));
-    emit({ type: 'chat.upsert', chat: next });
-    emit({ type: 'message.upsert', message, chat: next, live: true });
+    pushIncoming(chat, lines[(liveTick * 3) % lines.length]);
   }, 70_000);
+  // Tanıtım videosu (scripts/promo) gerçek arayüzü sürerken belirli bir sohbete mesaj düşürür
+  (window as unknown as { __miveloDemo?: unknown }).__miveloDemo = {
+    incoming: (name: string, text: string): boolean => {
+      const chat = chats.find((c) => c.name === name) ?? chats.find((c) => c.name.includes(name));
+      if (chat) pushIncoming(chat, text);
+      return !!chat;
+    },
+  };
 }
 
 

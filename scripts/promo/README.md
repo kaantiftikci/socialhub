@@ -1,18 +1,38 @@
-# Mivelo tanıtım videosu (Reels / TikTok, 1080×1920)
+# Mivelo tanıtım videosu (reels, 1080×1920, ~46 sn)
 
-Gerçek demodan çekilen **masaüstü** ekranlar + kare kare çizilen sahne → H.264 MP4 (30 fps, ~48 sn).
+Videodaki arayüz ekran görüntüsü değil, **gerçek uygulamadır**: tek dosya demo, bir iframe içinde sanal saatle kare kare
+çalıştırılır. İmleç gerçekten tıklar, klavye gerçekten yazar, Enter gerçekten gönderir. Böylece her kare birebir tekrar üretilebilir.
+
+## Çalıştırma
 
 ```bash
-npm run demo:html                                   # tek dosya demo (apps/web/dist-single)
-node scripts/promo/capture-assets.mjs /tmp/promo    # masaüstü ekranları (açık tema, 1440×900 @2×) + sosyal/e-posta simgeleri
-python3 scripts/promo/brand-tiles.py /tmp/promo     # pazaryeri logoları (beyaz zemin atılır) + tüm simgelere aynı köşe maskesi
-mkdir -p /tmp/promo/fonts && cp node_modules/@fontsource/inter/files/inter-latin{,-ext}-{400,500,600,700,800}-normal.woff2 /tmp/promo/fonts/
-FFMPEG=$(npx -y ffmpeg-static) node scripts/promo/render.mjs /tmp/promo mivelo-reel.mp4
+npm run demo:html                                   # apps/web/dist-single/mivelo-demo.html
+python3 scripts/promo/brand-tiles.py <varlık>       # pazaryeri logoları (beyaz zemin temizlenir)
+node scripts/promo/capture-assets.mjs <varlık>      # uygulama simgeleri (saydam köşeli)
+# <varlık>/fonts: inter-latin(-ext)-opsz-normal.woff2 ve inter-latin(-ext)-wght-normal.woff2 (@fontsource-variable/inter)
+node scripts/promo/render.mjs <varlık> mivelo-reel.mp4 --scale 2          # video + müzik + efektler
+node scripts/promo/render.mjs <varlık> kareler/ --stills 3,10.5,22        # storyboard kareleri (JPEG)
 ```
 
-- Yazı tipi demo ve waitlist ile aynı: **Inter** (yerel woff2; `@fontsource/inter` geçici kurulabilir). Türkçe harfler latin-ext dosyasında.
-- `reel.html?a=<varlık klasörü>&play=1` tarayıcıda gerçek zamanlı önizleme.
-- Hareketin tamamı `window.render(t)` ile zamanın fonksiyonu (CSS geçişi yok): her kare birebir tekrar üretilir.
-  Anahtar kare kuralı: bir karede verilmeyen değer önceki değerini korur. Pencere "kamerası": `cx/cy` (ekran görüntüsünün
-  1440×900 CSS koordinatı) görünüm alanının ortasına, `z` kat yakın, `vh` görünüm yüksekliği.
-- Müzik yok (Instagram/TikTok'ta hazır müzik eklenir); sahne geçişleri ~3,2 sn'lik vuruşlara göre (≈ 75 BPM'in 4 vuruşu).
+`FFMPEG=/yol` (H.264), `CHROMIUM=/yol` isteğe bağlı.
+
+## Dosyalar
+
+- **`reel.html`**: kompozisyon. Tek nesne sürekli biçim değiştirir: bildirim hapı → logo → uygulama penceresi → logo → CTA.
+  - `cam()` kart geometrisini ve kamerayı sürer: odak (`fx/fy` ya da `f: {sel}`) ve ölçek `S`.
+  - `mv()` ve `click()` imleci, `typeText()` ve `press()` klavyeyi sürer.
+  - `say()` başlıkları kelime kelime bulanıklıktan açar.
+  - `inApp()` demoya gelen mesaj düşürür (`window.__miveloDemo.incoming`).
+- **`render.mjs`**: yerel sunucu, Playwright sanal saati (`clock.runFor`), gerçek fare ve klavye.
+  - iframe'deki CSS animasyonları video zamanına bağlanır (`syncAnims`).
+  - Tıklama güvencesi: kamera kayarken imleç hedefi ıskalarsa, hedef DOM üzerinden tıklanır.
+  - Çıktı: ffmpeg ile H.264 ve AAC; ses -14 LUFS'e normalleştirilir.
+- **`audio.mjs`**: telifsiz, kodla üretilen müzik ve efektler.
+  - Müzik: 120 BPM; Am7 – Fmaj7 – Cadd9 – G6; giriş, ana bölüm, 40. sn'de sadeleşme, 44. sn'de final.
+  - Efektler: tıklama, tuş, gönder, bildirim, geçiş, onay. `render.mjs`'in topladığı ipuçlarıyla aynı karede çalar.
+
+## Yazı tipi
+
+- Başlıklar waitlist sitesiyle aynı yığını kullanır: `-apple-system`, SF Pro Display. Mac'te render alınırsa SF Pro ile çizilir.
+- SF Pro yoksa (Linux/CI) Inter Display (opsz) kullanılır.
+- Uygulamanın kendi arayüzü Inter'dir.
