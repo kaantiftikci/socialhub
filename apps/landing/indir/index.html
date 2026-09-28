@@ -107,15 +107,8 @@ svg{flex-shrink:0}
 .big-dl.done .arr{animation:drop .6s var(--spring)}
 @keyframes drop{0%{transform:none}40%{transform:translateY(5px)}100%{transform:none}}
 .cta .meta{font-size:13px;color:var(--ink-3)}
-.cta-row{display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap}
-/* ikinci düğme: tüm sürümler (Mac Intel / Windows / Apple Silicon) — cam, ana düğmenin yanında */
-.all-dl{display:inline-flex;align-items:center;gap:9px;height:54px;padding:0 22px 0 18px;border-radius:16px;font-size:15.5px;font-weight:600;letter-spacing:-.01em;color:var(--ink);text-decoration:none;
-  background:linear-gradient(160deg,rgba(255,255,255,.85),rgba(255,255,255,.55));-webkit-backdrop-filter:blur(16px) saturate(180%);backdrop-filter:blur(16px) saturate(180%);
-  box-shadow:inset 0 1px 0 #fff,inset 0 0 0 1px rgba(255,255,255,.7),0 0 0 1px rgba(20,18,40,.06),0 14px 30px -18px rgba(40,30,110,.45);transition:transform .2s var(--ease),background .2s}
-.all-dl:hover{transform:translateY(-1px);background:#fff}.all-dl:active{transform:scale(.97)}
-.all-dl[hidden]{display:none}
-.all-dl .osic2{display:inline-flex;gap:6px;color:var(--ink-2)}
-.all-dl .osic2 svg{width:18px;height:18px}
+.cta .other{font-size:13.5px;color:var(--brand-ink);text-decoration:none;font-weight:500}
+.cta .other:hover{text-decoration:underline;text-underline-offset:3px}
 
 /* kelime kelime açılma + alt metin süpürme (ana sayfayla aynı) */
 .words .wd{display:inline-block;opacity:0;filter:blur(10px);transform:translateY(.32em);
@@ -224,11 +217,9 @@ footer a:hover{color:var(--ink)}
     <h1 class="h1">Mivelo'yu <span class="grad">indir</span></h1>
     <p class="lead">Tüm mesajların tek gelen kutusunda, kendi bilgisayarında. Hesapların kendi internetinden bağlanır; mesajların yalnız sende kalır.</p>
     <div class="cta">
-      <div class="cta-row">
-        <a class="big-dl off" id="bigDl" href="#surumler"><span class="osic" id="bigIc"></span><span id="bigTx">Hazırlanıyor…</span><svg class="arr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12M6 11l6 6 6-6M5 20h14"/></svg></a>
-        <a class="all-dl" id="allDl" href="#surumler" hidden><span class="osic2"></span>Sürümleri gör</a>
-      </div>
+      <a class="big-dl" id="bigDl" href="#surumler"><span class="osic" id="bigIc"></span><span id="bigTx">Sürümleri gör</span><svg class="arr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12M6 11l6 6 6-6M5 20h14"/></svg></a>
       <span class="meta" id="bigMeta"></span>
+      <a class="other" href="#surumler">Tüm sürümler ↓</a>
     </div>
   </div>
 </section>
@@ -362,10 +353,9 @@ footer a:hover{color:var(--ink)}
   var APPLE='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04c-2.04.027-3.91 1.183-4.961 3.014c-2.117 3.675-.546 9.103 1.519 12.09c1.013 1.454 2.208 3.09 3.792 3.039c1.52-.065 2.09-.987 3.935-.987c1.831 0 2.35.987 3.96.948c1.637-.026 2.676-1.48 3.676-2.948c1.156-1.688 1.636-3.325 1.662-3.415c-.039-.013-3.182-1.221-3.22-4.857c-.026-3.04 2.48-4.494 2.597-4.559c-1.429-2.09-3.623-2.324-4.39-2.376c-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83c-1.207.052-2.662.805-3.532 1.818c-.78.896-1.454 2.338-1.273 3.714c1.338.104 2.715-.688 3.559-1.701"/></svg>';
   var WIN='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.1l7.4-1v7.2H3zm0 13.8l7.4 1v-7.1H3zm8.3 1.1L21 21.4v-8.6h-9.7zm0-15.9v7.3H21V2.6z"/></svg>';
   if(rec) $('#'+rec).classList.add('rec');
-  /* tanınan sistemde kendi logosu; bilinmiyorsa (telefon, Linux) ya da "Sürümleri gör" durumunda Apple + Windows */
+  /* açılış düğmesi her cihazda aynı: Apple + Windows logosu, "Sürümleri gör" → kartlar (önerilen sistem kartta işaretli) */
   function bothIcons(){ $('#bigIc').innerHTML=APPLE+WIN; }
-  if(isWin) $('#bigIc').innerHTML=WIN; else if(isMac) $('#bigIc').innerHTML=APPLE; else bothIcons();
-  var BIG={file:isWin?'Mivelo-windows-x64-setup.exe':isMac?'Mivelo-mac-arm64.dmg':'', label:isWin?'Windows için indir':'Mac için indir'};
+  bothIcons();
 
   /* Mac / Windows sekmesi: kayan hap (ana sayfadaki görünüm sekmeleri gibi) */
   var seg=$('#seg'), pill=$('#pill'), btns=[].slice.call(seg.querySelectorAll('button'));
@@ -392,7 +382,6 @@ footer a:hover{color:var(--ink)}
 
   /* sürüm bilgisi: latest.json */
   var mb=function(n){ return (n/1048576).toFixed(0)+' MB'; };
-  function wireDone(a){ a.addEventListener('click',function(){ a.classList.remove('done'); void a.offsetWidth; a.classList.add('done'); }); }
   fetch('files/latest.json',{cache:'no-store'}).then(function(r){ return r.ok?r.json():null; }).then(function(j){
     if(!j||!j.files) throw 0;
     document.querySelectorAll('[data-file]').forEach(function(a){
@@ -401,13 +390,8 @@ footer a:hover{color:var(--ink)}
       a.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12M6 11l6 6 6-6M5 20h14"/></svg>İndir';
       var s=document.querySelector('[data-size="'+f+'"]'); if(s) s.textContent=mb(j.files[f].size)+' · sürüm '+j.version;
     });
-    var big=$('#bigDl');
-    if(BIG.file && j.files[BIG.file]){
-      big.href='files/'+BIG.file; big.setAttribute('download',''); big.classList.remove('off'); $('#bigTx').textContent=BIG.label; wireDone(big);
-      $('#bigMeta').textContent='Sürüm '+j.version+' · '+mb(j.files[BIG.file].size)+(isMac?' · Apple Silicon':'');
-      var all=$('#allDl'); all.querySelector('.osic2').innerHTML=APPLE+WIN; all.hidden=false;
-    } else { bothIcons(); big.classList.remove('off'); $('#bigTx').textContent='Sürümleri gör'; $('#bigMeta').textContent='Sürüm '+j.version; }
-  }).catch(function(){ bothIcons(); var big=$('#bigDl'); big.classList.remove('off'); $('#bigTx').textContent='Sürümleri gör'; });
+    $('#bigMeta').textContent='Sürüm '+j.version;
+  }).catch(function(){});
 })();
 </script>
 </body>
