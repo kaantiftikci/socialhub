@@ -394,6 +394,7 @@ export class BrowserConnector extends BaseConnector {
   async start(opts: StartOptions = {}): Promise<void> {
     const interactive = opts.interactive !== false;
     this.stopping = false;
+    this.loginCancelledOnce = false;
     // Giriş varsayılan olarak AYRI pencerede (Kaan: Mivelo içi yayında sitelerin düğmeleri tepki vermiyordu); içeride açmak için MIVELO_LOGIN_EMBED=1.
     this.external = !!opts.external || process.env.MIVELO_LOGIN_EMBED !== '1';
     try {
@@ -854,6 +855,23 @@ export class BrowserConnector extends BaseConnector {
    * platformun izin/onay adımları (2FA, "girişi kaydet", uygulama izinleri) için sayfa
    * birkaç saniye hareketsiz kalana dek bekler, sonra döner.
    */
+  /**
+   * Kullanıcı giriş penceresini giriş yapmadan kapattı ya da iptal etti: tarayıcı tamamen kapatılır (macOS'ta son pencere
+   * kapanınca Chromium açık kalıyordu), hesap "Bağlı değil" olur ve olay yayınlanır — hiç bağlanmamış yeni hesabı registry
+   * kaldırır, Bağlan kartı ilk haline döner. Eskiden hesap sonsuza dek "Eşleşme bekleniyor"da kalıyordu.
+   */
+  private loginCancelledOnce = false;
+  private async loginCancelled(why: string): Promise<void> {
+    if (this.loginCancelledOnce) return;
+    this.loginCancelledOnce = true;
+    bus.log('info', `${this.account.platform}: ${why}; bağlanma iptal edildi`);
+    await this.stopEmbed().catch(() => undefined);
+    await this.closeCtx();
+    this.unschedule();
+    this.setStatus('disconnected', 'Giriş yapılmadı — bağlanmak için Yeniden bağlan');
+    bus.emit({ type: 'account.login-cancelled', accountId: this.account.id });
+  }
+
   private async waitForLogin(): Promise<boolean> {
     let ticks = 0;
     while (!this.stopping) {
@@ -861,13 +879,11 @@ export class BrowserConnector extends BaseConnector {
       if (this.embedOn) await this.keepEmbedAlive();
       if (this.loginAbort) {
         this.loginAbort = false;
-        await this.stopEmbed();
-        await this.closeCtx();
-        this.setStatus('pairing', 'Giriş iptal edildi — tekrar denemek için Yeniden bağlan');
+        await this.loginCancelled('giriş iptal edildi');
         return false;
       }
       if (!this.page || this.page.isClosed()) {
-        bus.log('warn', `${this.account.platform}: giriş penceresi kapatıldı, giriş tamamlanmadı`);
+        await this.loginCancelled('giriş penceresi giriş yapılmadan kapatıldı');
         return false;
       }
       if (await this.isLoggedIn(true)) break;
@@ -884,7 +900,8 @@ export class BrowserConnector extends BaseConnector {
     for (let i = 0; i < 120 && !this.stopping; i++) {
       this.adoptNewestPage();
       if (this.embedOn) await this.keepEmbedAlive();
-      if (!this.page || this.page.isClosed()) return false;
+      // giriş algılandıktan sonra pencere kapatıldı (izin adımları beklenmeden): oturum var, devam et
+      if (!this.page || this.page.isClosed()) break;
       const url = this.page.url();
       const stillIn = await this.isLoggedIn(true);
       if (url === lastUrl && stillIn) stableFor += 500;

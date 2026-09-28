@@ -204,6 +204,15 @@ Dil: arayüz ve yorumlar Türkçe.
   önce facebook.com/messages, olmazsa messenger.com — Nisan 2026'da kapandı; seçilen adres günlüğe yazılır, `verify-strategy.mjs messenger`
   hangisinin çalıştığını basar; facebook.com düzeni gerçek hesapla henüz doğrulanmadı).
   Çerezli medya `fetchMedia` ile vekilden geçer, `~/.mivelo/sessions/<hesap>/media` önbelleği.
+- **Bağlanma iptali (29.09, Kaan: X giriş penceresini girişsiz kapattım, "eşleşme bekleniyor"da kaldı)**: köprü `waitForLogin` pencere
+  kapanınca/iptalde `loginCancelled` → tarayıcı TAMAMEN kapanır (macOS'ta son pencere kapanınca Chromium açık kalıyordu), hesap 'disconnected'
+  "Giriş yapılmadı", `account.login-cancelled` olayı → registry bu oturumda "Bağlan" ile açılmış, hiç bağlanmamış (`fresh`) hesabı kaldırır
+  (`cancelLogin` → `account.removed`, kart "Bağlan"a döner); var olan hesabın denemesi durur. Giriş algılandıktan sonra kapatılırsa devam
+  edilir. `POST /api/accounts/:id/cancel-login`. Arayüz: Bağlan penceresi kapanınca bu pencerede başlatılıp hâlâ bekleyen QR'lı hesaplar
+  (WhatsApp/Telegram; tek dosya demoda satır içi giriş formu da) iptal (`startedHere`, `QR_CANCEL`). Demo: giriş açılır penceresi girişsiz
+  kapanınca (`watchDemoLoginWindow`, `win.closed` + 0,9 sn pay) aynı. Bildirim "Giriş penceresi kapatıldı; bağlanma iptal edildi". Test: connect-cancel.test.ts.
+- **Yeniden bağlan (29.09)**: uyarı kartındaki ve sağ tık menüsündeki "Yeniden bağlan"/"PIN'i gir" (`App.reconnect`) Bağlan penceresini o hesabın
+  alanında açar (`connectFocus`) + yeniden bağlanmayı başlatır; "Ayrıntı ve eşleşme" de o hesaba odaklanır. Panelde `attention` (PIN vb.) kırmızı satır.
 - Bağlan penceresi: kapatma ✕ `.modal-x` kaydırılan alanın DIŞINDA (mutlak konum, aşağı inince de görünür). Telegram kartında Bağlan → doğrudan QR (ara form yok; kendi api_id'si yalnız QR altındaki "Gelişmiş" bağlantısıyla `telegram:new`).
 - **Telegram** (teleproto — bakımı süren GramJS fork'u; GramJS Temmuz 2026'da arşivlendi): api_id/api_hash Bağlan formundan (token dosyası JSON); giriş QR ile (`tg://login?token`), 2FA parolası prompt.
 - **iMessage**: `~/Library/Messages/chat.db` salt okunur + AppleScript gönderim; Tam Disk Erişimi yoksa Sistem Ayarları bölmesini açar.

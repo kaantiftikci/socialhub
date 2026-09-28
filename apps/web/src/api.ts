@@ -54,6 +54,8 @@ const liveApi = {
   messageHtml: (messageId: string) => call<{ html: string }>('GET', `/messages/${enc(messageId)}/html`),
   loginInput: (id: string, events: LoginInput[]) => call('POST', `/accounts/${enc(id)}/login-input`, { events }),
   loginCancel: (id: string) => call('POST', `/accounts/${enc(id)}/login-cancel`),
+  /** Bağlanmayı iptal et: hiç bağlanmamış yeni hesap kaldırılır, var olanın denemesi durur */
+  cancelLogin: (id: string) => call<{ result: 'removed' | 'stopped' | 'none' }>('POST', `/accounts/${enc(id)}/cancel-login`),
   loginWindow: (id: string) => call('POST', `/accounts/${enc(id)}/login-window`),
   accountInput: (id: string, kind: 'phone' | 'code' | 'password', value: string) => call('POST', `/accounts/${enc(id)}/input`, { kind, value }),
   chats: () => call<Chat[]>('GET', '/chats'),

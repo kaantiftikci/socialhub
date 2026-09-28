@@ -104,6 +104,25 @@ export function ConnectModal({
   const [busy, setBusy] = useState(false);
 
   const activeAccount = accounts.find((a) => a.id === active);
+  /**
+   * Bu pencerede "Bağlan" ile başlatılan hesaplar: pencere kapanınca hâlâ QR/giriş bekleyen QR'lı hesap (WhatsApp, Telegram;
+   * demoda tüm bekleyenler) iptal edilir — hiç bağlanmamış yeni hesap kaldırılır, Bağlan kartı ilk haline döner. Tarayıcıyla
+   * girilen uygulamaların ayrı giriş penceresi bağımsızdır: onu kapatmak çekirdekte iptal eder.
+   */
+  const startedHere = useRef(new Set<string>());
+  const accountsRef = useRef(accounts);
+  accountsRef.current = accounts;
+  useEffect(
+    () => () => {
+      for (const id of startedHere.current) {
+        const a = accountsRef.current.find((x) => x.id === id);
+        if (!a || a.status === 'connected') continue;
+        // tek dosya demoda tarayıcı girişi de bu pencerenin içindeki formda (DemoLogin): pencere kapanınca o da iptal
+        if (QR_CANCEL.has(a.platform) || (DEMO_OFFLINE && PLATFORMS[a.platform].mode === 'browser')) void api.cancelLogin(id).catch(() => undefined);
+      }
+    },
+    [],
+  );
   // Başka bir sağlayıcının formuna geçince alanlar sıfırlansın (Yahoo'ya yazılan adres/şifre "Diğer e-posta"da görünmesin)
   // ve açılan panel görünür alana kaydırılsın
   useEffect(() => {
@@ -161,6 +180,7 @@ export function ConnectModal({
         // form doldurulduysa (e-posta uygulama şifresi, pazaryeri, Slack belirteci) doğrudan bağlanır; yoksa QR / giriş formu gösterilir
         const filled = isMail || !!shopFields || platform === 'shopier' || (platform === 'slack' && !!opts.token);
         const a = await api.addAccount(platform, filled ? 'demo-form' : undefined);
+        if (a.status !== 'connected') startedHere.current.add(a.id);
         setActive(a.id);
         // gerçek uygulamadaki gibi giriş penceresi hemen açılır (engellenirse "Giriş ekranını aç" düğmesi)
         if (!DEMO_OFFLINE && a.status === 'pairing' && PLATFORMS[platform].mode === 'browser' && !openDemoLoginWindow(a)) notify('Giriş penceresi engellendi; "Giriş ekranını aç"a bas', true);
@@ -188,6 +208,7 @@ export function ConnectModal({
         token = JSON.stringify(cfg);
       }
       const a = await api.addAccount(platform, token);
+      if (a.status !== 'connected') startedHere.current.add(a.id);
       setActive(a.id);
       setMail(EMPTY_MAIL);
       await onChanged();
@@ -668,7 +689,12 @@ export function ConnectModal({
                   </button>
                 </div>
               )}
-              {activeAccount.status === 'connected' && (
+              {activeAccount.status === 'connected' && activeAccount.attention && (
+                <p style={{ margin: '10px 0 0', fontSize: 13.5, color: 'var(--danger)', display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+                  <Icon name="alert" size={15} sw={2.2} /> {activeAccount.attention}
+                </p>
+              )}
+              {activeAccount.status === 'connected' && !activeAccount.attention && (
                 <p style={{ margin: '10px 0 0', fontSize: 13.5, color: 'var(--text2)' }}>Bağlı. {PLATFORMS[activeAccount.platform].category === 'shop' ? 'Siparişler ve müşteri soruları' : 'Sohbetler'} gelen kutusuna geliyor.</p>
               )}
             </div>
@@ -803,6 +829,8 @@ function accountLabel(a: Account | undefined): string | undefined {
 }
 
 const STATUS_RANK: Record<Account['status'], number> = { connected: 0, connecting: 1, pairing: 2, error: 3, disconnected: 4 };
+/** Bağlan penceresi kapanınca bekleyen bağlanması iptal edilen (eşleştirmesi bu pencerede görünen) QR'lı uygulamalar */
+const QR_CANCEL = new Set<Platform>(['whatsapp', 'telegram']);
 
 function statusText(a: Account): string {
   return { connected: 'Bağlı', connecting: 'Bağlanıyor…', pairing: 'Eşleşme bekleniyor', disconnected: 'Bağlı değil', error: 'Hata' }[a.status];

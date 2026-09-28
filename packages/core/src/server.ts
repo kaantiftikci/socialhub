@@ -254,6 +254,11 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     });
     return { ok: true };
   });
+  // Bağlanma iptali (Bağlan penceresi QR beklerken kapandı): yeni hesap kaldırılır, var olanın denemesi durur
+  route('POST', '/api/accounts/:id/cancel-login', async (r, _s, p) => {
+    localOnly(r);
+    return { result: await registry.cancelLogin(dec(p.id)) };
+  });
   route('POST', '/api/accounts/:id/login-cancel', (_r, _s, p) => {
     const c = registry.get(dec(p.id)) as { loginCancel?: () => void } | undefined;
     c?.loginCancel?.();

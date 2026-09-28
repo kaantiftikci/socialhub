@@ -55,10 +55,45 @@ export class Registry {
     return run;
   }
 
+  /** Bu oturumda "Bağlan" ile açılmış ve henüz hiç bağlanmamış hesaplar: giriş iptal edilince tamamen kaldırılır */
+  private fresh = new Set<string>();
+
   constructor(private store: Store) {
-    // tarayıcı girişli e-posta hesabı bağlanınca önceki denemelerden kalan boş kopyaları temizle
     bus.on((ev) => {
-      if (ev.type === 'account.status' && ev.account.status === 'connected') void this.pruneStaleLogins(ev.account);
+      // tarayıcı girişli e-posta hesabı bağlanınca önceki denemelerden kalan boş kopyaları temizle
+      if (ev.type === 'account.status' && ev.account.status === 'connected') {
+        this.fresh.delete(ev.account.id);
+        void this.pruneStaleLogins(ev.account);
+      }
+      // giriş penceresi girişsiz kapatıldı: yeni hesap iz bırakmasın (Bağlan kartı ilk haline döner)
+      if (ev.type === 'account.login-cancelled' && this.fresh.has(ev.accountId)) void this.cancelLogin(ev.accountId).catch(() => undefined);
+    });
+  }
+
+  /**
+   * Bağlanmayı iptal et (QR/giriş penceresi kapatıldı, arayüzde Bağlan penceresi kapandı): hiç bağlanmamış yeni hesap tamamen
+   * kaldırılır ('removed' + account.removed olayı), var olan hesabın bağlanma denemesi durdurulur ('stopped'). Bağlıysa dokunulmaz.
+   */
+  cancelLogin(id: string): Promise<'removed' | 'stopped' | 'none'> {
+    return this.serial(id, async () => {
+      const a = this.store.getAccount(id);
+      if (!a || a.status === 'connected') return 'none';
+      if (this.fresh.has(id)) {
+        this.fresh.delete(id);
+        await this.removeNow(id);
+        bus.emit({ type: 'account.removed', accountId: id });
+        return 'removed';
+      }
+      const c = this.connectors.get(id);
+      if (c) {
+        this.connectors.delete(id);
+        await withTimeout(c.stop(), 15_000).catch(() => undefined);
+      }
+      const cur = this.store.getAccount(id) ?? a;
+      const next: Account = { ...cur, status: 'disconnected', detail: 'Bağlanma iptal edildi — bağlanmak için Yeniden bağlan' };
+      this.store.upsertAccount(next);
+      bus.emit({ type: 'account.status', account: next });
+      return 'stopped';
     });
   }
 
@@ -157,6 +192,7 @@ export class Registry {
     };
     this.store.upsertAccount(account);
     if (opts.token) fs.writeFileSync(path.join(sessionDir(account.id), 'token'), opts.token, { mode: 0o600 });
+    this.fresh.add(account.id);
     try {
       await this.spawn(account);
     } catch (e) {
@@ -174,6 +210,7 @@ export class Registry {
 
   private async removeNow(id: string): Promise<void> {
     if (!this.store.getAccount(id) && !this.connectors.has(id)) throw new Error('Hesap yok');
+    this.fresh.delete(id);
     const c = this.connectors.get(id);
     if (c) {
       this.connectors.delete(id);

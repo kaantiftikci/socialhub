@@ -282,6 +282,17 @@ export default function App() {
     toastTimer.current = window.setTimeout(() => setToast(null), 3500);
   }, []);
 
+  /**
+   * Yeniden bağlan: Bağlan penceresi o uygulamanın alanında açılır (QR / giriş ekranı / durum orada görünür) ve yeniden
+   * bağlanma başlar; pencere açılana dek üstte gösterge kalır (hata olursa kalkar).
+   */
+  const reconnect = (a: Account, label?: string) => {
+    setConnectFocus(a.id);
+    setConnectOpen(true);
+    markOpening(a.id, label || 'Yeniden bağlanılıyor');
+    api.restartAccount(a.id).catch((e) => (clearOpeningFor(a.id), notify(e.message, true)));
+  };
+
   const refresh = useCallback(async () => {
     const [a, c, h] = await Promise.all([api.accounts(), api.chats(), api.health()]);
     setAccounts(a);
@@ -441,6 +452,10 @@ export default function App() {
               })
               .catch(() => undefined);
           }
+          break;
+        case 'account.login-cancelled':
+          clearOpeningFor(ev.accountId);
+          notify('Giriş penceresi kapatıldı; bağlanma iptal edildi');
           break;
         case 'account.removed':
           setAccounts((prev) => prev.filter((a) => a.id !== ev.accountId));
@@ -1525,11 +1540,7 @@ export default function App() {
                     // QR süresi dolmuşsa (ekranda kod yok) yenisini iste
                     if (!qr[a.id]) api.restartAccount(a.id).catch((e) => notify(e.message, true));
                   }
-                  else {
-                    // pencere açılana (ya da oturum doğrulanana) dek ekranda kalan gösterge; hata olursa kalkar
-                    markOpening(a.id, is.done || 'Yeniden bağlanılıyor');
-                    api.restartAccount(a.id).catch((e) => (clearOpeningFor(a.id), notify(e.message, true)));
-                  }
+                  else reconnect(a, is.done);
                 }}
               >
                 {is.label}
@@ -1560,10 +1571,10 @@ export default function App() {
               <span className={`dot ${menu.account.status}`} style={{ marginLeft: 'auto' }} />
               <span style={{ fontSize: 11.5, color: 'var(--text3)' }}>{statusText(menu.account.status)}</span>
             </div>
-            <button onClick={() => (setMenu(null), setConnectOpen(true))}>
+            <button onClick={() => (setMenu(null), setConnectFocus(menu.account.id), setConnectOpen(true))}>
               <Icon name="sliders" size={14} /> Ayrıntı ve eşleşme
             </button>
-            <button onClick={() => (setMenu(null), api.restartAccount(menu.account.id).then(() => notify('Yeniden bağlanılıyor')).catch((e) => notify(e.message, true)))}>
+            <button onClick={() => (setMenu(null), reconnect(menu.account))}>
               <Icon name="refresh" size={14} sw={2} /> Yeniden bağlan
             </button>
             {menu.confirm ? (

@@ -115,7 +115,36 @@ export function openDemoLoginWindow(a: Account): boolean {
   const left = Math.max(0, Math.round((window.screenX || 0) + ((window.outerWidth || w) - w) / 2));
   const top = Math.max(0, Math.round((window.screenY || 0) + ((window.outerHeight || h) - h) / 2));
   const win = window.open(`/demo-login.html?${q}`, `mivelo-login-${a.id}`, `popup=yes,width=${w},height=${h},left=${left},top=${top}`);
+  if (win) watchDemoLoginWindow(win, a.id);
   return !!win;
+}
+
+/**
+ * Giriş penceresi giriş yapılmadan kapatılırsa (gerçek uygulamadaki gibi) bağlanma iptal: yeni hesap kaldırılır, Bağlan
+ * kartı ilk haline döner. Başarıda pencere "tamam" mesajını gönderip kendini kapatır; mesaj işlenebilsin diye kısa bekleme.
+ */
+function watchDemoLoginWindow(win: Window, id: string): void {
+  const t = window.setInterval(() => {
+    const a = accounts.find((x) => x.id === id);
+    if (!a || a.status === 'connected') return window.clearInterval(t);
+    if (!win.closed) return;
+    window.clearInterval(t);
+    window.setTimeout(() => {
+      const still = accounts.find((x) => x.id === id);
+      if (still && still.status !== 'connected') void cancelDemoLogin(id, true);
+    }, 900);
+  }, 400);
+}
+
+/** Bekleyen (hiç bağlanmamış) demo hesabını kaldır: kart "Bağlan"a döner */
+async function cancelDemoLogin(id: string, windowClosed = false): Promise<'removed' | 'none'> {
+  const a = accounts.find((x) => x.id === id);
+  if (!a || a.status === 'connected') return 'none';
+  accounts = accounts.filter((x) => x.id !== id);
+  await saveAccounts().catch(() => undefined);
+  emit({ type: 'account.removed', accountId: id });
+  if (windowClosed) emit({ type: 'account.login-cancelled', accountId: id });
+  return 'removed';
 }
 if (typeof window !== 'undefined') {
   const done = (d: unknown) => {
@@ -492,6 +521,7 @@ export const staticApi = {
     }
     for (const chatId of gone) emit({ type: 'chat.delete', chatId });
   },
+  cancelLogin: async (id: string) => ({ result: await cancelDemoLogin(id) }),
   /** Demo giriş formu gönderildi (Connect.tsx): bilgiler kullanılmaz, hesap bağlanır */
   demoLogin: async (id: string) => {
     await new Promise((r) => setTimeout(r, 900));
