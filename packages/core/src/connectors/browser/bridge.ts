@@ -754,7 +754,13 @@ export class BrowserConnector extends BaseConnector {
             await page.mouse.wheel(ev.dx, ev.dy);
             break;
           case 'text':
-            if (ev.text) await page.keyboard.insertText(ev.text.slice(0, 2000));
+            // Gerçek tuş olayları (keydown/keypress/input/keyup): insertText yalnız 'input' üretir → kutucuklu doğrulama kodu
+            // alanları (Yandex vb.) kodu görüyor ama form geçerli sayılmıyor, "Continue" basılamıyordu. Uzun yapıştırma insertText.
+            if (ev.text) {
+              const t = ev.text.slice(0, 2000);
+              if (t.length <= 200) await page.keyboard.type(t);
+              else await page.keyboard.insertText(t);
+            }
             break;
           case 'key':
             if (/^((Shift|Control|Alt|Meta|ControlOrMeta)\+)*[\w]{1,16}$/.test(ev.key)) await page.keyboard.press(ev.key);

@@ -76,7 +76,9 @@ Dil: arayüz ve yorumlar Türkçe.
   `mv_send_mail` (kimlik doğrulamalı SMTP, bağımlılıksız; ayar `~/mivelo-data/smtp.json` 0600, Admin → Ayarlar → E-posta gönderimi + deneme
   e-postası + sunucu konuşma dökümü, şifre dökümde gizli). Türkticaret: smtp.turkticaret.net 465 SSL / 587 STARTTLS, kullanıcı = gönderen
   (varsayılan sunucu değeri bu). Bağlantı kurulamazsa ("Connection refused": barındırma bir giden portu kapatmış olabilir) öteki port
-  kendiliğinden denenir, çalışan kaydedilir; ikisi de kapalıysa sağlayıcıdan giden SMTP erişimi istenmeli. SMTP yoksa mail() yedeği — cPanel'de "gönderildi" deyip ULAŞMIYORDU (SPF/DKIM).
+  kendiliğinden denenir, sonra sunucunun yerel posta sunucusu (localhost:587 STARTTLS, localhost:25; yalnız localhost'ta sertifika
+  denetimi yok) — cPanel "SMTP Restrictions" dışarıyı kapatıyor (Kaan'ın sunucusunda 465/587 ikisi de "Connection refused"); çalışan kaydedilir;
+  hepsi kapalıysa sağlayıcıdan giden SMTP erişimi istenmeli. SMTP yoksa mail() yedeği — cPanel'de "gönderildi" deyip ULAŞMIYORDU (SPF/DKIM).
   Şifre e-postada YOK; sonuç `mailed`/`mailError` rozetinde. Her kullanıcının bağladığı uygulamalar kendi kaydında (bağımsız); reddedilenin oturumu düşer.
   Kayıtla gelen kullanıcı (`requestedAt`) `user_public.fresh` → demo BOŞ panelle açılır (`loadDemoAccounts(list, {fresh})`: varsayılan
   DEMO_APPS, örnek sohbet ve takvim etkinliği yok; bağladığı uygulamanın örnekleri gelir). admin örnek veriyle açılır.
@@ -369,7 +371,8 @@ Dil: arayüz ve yorumlar Türkçe.
   Hız: `login.start` olayı → arayüz ekranı HEMEN "açılıyor…" ile açar; tarayıcı gezinmeden (`launch(…, navigate=false)`) yayın başlar,
   sonra `Strategy.loginUrl ?? home` (Yandex: passport; eskiden 5-10 sn sonra açılıyordu). Akış donmasın: ana çerçeve gezinmesinde ve 2,5 sn kare
   gelmezse yayın yeniden başlar (`keepEmbedAlive`; tıklama/tuş sonrası da); `Emulation.setFocusEmulationEnabled` (sayfa odakta sanılsın);
-  uygulanamayan girdi günlüğe. (Kaan: Yandex kod girildi ama butonlar tepki vermedi → bu düzeltmeler; doğrulanmadı.)
+  uygulanamayan girdi günlüğe. Yazı `keyboard.type` ile (≤200 kr.; gerçek tuş olayları) — `insertText` yalnız input üretiyordu, kutucuklu
+  kod alanları kodu gösterip formu geçersiz sayıyordu ("Continue" basılamıyordu). (Kaan: Yandex kod girildi ama butonlar tepki vermedi → bu düzeltmeler; doğrulanmadı.)
   Site iframe'e gömülemez (X-Frame-Options) ve oturum Mivelo profilinde olmalı → bu yol. Google görünmez tarayıcıda girişi reddederse "Ayrı pencerede aç".
 - Ayrı giriş penceresi `--app=<home>` (sekmesiz/adres çubuksuz 760×860 pencere, viewport null). Kullanıcının kendi tarayıcısında açılamaz:
   oturum çerezleri Mivelo'nun Chromium profilinde olmalı. Etiket genel kaldıysa köprü yoklamadan sonra 10 dk'da bir `me()`'yi yeniden dener
