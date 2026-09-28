@@ -87,24 +87,31 @@ function runOnce() {
   try {
     const branch = git('rev-parse', '--abbrev-ref', 'HEAD');
     if (branch !== BRANCH) return skip(`atlandı: '${branch}' dalındasın (yalnız ${BRANCH} güncellenir)`);
-    if (git('status', '--porcelain', '--untracked-files=no')) return skip('atlandı: kaydedilmemiş yerel değişiklik var (git stash ya da commit et)');
     try {
       git('fetch', '--quiet', 'origin', BRANCH);
     } catch (e) {
       return skip(`fetch başarısız (ağ?): ${String(e.stderr || e.message).trim().split('\n')[0]}`);
     }
-    fs.rmSync(SKIP, { force: true });
     const head = git('rev-parse', 'HEAD');
     const remote = git('rev-parse', `origin/${BRANCH}`);
     if (head === remote) return;
     if (git('merge-base', head, remote) !== head) return skip('atlandı: yerel main origin/main\'den ayrışmış (hızlı ileri alınamaz)');
+    // package-lock.json'u yerel npm kendisi yeniden yazar (sürüm farkı); senin emeğin değil → yalnız çekilecek commit varken geri alınır, çekimden sonra npm install yeniden üretir
+    const dirty = [...new Set([...git('diff', '--name-only').split('\n'), ...git('diff', '--name-only', '--cached').split('\n')].filter(Boolean))];
+    const REGEN = new Set(['package-lock.json']);
+    let lockReset = false;
+    if (dirty.length && dirty.every((f) => REGEN.has(f))) {
+      git('checkout', '--', ...dirty);
+      lockReset = true;
+    } else if (dirty.length) return skip(`atlandı: kaydedilmemiş yerel değişiklik var (${dirty.slice(0, 3).join(', ')}${dirty.length > 3 ? '…' : ''}) — git stash ya da commit et`);
+    fs.rmSync(SKIP, { force: true });
     const changed = git('diff', '--name-only', head, remote).split('\n').filter(Boolean);
     const subjects = git('log', '--format=%s', `${head}..${remote}`).split('\n').filter(Boolean);
     log(`${subjects.length} yeni commit: ${subjects.join(' | ')}`);
     if (!sh('git', ['pull', '--ff-only', '--quiet', 'origin', BRANCH])) return notify('Mivelo güncellenemedi', 'git pull başarısız — ~/.kavsak/autodeploy.log');
 
     const any = (re) => changed.some((f) => re.test(f));
-    if (any(/(^|\/)package(-lock)?\.json$/) && !sh('npm', ['install', '--no-audit', '--no-fund'])) return notify('Mivelo güncellenemedi', 'npm install başarısız');
+    if ((lockReset || any(/(^|\/)package(-lock)?\.json$/)) && !sh('npm', ['install', '--no-audit', '--no-fund'])) return notify('Mivelo güncellenemedi', 'npm install başarısız');
     if (any(/^packages\/core\//) && !sh('npm', ['run', 'build', '-w', 'packages/core'])) return notify('Mivelo güncellenemedi', 'Çekirdek derlemesi başarısız');
 
     let appNote = '';
