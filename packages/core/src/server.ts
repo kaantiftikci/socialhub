@@ -209,6 +209,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   route('DELETE', '/api/accounts/:id', async (r, _s, p) => {
     localOnly(r);
     const id = dec(p.id);
+    if (!store.getAccount(id) && !registry.get(id)) throw new HttpError(404, 'Hesap yok');
     await registry.remove(id);
     // hesabın sohbetlerine zamanlanmış gönderimler de gitsin (yoksa 404 → "kaçırıldı" olarak 7 gün kalırdı)
     const gone = new Set(scheduled.list().filter((s) => s.chatId.startsWith(`${id}/`)).map((s) => s.chatId));
@@ -218,6 +219,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   });
   route('POST', '/api/accounts/:id/restart', async (r, _s, p) => {
     localOnly(r);
+    if (!store.getAccount(dec(p.id))) throw new HttpError(404, 'Hesap yok');
     await registry.restart(dec(p.id));
     return { ok: true };
   });
@@ -255,9 +257,12 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     const id = dec(p.id);
     const tags = (body as { tags?: unknown }).tags ?? [];
     if (!Array.isArray(tags)) throw new HttpError(400, 'tags bir dizi olmalı');
-    store.setTags(id, tags.map((t) => String(t).trim()).filter(Boolean).slice(0, 20));
-    const chat = store.getChat(id);
-    if (chat) bus.emit({ type: 'chat.upsert', chat });
+    if (!store.getChat(id)) throw new HttpError(404, 'Sohbet yok');
+    // yalnız metin/sayı etiketler ("null", "[object Object]" gibi çöp etiket yazılmasın)
+    const clean = tags.filter((t) => typeof t === 'string' || typeof t === 'number').map((t) => String(t).trim().slice(0, 40)).filter(Boolean);
+    store.setTags(id, [...new Set(clean)].slice(0, 20));
+    const chat = store.getChat(id)!;
+    bus.emit({ type: 'chat.upsert', chat });
     return chat;
   });
   /** Ban önleme: toplu/aşırı gönderim desenini gönderimden önce durdur (send-guard.ts) */

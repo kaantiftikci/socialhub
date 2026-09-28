@@ -107,3 +107,31 @@ test('sunucu: yabancı Host (DNS rebinding) reddedilir; /api/lan uzak isteğe be
     await new Promise((r) => server.close(r));
   }
 });
+
+test('sunucu: olmayan hesap 404 (500 değil); etiketler yalnız metin/sayı, olmayan sohbet 404', async () => {
+  const port = 20000 + Math.floor(Math.random() * 20000);
+  const server = createServer(store, new Registry(store), port);
+  await new Promise<void>((r) => server.once('listening', () => r()));
+  const req = (method: string, p: string, body?: unknown) =>
+    new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const r = http.request({ host: '127.0.0.1', port, path: p, method, headers: { host: `127.0.0.1:${port}`, 'content-type': 'application/json' } }, (res) => {
+        let b = '';
+        res.on('data', (c) => (b += c));
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: b }));
+      });
+      r.on('error', reject);
+      r.end(body === undefined ? undefined : JSON.stringify(body));
+    });
+  try {
+    assert.equal((await req('DELETE', '/api/accounts/yok')).status, 404);
+    assert.equal((await req('POST', '/api/accounts/yok/restart')).status, 404);
+    assert.equal((await req('POST', '/api/chats/yok/tags', { tags: ['a'] })).status, 404);
+    store.upsertAccount({ id: 'demo:t', platform: 'demo', label: 'T', status: 'connected', createdAt: Date.now() });
+    store.upsertChat({ id: 'demo:t/c', accountId: 'demo:t', platform: 'demo', remoteId: 'c', name: 'C', kind: 'direct', unread: 0, lastMessageAt: 0, lastPreview: '', tags: [] });
+    const r = await req('POST', `/api/chats/${encodeURIComponent('demo:t/c')}/tags`, { tags: [1, null, {}, ' iş ', 'iş', ['x']] });
+    assert.equal(r.status, 200);
+    assert.deepEqual(JSON.parse(r.body).tags, ['1', 'iş']);
+  } finally {
+    await new Promise((r) => server.close(r));
+  }
+});
