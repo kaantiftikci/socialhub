@@ -245,6 +245,33 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
 .lic-made{margin-top:14px;padding:12px;border-radius:12px;background:var(--brand-soft);display:flex;flex-direction:column;gap:8px}
 .lic-made .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .lic-dev{display:flex;align-items:center;gap:8px;padding:4px 0}
+.pp-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.pp-bar .input{height:34px}
+.pp-bar #ppQ{flex:1;min-width:180px}
+.pp-list{max-height:360px;overflow:auto;border:1px solid var(--line-2);border-radius:12px}
+.pp-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--line-2);cursor:pointer}
+.pp-row:last-child{border-bottom:0}
+.pp-row:hover{background:var(--bg-2)}
+.pp-row input{width:17px;height:17px;flex:none}
+.pp-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.pp-main b{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pp-main span{font-size:12px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pp-st{font-size:12px;flex:none;white-space:nowrap}
+.pp-st.ok{color:var(--good,#16a34a)}.pp-st.bad{color:var(--bad)}
+@media (max-width:600px){.pp-row{flex-wrap:wrap}.pp-st{width:100%;padding-left:27px}.pp-bar .seg{width:100%}}
+.pp-foot{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}
+.pp-foot .sp{flex:1}
+.pp-res{margin-top:12px;padding:12px;border-radius:12px;background:var(--bg-2);font-size:13px;display:flex;flex-direction:column;gap:6px}
+.pp-res .bad{color:var(--bad)}
+.tpl-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;margin-top:12px}
+@media (max-width:980px){.tpl-grid{grid-template-columns:1fr}}
+.tpl-grid textarea{width:100%;min-height:330px;resize:vertical;font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;padding:10px 12px;height:auto}
+.tpl-vars{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.tpl-vars button{font:12px ui-monospace,Menlo,monospace;padding:3px 8px;border-radius:8px;border:1px solid var(--line-2);background:var(--bg-2);cursor:pointer;color:inherit}
+.tpl-prev{border:1px solid var(--line-2);border-radius:14px;overflow:hidden;background:#f4f2fa;display:flex;flex-direction:column}
+.tpl-prev .subj{padding:9px 12px;font-size:12.5px;border-bottom:1px solid var(--line-2);background:var(--card,#fff)}
+.tpl-prev iframe{width:100%;height:520px;border:0;background:#f4f2fa}
+.lic-sent{font-size:12px}
 .acc{border-bottom:1px solid var(--line-2)}.acc:last-child{border-bottom:0}
 .acc-head{display:flex;align-items:center;gap:10px;width:100%;padding:12px 2px;border:0;background:transparent;text-align:left;cursor:pointer;color:inherit;font:inherit}
 .acc-head:hover .acc-main b{color:var(--brand-ink)}
@@ -379,6 +406,35 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     <!-- lisanslar -->
     <section class="page" id="p-lisans">
       <div class="top"><h2>Lisanslar</h2><span class="sp"></span><a class="btn" href="/indir/" target="_blank" rel="noopener">mivelo.app/indir ↗</a></div>
+      <div class="card" style="margin-bottom:14px"><h3>Üyelere anahtar gönder <span class="sub">bekleme listesi ve demo üyeleri; seç, gönder de: her birine anahtar üretilir ve logolu e-posta gider</span></h3>
+        <div class="pp-bar">
+          <input class="input" id="ppQ" type="search" placeholder="Ad ya da e-posta ara…" aria-label="Ara">
+          <div class="seg" id="ppSeg"><button data-f="nokey" class="on">Anahtarsız</button><button data-f="all">Tümü</button><button data-f="sent">Gönderilen</button><button data-f="fail">Hatalı</button></div>
+        </div>
+        <div class="pp-list" id="ppList"><div class="empty">Yükleniyor…</div></div>
+        <div class="pp-foot">
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px"><input type="checkbox" id="ppAll"> Görünenleri seç</label>
+          <select class="input" id="ppMax" style="width:auto;height:34px" aria-label="Cihaz sınırı"><option value="1">1 cihaz</option><option value="2" selected>2 cihaz</option><option value="3">3 cihaz</option><option value="5">5 cihaz</option></select>
+          <select class="input" id="ppDays" style="width:auto;height:34px" aria-label="Süre"><option value="0" selected>Süresiz</option><option value="30">30 gün</option><option value="90">90 gün</option><option value="365">1 yıl</option></select>
+          <span class="sp"></span>
+          <button class="btn dark" id="ppSend" type="button" disabled>Seçilenlere gönder</button>
+        </div>
+        <div class="muted" style="font-size:12px;margin-top:8px">Kişinin etkin anahtarı varsa yenisi üretilmez, aynı anahtar yeniden gönderilir. Başarıyla gönderilen bekleme listesi kaydı "Davet edildi" olur.</div>
+        <div id="ppRes"></div>
+      </div>
+      <details class="card" id="tplCard" style="margin-bottom:14px"><summary style="cursor:pointer;font-weight:600">E-posta taslağı <span class="sub" style="font-weight:400">anahtarla giden e-postanın metni; logo, anahtar kutusu ve indirme düğmesi kendiliğinden eklenir</span></summary>
+        <div class="tpl-grid">
+          <div>
+            <label class="muted" for="tplSub" style="display:block;font-size:12px">Konu</label>
+            <input class="input" id="tplSub" maxlength="150" style="display:block;width:100%;margin:4px 0 10px">
+            <label class="muted" for="tplBody" style="display:block;font-size:12px">Metin</label>
+            <div class="tpl-vars" id="tplVars"><button type="button" data-v="{ad}" title="Kişinin adı (yoksa atlanır)">{ad}</button><button type="button" data-v="{anahtar}" title="Tek başına satırda: büyük anahtar kutusu">{anahtar}</button><button type="button" data-v="{indir}" title="mivelo.app/indir bağlantısı">{indir}</button><button type="button" data-v="{cihaz}" title="Cihaz sınırı">{cihaz}</button><button type="button" data-v="{gecerlilik}" title="Süresiz ya da bitiş tarihi">{gecerlilik}</button></div>
+            <textarea class="input" id="tplBody" maxlength="5000" spellcheck="true"></textarea>
+            <div class="pp-foot"><button class="btn dark" id="tplSave" type="button">Kaydet</button><button class="btn" id="tplReset" type="button">Varsayılana dön</button><span class="sp"></span><input class="input" id="tplTo" type="email" placeholder="deneme adresi" style="width:190px;height:34px"><button class="btn" id="tplTest" type="button">Deneme gönder</button></div>
+          </div>
+          <div class="tpl-prev"><div class="subj"><span class="muted">Konu:</span> <b id="tplPrevSub"></b></div><iframe id="tplPrev" sandbox="" title="E-posta önizlemesi"></iframe></div>
+        </div>
+      </details>
       <div class="card" style="margin-bottom:14px"><h3>Yeni lisans anahtarı <span class="sub">masaüstü uygulaması açılışta anahtar ister; yalnız burada ürettiklerinle açılır</span></h3>
         <form id="licForm" class="lic-form">
           <label><span>Kime / not</span><input class="input" id="licNote" maxlength="120" placeholder="ör. Ahmet — beta"></label>
@@ -388,6 +444,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
           <label><span>Adet</span><input class="input" id="licCount" type="number" min="1" max="50" value="1"></label>
           <button class="btn dark" type="submit">Oluştur</button>
           <datalist id="licMails"></datalist>
+          <label style="flex-direction:row;align-items:center;gap:8px;grid-column:1/-1;font-size:13px;color:inherit"><input type="checkbox" id="licSend" checked> E-posta yazılıysa anahtarı logolu e-postayla hemen gönder</label>
         </form>
         <div id="licMade"></div>
       </div>
@@ -679,8 +736,9 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     return 'mailto:'+encodeURIComponent(k.email||'')+'?subject='+encodeURIComponent('Mivelo lisans anahtarın')+'&body='+encodeURIComponent(body);
   }
   function copyText(t){ (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(function(){ toast('Kopyalandı'); }).catch(function(){ var i=document.createElement('textarea'); i.value=t; document.body.appendChild(i); i.select(); document.execCommand('copy'); i.remove(); toast('Kopyalandı'); }); }
+  function loadLicKeys(){ return api('licenses').then(function(d){ LIC=d.keys; renderLic(); }).catch(function(e){ toast(e.message,true); }); }
   function loadLic(){
-    api('licenses').then(function(d){ LIC=d.keys; renderLic(); }).catch(function(e){ toast(e.message,true); });
+    loadLicKeys(); loadPeople();
     api('waitlist').then(function(d){ $('#licMails').innerHTML=(d.entries||[]).slice(0,500).map(function(e){ return '<option value="'+esc(e.email)+'">'; }).join(''); }).catch(function(){});
   }
   function renderLic(){
@@ -693,22 +751,25 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     $('#nc-lisans').textContent=LIC.length?fmt(LIC.filter(function(k){ return k.status==='active'; }).length):'';
     $('#licBox').innerHTML=rows.length?rows.map(function(k){
       var st=LIC_ST[k.status]||LIC_ST.active, open=!!OPEN_L[k.id];
-      var acts='<button class="btn sm" data-lcopy="'+esc(k.key)+'">Kopyala</button><a class="btn sm" href="'+esc(licMail(k))+'">E-postayla gönder</a>'+
+      var acts='<button class="btn sm" data-lcopy="'+esc(k.key)+'">Kopyala</button>'+(k.status==='active'?'<button class="btn sm soft" data-lsend="'+esc(k.id)+'">'+(k.sentAt?'Yeniden gönder':'E-postayla gönder')+'</button>':'')+'<a class="btn sm" href="'+esc(licMail(k))+'" title="Kendi e-posta uygulamanda aç">Taslağı aç</a>'+
         (k.status==='revoked'?'<button class="btn sm soft" data-lst="'+esc(k.id)+'" data-to="active">Etkinleştir</button>':'<button class="btn sm danger" data-lst="'+esc(k.id)+'" data-to="revoked">İptal et</button>')+
         (k.activations.length?'<button class="btn sm" data-lreset="'+esc(k.id)+'">Cihazları sıfırla</button>':'')+
         '<button class="btn sm" data-ldel="'+esc(k.id)+'">'+I.trash+' Sil</button>';
       var devs=k.activations.length?k.activations.map(function(a){ return '<div class="lic-dev"><span>'+esc(a.name||'Cihaz')+' · '+esc(a.os||'?')+(a.version?' · v'+esc(a.version):'')+' · son '+ago(tsOf(a.lastAt))+'</span><button class="btn sm" data-lrel="'+esc(k.id)+'" data-act="'+esc(a.id)+'">Kaldır</button></div>'; }).join(''):'<span class="muted">Henüz kullanılmadı</span>';
       return '<div class="acc'+(open?' open':'')+'"><button type="button" class="acc-head" data-acc="l:'+esc(k.id)+'" aria-expanded="'+open+'">'+
-        '<span class="acc-main"><b class="lic-key">'+esc(k.key)+'</b><span class="muted">'+esc(k.note||k.email||'not yok')+' · '+k.activations.length+'/'+k.maxDevices+' cihaz'+(k.activations.length?' · son kullanım '+ago(Math.max.apply(null,k.activations.map(function(a){ return tsOf(a.lastAt); }))):' · henüz kullanılmadı')+'</span></span>'+
+        '<span class="acc-main"><b class="lic-key">'+esc(k.key)+'</b><span class="muted">'+esc(k.note||k.email||'not yok')+(k.mailError?' · gönderilemedi':k.sentAt?' · e-posta gitti':'')+' · '+k.activations.length+'/'+k.maxDevices+' cihaz'+(k.activations.length?' · son kullanım '+ago(Math.max.apply(null,k.activations.map(function(a){ return tsOf(a.lastAt); }))):' · henüz kullanılmadı')+'</span></span>'+
         '<span class="chip '+st[1]+'"><i></i>'+st[0]+'</span><span class="acc-chev">'+I.chev+'</span></button>'+
-        (open?'<div class="acc-body"><dl class="acc-dl">'+(k.email?'<dt>E-posta</dt><dd>'+esc(k.email)+'</dd>':'')+(k.note?'<dt>Not</dt><dd>'+esc(k.note)+'</dd>':'')+
+        (open?'<div class="acc-body"><dl class="acc-dl">'+(k.email?'<dt>E-posta</dt><dd>'+esc(k.email)+'</dd>':'')+
+          '<dt>Gönderim</dt><dd class="lic-sent">'+(k.mailError?'<span style="color:var(--bad)">Gönderilemedi: '+esc(k.mailError)+'</span>':k.sentAt?'Gönderildi · '+ago(k.sentAt)+(k.sentTo?' · '+esc(k.sentTo):''):'Gönderilmedi')+'</dd>'+(k.note?'<dt>Not</dt><dd>'+esc(k.note)+'</dd>':'')+
           '<dt>Oluşturma</dt><dd>'+ago(tsOf(k.createdAt))+'</dd><dt>Geçerlilik</dt><dd>'+(k.expiresAt?new Date(k.expiresAt).toLocaleDateString('tr-TR'):'Süresiz')+'</dd>'+
           '<dt>Cihaz sınırı</dt><dd><select class="input" data-lmax="'+esc(k.id)+'" style="width:auto;height:30px">'+[1,2,3,5,10].map(function(n){ return '<option'+(n===k.maxDevices?' selected':'')+'>'+n+'</option>'; }).join('')+'</select></dd>'+
           '<dt>Cihazlar</dt><dd>'+devs+'</dd></dl><div class="acc-acts">'+acts+'</div></div>':'')+'</div>'; }).join(''):'<div class="empty">'+(LIC.length?'Eşleşen lisans yok.':'Henüz lisans oluşturulmadı.')+'</div>';
   }
   function licUpdate(body,msg){ return api('license_update',body).then(function(k){ LIC=LIC.map(function(x){ return x.id===k.id?k:x; }); renderLic(); if(msg) toast(msg); }).catch(function(e){ toast(e.message,true); }); }
   $('#licForm').addEventListener('submit',function(e){ e.preventDefault();
-    api('license_create',{note:$('#licNote').value.trim(),email:$('#licEmail').value.trim(),maxDevices:+$('#licMax').value,days:+$('#licDays').value,count:+$('#licCount').value||1}).then(function(d){
+    api('license_create',{note:$('#licNote').value.trim(),email:$('#licEmail').value.trim(),send:$('#licSend').checked,maxDevices:+$('#licMax').value,days:+$('#licDays').value,count:+$('#licCount').value||1}).then(function(d){
+      if(d.mail) toast(d.mail.ok?'Anahtar '+d.mail.email+' adresine gönderildi':'Anahtar üretildi ama e-posta gönderilemedi: '+d.mail.error,!d.mail.ok);
+      if(d.mail) loadPeople();
       LIC=d.created.slice().reverse().concat(LIC); renderLic(); $('#licNote').value=''; $('#licEmail').value=''; $('#licCount').value=1;
       var keys=d.created.map(function(k){ return k.key; }).join('\n');
       $('#licMade').innerHTML='<div class="lic-made"><b>'+d.created.length+' anahtar oluşturuldu</b>'+d.created.map(function(k){ return '<div class="row"><span class="lic-key">'+esc(k.key)+'</span><button class="btn sm" data-lcopy="'+esc(k.key)+'">Kopyala</button><a class="btn sm soft" href="'+esc(licMail(k))+'">E-postayla gönder</a></div>'; }).join('')+
@@ -718,14 +779,76 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   $('#licSeg').addEventListener('click',function(e){ var b=e.target.closest('button'); if(!b) return; LIC_F=b.dataset.f; $$('#licSeg button').forEach(function(x){ x.classList.toggle('on',x===b); }); renderLic(); });
   document.addEventListener('change',function(e){ var s=e.target.closest('[data-lmax]'); if(s) licUpdate({id:s.dataset.lmax,maxDevices:+s.value},'Cihaz sınırı güncellendi'); });
   document.addEventListener('click',function(e){
-    var b=e.target.closest('[data-lcopy],[data-lst],[data-lreset],[data-lrel],[data-ldel]'); if(!b) return;
+    var b=e.target.closest('[data-lcopy],[data-lst],[data-lreset],[data-lrel],[data-ldel],[data-lsend]'); if(!b) return;
     if(b.dataset.lcopy) return copyText(b.dataset.lcopy);
+    if(b.dataset.lsend){ var k=LIC.filter(function(x){ return x.id===b.dataset.lsend; })[0]; if(!k) return;
+      var to=k.email||(prompt('Anahtar hangi adrese gönderilsin?')||'').trim(); if(!to) return;
+      b.disabled=true; b.textContent='Gönderiliyor…';
+      api('license_send',{id:k.id,email:to}).then(function(r){ toast(r.ok?'Anahtar '+r.email+' adresine gönderildi':'Gönderilemedi: '+r.error,!r.ok); loadLicKeys(); loadPeople(); }).catch(function(x){ toast(x.message,true); b.disabled=false; });
+      return; }
     if(b.dataset.lst) return licUpdate({id:b.dataset.lst,status:b.dataset.to},b.dataset.to==='revoked'?'İptal edildi: kullanıcı uygulamaya dönünce (en geç 30 dk içinde) kilitlenir':'Etkinleştirildi');
     if(b.dataset.lrel) return licUpdate({id:b.dataset.lrel,release:b.dataset.act},'Cihaz kaldırıldı');
     if(b.dataset.armed!=='1'){ b.dataset.armed='1'; var t=b.innerHTML; b.textContent='Emin misin?'; setTimeout(function(){ b.dataset.armed=''; b.innerHTML=t; },3000); return; }
     if(b.dataset.lreset) return licUpdate({id:b.dataset.lreset,resetDevices:true},'Cihazlar sıfırlandı');
     if(b.dataset.ldel) api('license_delete',{id:b.dataset.ldel}).then(function(){ LIC=LIC.filter(function(k){ return k.id!==b.dataset.ldel; }); renderLic(); toast('Silindi'); }).catch(function(x){ toast(x.message,true); });
   });
+  /* ---------- üyelere anahtar gönder + e-posta taslağı ---------- */
+  var PP=[], PP_F='nokey', PP_SEL={};
+  function loadPeople(){ api('lic_people').then(function(d){ PP=d.people||[]; renderPeople(); }).catch(function(e){ $('#ppList').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; }); }
+  function ppVisible(){
+    var q=($('#ppQ').value||'').toLocaleLowerCase('tr');
+    return PP.filter(function(p){
+      if(PP_F==='nokey'&&(p.key&&p.key.status==='active')) return false;
+      if(PP_F==='sent'&&!p.sentAt) return false;
+      if(PP_F==='fail'&&!p.mailError) return false;
+      return !q||(p.name+' '+p.email).toLocaleLowerCase('tr').indexOf(q)>=0; });
+  }
+  function ppState(p){
+    if(p.mailError) return '<span class="pp-st bad" title="'+esc(p.mailError)+'">Gönderilemedi</span>';
+    if(p.sentAt) return '<span class="pp-st ok">Gönderildi · '+ago(p.sentAt)+(p.key&&p.key.used?' · kullanıyor':'')+'</span>';
+    if(p.key) return '<span class="pp-st">'+(p.key.status==='active'?'Anahtarı var (gönderilmedi)':'Anahtarı iptal')+'</span>';
+    return '<span class="pp-st muted">Anahtar yok</span>';
+  }
+  function renderPeople(){
+    var rows=ppVisible(), SRC={waitlist:'Bekleme listesi',demo:'Demo üyesi'};
+    $('#ppList').innerHTML=rows.length?rows.map(function(p){
+      return '<label class="pp-row"><input type="checkbox" data-psel="'+esc(p.email)+'"'+(PP_SEL[p.email]?' checked':'')+'>'+
+        '<span class="pp-main"><b>'+esc(p.name||p.email)+'</b><span>'+(p.name?esc(p.email)+' · ':'')+p.src.map(function(s){ return SRC[s]||s; }).join(' + ')+(p.at?' · '+ago(p.at):'')+'</span></span>'+ppState(p)+'</label>'; }).join('')
+      :'<div class="empty">'+(PP.length?'Bu filtrede kimse yok.':'Henüz üye yok: bekleme listesine ya da demoya kaydolanlar burada görünür.')+'</div>';
+    $('#ppAll').checked=rows.length>0&&rows.every(function(p){ return PP_SEL[p.email]; });
+    var n=Object.keys(PP_SEL).filter(function(k){ return PP_SEL[k]; }).length;
+    $('#ppSend').disabled=!n; $('#ppSend').textContent=n?n+' kişiye anahtar gönder':'Seçilenlere gönder';
+  }
+  $('#ppQ').addEventListener('input',renderPeople);
+  $('#ppSeg').addEventListener('click',function(e){ var b=e.target.closest('button'); if(!b) return; PP_F=b.dataset.f; $$('#ppSeg button').forEach(function(x){ x.classList.toggle('on',x===b); }); renderPeople(); });
+  $('#ppList').addEventListener('change',function(e){ var t=e.target.closest('[data-psel]'); if(!t) return; PP_SEL[t.dataset.psel]=t.checked; renderPeople(); });
+  $('#ppAll').addEventListener('change',function(e){ ppVisible().forEach(function(p){ PP_SEL[p.email]=e.target.checked; }); renderPeople(); });
+  $('#ppSend').addEventListener('click',function(){
+    var b=this, em=Object.keys(PP_SEL).filter(function(k){ return PP_SEL[k]; });
+    if(!em.length) return;
+    if(em.length>50){ toast('Tek seferde en çok 50 kişi',true); return; }
+    b.disabled=true; b.textContent='Gönderiliyor… ('+em.length+')';
+    api('license_issue',{emails:em,maxDevices:+$('#ppMax').value,days:+$('#ppDays').value}).then(function(d){
+      var bad=d.results.filter(function(r){ return !r.ok; });
+      PP_SEL={}; loadPeople(); loadLicKeys();
+      $('#ppRes').innerHTML='<div class="pp-res"><b>'+d.sent+' / '+d.results.length+' e-posta gönderildi</b>'+
+        (bad.length?'<div class="bad">Gönderilemeyen '+bad.length+' kişi: anahtarları üretildi, Lisanslar listesinden "Taslağı aç" ile kendi e-postandan gönderebilirsin.</div><div class="muted">'+esc(bad[0].error)+'</div>'+
+          bad.map(function(r){ return '<div class="row" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span>'+esc(r.email)+'</span><span class="lic-key">'+esc(r.key)+'</span><button class="btn sm" data-lcopy="'+esc(r.key)+'">Kopyala</button></div>'; }).join(''):'')+'</div>';
+      toast(bad.length?d.sent+' gönderildi, '+bad.length+' gönderilemedi':d.sent+' kişiye anahtar gönderildi',!!bad.length);
+    }).catch(function(x){ toast(x.message,true); }).then(function(){ renderPeople(); });
+  });
+  var TPL_DEF=null, tplTimer=0;
+  function loadTpl(){ api('lic_mail').then(function(d){ TPL_DEF=d.default; $('#tplSub').value=d.tpl.subject; $('#tplBody').value=d.tpl.body; tplPreview(); }).catch(function(){}); }
+  function tplPreview(){ clearTimeout(tplTimer); tplTimer=setTimeout(function(){
+    api('lic_mail_preview',{subject:$('#tplSub').value,body:$('#tplBody').value}).then(function(d){ $('#tplPrevSub').textContent=d.subject; $('#tplPrev').srcdoc=d.html; }).catch(function(){}); },350); }
+  $('#tplSub').addEventListener('input',tplPreview); $('#tplBody').addEventListener('input',tplPreview);
+  $('#tplVars').addEventListener('click',function(e){ var b=e.target.closest('[data-v]'); if(!b) return; var t=$('#tplBody'), a=t.selectionStart, z=t.selectionEnd;
+    t.value=t.value.slice(0,a)+b.dataset.v+t.value.slice(z); t.focus(); t.selectionStart=t.selectionEnd=a+b.dataset.v.length; tplPreview(); });
+  $('#tplSave').addEventListener('click',function(){ api('lic_mail_save',{subject:$('#tplSub').value,body:$('#tplBody').value}).then(function(d){ $('#tplSub').value=d.tpl.subject; $('#tplBody').value=d.tpl.body; toast('Taslak kaydedildi'); }).catch(function(x){ toast(x.message,true); }); });
+  $('#tplReset').addEventListener('click',function(){ if(!TPL_DEF) return; $('#tplSub').value=TPL_DEF.subject; $('#tplBody').value=TPL_DEF.body; tplPreview(); toast('Varsayılan metin geldi; kalıcı olması için Kaydet'); });
+  $('#tplTest').addEventListener('click',function(){ var b=this, to=$('#tplTo').value.trim(); if(!to){ toast('Deneme adresini yaz',true); return; } b.disabled=true;
+    api('lic_mail_test',{to:to,subject:$('#tplSub').value,body:$('#tplBody').value}).then(function(d){ toast(d.ok?'Deneme e-postası gönderildi':'Gönderilemedi: '+d.error,!d.ok); }).catch(function(x){ toast(x.message,true); }).then(function(){ b.disabled=false; }); });
+  $('#tplCard').addEventListener('toggle',function(){ if(this.open&&!TPL_DEF) loadTpl(); });
   function renderDemo(){ var d=LAST_DEMO; if(!d) return;
     setAuto(d.autoApprove!==false);
     var pend=d.users.filter(function(u){ return u.status==='pending'; }).length;

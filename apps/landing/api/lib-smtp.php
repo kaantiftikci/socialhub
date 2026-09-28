@@ -33,10 +33,11 @@ if (!function_exists('mv_smtp_config')) {
     }
 
     /**
-     * Düz metin e-posta gönder. SMTP yapılandırılmışsa SMTP, değilse mail() (yedek, teslimi güvenilmez).
+     * E-posta gönder (düz metin; $html verilirse metin + HTML "multipart/alternative"). SMTP yapılandırılmışsa SMTP,
+     * değilse mail() (yedek, teslimi güvenilmez).
      * @return array{ok: bool, via: string, error?: string, log?: string[]}
      */
-    function mv_send_mail(string $to, string $subject, string $body, ?string $replyTo = null): array
+    function mv_send_mail(string $to, string $subject, string $body, ?string $replyTo = null, ?string $html = null): array
     {
         $to = trim($to);
         if (!filter_var($to, FILTER_VALIDATE_EMAIL) || preg_match('/[\r\n]/', $to)) {
@@ -46,7 +47,7 @@ if (!function_exists('mv_smtp_config')) {
         if ($cfg) {
             // Paylaşımlı barındırmada giden SMTP portlarından biri kapalı olabiliyor ("Connection refused"): bağlantı kurulamazsa
             // öteki standart porta (465 SSL ↔ 587 STARTTLS) geç. Kimlik reddi gibi sunucu yanıtlarında yeniden denenmez.
-            $res = mv_smtp_send($cfg, $to, $subject, $body, $replyTo);
+            $res = mv_smtp_send($cfg, $to, $subject, $body, $replyTo, $html);
             if ($res['ok'] || empty($res['connectFailed'])) {
                 return $res;
             }
@@ -56,7 +57,7 @@ if (!function_exists('mv_smtp_config')) {
                 if ((int) ($cfg['port'] ?? 0) === $alt['port']) {
                     continue;
                 }
-                $try = mv_smtp_send(array_merge($cfg, $alt), $to, $subject, $body, $replyTo);
+                $try = mv_smtp_send(array_merge($cfg, $alt), $to, $subject, $body, $replyTo, $html);
                 $log[] = '— ' . $alt['port'] . ' (' . $alt['secure'] . '): ' . ($try['ok'] ? 'başarılı' : ($try['error'] ?? ''));
                 $log = array_merge($log, $try['log'] ?? []);
                 if ($try['ok']) {
@@ -73,14 +74,13 @@ if (!function_exists('mv_smtp_config')) {
             // kabul edip "gönderildi" diyor ama iletmiyor (mail() ile aynı); kurumsal posta kutusu da orada değil (535).
             return ['ok' => false, 'via' => 'smtp', 'error' => 'Barındırma sunucusu dışarıya e-posta bağlantısını (465 ve 587) engelliyor. Türkticaret desteğinden bu hosting hesabı için smtp.turkticaret.net\'e giden SMTP erişimini açmalarını iste.', 'log' => $log];
         }
-        $headers = implode("\r\n", [
+        [$ctype, $payload] = mv_mime_body($body, $html);
+        $headers = implode("\r\n", array_merge([
             'From: Mivelo <hello@mivelo.app>',
             'Reply-To: ' . ($replyTo && filter_var($replyTo, FILTER_VALIDATE_EMAIL) ? $replyTo : 'hello@mivelo.app'),
             'MIME-Version: 1.0',
-            'Content-Type: text/plain; charset=UTF-8',
-            'Content-Transfer-Encoding: base64',
-        ]);
-        $ok = @mail($to, mv_mime_header($subject), chunk_split(base64_encode($body)), $headers, '-fhello@mivelo.app');
+        ], $ctype));
+        $ok = @mail($to, mv_mime_header($subject), $payload, $headers, '-fhello@mivelo.app');
         return ['ok' => $ok, 'via' => 'mail()', 'error' => $ok ? 'SMTP ayarlı değil: sunucunun mail() işlevi kullanıldı; teslim edilmeyebilir (Ayarlar → E-posta gönderimi)' : 'mail() başarısız'];
     }
 
@@ -122,10 +122,28 @@ if (!function_exists('mv_smtp_config')) {
     }
 
     /**
+     * Gövde: yalnız metin ya da metin + HTML (multipart/alternative; HTML'i göstermeyen istemci metni okur).
+     * @return array{0: string[], 1: string} [içerik başlıkları, gövde (CRLF)]
+     */
+    function mv_mime_body(string $text, ?string $html): array
+    {
+        $b64 = fn (string $v) => rtrim(chunk_split(base64_encode($v), 76, "\r\n"));
+        if ($html === null || $html === '') {
+            return [['Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64'], $b64($text)];
+        }
+        $bd = 'mv-' . bin2hex(random_bytes(10));
+        $parts = [];
+        foreach ([['text/plain', $text], ['text/html', $html]] as [$t, $v]) {
+            $parts[] = "--$bd\r\nContent-Type: $t; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n" . $b64($v);
+        }
+        return [['Content-Type: multipart/alternative; boundary="' . $bd . '"'], implode("\r\n", $parts) . "\r\n--$bd--"];
+    }
+
+    /**
      * @param array<string, mixed> $cfg
      * @return array{ok: bool, via: string, error?: string, log?: string[]}
      */
-    function mv_smtp_send(array $cfg, string $to, string $subject, string $body, ?string $replyTo = null): array
+    function mv_smtp_send(array $cfg, string $to, string $subject, string $body, ?string $replyTo = null, ?string $html = null): array
     {
         $host = (string) $cfg['host'];
         $port = (int) ($cfg['port'] ?? 465);
@@ -190,13 +208,13 @@ if (!function_exists('mv_smtp_config')) {
                 'Subject: ' . mv_mime_header($subject),
                 'Message-ID: <' . bin2hex(random_bytes(12)) . '@' . $domain . '>',
                 'MIME-Version: 1.0',
-                'Content-Type: text/plain; charset=UTF-8',
-                'Content-Transfer-Encoding: base64',
             ];
+            [$ctype, $payload] = mv_mime_body($body, $html);
+            $headers = array_merge($headers, $ctype);
             if ($replyTo && filter_var($replyTo, FILTER_VALIDATE_EMAIL) && !preg_match('/[\r\n]/', $replyTo)) {
                 $headers[] = 'Reply-To: <' . $replyTo . '>';
             }
-            $data = implode("\r\n", $headers) . "\r\n\r\n" . rtrim(chunk_split(base64_encode($body), 76, "\r\n")) . "\r\n.";
+            $data = implode("\r\n", $headers) . "\r\n\r\n" . $payload . "\r\n.";
             $cmd($data, [250], '(ileti)');
             fwrite($fp, "QUIT\r\n");
             fclose($fp);

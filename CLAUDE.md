@@ -136,7 +136,14 @@ Dil: arayüz ve yorumlar Türkçe.
   yeniden sorar (?check=1 → iptal pencereye dönünce hemen kilitler). Sunucu `apps/landing/api/license.php` (mivelo.app/api/license.php; activate/check/release; `~/mivelo-data/licenses.json`, hatalı
   anahtar IP başına saatte 20, `license-rate.json`). Admin → **Lisanslar** (`api.php` licenses/license_create/update/delete; anahtar `MVL-` + 4×4
   karışmayan harf/rakam, 80 bit; not, e-posta (bekleme listesinden öneri), cihaz sınırı 1-10 (vars. 2), süre (süresiz/30/90/365 gün), adet ≤50;
-  Kopyala · E-postayla gönder (mailto şablonu: anahtar + indirme bağlantısı) · İptal et/Etkinleştir · Cihazları sıfırla · cihaz başına Kaldır · Sil).
+  Kopyala · E-postayla gönder (SMTP) / Taslağı aç (mailto yedeği) · İptal et/Etkinleştir · Cihazları sıfırla · cihaz başına Kaldır · Sil).
+  **Üyelere anahtar gönder** (Lisanslar üstü): bekleme listesi + demo üyeleri (spam/reddedilen hariç, e-postayla birleşik; `lic_people`) seçilir →
+  `license_issue` kişi başına etkin anahtarı varsa onu, yoksa yenisini (≤50/istek) logolu HTML e-postayla gönderir (`lic_send_one`: anahtara
+  `sentAt/sentTo/mailError`, başarıda bekleme listesi Bekliyor → Davet edildi). Oluştur formunda "hemen gönder" kutusu. **E-posta taslağı**
+  (`~/mivelo-data/license-mail.json`, varsayılan `LIC_MAIL_DEFAULT`): konu + metin, yer tutucular {ad} (ilk ad; yoksa atlanır) {anahtar} (tek
+  satırda büyük kutu) {indir} {cihaz} {gecerlilik}; canlı önizleme (`lic_mail_preview`, sandbox iframe) + deneme gönderimi. HTML tablo düzeni,
+  logo `https://mivelo.app/apple-touch-icon.png`, "Mivelo'yu indir" düğmesi; `mv_send_mail(..., $html)` metin+HTML multipart/alternative.
+  Gönderim SMTP'ye bağlı: Türkticaret giden SMTP'yi açmadıkça "Gönderilemedi" (anahtar yine üretilir). Yerelde sahte SMTP ile sınandı.
   İstemci tarafı denetimdir (paket değiştirilerek aşılabilir); amaç anahtarsız dağıtımı engellemek. Yerel uçtan uca sınandı (php -S + çekirdek).
 - **Windows**: `tauri.windows.conf.json` (NSIS, currentUser, yerel başlık çubuğu) Tauri'nin platform yapılandırma birleştirmesiyle
   uygulanır; paket yalnız CI'da üretilir (`.github/workflows/build-desktop.yml` windows-x64 işi, windows-latest,

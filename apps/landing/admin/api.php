@@ -13,6 +13,13 @@ declare(strict_types=1);
 const DEFAULT_HASH = '$2y$12$RMRxM3ZcJ3.SI.MuYUail.aDr4/jJwL4o8FbSRhp9FJMrcyMHDsRG';
 const IDLE = 12 * 3600;
 const STATUSES = ['waiting', 'invited', 'joined', 'spam'];
+// Lisans e-postasının varsayılan metni (Admin → Lisanslar → E-posta taslağı; yer tutucular lic_mail_render'da)
+const LIC_MAIL_DEFAULT = [
+    'subject' => 'Mivelo lisans anahtarın hazır',
+    'body' => "Merhaba {ad},\n\nMivelo'ya erken erişimin açıldı! Masaüstü uygulaması için kişisel lisans anahtarın:\n\n{anahtar}\n\n"
+        . "Kurulum:\n1. Aşağıdaki bağlantıdan bilgisayarına uygun sürümü indir (Mac ya da Windows).\n2. Uygulamayı açınca bu anahtarı yapıştır.\n3. Kanallarını bağla, hepsi tek gelen kutusunda.\n\n"
+        . "Anahtar en fazla {cihaz} cihazda kullanılabilir · {gecerlilik}.\n\nBir sorun olursa bu e-postayı yanıtlaman yeterli.\n\nSevgiler,\nMivelo ekibi",
+];
 
 require_once __DIR__ . '/../api/lib-smtp.php';
 
@@ -640,6 +647,7 @@ function license_public(array $k): array
     $st = ($k['status'] ?? 'active') !== 'active' ? 'revoked' : ($exp && strtotime((string) $exp) < time() ? 'expired' : 'active');
     return ['id' => $k['id'], 'key' => $k['key'], 'note' => $k['note'] ?? '', 'email' => $k['email'] ?? '', 'maxDevices' => (int) ($k['maxDevices'] ?? 2),
         'expiresAt' => $exp, 'status' => $st, 'createdAt' => $k['createdAt'] ?? null, 'usedAt' => $k['usedAt'] ?? null,
+        'sentAt' => (int) ($k['sentAt'] ?? 0), 'sentTo' => (string) ($k['sentTo'] ?? ''), 'mailError' => (string) ($k['mailError'] ?? ''),
         'activations' => array_map(fn ($a) => ['id' => $a['id'], 'name' => $a['name'] ?? '', 'os' => $a['os'] ?? '', 'version' => $a['version'] ?? '',
             'firstAt' => $a['firstAt'] ?? null, 'lastAt' => $a['lastAt'] ?? null], $k['activations'] ?? [])];
 }
@@ -674,7 +682,12 @@ if ($a === 'license_create' && $method === 'POST') {
         }
         return $out;
     });
-    out(['created' => $made]);
+    // tek anahtar + e-posta + "gönder" işaretliyse logolu e-posta hemen gider
+    $mail = null;
+    if (!empty($body['send']) && $email !== '' && count($made) === 1) {
+        $mail = lic_send_one(['id' => $made[0]['id'], 'key' => $made[0]['key'], 'maxDevices' => $max, 'expiresAt' => $exp], $email, (string) (lic_people()[$email]['name'] ?? ''));
+    }
+    out(['created' => $made, 'mail' => $mail]);
 }
 
 if ($a === 'license_update' && $method === 'POST') {
@@ -717,6 +730,260 @@ if ($a === 'license_delete' && $method === 'POST') {
         return $b - count($d['keys']);
     });
     out(['deleted' => $n]);
+}
+
+/* ---------------- lisans e-postası (logolu şablon + üyelere gönderim) ---------------- */
+
+function lic_mail_tpl(): array
+{
+    $t = read_json('license-mail.json', []);
+    return [
+        'subject' => trim((string) ($t['subject'] ?? '')) ?: LIC_MAIL_DEFAULT['subject'],
+        'body' => trim((string) ($t['body'] ?? '')) ?: LIC_MAIL_DEFAULT['body'],
+    ];
+}
+
+/**
+ * Şablonu doldur → [konu, düz metin, HTML]. Yer tutucular: {ad} {anahtar} {indir} {cihaz} {gecerlilik}.
+ * HTML e-posta istemcileri için tablo düzeni + satır içi stil; logo mivelo.app'teki PNG (SVG Gmail'de görünmez).
+ * Yalnız {anahtar} bulunan satır büyük anahtar kutusu olur; indirme düğmesi her zaman eklenir.
+ */
+function lic_mail_render(array $tpl, array $k, string $name): array
+{
+    // {ad} = ilk ad ("Merhaba Mehmet,"; soyad resmi durur)
+    $name = explode(' ', trim(preg_replace('/\s+/', ' ', $name) ?? ''))[0];
+    $vars = [
+        '{ad}' => $name !== '' ? $name : 'merhaba',
+        '{anahtar}' => (string) $k['key'],
+        '{indir}' => 'https://mivelo.app/indir/',
+        '{cihaz}' => (string) (int) ($k['maxDevices'] ?? 2),
+        '{gecerlilik}' => !empty($k['expiresAt']) ? date('d.m.Y', (int) strtotime((string) $k['expiresAt'])) . ' tarihine kadar geçerli' : 'süresiz',
+    ];
+    // "Merhaba merhaba," olmasın: ad yoksa selamlamadaki yer tutucu atılır
+    $body = $name === '' ? preg_replace('/\s*\{ad\}/u', '', $tpl['body']) : $tpl['body'];
+    $subject = strtr($tpl['subject'], $vars);
+    $text = strtr($body, $vars);
+    if (strpos($body, '{indir}') === false) {
+        $text .= "\n\nİndir: https://mivelo.app/indir/";
+    }
+    $e = fn ($v) => htmlspecialchars((string) $v, ENT_QUOTES, 'UTF-8');
+    $font = "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Helvetica,Arial,sans-serif";
+    $keyBox = '<div style="margin:6px 0 18px;padding:18px 12px;border-radius:14px;background:#f3efff;border:1px dashed #b9a6ff;text-align:center">'
+        . '<div style="font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:#6c47ff;font-weight:600;margin-bottom:6px">Lisans anahtarın</div>'
+        . '<div style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:21px;font-weight:700;letter-spacing:1.5px;color:#1a1530">' . $e($k['key']) . '</div></div>';
+    $inline = function (string $line) use ($e, $vars): string {
+        $h = $e(strtr($line, array_diff_key($vars, ['{anahtar}' => 1, '{indir}' => 1])));
+        $h = str_replace('{anahtar}', '<b style="font-family:ui-monospace,Menlo,Consolas,monospace">' . $e($vars['{anahtar}']) . '</b>', $h);
+        return str_replace('{indir}', '<a href="https://mivelo.app/indir/" style="color:#6c47ff">mivelo.app/indir</a>', $h);
+    };
+    $html = '';
+    foreach (preg_split("/\n{2,}/", trim($body)) as $para) {
+        if (trim($para) === '{anahtar}') {
+            $html .= $keyBox;
+            continue;
+        }
+        $html .= '<p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#2a2640">' . implode('<br>', array_map($inline, explode("\n", $para))) . '</p>';
+    }
+    if (strpos($body, '{anahtar}') === false) {
+        $html .= $keyBox;
+    }
+    $btn = '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 6px"><tr><td style="border-radius:12px;background:#6c47ff">'
+        . '<a href="https://mivelo.app/indir/" style="display:inline-block;padding:13px 26px;' . $font . ';font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:12px">Mivelo\'yu indir</a></td></tr></table>';
+    $full = '<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>' . $e($subject) . '</title></head>'
+        . '<body style="margin:0;padding:0;background:#f4f2fa;' . $font . '">'
+        . '<div style="display:none;max-height:0;overflow:hidden">Lisans anahtarın: ' . $e($k['key']) . '</div>'
+        . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f2fa"><tr><td align="center" style="padding:28px 14px">'
+        . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:540px">'
+        . '<tr><td style="padding:0 6px 16px"><table role="presentation" cellpadding="0" cellspacing="0"><tr>'
+        . '<td><img src="https://mivelo.app/apple-touch-icon.png" width="40" height="40" alt="" style="display:block;border-radius:11px"></td>'
+        . '<td style="padding-left:10px;font-size:20px;font-weight:700;letter-spacing:-.3px;color:#1a1530">Mivelo</td></tr></table></td></tr>'
+        . '<tr><td style="background:#ffffff;border-radius:20px;padding:30px 28px;border:1px solid #e8e3f7">' . $html . $btn . '</td></tr>'
+        . '<tr><td style="padding:18px 8px 0;font-size:12px;line-height:1.6;color:#8a85a0;text-align:center">'
+        . 'Tüm mesajların tek gelen kutusunda · <a href="https://mivelo.app" style="color:#8a85a0">mivelo.app</a><br>'
+        . 'Bu e-postayı Mivelo erken erişim listesine katıldığın için aldın. Anahtarını kimseyle paylaşma.</td></tr>'
+        . '</table></td></tr></table></body></html>';
+    return [$subject, $text, $full];
+}
+
+/** Bekleme listesi + demo üyeleri (gerçek e-postalı) tek listede: ad, kaynaklar, anahtar ve gönderim durumu */
+function lic_people(): array
+{
+    $p = [];
+    foreach (entries() as $e) {
+        $m = strtolower((string) ($e['email'] ?? ''));
+        if ($m === '' || ($e['status'] ?? '') === 'spam') {
+            continue;
+        }
+        $p[$m] = ['email' => $m, 'name' => '', 'src' => ['waitlist'], 'at' => (int) ($e['at'] ?? 0), 'wl' => $e['status'] ?? 'waiting'];
+    }
+    foreach (read_json('users.json', ['users' => []])['users'] ?? [] as $u) {
+        $m = strtolower((string) ($u['email'] ?? ''));
+        if ($m === '' || str_ends_with_s($m, '@demo') || !filter_var($m, FILTER_VALIDATE_EMAIL) || demo_status($u) === 'rejected') {
+            continue;
+        }
+        $name = trim((string) ($u['name'] ?? ''));
+        if (isset($p[$m])) {
+            $p[$m]['name'] = $name;
+            $p[$m]['src'][] = 'demo';
+        } else {
+            $p[$m] = ['email' => $m, 'name' => $name, 'src' => ['demo'], 'at' => (int) ($u['requestedAt'] ?? 0), 'wl' => ''];
+        }
+    }
+    return $p;
+}
+
+if ($a === 'lic_mail' && $method === 'GET') {
+    out(['tpl' => lic_mail_tpl(), 'default' => LIC_MAIL_DEFAULT, 'smtp' => (bool) mv_smtp_config()]);
+}
+
+if ($a === 'lic_mail_save' && $method === 'POST') {
+    $sub = mb_substr(trim((string) ($body['subject'] ?? '')), 0, 150);
+    $txt = mb_substr(str_replace("\r", '', trim((string) ($body['body'] ?? ''))), 0, 5000);
+    $path = data_dir() . '/license-mail.json';
+    $lh = store_lock($path);
+    store_write($path, $sub === '' && $txt === '' ? [] : ['subject' => $sub, 'body' => $txt], JSON_PRETTY_PRINT);
+    flock($lh, LOCK_UN);
+    fclose($lh);
+    out(['tpl' => lic_mail_tpl()]);
+}
+
+if ($a === 'lic_mail_preview' && $method === 'POST') {
+    $tpl = ['subject' => mb_substr((string) ($body['subject'] ?? ''), 0, 150) ?: LIC_MAIL_DEFAULT['subject'], 'body' => mb_substr(str_replace("\r", '', (string) ($body['body'] ?? '')), 0, 5000) ?: LIC_MAIL_DEFAULT['body']];
+    [$sub, , $html] = lic_mail_render($tpl, ['key' => 'MVL-ABCD-EFGH-JKLM-NPQR', 'maxDevices' => 2, 'expiresAt' => null], (string) ($body['name'] ?? 'Ayşe'));
+    out(['subject' => $sub, 'html' => $html]);
+}
+
+if ($a === 'lic_mail_test' && $method === 'POST') {
+    $tpl = ['subject' => mb_substr((string) ($body['subject'] ?? ''), 0, 150) ?: LIC_MAIL_DEFAULT['subject'], 'body' => mb_substr(str_replace("\r", '', (string) ($body['body'] ?? '')), 0, 5000) ?: LIC_MAIL_DEFAULT['body']];
+    [$sub, $text, $html] = lic_mail_render($tpl, ['key' => 'MVL-ABCD-EFGH-JKLM-NPQR', 'maxDevices' => 2, 'expiresAt' => null], 'Kaan');
+    $res = mv_send_mail(trim((string) ($body['to'] ?? '')), '[Deneme] ' . $sub, $text, null, $html);
+    out(['ok' => $res['ok'] && $res['via'] === 'smtp', 'error' => $res['ok'] && $res['via'] === 'smtp' ? '' : ($res['error'] ?? '')]);
+}
+
+if ($a === 'lic_people' && $method === 'GET') {
+    $keys = read_json('licenses.json', ['keys' => []])['keys'] ?? [];
+    $byMail = [];
+    foreach ($keys as $k) {
+        $m = strtolower((string) ($k['email'] ?? ''));
+        if ($m !== '') {
+            $byMail[$m][] = $k;
+        }
+    }
+    $out = [];
+    foreach (lic_people() as $m => $x) {
+        $ks = $byMail[$m] ?? [];
+        $last = $ks ? end($ks) : null;
+        $out[] = $x + [
+            'key' => $last ? ['id' => $last['id'], 'status' => license_public($last)['status'], 'used' => !empty($last['activations'])] : null,
+            'sentAt' => $last ? (int) ($last['sentAt'] ?? 0) : 0,
+            'mailError' => $last ? (string) ($last['mailError'] ?? '') : '',
+        ];
+    }
+    usort($out, fn ($p, $q) => $q['at'] <=> $p['at']);
+    out(['people' => $out]);
+}
+
+/** Anahtarı e-postayla gönder; sonucu anahtar kaydına yaz, başarıda bekleme listesinde "Davet edildi" */
+function lic_send_one(array $k, string $to, string $name): array
+{
+    [$sub, $text, $html] = lic_mail_render(lic_mail_tpl(), $k, $name);
+    $res = mv_send_mail($to, $sub, $text, null, $html);
+    $ok = $res['ok'] && $res['via'] === 'smtp';
+    $err = $ok ? '' : (string) ($res['error'] ?? 'Gönderilemedi');
+    with_json('licenses.json', ['keys' => []], function (array &$d) use ($k, $to, $ok, $err) {
+        foreach ($d['keys'] as &$x) {
+            if ($x['id'] === $k['id']) {
+                $x['email'] = $x['email'] ?: $to;
+                $x['mailError'] = $err;
+                if ($ok) {
+                    $x['sentAt'] = time();
+                    $x['sentTo'] = $to;
+                }
+            }
+        }
+        unset($x);
+    });
+    if ($ok) {
+        with_json('waitlist.json', ['entries' => []], function (array &$d) use ($to) {
+            foreach ($d['entries'] as &$e) {
+                if (strtolower((string) $e['email']) === $to && ($e['status'] ?? 'waiting') === 'waiting') {
+                    $e['status'] = 'invited';
+                    $e['invitedAt'] = time();
+                }
+            }
+            unset($e);
+        });
+    }
+    return ['email' => $to, 'key' => $k['key'], 'id' => $k['id'], 'ok' => $ok, 'error' => $err];
+}
+
+// Seçilen üyelere: her birine (etkin anahtarı yoksa) yeni anahtar üret + logolu e-postayı gönder. En çok 50 kişi / istek.
+if ($a === 'license_issue' && $method === 'POST') {
+    $emails = array_slice(array_values(array_unique(array_filter(array_map(fn ($m) => strtolower(trim((string) $m)), (array) ($body['emails'] ?? [])),
+        fn ($m) => (bool) filter_var($m, FILTER_VALIDATE_EMAIL)))), 0, 50);
+    if (!$emails) {
+        fail(400, 'Kişi seçilmedi');
+    }
+    $max = max(1, min(10, (int) ($body['maxDevices'] ?? 2)));
+    $days = (int) ($body['days'] ?? 0);
+    $exp = $days > 0 ? gmdate('c', time() + min($days, 3650) * 86400) : null;
+    $newKey = !empty($body['newKey']);
+    $people = lic_people();
+    $keys = with_json('licenses.json', ['keys' => []], function (array &$d) use ($emails, $max, $exp, $newKey, $people) {
+        $have = array_flip(array_map(fn ($k) => $k['key'], $d['keys']));
+        $out = [];
+        foreach ($emails as $m) {
+            $found = null;
+            if (!$newKey) {
+                foreach (array_reverse($d['keys']) as $k) {
+                    if (strtolower((string) ($k['email'] ?? '')) === $m && license_public($k)['status'] === 'active') {
+                        $found = $k;
+                        break;
+                    }
+                }
+            }
+            if (!$found) {
+                do {
+                    $key = new_license_key();
+                } while (isset($have[$key]));
+                $have[$key] = 1;
+                $found = ['id' => 'l-' . bin2hex(random_bytes(6)), 'key' => $key, 'note' => mb_substr($people[$m]['name'] ?? '', 0, 120), 'email' => $m,
+                    'maxDevices' => $max, 'expiresAt' => $exp, 'status' => 'active', 'createdAt' => gmdate('c'), 'activations' => []];
+                $d['keys'][] = $found;
+            }
+            $out[$m] = $found;
+        }
+        return $out;
+    });
+    $res = [];
+    foreach ($keys as $m => $k) {
+        $res[] = lic_send_one($k, $m, $people[$m]['name'] ?? '');
+    }
+    out(['results' => $res, 'sent' => count(array_filter($res, fn ($r) => $r['ok']))]);
+}
+
+// Var olan anahtarı (yeniden) gönder: kayıttaki e-postaya ya da verilen adrese
+if ($a === 'license_send' && $method === 'POST') {
+    $id = (string) ($body['id'] ?? '');
+    $to = strtolower(trim((string) ($body['email'] ?? '')));
+    $k = null;
+    foreach (read_json('licenses.json', ['keys' => []])['keys'] ?? [] as $x) {
+        if ($x['id'] === $id) {
+            $k = $x;
+        }
+    }
+    if (!$k) {
+        fail(404, 'Lisans yok');
+    }
+    $to = $to ?: strtolower((string) ($k['email'] ?? ''));
+    if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
+        fail(400, 'Bu anahtarın e-postası yok: adres yaz');
+    }
+    if (license_public($k)['status'] !== 'active') {
+        fail(400, 'İptal edilmiş ya da süresi dolmuş anahtar gönderilmez');
+    }
+    $people = lic_people();
+    out(lic_send_one($k, $to, (string) ($body['name'] ?? ($people[$to]['name'] ?? ''))));
 }
 
 /* ---------------- geri bildirim (uygulamadaki sağ alt düğme → api/feedback.php) ---------------- */
