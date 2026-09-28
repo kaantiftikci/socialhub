@@ -393,7 +393,9 @@ Dil: arayüz ve yorumlar Türkçe.
   ayrı satır sayılıyordu → boş "(konu yok)" sohbetleri; `prune-v1` ile bir kez silinir), alanlar tutmazsa satır metninden; ilk turda
   `Yandex Mail tanı:` günlüğü (seçici sayıları + ilk satırın sınıfları, içerik yok) → seçici ayarı buna göre. Adres `yandex_login` çerezinden.
   Eşleşme metinsiz bağlantı kaplaması olabilir → metinli ama başka satır içermeyen üst öğeye çıkılır (`lift`); metin parçaları yaprak öğelerden;
-  tıklama en dıştaki eşleşme sırasıyla (`idx`). Giriş: oturum yokken mail.yandex ana sayfaya atıyor → passive loggedIn passport'a gider (`LOGIN_URL`). Token dosyalı eski IMAP hesapları sürer;
+  tıklama en dıştaki eşleşme sırasıyla (`idx`). Dizi (sayılı "8 ▾") satırları bağlantı değil div → ROW_SEL'e `.mail-MessageSnippet` eklendi (eskiden bugünkü ve
+  dizi e-postaları hiç yoktu); ileti görünümü okunamazsa satır özeti tek ileti; `openMail` #message/#thread görünümünde kalmışsa #inbox'a döner;
+  avatar satırdaki img ya da avatar/logo kutusunun arka plan görseli (`Thread.avatarUrl`). Tanı günlüğü `threadish`/`avatarish`/`hash` da yazar. Giriş: oturum yokken mail.yandex ana sayfaya atıyor → passive loggedIn passport'a gider (`LOGIN_URL`). Token dosyalı eski IMAP hesapları sürer;
   şifre reddinde "Yandex ile giriş yap" (Yahoo gibi, IMAP hesabı tarayıcı yoluna çevrilir).
 - WhatsApp tek seferlik medya ikizi: telefon aynı gönderimi iki kimlikle yollayabiliyor (biri tek, biri çift tik iki yer tutucu) → `upsertPlaceholder`
   aynı sohbet+gönderen ±10 sn ikizi varsa yeni kayıt açmaz, kimliği `twins` ile bağlar (alındılar tek balona); açılışta `store.dropTwins` eskileri birleştirir.

@@ -16,7 +16,9 @@ import { cleanMailHtml } from '../mail-html.js';
  */
 const HOME = 'https://mail.yandex.com/';
 const YANDEX_COOKIE_DOMAINS = /(^|\.)yandex\.(com|com\.tr|ru)$/;
-const ROW_SEL = '.ns-view-messages-item-wrap a.mail-MessageSnippet, a.mail-MessageSnippet, [data-testid="message-list-item"], [data-testid*="message-snippet" i], [role="listitem"] a[href*="message"]';
+// Dizi (thread, "8 ▾" sayılı) satırları bağlantı değil: tıklanınca yerinde açılan div → yalnız a.mail-MessageSnippet onları kaçırıyordu
+// (Kaan: bugünkü ve bazı eski e-postalar yoktu — hepsi dizi satırıydı). En dıştaki eşleşme satır sayıldığı için iç içe eşleşme sorun değil.
+const ROW_SEL = '.ns-view-messages-item-wrap a.mail-MessageSnippet, a.mail-MessageSnippet, .mail-MessageSnippet, [data-testid="message-list-item"], [data-testid*="message-snippet" i], [role="listitem"] a[href*="message"]';
 
 let meEmail = '';
 /** Liste satırının zamanı (ileti görünümünde zaman okunamazsa yedek; "şimdi" yazılınca sıra bozuluyordu) */
@@ -31,6 +33,11 @@ const onLogin = (u: string) => /^https:\/\/passport\.yandex\.(com|com\.tr|ru)\//
 /** Posta kutusunu aç; liste çizildiyse true, giriş sayfasına düştüyse 'signin' */
 async function openMail(page: Page): Promise<true | 'signin' | undefined> {
   if (!onMail(page.url())) await page.goto(HOME, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+  // önceki okumadan açık kalan ileti/dizi görünümü (#message/…, #thread/…): liste sanılıp dizinin iç satırları okunuyordu → gelen kutusuna dön
+  else if (!/^(#(inbox)?)?$/.test(new URL(page.url()).hash)) {
+    await page.evaluate(() => (location.hash = '#inbox')).catch(() => undefined);
+    await page.waitForTimeout(1200);
+  }
   for (let i = 0; i < 25; i++) {
     if (onLogin(page.url())) return 'signin';
     if ((await page.locator(ROW_SEL).count().catch(() => 0)) > 0) return true;
@@ -49,6 +56,8 @@ interface YandexRow {
   subject: string;
   snippet: string;
   time: string;
+  /** gönderen logosu/fotoğrafı (Yandex listesinde görünen; img ya da arka plan görseli) */
+  avatar: string;
   /** tıklama için: sayfadaki en dıştaki eşleşmeler arasındaki sıra */
   idx: number;
 }
@@ -101,7 +110,20 @@ function readRows(page: Page): Promise<YandexRow[]> {
         seen.set(base, n + 1);
         key = n ? `${base}#${n}` : base;
       }
-      out.push({ key, unread, sender, senderEmail, subject, snippet: snippet.slice(0, 300), time, idx });
+      // avatar: satırdaki ilk gerçek görsel (img) ya da avatar kutusunun arka plan görseli; baş harf kutuları (görselsiz) boş
+      let avatar = '';
+      const img = el.querySelector<HTMLImageElement>('img[src^="http"], img[src^="//"]');
+      if (img && img.naturalWidth !== 1) avatar = img.src;
+      if (!avatar) {
+        for (const a of Array.from(el.querySelectorAll<HTMLElement>('[class*="vatar" i], [class*="Logo" i], [class*="userpic" i]')).slice(0, 6)) {
+          const bg = getComputedStyle(a).backgroundImage.match(/url\(["']?((?:https?:)?\/\/[^"')]+)/)?.[1];
+          if (bg) {
+            avatar = bg.startsWith('//') ? 'https:' + bg : bg;
+            break;
+          }
+        }
+      }
+      out.push({ key, unread, sender, senderEmail, subject, snippet: snippet.slice(0, 300), time, avatar, idx });
     }
     return out;
   }, ROW_SEL);
@@ -119,7 +141,10 @@ async function diagnose(page: Page): Promise<void> {
       const desc = (e: Element | null) => (e ? `${e.tagName.toLowerCase()}.${String(e.className).slice(0, 80)}` : '-');
       const inner = first ? Array.from(first.querySelectorAll('[class]')).slice(0, 25).map((e) => String(e.className).split(' ')[0]).filter(Boolean) : [];
       const tids = first ? Array.from(first.querySelectorAll('[data-testid]')).map((e) => e.getAttribute('data-testid')).slice(0, 15) : [];
-      return { counts, row: desc(first), parent: desc(first?.parentElement ?? null), inner: [...new Set(inner)], tids };
+      // dizi satırları (sayılı) ve avatar yapısı: tanı için yalnız sayılar/sınıf adları
+      const threadish = Array.from(document.querySelectorAll('[class*="hread" i]')).slice(0, 5).map((e) => desc(e));
+      const avatarish = first ? Array.from(first.querySelectorAll('img, [class*="vatar" i]')).slice(0, 3).map((e) => desc(e)) : [];
+      return { counts, row: desc(first), parent: desc(first?.parentElement ?? null), inner: [...new Set(inner)], tids, threadish, avatarish, hash: location.hash.slice(0, 12) };
     }, ROW_SEL)
     .catch((e) => ({ error: String(e).slice(0, 100) }));
   bus.log('info', `Yandex Mail tanı: ${JSON.stringify(d)}`);
@@ -167,6 +192,19 @@ async function readThread(page: Page, threadId: string, limit: number, restore: 
     .catch(() => [] as Array<{ text: string; from: string; fromName: string; time: string; html: string }>);
   if (restore && wasUnread) await markUnread(page, threadId);
   const good = rows.filter((r) => r.text.length > 0);
+  // ileti görünümü okunamadı (dizi satırı yerinde açılıyor olabilir): en azından listedeki özet tek ileti olarak görünsün
+  if (!good.length && (row.snippet || row.subject)) {
+    return [
+      {
+        id: hashId(threadId + '|row'),
+        text: [row.subject, row.snippet].filter(Boolean).join('\n\n'),
+        ts: threadTs.get(threadId) ?? parseMailDate(row.time) ?? Date.now(),
+        fromMe: false,
+        senderId: row.senderEmail || row.sender || threadId,
+        senderName: row.sender || 'Gönderen',
+      },
+    ];
+  }
   return good
     .map((r, i) => {
       const fromMe = !!meEmail && r.from.toLowerCase() === meEmail;
@@ -297,6 +335,7 @@ export const yandex: Strategy = {
         kind: 'direct' as const,
         lastTs: times[i] ?? 0,
         preview: `${row.sender}: ${row.snippet}`.slice(0, 200),
+        avatarUrl: row.avatar || undefined,
         unread: row.unread ? 1 : 0,
         participants: row.sender ? [{ id: row.senderEmail || row.sender, name: row.sender, handle: row.senderEmail || undefined }] : undefined,
       };
