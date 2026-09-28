@@ -107,8 +107,15 @@ svg{flex-shrink:0}
 .big-dl.done .arr{animation:drop .6s var(--spring)}
 @keyframes drop{0%{transform:none}40%{transform:translateY(5px)}100%{transform:none}}
 .cta .meta{font-size:13px;color:var(--ink-3)}
-.cta .other{font-size:13.5px;color:var(--brand-ink);text-decoration:none;font-weight:500}
-.cta .other:hover{text-decoration:underline;text-underline-offset:3px}
+.cta-row{display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap}
+/* ikinci düğme: tüm sürümler (Mac Intel / Windows / Apple Silicon) — cam, ana düğmenin yanında */
+.all-dl{display:inline-flex;align-items:center;gap:9px;height:54px;padding:0 22px 0 18px;border-radius:16px;font-size:15.5px;font-weight:600;letter-spacing:-.01em;color:var(--ink);text-decoration:none;
+  background:linear-gradient(160deg,rgba(255,255,255,.85),rgba(255,255,255,.55));-webkit-backdrop-filter:blur(16px) saturate(180%);backdrop-filter:blur(16px) saturate(180%);
+  box-shadow:inset 0 1px 0 #fff,inset 0 0 0 1px rgba(255,255,255,.7),0 0 0 1px rgba(20,18,40,.06),0 14px 30px -18px rgba(40,30,110,.45);transition:transform .2s var(--ease),background .2s}
+.all-dl:hover{transform:translateY(-1px);background:#fff}.all-dl:active{transform:scale(.97)}
+.all-dl[hidden]{display:none}
+.all-dl .osic2{display:inline-flex;gap:6px;color:var(--ink-2)}
+.all-dl .osic2 svg{width:18px;height:18px}
 
 /* kelime kelime açılma + alt metin süpürme (ana sayfayla aynı) */
 .words .wd{display:inline-block;opacity:0;filter:blur(10px);transform:translateY(.32em);
@@ -217,9 +224,11 @@ footer a:hover{color:var(--ink)}
     <h1 class="h1">Mivelo'yu <span class="grad">indir</span></h1>
     <p class="lead">Tüm mesajların tek gelen kutusunda, kendi bilgisayarında. Hesapların kendi internetinden bağlanır; mesajların yalnız sende kalır.</p>
     <div class="cta">
-      <a class="big-dl off" id="bigDl" href="#surumler"><span class="osic" id="bigIc"></span><span id="bigTx">Hazırlanıyor…</span><svg class="arr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12M6 11l6 6 6-6M5 20h14"/></svg></a>
+      <div class="cta-row">
+        <a class="big-dl off" id="bigDl" href="#surumler"><span class="osic" id="bigIc"></span><span id="bigTx">Hazırlanıyor…</span><svg class="arr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12M6 11l6 6 6-6M5 20h14"/></svg></a>
+        <a class="all-dl" id="allDl" href="#surumler" hidden><span class="osic2"></span>Sürümleri gör</a>
+      </div>
       <span class="meta" id="bigMeta"></span>
-      <a class="other" href="#surumler">Tüm sürümler ↓</a>
     </div>
   </div>
 </section>
@@ -395,7 +404,8 @@ footer a:hover{color:var(--ink)}
     var big=$('#bigDl');
     if(BIG.file && j.files[BIG.file]){
       big.href='files/'+BIG.file; big.setAttribute('download',''); big.classList.remove('off'); $('#bigTx').textContent=BIG.label; wireDone(big);
-      $('#bigMeta').textContent='Sürüm '+j.version+' · '+mb(j.files[BIG.file].size)+(isMac?' · Apple Silicon (Intel için aşağıda)':'');
+      $('#bigMeta').textContent='Sürüm '+j.version+' · '+mb(j.files[BIG.file].size)+(isMac?' · Apple Silicon':'');
+      var all=$('#allDl'); all.querySelector('.osic2').innerHTML=APPLE+WIN; all.hidden=false;
     } else { bothIcons(); big.classList.remove('off'); $('#bigTx').textContent='Sürümleri gör'; $('#bigMeta').textContent='Sürüm '+j.version; }
   }).catch(function(){ bothIcons(); var big=$('#bigDl'); big.classList.remove('off'); $('#bigTx').textContent='Sürümleri gör'; });
 })();

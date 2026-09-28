@@ -130,7 +130,7 @@ Dil: arayüz ve yorumlar Türkçe.
   Windows imzasız (SmartScreen). Hepsi başarılıysa `publish`: `mivelo.app/indir/files/` (FTP; Mivelo-mac-arm64.dmg, Mivelo-mac-intel.dmg,
   Mivelo-windows-x64-setup.exe, latest.json {version,date,files}; `deploy/indir/.htaccess`: json'da CORS *, indirme başlığı, liste kapalı). İndirme sayfası
   `apps/landing/indir/index.html` (ana sayfanın görsel dili: cam üst çubuk, hareketli gradyan, kelime kelime açılan başlık + süpürülen alt metin,
-  kaydırınca beliren kartlar; işletim sistemine göre büyük indirme düğmesi + önerilen kart (telefonda en üstte), Mac/Windows kayan hap sekmeli
+  kaydırınca beliren kartlar; işletim sistemine göre büyük indirme düğmesi + yanında cam "Sürümleri gör" (telefonda/tanınmayan sistemde ana düğme zaten "Sürümleri gör", tek düğme) + önerilen kart (telefonda en üstte), Mac/Windows kayan hap sekmeli
   kurulum adımları, lisans bandı; latest.json'dan boyut/sürüm; `prefers-reduced-motion` uyar). `indir/.htaccess` HTML'e `no-cache` (tarayıcı eski
   tasarımı gösteriyordu; admin/ ile aynı kural). Kök `.htaccess` YAZILMAZ (sunucudaki cPanel PHP işleyicisini ezer). Chromium pakette YOK:
   `packages/core/src/browser-install.ts` `ensureChromium` — köprü `launch` öncesi yoksa `playwright install --no-shell chromium` (gömülü node ile,
