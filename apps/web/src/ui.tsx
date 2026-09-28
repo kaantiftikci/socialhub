@@ -104,10 +104,11 @@ const LEAD_ICONS: Record<string, string> = {
   '📦': 'box', '🛍': 'bag', '🛒': 'cart', '✅': 'check', '✔': 'check', '☑': 'check', '📝': 'pen', '❌': 'x', '🚫': 'ban', '⚠': 'alert',
   '↩': 'undo', '↪': 'arrow', '🔁': 'refresh', '📍': 'mappin', '👤': 'user', '🧾': 'receipt', '📊': 'chart', '🔒': 'lock', '📷': 'camera',
   '🖼': 'image', '🎤': 'mic', '🎙': 'mic', '🎵': 'music', '🎬': 'play', '📹': 'play', '📎': 'clip', '🗑': 'trash', '💬': 'thread', '🎁': 'gift',
-  '💳': 'card', '✉': 'mail', '📧': 'mail', '📅': 'calendar', '📆': 'calendar', '🔗': 'link', '❓': 'help', '🚚': 'truck', '⏰': 'clock', '🔔': 'bell',
+  '💳': 'card', '✉': 'mail', '📧': 'mail', '📅': 'calendar', '📆': 'calendar', '🔗': 'link', '❓': 'help', '🚚': 'truck', '⏰': 'clock', '⏳': 'clock', '⌛': 'clock', '⏱': 'clock', '🔔': 'bell',
 };
 // isteğe bağlı "Sen: " / "Mert: " öneki + baştaki emoji (+ varyasyon seçicisi) + boşluk
-const LEAD_RE = /^((?:[^:\n]{1,40}: )?)([\u2190-\u21FF\u2600-\u27BF\u2B00-\u2BFF]|[\u{1F000}-\u{1FAFF}])\uFE0F?\s+/u;
+// U+2300–23FF: ⏳ ⌛ ⏰ ⏱ (eskiden aralık dışındaydı → emoji olarak kalıyordu)
+const LEAD_RE = /^((?:[^:\n]{1,40}: )?)([\u2190-\u21FF\u2300-\u23FF\u2600-\u27BF\u2B00-\u2BFF]|[\u{1F000}-\u{1FAFF}])\uFE0F?\s+/u;
 export function leadIcon(text: string): { prefix: string; icon?: string; rest: string } {
   const m = LEAD_RE.exec(text ?? '');
   const icon = m ? LEAD_ICONS[m[2]] : undefined;

@@ -135,3 +135,21 @@ test('sunucu: olmayan hesap 404 (500 değil); etiketler yalnız metin/sayı, olm
     await new Promise((r) => server.close(r));
   }
 });
+
+test('registry: aynı e-posta adresi yeniden eklenince kopya açılmaz, var olan hesabın şifresi güncellenir (Yahoo "Şifreyi güncelle")', async () => {
+  const reg = new Registry(store);
+  // gerçek IMAP bağlantısı kurulmasın
+  (reg as unknown as { spawn: () => Promise<void> }).spawn = async () => undefined;
+  const a = await reg.add('yahoo', { token: JSON.stringify({ user: 'kaan@yahoo.com', pass: 'eski', host: 'imap.elle.example' }) });
+  const b = await reg.add('yahoo', { token: JSON.stringify({ user: 'Kaan@Yahoo.com', pass: 'yeni' }) });
+  assert.equal(b.id, a.id);
+  assert.equal(store.listAccounts().filter((x) => x.platform === 'yahoo').length, 1);
+  const tok = JSON.parse(fs.readFileSync(path.join(tmp, 'sessions', a.id, 'token'), 'utf8'));
+  assert.equal(tok.pass, 'yeni');
+  assert.equal(tok.host, 'imap.elle.example', 'formda verilmeyen alan korunur');
+  // farklı adres → ayrı hesap
+  const c = await reg.add('yahoo', { token: JSON.stringify({ user: 'baska@yahoo.com', pass: 'p' }) });
+  assert.notEqual(c.id, a.id);
+  store.deleteAccount(a.id);
+  store.deleteAccount(c.id);
+});

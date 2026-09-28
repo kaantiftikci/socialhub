@@ -575,7 +575,19 @@ export class IMessageConnector extends BaseConnector {
   private poll(trigger = 'ilk'): void {
     if (!this.db) return;
     try {
-      const rows = this.query(this.lastRowId, 200);
+      // Birikmiş mesajların hepsi (iCloud eşitlemesi bir anda binlerce yazabilir): 500'lük parçalar, tur başına ≤10 parça
+      const before = this.lastRowId;
+      const rows: Row[] = [];
+      for (let i = 0; i < 10; i++) {
+        const part = this.query(rows.length ? rows[rows.length - 1].rowid : this.lastRowId, 500);
+        rows.push(...part);
+        if (part.length < 500) break;
+      }
+      // Mesajlar önce message satırını, sonra sohbet bağını (chat_message_join) yazar; arada okunursa JOIN'li sorgu mesajı
+      // atlıyor ve lastRowId ilerlediği için bir daha hiç bakılmıyordu ("son gelenler görünmüyor"). Bağsız yeni satırlar beklemeye alınır.
+      const top = Math.max(before, ...rows.map((r) => r.rowid));
+      this.trackUnjoined(before, top, new Set(rows.map((r) => r.rowid)));
+      rows.push(...this.recheckUnjoined());
       let fresh = 0;
       let oldest = Infinity;
       for (const r of rows) {
@@ -605,6 +617,31 @@ export class IMessageConnector extends BaseConnector {
     } catch (e) {
       bus.log('warn', `iMessage yoklama: ${(e as Error).message}`);
     }
+  }
+
+  /** Sohbet bağı henüz yazılmamış yeni mesajlar: ROWID → ilk görülme (ms); 2 dk izlenir */
+  private unjoined = new Map<number, number>();
+
+  private trackUnjoined(from: number, to: number, got: Set<number>): void {
+    if (!this.db || to <= from) return;
+    try {
+      const ids = this.db.prepare('SELECT ROWID AS id FROM message WHERE ROWID > ? AND ROWID <= ?').all(from, to) as Array<{ id: number }>;
+      for (const { id } of ids) if (!got.has(id) && !this.unjoined.has(id) && this.unjoined.size < 500) this.unjoined.set(id, Date.now());
+    } catch {
+      /* yok say */
+    }
+  }
+
+  private recheckUnjoined(): Row[] {
+    if (!this.db || !this.unjoined.size) return [];
+    const one = this.db.prepare(`${this.selectSql} WHERE m.ROWID = ?`);
+    const out: Row[] = [];
+    for (const [id, since] of [...this.unjoined]) {
+      const r = one.get(id) as Row | undefined;
+      if (r) (out.push(r), this.unjoined.delete(id));
+      else if (Date.now() - since > 120_000) this.unjoined.delete(id); // sohbetsiz kaldı (sistem satırı vb.)
+    }
+    return out;
   }
 
   /** Eki henüz diske inmemiş canlı mesajlar: ROWID → ilk görülme (ms). En çok 200, her biri en çok 10 dk izlenir. */
@@ -640,6 +677,35 @@ export class IMessageConnector extends BaseConnector {
     }
   }
 
+  /** sohbet guid → bu sohbette benden mesaj var mı (Mesajlar: yanıtladığın kişi artık "bilinmeyen" sayılmaz) */
+  private repliedCache = new Map<string, boolean>();
+  /**
+   * Mesajlar uygulamasının "Bilinmeyen Gönderenler" kuralı: kişi rehberde yok VE sen hiç yanıtlamamışsın. Bazı macOS
+   * sürümleri chat.is_filtered'ı bu sohbetler için 0 bırakıyor → klasör boş görünüyordu. Rehber okunamadıysa (izin yok)
+   * herkes "bilinmeyen" olmasın diye uygulanmaz.
+   */
+  private unknownSender(r: Row, ident: string): boolean {
+    if (!this.names.size) return false;
+    const h = r.handle ?? ident;
+    if (!h || phoneKeys(h).some((k) => this.names.has(k))) return false;
+    if (r.is_from_me) {
+      this.repliedCache.set(r.chat_guid, true);
+      return false;
+    }
+    let replied = this.repliedCache.get(r.chat_guid);
+    if (replied === undefined && this.db) {
+      try {
+        replied = !!this.db
+          .prepare('SELECT 1 FROM chat_message_join cmj JOIN chat c ON c.ROWID = cmj.chat_id JOIN message m ON m.ROWID = cmj.message_id WHERE c.guid = ? AND m.is_from_me = 1 LIMIT 1')
+          .get(r.chat_guid);
+      } catch {
+        replied = true; // sorgu olmadı: sınıflandırma yapma
+      }
+      this.repliedCache.set(r.chat_guid, replied);
+    }
+    return !replied;
+  }
+
   private ingest(r: Row, live: boolean): void {
     if (r.item_type !== 0) return; // grup olayları, isim değişiklikleri vb.
     if (isAssociatedReaction(r.associated_message_type)) return; // tapback: ayrı mesaj değil
@@ -654,7 +720,7 @@ export class IMessageConnector extends BaseConnector {
     // chat_identifier filtrelenmiş sohbetlerde "+90…(smsft)" / "(filtered)" ekiyle gelir; ad/numara eşlemesinde ek atılır
     const ident = r.chat_identifier.replace(/\((filtered|smsft)\)$/, '');
     const chatName = this.nameOf(isGroup ? null : r.handle ?? ident, r.display_name, ident);
-    const folder = imessageFolder(r.is_filtered);
+    const folder = imessageFolder(r.is_filtered) ?? (!isGroup && this.unknownSender(r, ident) ? 'unknown' : undefined);
     const existing = this.store.getChat(chatIdOf(this.account.id, r.chat_guid));
     // Klasör her seferinde chat.is_filtered'dan yeniden yazılır: bilinen kişiye taşınan sohbet (0) ve eski sürümün "sms" değeri silinir
     const { folder: _oldFolder, ...rest } = existing?.meta ?? {};

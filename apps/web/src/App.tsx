@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, connectEvents } from './api';
-import { PLATFORMS, isOrderPage, shopKind, shopPending, type Account, type Chat, type ChatFlags, type CoreEvent, type Message, type Platform, type ShopKind, DEFAULT_TAGS } from './types';
+import { PLATFORMS, ORDER_Q_PLATFORMS, isOrderPage, questionOrderRef, shopKind, shopPending, shopTabOf, type Account, type Chat, type ChatFlags, type CoreEvent, type Message, type Platform, type ShopTab, DEFAULT_TAGS } from './types';
 import { Avatar, Chip, Icon, IconText, stripLeadIcon, Logo, Resizer, SyncBar, Tag, ago, fmtTime, loadPaneSizes, useClosing } from './ui';
 import { Conversation, REACT_TEXT, refreshScheduled, startScheduledSends } from './Conversation';
 import { ConnectModal } from './Connect';
@@ -20,28 +20,61 @@ const FLAG_VIEWS: Array<{ view: View; flag: 'archived' | 'muted' | 'hidden'; lab
 ];
 export type Filter = 'all' | 'unread' | 'waiting' | 'followup';
 
+/** Gezinme durumu (sayfa yenilenince aynı görünüm/sohbet açılsın). sessionStorage: sekmeye özel, sekme kapanınca silinir. */
+type NavState = {
+  view?: View;
+  filter?: Filter;
+  platformFilter?: Platform | null;
+  tagFilter?: string | null;
+  imFolder?: 'unknown' | 'junk' | 'sms' | 'deleted' | null;
+  mailFolder?: 'sent' | 'junk' | null;
+  tgArchive?: boolean;
+  shopTab?: ShopTab | null;
+  selected?: string | null;
+};
+const NAV_KEY = 'mivelo.nav';
+const NAV0: NavState = (() => {
+  try {
+    const v = JSON.parse(sessionStorage.getItem(NAV_KEY) ?? 'null');
+    return v && typeof v === 'object' ? (v as NavState) : {};
+  } catch {
+    return {};
+  }
+})();
+function saveNav(n: NavState): void {
+  try {
+    sessionStorage.setItem(NAV_KEY, JSON.stringify(n));
+  } catch {
+    /* gizli mod vb. */
+  }
+}
+
 
 export default function App() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [chats, setChats] = useState<Map<string, Chat>>(new Map());
   const chatsRef = useRef(chats);
   chatsRef.current = chats;
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(NAV0.selected ?? null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [view, setView] = useState<View>('inbox');
-  const [filter, setFilter] = useState<Filter>('all');
-  const [platformFilter, setPlatformFilter] = useState<Platform | null>(null);
-  const [tagFilter, setTagFilter] = useState<string | null>(null);
+  const [view, setView] = useState<View>(NAV0.view ?? 'inbox');
+  const [filter, setFilter] = useState<Filter>(NAV0.filter ?? 'all');
+  const [platformFilter, setPlatformFilter] = useState<Platform | null>(NAV0.platformFilter && PLATFORMS[NAV0.platformFilter] ? NAV0.platformFilter : null);
+  const [tagFilter, setTagFilter] = useState<string | null>(NAV0.tagFilter ?? null);
   const smartSort = false; // akıllı sıralama kaldırıldı: her zaman son mesaja göre
   const [listSearch, setListSearch] = useState(false);
   /** iMessage klasörü: Mesajlar uygulamasındaki Bilinmeyen / İstenmeyen / SMS filtresi / Son silinenler */
-  const [imFolder, setImFolder] = useState<'unknown' | 'junk' | 'sms' | 'deleted' | null>(null);
+  const [imFolder, setImFolder] = useState<'unknown' | 'junk' | 'sms' | 'deleted' | null>(NAV0.imFolder ?? null);
   /** E-posta hesaplarında Gönderilenler / Gereksiz sekmesi */
-  const [mailFolder, setMailFolder] = useState<'sent' | 'junk' | null>(null);
+  const [mailFolder, setMailFolder] = useState<'sent' | 'junk' | null>(NAV0.mailFolder ?? null);
   /** Telegram: üstteki "Arşiv" sekmesi (chat.meta.archived) */
-  const [tgArchive, setTgArchive] = useState(false);
+  const [tgArchive, setTgArchive] = useState(!!NAV0.tgArchive);
   /** Pazaryeri kanalları: Tümü · Siparişler · Sorular sekmesi */
-  const [shopTab, setShopTab] = useState<ShopKind | null>(null);
+  const [shopTab, setShopTab] = useState<ShopTab | null>(NAV0.shopTab ?? null);
+  // yenilemede aynı yerde kalınsın: görünüm/kanal/sekme/açık sohbet bu tarayıcı sekmesine yazılır
+  useEffect(() => {
+    saveNav({ view, filter, platformFilter, tagFilter, imFolder, mailFolder, tgArchive, shopTab, selected });
+  }, [view, filter, platformFilter, tagFilter, imFolder, mailFolder, tgArchive, shopTab, selected]);
   /** Platform seçimi değişince platforma özel sekmeler (iMessage klasörü, Telegram arşivi) sıfırlanır */
   const selectPlatform = useCallback((p: Platform | null) => {
     setMailFolder(null);
@@ -590,10 +623,17 @@ export default function App() {
   }, [chats, selected]);
   /** Pazaryeri sekmelerindeki sayılar: açık sipariş ve yanıt bekleyen soru */
   const shopCounts = useMemo(() => {
-    const n: Record<ShopKind, number> = { order: 0, question: 0 };
-    if (!isShop) return n;
-    for (const c of inboxChats) if (c.platform === platformFilter && shopPending(c)) n[shopKind(c)!] += 1;
-    return n;
+    // total: sekmedeki tüm sohbetler (sipariş soruları sekmesini boşken gizlemek için)
+    const n: Record<ShopTab, number> = { order: 0, productQ: 0, orderQ: 0 };
+    const total: Record<ShopTab, number> = { order: 0, productQ: 0, orderQ: 0 };
+    if (!isShop) return { n, total };
+    for (const c of inboxChats) {
+      if (c.platform !== platformFilter) continue;
+      const t = shopTabOf(c)!;
+      total[t] += 1;
+      if (shopPending(c)) n[t] += 1;
+    }
+    return { n, total };
   }, [inboxChats, platformFilter, isShop]);
   const chatList = useMemo(() => {
     // Telegram "Arşiv" sekmesi yalnızca arşivlenmişleri, iMessage klasör sekmeleri o klasörü; diğer her görünüm gelen kutusunu listeler
@@ -612,7 +652,7 @@ export default function App() {
       return folder !== 'junk';
     });
     if (tagFilter) list = list.filter((c) => c.tags.includes(tagFilter));
-    if (shopTab && isShop) list = list.filter((c) => shopKind(c) === shopTab);
+    if (shopTab && isShop) list = list.filter((c) => shopTabOf(c) === shopTab);
     // iMessage'da Okunmamış/Bekleyen sekmeleri yok (Mesajlar uygulamasındaki klasörler var)
     const effFilter = platformFilter === 'imessage' && filter !== 'followup' ? 'all' : filter;
     if (effFilter === 'unread') list = list.filter((c) => c.unread > 0);
@@ -628,9 +668,26 @@ export default function App() {
     else if (filter !== 'followup') list.sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || (smartSort ? score(b) - score(a) : 0) || b.lastMessageAt - a.lastMessageAt);
     return list;
   }, [activeChats, inboxChats, filter, platformFilter, tagFilter, query, smartSort, imFolder, tgArchive, mailFolder, shopTab, isShop]);
+  // Liste parça parça çizilir (binlerce sohbet tek seferde DOM'a girince kaydırma/yazma takılıyordu): ilk 300, sona yaklaşınca +300
+  const [rowLimit, setRowLimit] = useState(300);
+  useEffect(() => setRowLimit(300), [view, filter, platformFilter, tagFilter, imFolder, mailFolder, tgArchive, shopTab, query]);
+  const moreRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = moreRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver((es) => es.some((e) => e.isIntersecting) && setRowLimit((n) => n + 300), { rootMargin: '600px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [rowLimit, chatList.length > rowLimit]);
+  // seçili sohbet (yenileme sonrası geri yüklenen ya da klavyeyle gidilen) çizilen parçanın dışındaysa parçayı büyüt
+  useEffect(() => {
+    if (!selected) return;
+    const idx = chatList.findIndex((c) => c.id === selected);
+    if (idx >= rowLimit) setRowLimit(idx + 50);
+  }, [selected, chatList, rowLimit]);
 
   /** Boş liste metni: hangi sekme/filtre boşsa ona göre anlamlı bir açıklama */
-  const emptyText = shopTab && isShop && filter === 'all' && !query.trim() ? (shopTab === 'order' ? 'Bu kanalda sipariş yok.' : 'Bu kanalda müşteri sorusu yok.') : filter === 'followup' ? 'Takipte sohbet yok. Sohbetin sağ panelinden "Yanıt gelmezse hatırlat" ile ekle.' : imFolder || tgArchive || mailFolder ? 'Bu klasörde sohbet yok.' : query.trim() ? 'Aramayla eşleşen sohbet yok.' : filter === 'unread' && platformFilter !== 'imessage' ? 'Okunmamış sohbet yok.' : filter === 'waiting' && platformFilter !== 'imessage' ? 'Yanıt bekleyen sohbet yok.' : tagFilter ? 'Bu etikette sohbet yok.' : platformFilter ? 'Bu kanalda henüz sohbet yok.' : 'Bu filtreye uyan sohbet yok.';
+  const emptyText = shopTab && isShop && filter === 'all' && !query.trim() ? (shopTab === 'order' ? 'Bu kanalda sipariş yok.' : shopTab === 'orderQ' ? 'Bu kanalda sipariş sorusu yok.' : 'Bu kanalda ürün sorusu yok.') : filter === 'followup' ? 'Takipte sohbet yok. Sohbetin sağ panelinden "Yanıt gelmezse hatırlat" ile ekle.' : imFolder || tgArchive || mailFolder ? 'Bu klasörde sohbet yok.' : query.trim() ? 'Aramayla eşleşen sohbet yok.' : filter === 'unread' && platformFilter !== 'imessage' ? 'Okunmamış sohbet yok.' : filter === 'waiting' && platformFilter !== 'imessage' ? 'Yanıt bekleyen sohbet yok.' : tagFilter ? 'Bu etikette sohbet yok.' : platformFilter ? 'Bu kanalda henüz sohbet yok.' : 'Bu filtreye uyan sohbet yok.';
 
   const totals = useMemo(() => {
     let unread = 0;
@@ -1110,18 +1167,26 @@ export default function App() {
                   </div>
                 )}
                 {view === 'inbox' && (
-                  <div className="tabs" role="tablist" aria-label={platformFilter === 'imessage' ? 'Mesajlar klasörleri' : 'Filtreler'}>
+                  <div className={`tabs ${isShop ? `shop n${ORDER_Q_PLATFORMS.has(platformFilter!) || shopCounts.total.orderQ > 0 ? 4 : 3}` : ''}`} role="tablist" aria-label={platformFilter === 'imessage' ? 'Mesajlar klasörleri' : 'Filtreler'}>
                     {/* iMessage: Okunmamış yerine Mesajlar uygulamasındaki klasörler */}
                     {isShop ? (
                       <>
                         <button role="tab" aria-selected={filter === 'all' && !shopTab} className={filter === 'all' && !shopTab ? 'active' : ''} onClick={() => (setFilter('all'), setShopTab(null))}>
                           Tümü
                         </button>
-                        {([['order', 'Siparişler', 'Açık (kargolanmamış) siparişler'], ['question', 'Sorular', 'Yanıt bekleyen müşteri soruları']] as Array<[ShopKind, string, string]>).map(([k, label, title]) => (
-                          <button key={k} role="tab" title={`${label} · sayı: ${title.toLowerCase()}`} aria-selected={shopTab === k && filter === 'all'} className={shopTab === k && filter === 'all' ? 'active' : ''} onClick={() => (setFilter('all'), setShopTab(k))}>
-                            {label} {shopCounts[k] > 0 && <span className="c">{fmtCount(shopCounts[k])}</span>}
-                          </button>
-                        ))}
+                        {(
+                          [
+                            ['order', 'Siparişler', 'Açık (kargolanmamış) siparişler'],
+                            ['productQ', 'Ürün soruları', 'Yanıt bekleyen ürün soruları'],
+                            ['orderQ', 'Sipariş soruları', 'Yanıt bekleyen, bir siparişe bağlı müşteri soruları'],
+                          ] as Array<[ShopTab, string, string]>
+                        )
+                          .filter(([k]) => k !== 'orderQ' || ORDER_Q_PLATFORMS.has(platformFilter!) || shopCounts.total.orderQ > 0)
+                          .map(([k, label, title]) => (
+                            <button key={k} role="tab" title={`${label} · sayı: ${title.toLowerCase()}`} aria-selected={shopTab === k && filter === 'all'} className={shopTab === k && filter === 'all' ? 'active' : ''} onClick={() => (setFilter('all'), setShopTab(k))}>
+                              {label} {shopCounts.n[k] > 0 && <span className="c">{fmtCount(shopCounts.n[k])}</span>}
+                            </button>
+                          ))}
                       </>
                     ) : (platformFilter === 'imessage' ? (['all'] as Filter[]) : (['all', 'unread', 'waiting'] as Filter[])).map((f) => (
                       <button key={f} role="tab" title={f === 'waiting' ? 'Yanıt bekleyenler: birebir sohbetler önce, gruplar sonra' : undefined} aria-selected={filter === f && !imFolder && !mailFolder} className={filter === f && !imFolder && !mailFolder ? 'active' : ''} onClick={() => (setFilter(f), setImFolder(null), setMailFolder(null))}>
@@ -1203,7 +1268,7 @@ export default function App() {
                     )}
                   </div>
                 ) : (
-                  groupByDay(chatList).map(([day, items]) => (
+                  groupByDay(chatList.slice(0, rowLimit)).map(([day, items]) => (
                     <div key={day} style={{ display: 'contents' }}>
                       <div className="group-label">
                         <span className="label">{day}</span>
@@ -1213,6 +1278,11 @@ export default function App() {
                       ))}
                     </div>
                   ))
+                )}
+                {chatList.length > rowLimit && (
+                  <div ref={moreRef} className="list-more" aria-hidden="true">
+                    <span className="spin" />
+                  </div>
                 )}
                 {query.trim().length >= 2 && hits.length > 0 && (
                   <div className="group">
@@ -1363,7 +1433,11 @@ export default function App() {
                 className="btn sm primary b"
                 onClick={() => {
                   setAlertPop(null);
-                  if (is.action === 'connect') {
+                  if (is.action === 'credentials') {
+                    // Bağlan: bu hesabın formu, e-posta adresi dolu gelir; kaydedince var olan hesap güncellenip yeniden bağlanır
+                    setConnectFocus(`edit:${a.id}`);
+                    setConnectOpen(true);
+                  } else if (is.action === 'connect') {
                     setConnectFocus(a.id);
                     setConnectOpen(true);
                     // QR süresi dolmuşsa (ekranda kod yok) yenisini iste
@@ -1642,10 +1716,27 @@ function statusText(s: Account['status']): string {
  * Kullanıcı eylemi gereken kanal durumu → yanıp sönen kırmızı işaret + açılır kart (başlık, ne yapmalı, düğme).
  * Geçici 'connecting' uyarı sayılmaz. attention (bağlı ama PIN vb. bekliyor) önce gelir.
  */
-function accountIssue(a: Account): { title: string; how: string; label: string; action: 'reconnect' | 'connect'; done: string } | null {
+/** Giriş bilgisi reddi (yanlış/süresi dolmuş şifre, geçersiz API anahtarı): aynı bilgiyle yeniden denemek işe yaramaz */
+const AUTH_FAIL = /giriş reddedildi|uygulama şifresi|şifre|parola|kimlik doğrulama|yetkisiz|unauthori[sz]ed|invalid (credentials|api ?key|token)|\b40[13]\b|api anahtar/i;
+/** Bilgileri Bağlan formundan yeniden girilebilen (şifre/API anahtarıyla bağlanan) kanallar */
+const credentialForm = (a: Account) => {
+  const p = PLATFORMS[a.platform];
+  return p.mode === 'mail' || p.category === 'shop' || ((a.platform === 'gmail' || a.platform === 'icloud') && /uygulama şifresi|giriş reddedildi/i.test(a.detail ?? ''));
+};
+
+function accountIssue(a: Account): { title: string; how: string; label: string; action: 'reconnect' | 'connect' | 'credentials'; done: string } | null {
   const name = PLATFORMS[a.platform].name;
   const browser = PLATFORMS[a.platform].mode === 'browser';
   const detail = (a.detail ?? '').replace(/\s+/g, ' ').trim();
+  // Şifre/anahtar reddedildiyse "Yeniden bağlan" aynı bilgiyle tekrar dener ve sessizce yine düşer → bilgileri güncelleme formunu aç
+  if ((a.status === 'error' || a.status === 'pairing' || a.status === 'disconnected') && credentialForm(a) && AUTH_FAIL.test(detail))
+    return {
+      title: 'Giriş bilgileri reddedildi',
+      how: PLATFORMS[a.platform].category === 'shop' ? `${name} API bilgilerini kontrol edip yeniden gir.` : `${name} şifreyi kabul etmedi. Yeni bir uygulama şifresi oluşturup gir (normal hesap şifresi çoğu zaman kabul edilmez).`,
+      label: PLATFORMS[a.platform].category === 'shop' ? 'Bilgileri güncelle' : 'Şifreyi güncelle',
+      action: 'credentials',
+      done: '',
+    };
   if (a.attention && a.status === 'connected')
     return {
       title: a.attention,
@@ -1786,7 +1877,7 @@ function ChatRow({
         <span className="top">
           {chat.pinned && <Icon name="pin" size={12} color="var(--text3)" />}
           {kind && (
-            <span className={`skind k-${kind}`} title={kind === 'order' ? 'Sipariş' : 'Müşteri sorusu'} aria-label={kind === 'order' ? 'Sipariş' : 'Müşteri sorusu'}>
+            <span className={`skind k-${kind}`} title={kind === 'order' ? 'Sipariş' : questionOrderRef(chat) ? 'Sipariş sorusu' : 'Ürün sorusu'} aria-label={kind === 'order' ? 'Sipariş' : questionOrderRef(chat) ? 'Sipariş sorusu' : 'Ürün sorusu'}>
               <Icon name={kind === 'order' ? 'box' : 'help'} size={12} sw={2} />
             </span>
           )}

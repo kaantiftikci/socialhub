@@ -345,8 +345,21 @@ export class Store {
     return r ? rowToChat(r) : undefined;
   }
 
-  listChats(limit = 600): Chat[] {
-    return this.db.prepare('SELECT * FROM chats ORDER BY last_message_at DESC LIMIT ?').all(limit).map(rowToChat);
+  /**
+   * Arayüze giden sohbetler: HESAP BAŞINA en yeni `perAccount` (eskiden tümünde toplam 600 → çok sohbetli WhatsApp, iMessage'ın
+   * eski/klasördeki sohbetlerini listeden atıyordu). Okunmamış, işaretli (sabit/arşiv/sessiz), takipte ve iMessage klasörü/Son
+   * Silinenler'deki sohbetler sınırdan bağımsız hep gelir.
+   */
+  listChats(perAccount = 3000): Chat[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY account_id ORDER BY last_message_at DESC) AS rn FROM chats)
+          WHERE rn <= ? OR unread > 0 OR flags IS NOT NULL OR followup IS NOT NULL
+             OR (platform = 'imessage' AND (meta LIKE '%"folder"%' OR meta LIKE '%"deleted"%'))
+          ORDER BY last_message_at DESC`,
+      )
+      .all(perAccount)
+      .map(rowToChat);
   }
 
   /** Bir hesabın tüm sohbetleri (sınırsız; connector içi toplu işlemler için). */

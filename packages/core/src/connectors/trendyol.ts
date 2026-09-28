@@ -444,16 +444,19 @@ export class TrendyolConnector extends BaseConnector {
     const participant: Participant = { id: String(q.customerId ?? id), name };
     const waiting = status === 'WAITING_FOR_ANSWER';
     const product = String(q.productName ?? 'Ürün');
+    // sipariş sorusu: soru bir siparişe bağlıysa numarası (alan adı belgede yok; olası adlar denenir) → arayüzde "Sipariş soruları" sekmesi
+    const orderRaw = q.orderNumber ?? q.orderId ?? q.order?.orderNumber ?? q.order?.id;
+    const orderNumber = orderRaw != null && String(orderRaw).trim() ? String(orderRaw).trim() : undefined;
     this.upsertChat({
       remoteId: rid,
-      name: `Soru · ${shorten(product)}`,
+      name: orderNumber ? `Sipariş sorusu · #${orderNumber}` : `Soru · ${shorten(product)}`,
       kind: 'direct',
       lastMessageAt: Number(q.answer?.creationDate) || created,
       link: q.webUrl || undefined,
       avatarUrl: q.imageUrl || undefined,
       participants: [participant],
       unread: !prev && waiting ? 1 : undefined,
-      meta: { question: { id, status, statusLabel: QUESTION_STATUS[status] ?? status, productName: product, productMainId: q.productMainId, imageUrl: q.imageUrl, webUrl: q.webUrl, public: q.public, dateCreated: new Date(created).toISOString(), reportReason: q.reportReason } },
+      meta: { question: { id, status, statusLabel: QUESTION_STATUS[status] ?? status, productName: product, orderNumber, productMainId: q.productMainId, imageUrl: q.imageUrl, webUrl: q.webUrl, public: q.public, dateCreated: new Date(created).toISOString(), reportReason: q.reportReason } },
     });
     if (q.text) {
       this.upsertMessage({ remoteChatId: rid, remoteId: `q-${id}`, senderId: participant.id, senderName: name, fromMe: false, text: String(q.text), ts: created, status: 'delivered' }, { live: live && !prev && waiting });

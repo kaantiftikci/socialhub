@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { STATIC_DEMO } from './profile';
 import { MAC_ONLY, PLATFORMS, type Account, type CoreOs, type Platform } from './types';
@@ -87,7 +87,15 @@ export function ConnectModal({
   notify: (t: string, err?: boolean) => void;
   onChanged: () => Promise<void>;
 }) {
-  const [active, setActive] = useState<string | null>(focus ?? null); // account id
+  // focus "edit:<hesap>" → o hesabın bilgi formu (şifre/API anahtarı yenileme); e-posta adresi önceden doldurulur
+  const editOf = focus?.startsWith('edit:') ? accounts.find((a) => a.id === focus.slice(5)) : undefined;
+  const [active, setActive] = useState<string | null>(editOf ? `${editOf.platform}:new` : (focus ?? null)); // account id
+  const prefill = useRef<{ active: string; user: string } | null>(editOf ? { active: `${editOf.platform}:new`, user: editOf.label && editOf.label.includes('@') ? editOf.label : '' } : null);
+  /** hesabın bilgilerini yeniden gir: yeni hesap formu açılır (kaydedince çekirdek var olan hesabı günceller) */
+  const editCredentials = (a: Account) => {
+    prefill.current = { active: `${a.platform}:new`, user: a.label && a.label.includes('@') ? a.label : '' };
+    setActive(`${a.platform}:new`);
+  };
   const [tg, setTg] = useState({ apiId: '', apiHash: '' });
   /** Slack resmi uygulama: User OAuth Token (xoxp) + isteğe bağlı App-Level Token (xapp, Socket Mode) */
   const [slackTok, setSlackTok] = useState({ user: '', app: '' });
@@ -104,7 +112,9 @@ export function ConnectModal({
   // Başka bir sağlayıcının formuna geçince alanlar sıfırlansın (Yahoo'ya yazılan adres/şifre "Diğer e-posta"da görünmesin)
   // ve açılan panel görünür alana kaydırılsın
   useEffect(() => {
-    setMail(EMPTY_MAIL);
+    const pf = prefill.current;
+    prefill.current = null;
+    setMail(pf && pf.active === active ? { ...EMPTY_MAIL, user: pf.user } : EMPTY_MAIL);
     setShop({});
     setPat('');
     setSlackTok({ user: '', app: '' });
@@ -621,7 +631,12 @@ export function ConnectModal({
               )}
 
               {activeAccount.status === 'error' && (
-                <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+                <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {(PLATFORMS[activeAccount.platform].mode === 'mail' || PLATFORMS[activeAccount.platform].category === 'shop' || /uygulama şifresi|giriş reddedildi/i.test(activeAccount.detail ?? '')) && (
+                    <button className="btn primary b" onClick={() => editCredentials(activeAccount)}>
+                      <Icon name="lock" size={14} sw={2} /> {PLATFORMS[activeAccount.platform].category === 'shop' ? 'Bilgileri güncelle' : 'Şifreyi güncelle'}
+                    </button>
+                  )}
                   <button className="btn darksec b" onClick={() => api.restartAccount(activeAccount.id).catch((e) => notify(e.message, true))}>
                     <Icon name="refresh" size={14} sw={2} /> Yeniden dene
                   </button>

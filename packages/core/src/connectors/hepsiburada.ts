@@ -587,7 +587,7 @@ export class HepsiburadaConnector extends BaseConnector {
     const remoteId = key;
     this.upsertChat({
       remoteId,
-      name: `Soru · ${short(product || q.subject?.description || `#${n}`, 40)}`,
+      name: q.orderNumber ? `Sipariş sorusu · #${q.orderNumber}` : `Soru · ${short(product || q.subject?.description || `#${n}`, 40)}`,
       kind: 'direct',
       lastMessageAt: created,
       participants: [participant],

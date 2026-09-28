@@ -102,8 +102,10 @@ Dil: arayüz ve yorumlar Türkçe.
 - **Pazaryerleri**: `trendyol.ts` (resmi Satıcı API: soru-cevap + sipariş), `hepsiburada.ts` (Satıcıya Sor + OMS), `n11.ts` (REST sipariş + SOAP
   soru), `etsy.ts`/`shopify.ts`/`amazon.ts` (resmi API siparişler + tarayıcı köprüsüyle mesaj/inbox; deneysel). Pazaryeri yanıtları
   yalnız metin (arayüz dosya/ses düğmesini gizler). Shopier `available:false` ("Yakında").
-  Pazaryeri kanal listesi sekmeleri **Tümü · Siparişler · Sorular** (`types.ts` `shopKind`: meta.order → sipariş, diğerleri soru; sayılar
-  `shopPending`: açık sipariş / cevap bekleyen soru). Satırda 📦/❓ işareti (`.skind`); sağ panelde `OrderPanel` ya da `QuestionPanel` (meta.question).
+  Pazaryeri kanal listesi sekmeleri **Tümü · Siparişler · Ürün soruları · Sipariş soruları** (2×2 ızgara `.tabs.shop`; `types.ts` `shopTabOf`:
+  meta.order → sipariş; soru `questionOrderRef` varsa (meta.question.orderNumber — Trendyol'da alan adı belgesiz, orderNumber/orderId/order.*
+  denenir; HB orderNumber; Amazon handle 123-1234567-1234567) sipariş sorusu, yoksa ürün sorusu; Sipariş soruları sekmesi `ORDER_Q_PLATFORMS`
+  ya da içerik varsa; sayılar `shopPending`: açık sipariş / cevap bekleyen soru). Satırda 📦/❓ işareti (`.skind`); sağ panelde `OrderPanel` ya da `QuestionPanel` (meta.question).
   Trendyol/Hepsiburada/n11/Shopier'de (`ORDER_ONLY_PLATFORMS`, `isOrderPage`) sipariş sohbet DEĞİL: orta alanda `OrderPage` (özet + durum
   geçmişi, yazma alanı yok; API'de sipariş üzerinden alıcıya mesaj ucu yok). Bağlı soru varsa (question.orderNumber) "Soruyu aç". Odak'ta sayılmaz.
   Siparişler varsayılan AÇIK (`ordersFlag`: token `ordersOff:true` kapatır; eski formun yazdığı `orders:false` yok sayılır). Trendyol soru/sipariş
@@ -127,6 +129,16 @@ Dil: arayüz ve yorumlar Türkçe.
   - Masaüstü bekçisi: 60 sn açılış payı, çökmede üstel bekleme ≤5 dk, SIGTERM→bekle→kill; `core-bundle/node-abi.json` ile uyumlu Node seçilir.
   - PHP depoları: önce kodla, tmp+rename, ayrı `.lock`; bozuk dosya 500 (asla sıfırlama); admin varsayılan şifreye asla düşmez; IPv6 /64 sınırı.
     Deploy durum dosyası `api/.ftp-deploy-sync-state.json` (sunucu kökündeki eskisi elle silinmeli).
+- **Giriş bilgisi reddi** (`App.tsx` `AUTH_FAIL` + `credentialForm`): e-posta/pazaryeri hesabında şifre/anahtar reddedilince uyarı düğmesi
+  "Şifreyi/Bilgileri güncelle" → Bağlan `focus="edit:<hesap>"` formu (e-posta dolu). Çekirdek `registry.add`: aynı platform + aynı adresli
+  e-posta hesabı varsa kopya açmaz, token'ı birleştirip (formda olmayan alanlar korunur) yeniden başlatır (test: security-fixes).
+- **Sohbet listesi**: `/api/chats` HESAP BAŞINA en yeni 3000 (`store.listChats`; eskiden toplam 600 → çok sohbetli WhatsApp iMessage'ın
+  eski/klasördeki sohbetlerini atıyordu) + okunmamış/bayraklı/takipte/iMessage klasör-silinen her zaman. Arayüz 300'lük parçalarla çizer
+  (`rowLimit`, `.list-more` IntersectionObserver). Gezinme durumu (görünüm/kanal/sekme/klasör/açık sohbet) sessionStorage `mivelo.nav`
+  → yenilemede aynı yer.
+- **iMessage**: poll birikmişi 500'lük parçalarla boşaltır (≤10/tur); `chat_message_join` henüz yazılmamış yeni satırlar `unjoined`da 2 dk
+  yeniden denenir (eskiden atlanıyordu → "son gelenler görünmüyor"). Bilinmeyen klasörü: is_filtered 0 olsa da rehberde yok + hiç yanıtlanmamış
+  birebir sohbet (`unknownSender`; rehber okunamazsa uygulanmaz).
 - **Kendi mesajının yankısı**: `store.isOwnEcho` (aynı sohbette ±3 dk, ≥12 kr. aynı metinli fromMe) → base.upsertMessage gelen saymaz (tüm
   platformlar); WhatsApp'ta katılımcı kimliği `meIds` ise fromMe. Uyarıdaki "QR'ı göster" Bağlan'ı o hesabın eşleştirme alanıyla açar (`focus`).
 
@@ -261,7 +273,7 @@ Dil: arayüz ve yorumlar Türkçe.
 - Mesaj üstüne gelince iki düğme (`.rtrig`, ikincisi `.second`): 😊 tepki (`REACT_PLATFORMS`: WhatsApp, Telegram, Slack, Instagram
   `broadcast/reaction`, LinkedIn `reactWithEmoji|unreactWithEmoji` {messageUrn, emoji} — mautrix-linkedin) + 📅 takvim (metinli her mesajda,
   tüm uygulamalar). LinkedIn gelen tepkiler `reactionSummaries` → `liReactions`. Messenger/X (yalnız DOM), iMessage, e-posta, pazaryeri: tepki yok.
-- Arayüzde emoji yerine ikon: bağlayıcıların yazdığı baş emojiler ("📦 Kargoya verildi", "📷 Fotoğraf", "Sen: 🎤 …") `ui.tsx`
+- Arayüzde emoji yerine ikon (`LEAD_RE` U+2300–23FF'yi de kapsar: ⏳⌛⏰ → clock; sipariş durum rozetleri de `IconText`): bağlayıcıların yazdığı baş emojiler ("📦 Kargoya verildi", "📷 Fotoğraf", "Sen: 🎤 …") `ui.tsx`
   `IconText`/`leadIcon` (`LEAD_ICONS` eşlemesi) ile ikon çizilir; sistem bildiriminde `stripLeadIcon` (düz metin). Kullanıcı içeriği ve
   tepki metinleri ("😂 … beğendi") olduğu gibi. Yeni arayüz metnine emoji yazma; `Icon` kullan.
 - Bağlan: resmi olmayan kanallarda "resmi değil" etiketi + Sosyal Medya altında açıklama (`UNOFFICIAL`, Connect.tsx).

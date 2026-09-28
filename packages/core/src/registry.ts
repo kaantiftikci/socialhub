@@ -91,6 +91,23 @@ export class Registry {
       await this.restart(existing.id);
       return existing;
     }
+    // E-posta: aynı adres yeniden bağlanınca kopya hesap açma → var olan hesabın bilgilerini güncelle (ör. yenilenen uygulama şifresi)
+    // ve yeniden başlat. Yeni formda verilmeyen alanlar (elle girilmiş sunucu vb.) eskisinden korunur.
+    if (MAIL_PLATFORMS.includes(platform) && opts.token) {
+      const next = parseJson(opts.token);
+      const user = String(next.user ?? '').trim().toLowerCase();
+      const same = user
+        ? this.list().find((a) => a.platform === platform && String(parseJson(readToken(a.id)).user ?? a.label ?? '').trim().toLowerCase() === user)
+        : undefined;
+      if (same) {
+        const merged = { ...parseJson(readToken(same.id)) };
+        for (const [k, v] of Object.entries(next)) if (v !== undefined && v !== null && v !== '') merged[k] = v;
+        fs.writeFileSync(path.join(sessionDir(same.id), 'token'), JSON.stringify(merged), { mode: 0o600 });
+        bus.log('info', `${same.id}: giriş bilgileri güncellendi, yeniden bağlanılıyor`);
+        await this.restart(same.id);
+        return same;
+      }
+    }
     const account: Account = {
       id: `${platform}:${randomBytes(4).toString('hex')}`,
       platform,
@@ -279,6 +296,23 @@ export class Registry {
   async stopAll(): Promise<void> {
     // tek bir asılı stop() kapanışı sonsuza dek bekletmesin
     await Promise.all([...this.connectors.values()].map((c) => withTimeout(c.stop(), 10_000).catch(() => undefined)));
+  }
+}
+
+function parseJson(t: string | undefined): Record<string, unknown> {
+  try {
+    const v = JSON.parse(t ?? '');
+    return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function readToken(id: string): string | undefined {
+  try {
+    return fs.readFileSync(path.join(sessionDir(id), 'token'), 'utf8');
+  } catch {
+    return undefined;
   }
 }
 

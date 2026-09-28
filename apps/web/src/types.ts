@@ -242,6 +242,24 @@ export function shopKind(c: Pick<Chat, 'platform' | 'meta'>): ShopKind | null {
   if (PLATFORMS[c.platform]?.category !== 'shop') return null;
   return c.meta?.order ? 'order' : 'question';
 }
+/** Pazaryeri sorusunun bağlı olduğu sipariş (sipariş sorusu); yoksa ürün sorusu.
+ *  Kaynaklar: meta.question.orderNumber (Trendyol/Hepsiburada), Amazon alıcı mesajında sipariş no (handle 123-1234567-1234567). */
+export function questionOrderRef(c: Pick<Chat, 'platform' | 'meta' | 'handle'>): string | undefined {
+  const q = c.meta?.question as { orderNumber?: string | number } | undefined;
+  if (q?.orderNumber) return String(q.orderNumber);
+  if (c.platform === 'amazon' && c.handle && /^\d{3}-\d{7}-\d{7}$/.test(c.handle)) return c.handle;
+  return undefined;
+}
+/** Pazaryeri liste sekmesi: siparişler · ürün soruları · sipariş soruları */
+export type ShopTab = 'order' | 'productQ' | 'orderQ';
+export function shopTabOf(c: Pick<Chat, 'platform' | 'meta' | 'handle'>): ShopTab | null {
+  const kind = shopKind(c);
+  if (!kind) return null;
+  if (kind === 'order') return 'order';
+  return questionOrderRef(c) ? 'orderQ' : 'productQ';
+}
+/** Sipariş soruları sekmesi olan pazaryerleri (sipariş sorusu yoksa da sekme görünür) */
+export const ORDER_Q_PLATFORMS = new Set<Platform>(['trendyol', 'hepsiburada', 'amazon']);
 /** Kapanmış sipariş durumları (gönderildi/teslim/iptal/iade): bunlar "bekleyen" sayılmaz */
 export const ORDER_CLOSED = /^(fulfilled|delivered|shipped|cancelled|canceled|returned|completed|closed)$/i;
 /** Satıcıdan bir şey bekleyen pazaryeri sohbeti: açık sipariş ya da yanıt bekleyen soru */

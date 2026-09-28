@@ -3,7 +3,7 @@ import { EmojiPicker } from './emoji';
 import { api, USE_STATIC } from './api';
 import { EventEditor } from './CalendarView';
 import { API_BASE, mediaUrl, openExternal } from './desktop';
-import { DEFAULT_TAGS, PLATFORMS, isOrderPage, shopKind, QUICK_REACTIONS, REACT_PLATFORMS, TAG_COLORS, openInAppLink, type Attachment, type CalendarDraft, type Chat, type ChatFlags, type DraftResult, type LinkPreview, type Message, type Reaction } from './types';
+import { DEFAULT_TAGS, PLATFORMS, isOrderPage, questionOrderRef, shopKind, QUICK_REACTIONS, REACT_PLATFORMS, TAG_COLORS, openInAppLink, type Attachment, type CalendarDraft, type Chat, type ChatFlags, type DraftResult, type LinkPreview, type Message, type Reaction } from './types';
 import { guessWhen } from './when';
 import { useAiPrefs } from './ai-prefs';
 import { useClosing, Avatar, Chip, Icon, IconText, Resizer, Tag, ago, fmtDay, fmtStamp, fmtTime } from './ui';
@@ -745,7 +745,7 @@ export function Conversation({
                   <span className="tdots"><i /><i /><i /></span>
                 </span>
               ) : (
-                <span className="meta">{isOrderPage(chat) ? 'Sipariş' : shopKind(chat) === 'question' ? 'Müşteri sorusu' : chat.kind === 'group' ? 'Grup' : chat.kind === 'channel' ? 'Kanal' : 'Sohbet'}</span>
+                <span className="meta">{isOrderPage(chat) ? 'Sipariş' : shopKind(chat) === 'question' ? (questionOrderRef(chat) ? 'Sipariş sorusu' : 'Ürün sorusu') : chat.kind === 'group' ? 'Grup' : chat.kind === 'channel' ? 'Kanal' : 'Sohbet'}</span>
               )}
             </span>
           </div>
@@ -1255,7 +1255,7 @@ export function Conversation({
           <span className="sub">
             {platform.name}
             {' · '}
-            {isOrderPage(chat) ? 'sipariş' : shopKind(chat) === 'question' ? 'müşteri sorusu' : chat.kind === 'group' ? 'grup' : chat.kind === 'channel' ? 'kanal' : 'sohbet'}
+            {isOrderPage(chat) ? 'sipariş' : shopKind(chat) === 'question' ? (questionOrderRef(chat) ? 'sipariş sorusu' : 'ürün sorusu') : chat.kind === 'group' ? 'grup' : chat.kind === 'channel' ? 'kanal' : 'sohbet'}
           </span>
         </div>
         {PLATFORMS[chat.platform].category === 'shop' && (chat.meta?.order as OrderMeta | undefined)?.items ? <OrderPanel chat={chat} notify={notify} /> : null}
@@ -1672,7 +1672,7 @@ function OrderPanel({ chat, notify }: { chat: Chat; notify: (t: string, err?: bo
   return (
     <div className="order">
       <div className="order-head">
-        <span className={`order-status ${open ? 'open' : 'done'}`}>{o.statusLabel ?? (open ? 'Açık sipariş' : 'Kapatıldı')}</span>
+        <span className={`order-status ${open ? 'open' : 'done'}`}><IconText text={o.statusLabel ?? (open ? 'Açık sipariş' : 'Kapatıldı')} size={12} /></span>
         <span className="order-total">{fmt(o.totals?.total)}</span>
       </div>
       <div className="order-items">
@@ -1747,7 +1747,7 @@ function OrderPage({ chat, messages, relatedQuestion, onOpenChat }: { chat: Chat
             <span className="op-no"><Icon name="box" size={20} color="var(--v)" /> Sipariş #{o.id}</span>
             <span className="op-date">{o.dateCreated ? when(Date.parse(o.dateCreated)) : ''}</span>
           </div>
-          <span className={`order-status ${open ? 'open' : 'done'}`}>{o.statusLabel ?? o.status}</span>
+          <span className={`order-status ${open ? 'open' : 'done'}`}><IconText text={String(o.statusLabel ?? o.status ?? '')} size={12} /></span>
         </div>
         <div className="op-items">
           {o.items.map((it, i) => (
