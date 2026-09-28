@@ -1,49 +1,12 @@
 import { claimUserLocalData, wipeUserLocalData } from './demo-isolation';
 import { useEffect, useState } from 'react';
-import { authCoreToken, authLoadAccounts, authLogin, authLogout, authMe, authRegister, authSignupConfig, type SessionUser } from './auth-api';
+import { authLoadAccounts, authLogin, authLogout, authMe, authRegister, authSignupConfig, type SessionUser } from './auth-api';
 import { setLeaveDemoPanel } from './demo-session';
 import { setProfileName, setProfileUser } from './profile';
 import { clearDemoAccounts, loadDemoAccounts } from './static-demo';
 import { Logo, PasswordInput } from './ui';
-import { REMOTE_CORE, clearRemoteCore, coreToken, setRemoteCore } from './desktop';
+import { REMOTE_CORE, clearRemoteCore } from './desktop';
 import App from './App';
-
-/**
- * Sunucu çekirdeği (Admin → Demo → Sunucu çekirdeği açık): üyenin gerçek bağlantıları ağ geçidindeki kendi çekirdeğinde. Her açılışta
- * taze belirteç alınır; API kökü modül yüklenirken seçildiği için çekirdek adresi değişince sayfa bir kez yenilenir. true = yenileniyor.
- */
-function tokenUid(t: string): string {
-  try {
-    return String((JSON.parse(atob(t.split('.')[0].replace(/-/g, '+').replace(/_/g, '/'))) as { u?: string }).u ?? '');
-  } catch {
-    return '';
-  }
-}
-
-async function syncRemoteCore(): Promise<boolean> {
-  let c: { core: string | null; token?: string };
-  try {
-    c = await authCoreToken();
-  } catch {
-    return false; // okunamadı: olduğu gibi devam
-  }
-  if (c.core && c.token) {
-    // açılışta yüklenen belirteç başka bir üyeninse (aynı tarayıcı, farklı hesap) o belirteçle TEK istek bile gitmesin: yenile
-    const loadedUid = tokenUid(await coreToken);
-    setRemoteCore(c.core, c.token);
-    if (REMOTE_CORE !== c.core.replace(/\/+$/, '') || loadedUid !== tokenUid(c.token)) {
-      location.reload();
-      return true;
-    }
-    return false;
-  }
-  if (REMOTE_CORE) {
-    clearRemoteCore();
-    location.reload();
-    return true;
-  }
-  return false;
-}
 
 export function DemoGate() {
   const [user, setUser] = useState<SessionUser | null | undefined>(undefined);
@@ -58,9 +21,8 @@ export function DemoGate() {
           claimUserLocalData(u.id);
           setProfileName(u.name);
           setProfileUser(u.username);
-          if (await syncRemoteCore()) return;
           // kayıtlı kanallar okunamazsa oturum geçerli kalır (giriş ekranına atılmaz), demo varsayılan kanallarla açılır
-          if (!REMOTE_CORE) loadDemoAccounts(await authLoadAccounts().catch(() => []), { fresh: u.fresh });
+          loadDemoAccounts(await authLoadAccounts().catch(() => []), { fresh: u.fresh });
         }
         setUser(u);
       })
@@ -77,15 +39,11 @@ export function DemoGate() {
 
   useEffect(() => {
     setLeaveDemoPanel(() => {
-      const wasRemote = !!REMOTE_CORE;
-      clearRemoteCore();
+      void authLogout().catch(() => undefined);
       clearDemoAccounts();
       wipeUserLocalData();
       setProfileName('');
-      // sunucu çekirdeğindeyken API kökü uzak: çıkıştan sonra sayfa yenilenir (sonraki giriş örnek veriyle ya da kendi çekirdeğiyle açılır)
-      void authLogout()
-        .catch(() => undefined)
-        .finally(() => (wasRemote ? location.reload() : setUser(null)));
+      setUser(null);
     });
     return () => setLeaveDemoPanel(null);
   }, []);
@@ -94,8 +52,6 @@ export function DemoGate() {
     claimUserLocalData(u.id);
     setProfileName(u.name);
     setProfileUser(u.username);
-    if (await syncRemoteCore()) return;
-    if (REMOTE_CORE) return setUser(u);
     loadDemoAccounts(await authLoadAccounts().catch(() => []), { fresh: u.fresh });
     setUser(u);
   }

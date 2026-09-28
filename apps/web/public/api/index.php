@@ -503,39 +503,6 @@ if ($action === 'me' && $method === 'GET') {
 }
 
 /**
- * Sunucu çekirdeği (gerçek bağlantılar): Admin → Demo → "Sunucu çekirdeği" açıksa oturumdaki üyeye, ağ geçidinin (core.mivelo.app)
- * doğrulayacağı imzalı kısa belirteç verilir: base64url({"u":uid,"e":bitiş}) + "." + base64url(HMAC-SHA256(gizli, yük)).
- * Gizli anahtar web kökü dışında ~/mivelo-data/core-secret (0600); ağ geçidindeki CORE_SECRET ile aynı. Kapalıysa {core:null}.
- */
-if ($action === 'core_token' && $method === 'GET') {
-    $me = with_users(function (array &$data) {
-        return ['write' => false, 'out' => current_user($data)];
-    });
-    if ($me === null) {
-        fail(401, 'Giriş gerekli');
-    }
-    $s = store_read(data_dir() . '/demo-settings.json', []);
-    $url = rtrim((string) ($s['coreUrl'] ?? ''), '/');
-    $secretFile = data_dir() . '/core-secret';
-    $secret = is_file($secretFile) ? trim((string) @file_get_contents($secretFile)) : '';
-    if (empty($s['coreEnabled']) || !preg_match('#^https://[a-z0-9.-]+(:\d+)?$#i', $url) || strlen($secret) < 32) {
-        echo json_encode(['core' => null]);
-        exit;
-    }
-    $uid = (string) $me['id'];
-    // hazır "admin" hesabı vitrin (örnek veri) olarak kalır; üyeler gerçek çekirdeğe bağlanır
-    if ($uid === 'u-admin' || !preg_match('/^u-[a-z0-9-]{3,40}$/', $uid)) {
-        echo json_encode(['core' => null]);
-        exit;
-    }
-    $b64 = fn (string $x) => rtrim(strtr(base64_encode($x), '+/', '-_'), '=');
-    $payload = $b64(json_encode(['u' => $uid, 'e' => time() + 7 * 86400]));
-    $token = $payload . '.' . $b64(hash_hmac('sha256', $payload, $secret, true));
-    echo json_encode(['core' => $url, 'token' => $token]);
-    exit;
-}
-
-/**
  * Geri bildirim (uygulamadaki sağ alt düğme): üye kimliği OTURUMDAN yazılır (istemcinin gönderdiği ad/e-posta yok sayılır).
  * Kayıt mantığı mivelo.app ile ortak lib-feedback.php (yayında demo klasörüne de kopyalanır).
  */

@@ -136,21 +136,10 @@ Dil: arayüz ve yorumlar Türkçe.
   (yalnız Windows). Mac'e özgü kalanlar: iMessage (arayüzde "Yalnız Mac"), macOS Kişiler, Anahtar Zinciri, Dock rozeti.
   Linux'ta `cargo check --target x86_64-pc-windows-msvc` çalışır (webkit gerekmez; `src-tauri/core-bundle/` klasörü var olmalı);
   gerçek Windows cihaz testi yapılmadı.
-- **Sunucu çekirdeği (demo üyeleri, core.mivelo.app)**: `apps/gateway/gateway.mjs` (bağımlılıksız Node, package.json YOK → workspace değil)
-  üye başına ayrı çekirdek süreci açar: `MIVELO_DATA_DIR=<USERS_DIR>/<uid>` (/var/lib/mivelo/users, 0700; HOME=<dir>/home), port 17000+,
-  `MIVELO_SERVER=1` + `MIVELO_LOGIN_EMBED=1`, `DISPLAY` (Xvfb :99). Belirteç (`token.mjs`, PHP ile aynı): `<b64url JSON {u,e}>.<b64url HMAC-SHA256(CORE_SECRET, yük)>`,
-  uid `^u-[a-z0-9-]{3,40}$`; `x-kavsak-token` ya da `?token=` → doğrulanır, SİLİNİR, yerine çekirdeğin kendi belirteci (+X-Forwarded-For, Host 127.0.0.1:port,
-  Origin/çerez gitmez). `/api/*` + `/ws` aktarılır; `GET /gw/health` yetkisiz; 401 "Oturum geçersiz…"; CORS yalnız `ALLOWED_ORIGINS`. İlk istekler tek başlatmayı
-  paylaşır (≤60 sn, /api/health), `MAX_CORES` (setup.sh: (RAM−1 GB)/1 GB) dolu → 503, `IDLE_MINUTES` (120; açık WS = etkin) boşta → SIGTERM→10 sn→SIGKILL (grup + üyenin Chromium'ları); zamanlanmış gönderim uyandırması (`wake.mjs`, dakikada bir üyenin `scheduled.json`'u okunur: zamanına ≤3 dk kala ve kaçırılma penceresi (14 dk) geçmemişse durdurulmuş çekirdek başlatılır, yakında gönderim varken boşta durdurma ertelenir; takvim/takip hatırlatmaları arayüz kapalıyken zaten gösterilemez → uyandırmaz; test wake.test.mjs);
-  çöken çekirdek sonraki istekte, art arda hızlı çöküşte 5 sn→≤5 dk bekleme. Çekirdek çıktısı doğrudan `<dir>/core.log` (5 MB → core.log.1), `core.pid`
-  (ağ geçidi yeniden başlayınca artık süreç öldürülür). **KVKK**: `POST /gw/delete-user {uid, ts}` + `x-gw-sig` = b64url(HMAC(CORE_SECRET, "delete:<uid>:<ts>")), ±300 sn
-  → çekirdek durur, klasör silinir, `{ok, deleted}`. Çekirdekte sunucu modu (`platform.ts IS_SERVER`): her istek belirteç ister (yerelden de), `localOnly` serbest
-  (hesap ekle/sil/yeniden başlat/AI anahtarı ağ geçidinden), LAN/iMessage/cihaz takvimi/`openExternal` kapalı, `login-window`/`external` yok sayılır (hep
-  Mivelo içi giriş), `DISPLAY` varsa Chromium Xvfb'de görünür (headful; `MIVELO_HEADFUL=0` kapatır), `/api/health` `server:true`. Kurulum `deploy/server/`
-  (depo GİZLİ → salt okunur GitHub deploy key `/root/mivelo-deploy`, `setup.sh --deploy-key` onu `mivelo`'nun ~/.ssh'ine koyar, uzak adres git@github.com; Admin kartındaki komut önce klonlar sonra setup.sh; raw.githubusercontent 404 verir. `setup.sh` tek satır: Node 22, Caddy, Xvfb, Playwright Chromium `/opt/mivelo/.pw`, kullanıcı `mivelo`, `/etc/mivelo/gateway.env` 0600, systemd
-  `mivelo-xvfb`/`mivelo-gateway`/`mivelo-update.timer` (5 dk: ff-only çekme; yalnız çekirdek/ağ geçidi/kilit değişince derleme + yeniden başlatma), Oracle
-  iptables 80/443; README Türkçe). Testler: `node --test apps/gateway/token.test.mjs`, `test/server-mode.test.ts`. Gerçek VPS'te DENENMEDİ.
-
+- **Sunucu çekirdeği KALDIRILDI (28.09)**: demo üyeleri için VPS'te üye başına çekirdek (apps/gateway, deploy/server, `IS_SERVER`, admin
+  "Sunucu çekirdeği" kartı, demo `core_token`) denendi ve silindi: veri merkezi IP'si + aynı IP'de çok hesap → Instagram/Meta/LinkedIn/X ban riski,
+  tüm oturumlar tek sunucuda (güvenlik/KVKK), gerçek giriş sayfası kullanıcının tarayıcısında açılamıyor (çerezler sunucuya taşınamaz). Gerçek
+  kullanım = masaüstü paketleri (DMG/EXE, kullanıcının kendi cihazı ve IP'si). Demo sitesi yalnız tanıtım (örnek veri). `#core=` tünel yolu (REMOTE_CORE) duruyor.
 ## Connector'lar ve kritik bilgiler
 - **WhatsApp** (`connectors/whatsapp.ts`, Baileys 7.0.0-rc14): `browser: ['Mac','Mivelo','1.0']` + `syncFullHistory: true`.
   ASLA `Browsers.macOS(...)` + syncFullHistory birlikte kullanma (DARWIN kimliği → sunucu 428 ile anında kapatır).
@@ -166,7 +155,6 @@ Dil: arayüz ve yorumlar Türkçe.
   hangisinin çalıştığını basar; facebook.com düzeni gerçek hesapla henüz doğrulanmadı).
   Çerezli medya `fetchMedia` ile vekilden geçer, `~/.mivelo/sessions/<hesap>/media` önbelleği.
 - Bağlan penceresi: kapatma ✕ `.modal-x` kaydırılan alanın DIŞINDA (mutlak konum, aşağı inince de görünür). Telegram kartında Bağlan → doğrudan QR (ara form yok; kendi api_id'si yalnız QR altındaki "Gelişmiş" bağlantısıyla `telegram:new`).
-- **Sunucu çekirdeğinde giriş HARİCİ SEKMEDE** (Kaan: uygulama içinde açılmasın): `LoginView.tsx` `preopenLogin(platform, id?)` sekmeyi TIKLAMA ANINDA açar (await sonrası açılanı tarayıcı engelliyordu → giriş Mivelo içinde görünüyordu); id yoksa boş sekme + `bindLogin`. Çağrılar: Connect `add` (token'sız), "Giriş ekranını aç", App uyarı düğmeleri/menü "Yeniden bağlan". Uzak modda LoginView asla katman çizmez: "Giriş ayrı sekmede açık · Sekmeye git" / "Giriş sekmesi engellendi · Giriş sekmesini aç" hapı. `?loginview` sekmesi login.end'de, hesap 'connected' olunca ya da 30 sn görüntü gelmez ve hesap 'pairing' değilse kendini kapatır.
 - **Telegram** (teleproto — bakımı süren GramJS fork'u; GramJS Temmuz 2026'da arşivlendi): api_id/api_hash Bağlan formundan (token dosyası JSON); giriş QR ile (`tg://login?token`), 2FA parolası prompt.
 - **iMessage**: `~/Library/Messages/chat.db` salt okunur + AppleScript gönderim; Tam Disk Erişimi yoksa Sistem Ayarları bölmesini açar.
 - **E-posta** (`connectors/mail.ts`): imapflow + nodemailer + mailparser; thread = sohbet. Gmail: uygulama şifresi ya da

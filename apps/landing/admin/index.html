@@ -366,16 +366,6 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     <section class="page" id="p-demo">
       <div class="top"><h2>Demo</h2><span class="sp"></span><a class="btn" href="https://demo.mivelo.app" target="_blank" rel="noopener">demo.mivelo.app ↗</a></div>
       <div class="card" style="margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap"><div style="flex:1;min-width:240px"><b>Yeni üyeleri otomatik onayla</b><div class="muted" style="font-size:12.5px;margin-top:3px">Açıkken kayıt olan hemen giriş yapar (onay e-postası beklemez). Kapatınca talepler burada onayını bekler ve onayda e-posta gider.</div></div><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="autoApprove" style="width:18px;height:18px"> <span id="autoApproveTx">—</span></label></div>
-      <div class="card" style="margin-bottom:14px" id="coreCard"><h3>Sunucu çekirdeği <span class="sub">açıkken üyeler demoda GERÇEK hesaplarını bağlar (gerçek QR, gerçek giriş sayfaları)</span></h3>
-        <div class="muted" style="font-size:12.5px;margin:-4px 0 12px">Her üyeye sunucuda ayrı bir Mivelo çekirdeği çalışır; mesajları o sunucuda durur. Kurulum: <code>deploy/server/README.md</code>. Kapalıyken demo örnek veriyle çalışır.</div>
-        <div class="sm-grid" style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:end">
-          <label style="display:block"><span class="muted" style="font-size:12px">Ağ geçidi adresi</span><input class="input" id="coreUrl" placeholder="https://core.mivelo.app" style="width:100%;margin-top:4px"></label>
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;height:38px"><input type="checkbox" id="coreOn" style="width:18px;height:18px"> <span id="coreOnTx">Kapalı</span></label>
-        </div>
-        <div style="margin-top:12px"><span class="muted" style="font-size:12px">Kurulum komutu (sunucuda bir kez çalıştır; gizli anahtar içerir, kimseyle paylaşma)</span>
-          <div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap"><input class="input" id="coreCmd" readonly style="flex:1;min-width:240px;font-family:ui-monospace,monospace;font-size:12px"><button class="btn sm" id="coreCopy">Kopyala</button></div></div>
-        <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center"><button class="btn sm soft" id="coreSave">Kaydet</button><button class="btn sm" id="coreCheck">Bağlantıyı dene</button><button class="btn sm" id="coreRotate" title="Yeni anahtar üretir; sunucudaki CORE_SECRET de güncellenmeli">Anahtarı yenile</button><span class="muted" id="coreStatus" style="font-size:12.5px"></span></div>
-      </div>
       <div class="card" style="padding-bottom:6px"><h3>Demo hesapları <span class="sub">üyelik talepleri burada; onaylayınca kullanıcıya e-posta gider</span></h3><div id="demoBox"></div></div>
     </section>
 
@@ -649,22 +639,10 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     var k=h.dataset.acc, id=k.slice(2), m=k[0]==='d'?OPEN_D:OPEN_F; if(m[id]) delete m[id]; else m[id]=1;
     if(k[0]==='d') renderDemo(); else renderFb(); });
   var DEMO_ST={pending:['Onay bekliyor','st-invited'],active:['Etkin','st-joined'],rejected:['Reddedildi','st-spam']};
-  /* ---------- sunucu çekirdeği ---------- */
-  var CORE={};
-  function coreRender(){ $('#coreUrl').value=CORE.url||''; $('#coreOn').checked=!!CORE.enabled; $('#coreOnTx').textContent=CORE.enabled?'Açık':'Kapalı';
-    var dom=(CORE.url||'https://core.mivelo.app').replace(/^https:\/\//,'');
-    $('#coreCmd').value='rm -rf /root/mivelo-src && GIT_SSH_COMMAND="ssh -i /root/mivelo-deploy -o StrictHostKeyChecking=accept-new" git clone -q --depth 1 git@github.com:kaantiftikci/socialhub.git /root/mivelo-src && bash /root/mivelo-src/deploy/server/setup.sh --deploy-key /root/mivelo-deploy --domain '+dom+' --secret '+(CORE.secret||''); }
-  function loadCore(){ api('core').then(function(d){ CORE=d; coreRender(); }).catch(function(e){ toast(e.message,true); }); }
-  function saveCore(rotate){ return api('core_save',{url:$('#coreUrl').value.trim(),enabled:$('#coreOn').checked,rotate:!!rotate}).then(function(d){ CORE=d; coreRender(); toast(rotate?'Yeni anahtar üretildi; sunucuda da güncelle':'Kaydedildi'); }).catch(function(x){ toast(x.message,true); loadCore(); }); }
-  $('#coreSave').addEventListener('click',function(){ saveCore(false); });
-  $('#coreOn').addEventListener('change',function(){ saveCore(false); });
-  $('#coreRotate').addEventListener('click',function(e){ var b=e.currentTarget; if(b.dataset.armed!=='1'){ b.dataset.armed='1'; b.textContent='Emin misin? Tekrar bas'; setTimeout(function(){ b.dataset.armed=''; b.textContent='Anahtarı yenile'; },3500); return; } b.dataset.armed=''; b.textContent='Anahtarı yenile'; saveCore(true); });
-  $('#coreCopy').addEventListener('click',function(){ var i=$('#coreCmd'); i.select(); (navigator.clipboard?navigator.clipboard.writeText(i.value):Promise.reject()).then(function(){ toast('Kopyalandı'); }).catch(function(){ document.execCommand('copy'); toast('Kopyalandı'); }); });
-  $('#coreCheck').addEventListener('click',function(){ var u=($('#coreUrl').value||'').trim().replace(/\/+$/,''); var st=$('#coreStatus'); if(!/^https:\/\//.test(u)){ st.textContent='Önce adresi yaz'; return; } st.textContent='Deneniyor…';
-    fetch(u+'/gw/health',{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(d){ st.textContent=d&&d.ok?'Çalışıyor · '+(d.cores||0)+' çekirdek açık':'Yanıt beklenmedik'; }).catch(function(){ st.textContent='Ulaşılamadı (sunucu kurulu mu, DNS kaydı yayıldı mı?)'; }); });
+  /* ---------- demo ayarları ---------- */
   function setAuto(on){ $('#autoApprove').checked=on; $('#autoApproveTx').textContent=on?'Açık':'Kapalı'; }
   $('#autoApprove').addEventListener('change',function(e){ var on=e.target.checked; api('demo_settings',{autoApprove:on}).then(function(d){ setAuto(d.autoApprove); toast(d.autoApprove?'Otomatik onay açık: yeni üyeler hemen girer':'Otomatik onay kapalı: yeni talepler onay bekler'); }).catch(function(x){ setAuto(!on); toast(x.message,true); }); });
-  function loadDemo(){ loadCore(); api('demo').then(function(d){ LAST_DEMO=d; renderDemo(); }).catch(function(e){ toast(e.message,true); }); }
+  function loadDemo(){ api('demo').then(function(d){ LAST_DEMO=d; renderDemo(); }).catch(function(e){ toast(e.message,true); }); }
   function renderDemo(){ var d=LAST_DEMO; if(!d) return;
     setAuto(d.autoApprove!==false);
     var pend=d.users.filter(function(u){ return u.status==='pending'; }).length;
@@ -697,14 +675,14 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     var b=e.target.closest('[data-dm],[data-dmail],[data-ddel],[data-dreset]'); if(!b) return;
     if(b.dataset.dreset){
       if(b.dataset.armed!=='1'){ b.dataset.armed='1'; toast('Verileri silmek için tekrar tıkla ('+b.dataset.name+')'); setTimeout(function(){ b.dataset.armed=''; },3000); return; }
-      api('demo_reset',{id:b.dataset.dreset}).then(function(d){ toast(d.coreError?'Veriler silindi; sunucu çekirdeği: '+d.coreError:'Veriler silindi',!!d.coreError); loadDemo(); }).catch(function(err){ toast(err.message,true); }); return;
+      api('demo_reset',{id:b.dataset.dreset}).then(function(d){ toast('Veriler silindi'); loadDemo(); }).catch(function(err){ toast(err.message,true); }); return;
     }
     var done=function(d){ if(d&&d.mailed===false) toast('Kaydedildi ama e-posta gönderilemedi: '+(d.mailError||'')+' — Ayarlar → E-posta gönderimi',true); else toast(d&&d.mailed?'Onaylandı, e-posta gönderildi':'Kaydedildi'); loadDemo(); };
     if(b.dataset.dm){ b.disabled=true; api('demo_update',{id:b.dataset.dm,status:b.dataset.to}).then(done).catch(function(err){ toast(err.message,true); b.disabled=false; }); }
     else if(b.dataset.dmail){ b.disabled=true; api('demo_mail',{id:b.dataset.dmail}).then(done).catch(function(err){ toast(err.message,true); b.disabled=false; }); }
     else if(b.dataset.ddel){
       if(b.dataset.armed!=='1'){ b.dataset.armed='1'; b.classList.add('danger'); toast('Silmek için tekrar tıkla ('+b.dataset.name+')'); setTimeout(function(){ b.dataset.armed=''; },3000); return; }
-      api('demo_delete',{id:b.dataset.ddel}).then(function(d){ toast(d.coreError?'Silindi; sunucu çekirdeği: '+d.coreError:'Silindi',!!d.coreError); loadDemo(); }).catch(function(err){ toast(err.message,true); });
+      api('demo_delete',{id:b.dataset.ddel}).then(function(d){ toast('Silindi'); loadDemo(); }).catch(function(err){ toast(err.message,true); });
     }
   });
 

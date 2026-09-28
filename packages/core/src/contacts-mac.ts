@@ -3,7 +3,6 @@ import path from 'node:path';
 import fs from 'node:fs';
 import Database from 'better-sqlite3';
 import { bus } from './bus.js';
-import { IS_SERVER } from './platform.js';
 
 /**
  * macOS Kişiler (AddressBook) veritabanından numara → ad eşlemesi.
@@ -27,7 +26,7 @@ export function macContacts(): Map<string, string> {
   const m = new Map<string, string>();
   cache = m;
   loadedAt = Date.now();
-  if (process.platform !== 'darwin' || IS_SERVER) return m;
+  if (process.platform !== 'darwin') return m;
   try {
     const dbs: string[] = [];
     const root = path.join(os.homedir(), 'Library', 'Application Support', 'AddressBook', 'AddressBook-v22.abcddb');

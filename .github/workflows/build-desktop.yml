@@ -13,7 +13,8 @@ on:
     paths: ['packages/core/**', 'apps/web/**', 'apps/desktop/**', 'scripts/bundle-core.mjs', 'package-lock.json', '.github/workflows/build-desktop.yml']
 concurrency:
   group: build-desktop-${{ github.ref }}
-  cancel-in-progress: true
+  # süren derleme iptal edilmez (yarım kalan paket yüklenmez); yeni itme sıraya girer
+  cancel-in-progress: false
 jobs:
   version:
     runs-on: ubuntu-latest

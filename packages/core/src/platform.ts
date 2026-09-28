@@ -8,12 +8,6 @@ import { bus } from './bus.js';
 export const IS_MAC = process.platform === 'darwin';
 export const IS_WINDOWS = process.platform === 'win32';
 export const IS_LINUX = process.platform === 'linux';
-/**
- * Sunucu modu (MIVELO_SERVER=1): çekirdek bir sunucuda (VPS) demo üyesi başına ayrı süreç olarak, ağ geçidinin
- * (apps/gateway) arkasında çalışır. Masaüstüne özgü her şey kapalı: dış uygulama/bağlantı açma, iMessage, macOS Kişiler,
- * cihaz takvimi, ayrı giriş penceresi (giriş yalnız Mivelo içi yayınla), telefondan erişim (LAN); her istek belirteç ister.
- */
-export const IS_SERVER = process.env.MIVELO_SERVER === '1';
 
 /** Kullanıcıya gösterilen ffmpeg kurulum ipucu (günlük satırlarında) */
 export const FFMPEG_HINT = IS_WINDOWS ? 'winget install ffmpeg' : IS_MAC ? 'brew install ffmpeg' : 'sudo apt install ffmpeg';
@@ -22,11 +16,10 @@ export const FFMPEG_HINT = IS_WINDOWS ? 'winget install ffmpeg' : IS_MAC ? 'brew
  * Dış bağlantıyı / dosyayı / uygulama şemasını (https://, mailto:, whatsapp://, yerel yol…) sistemin varsayılan
  * uygulamasıyla aç. Hata olursa yalnızca günlüğe yazar; çağıranı bekletmez.
  * darwin → `open`, win32 → `rundll32 url.dll,FileProtocolHandler` (cmd'nin `start`ı & ve ^ içeren adresleri bölüyordu),
- * linux → `xdg-open`. Sunucu modunda hiçbir şey yapmaz.
+ * linux → `xdg-open`.
  */
 export function openExternal(target: string): void {
-  // sunucuda açılacak masaüstü yok (xdg-open sunucuda bir şey açmaz ya da takılır)
-  if (!target || IS_SERVER) return;
+  if (!target) return;
   const [cmd, args]: [string, string[]] = IS_MAC
     ? ['open', [target]]
     : IS_WINDOWS

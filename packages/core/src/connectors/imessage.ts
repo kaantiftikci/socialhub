@@ -7,7 +7,7 @@ import Database from 'better-sqlite3';
 import { BaseConnector } from './base.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
-import { IS_SERVER, openExternal } from '../platform.js';
+import { openExternal } from '../platform.js';
 import { chatId as chatIdOf, type Attachment } from '../model.js';
 import { normalizePhone as normalizeContactPhone } from '../contacts-mac.js';
 
@@ -121,7 +121,7 @@ export class IMessageConnector extends BaseConnector {
   private static readonly FULL_LIMIT = 60_000;
 
   async start(): Promise<void> {
-    if (process.platform !== 'darwin' || IS_SERVER) {
+    if (process.platform !== 'darwin') {
       this.setStatus('error', 'iMessage yalnızca macOS üzerinde çalışır');
       return;
     }

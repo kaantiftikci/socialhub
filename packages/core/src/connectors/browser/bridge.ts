@@ -7,7 +7,7 @@ import { chatId } from '../../model.js';
 import { persistSessionCookies } from './outlook.js';
 import { bus } from '../../bus.js';
 import { sessionDir } from '../../config.js';
-import { IS_SERVER, killProcessesMatching } from '../../platform.js';
+import { killProcessesMatching } from '../../platform.js';
 import { ensureChromium } from '../../browser-install.js';
 import { mediaHostAllowed, MEDIA_MAX } from '../../media-hosts.js';
 import { isUiActive, onUiActive } from '../../activity.js';
@@ -368,8 +368,7 @@ export class BrowserConnector extends BaseConnector {
     const interactive = opts.interactive !== false;
     this.stopping = false;
     // Giriş varsayılan olarak AYRI pencerede (Kaan: Mivelo içi yayında sitelerin düğmeleri tepki vermiyordu); içeride açmak için MIVELO_LOGIN_EMBED=1.
-    // Sunucu modunda ayrı pencere YOK (kullanıcının önünde ekran yok): giriş her zaman Mivelo içi yayınla, 'external' istense de
-    this.external = !IS_SERVER && (!!opts.external || process.env.MIVELO_LOGIN_EMBED !== '1');
+    this.external = !!opts.external || process.env.MIVELO_LOGIN_EMBED !== '1';
     try {
       ({ chromium: this.chromium, request: this.request } = await import('playwright'));
     } catch {
@@ -565,9 +564,7 @@ export class BrowserConnector extends BaseConnector {
     try {
       const hidden = headless || process.env.KAVSAK_HEADLESS === '1';
       this.ctx = await this.chromium!.launchPersistentContext(profile, {
-        // Sunucu modunda sanal ekran (Xvfb, DISPLAY) varsa "görünmez" pencere aslında o ekranda gerçek pencere: siteler headless
-        // tarayıcıyı daha sık reddediyor (Google girişi). Geri kalan her şey görünmez modla aynı (boyut, kimlik, --app yok).
-        headless: hidden && !SERVER_HEADED,
+        headless: hidden,
         // Görünmez modda Chromium kimliği "HeadlessChrome" içerir; Microsoft/Google bazı oturumları bu yüzden reddeder
         // (Outlook görünmezde login.microsoftonline.com'a düşüyordu). Görünür pencereyle aynı gerçek kimlik kullanılır.
         userAgent: hidden ? await realUserAgent(this.chromium!) : undefined,
@@ -1371,8 +1368,6 @@ export const RATE_RE = /\b(429|999)\b|rate.?limit|too many/i;
 /** Genel ya da hatalı etiket (eski sürümlerin yazdığı "Error" / "olk-mail_…" dahil): yenisi gelince üstüne yazılabilir */
 /** Mivelo içi giriş ekranının boyutu (CSS px; görüntü 2x) */
 const EMBED_SIZE = { width: 820, height: 700 };
-/** Sunucu modu + sanal ekran: Chromium görünür (headful) modda Xvfb'de çalışır; MIVELO_HEADFUL=0 kapatır */
-const SERVER_HEADED = IS_SERVER && !!process.env.DISPLAY && process.env.MIVELO_HEADFUL !== '0';
 
 const GENERIC_LABEL = /^(messenger|instagram|x|linkedin|slack|outlook|gmail|icloud mail|yahoo mail|yandex mail|yahoo|yandex|etsy|shopify|amazon|error|hata)$|^olk-|pivot/i;
 

@@ -4,7 +4,7 @@
  * giriş yaptığında ve çıkışta silinir. Yalnız cihaz tercihleri kalır (tema, ses düzeyi/zil sesleri, panel genişlikleri, AI anahtarları).
  */
 const OWNER = 'mivelo.demoOwner';
-const KEEP = /^(mivelo\.(theme|aiPrefs)|kavsak\.(volume|panes|soundsOn|bannersOn|sound|sound\..+|vol\..+|tone\..+))$/;
+const KEEP = /^(mivelo\.(theme|aiPrefs)|kavsak\.(token|core|volume|panes|soundsOn|bannersOn|sound|sound\..+|vol\..+|tone\..+))$/;
 
 function wipe(store: Storage): void {
   const drop: string[] = [];

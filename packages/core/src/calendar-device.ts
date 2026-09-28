@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { IS_MAC, IS_SERVER, IS_WINDOWS } from './platform.js';
+import { IS_MAC, IS_WINDOWS } from './platform.js';
 import { parseStart, type CalendarEvent } from './calendar.js';
 
 /**
@@ -15,7 +15,6 @@ export type DeviceCalendarError = Error & { code?: 'denied' | 'unsupported' | 'n
 const err = (code: NonNullable<DeviceCalendarError['code']>, message: string): DeviceCalendarError => Object.assign(new Error(message), { code });
 
 export function deviceCalendarApp(): string | null {
-  if (IS_SERVER) return null; // sunucunun takvimi kullanıcının takvimi değil
   if (IS_MAC) return 'Takvim';
   if (IS_WINDOWS) return 'Outlook';
   return null;
@@ -59,7 +58,6 @@ export const ADD_JXA = `function run(argv) {
 
 /** Yazılabilir takvimlerin adları (macOS). İlk çağrıda macOS izin penceresi çıkar; kullanıcı yanıtlayana dek bekler. */
 export async function listDeviceCalendars(): Promise<string[]> {
-  if (IS_SERVER) throw err('unsupported', 'Sunucuda cihaz takvimi yok');
   if (IS_MAC) {
     try {
       const out = await run('osascript', ['-l', 'JavaScript', '-e', LIST_JXA], { timeout: 120_000 });
@@ -82,7 +80,6 @@ export async function addToDeviceCalendar(ev: CalendarEvent, calendar?: string):
   const d = p.date;
   const dur = Math.max(5, Math.min(24 * 60, ev.durationMin ?? 60));
   const title = ev.title.trim().slice(0, 200) || 'Etkinlik';
-  if (IS_SERVER) throw err('unsupported', 'Sunucuda cihaz takvimi yok');
   if (IS_MAC) {
     const args = { title, y: d.getFullYear(), mo: d.getMonth(), d: d.getDate(), h: d.getHours(), mi: d.getMinutes(), dur, allDay: p.allDay, notes: ev.notes?.slice(0, 2000), location: ev.location?.slice(0, 200), calendar };
     try {

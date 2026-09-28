@@ -1,5 +1,5 @@
 import { FeedbackButton } from './Feedback';
-import { LoginView, preopenLogin, pushLoginEvent } from './LoginView';
+import { LoginView, pushLoginEvent } from './LoginView';
 import { UpdateBanner } from './UpdateBanner';
 import { clearOpening as clearOpeningFor, markOpening, useLoginOpening } from './login-opening';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -1470,7 +1470,6 @@ export default function App() {
                     setConnectFocus(a.id);
                     setConnectOpen(true);
                     notify(is.done);
-                    preopenLogin(a.platform, a.id);
                     api.restartAccount(a.id).catch((e) => notify(e.message, true));
                   } else if (is.action === 'connect') {
                     setConnectFocus(a.id);
@@ -1481,7 +1480,6 @@ export default function App() {
                   else {
                     // pencere açılana (ya da oturum doğrulanana) dek ekranda kalan gösterge; hata olursa kalkar
                     markOpening(a.id, is.done || 'Yeniden bağlanılıyor');
-                    preopenLogin(a.platform, a.id);
                     api.restartAccount(a.id).catch((e) => (clearOpeningFor(a.id), notify(e.message, true)));
                   }
                 }}
@@ -1517,7 +1515,7 @@ export default function App() {
             <button onClick={() => (setMenu(null), setConnectOpen(true))}>
               <Icon name="sliders" size={14} /> Ayrıntı ve eşleşme
             </button>
-            <button onClick={() => (setMenu(null), preopenLogin(menu.account.platform, menu.account.id), api.restartAccount(menu.account.id).then(() => notify('Yeniden bağlanılıyor')).catch((e) => notify(e.message, true)))}>
+            <button onClick={() => (setMenu(null), api.restartAccount(menu.account.id).then(() => notify('Yeniden bağlanılıyor')).catch((e) => notify(e.message, true)))}>
               <Icon name="refresh" size={14} sw={2} /> Yeniden bağlan
             </button>
             {menu.confirm ? (

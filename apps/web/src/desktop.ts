@@ -44,15 +44,6 @@ function readRemoteCore(): string {
   }
 }
 export const REMOTE_CORE = readRemoteCore();
-/** Demo üyesi için sunucu çekirdeği (ağ geçidi) + imzalı belirteç; etkin olması sayfa yenilenince (API kökü açılışta seçilir) */
-export function setRemoteCore(core: string, token: string): void {
-  try {
-    localStorage.setItem('kavsak.core', core.replace(/\/+$/, ''));
-    localStorage.setItem('kavsak.token', token);
-  } catch {
-    /* depo kapalı */
-  }
-}
 export function clearRemoteCore(): void {
   try {
     localStorage.removeItem('kavsak.core');

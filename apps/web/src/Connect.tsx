@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type InputHTMLAttributes } from 'react';
 import { clearOpening, markOpening } from './login-opening';
-import { bindLogin, preopenLogin } from './LoginView';
 import { api, USE_STATIC } from './api';
 import { DEMO_OFFLINE, STATIC_DEMO } from './profile';
 import { openDemoLoginWindow, staticApi } from './static-demo';
@@ -188,16 +187,7 @@ export function ConnectModal({
         }
         token = JSON.stringify(cfg);
       }
-      // sunucu çekirdeği: giriş sekmesi tıklama anında açılır (await'ten sonra açılanı tarayıcı engeller)
-      const tab = !token ? preopenLogin(platform) : null;
-      let a: Account;
-      try {
-        a = await api.addAccount(platform, token);
-      } catch (e) {
-        tab?.close();
-        throw e;
-      }
-      bindLogin(tab, a.id);
+      const a = await api.addAccount(platform, token);
       setActive(a.id);
       setMail(EMPTY_MAIL);
       await onChanged();
@@ -615,7 +605,6 @@ export function ConnectModal({
                         if (!openDemoLoginWindow(activeAccount)) notify('Giriş penceresi engellendi; tarayıcıda açılır pencerelere izin ver', true);
                         return;
                       }
-                      preopenLogin(activeAccount.platform, activeAccount.id);
                       setBusy(true);
                       markOpening(activeAccount.id, 'Giriş penceresi açılıyor');
                       api.restartAccount(activeAccount.id).catch((e) => (clearOpening(activeAccount.id), notify(e.message, true), onChanged())).finally(() => setBusy(false));
@@ -724,12 +713,6 @@ export function ConnectModal({
                     <p className="grid-note">
                       Bu uygulamalara kendi hesabınla giriş yaparak bağlanırsın. Toplu ya da otomatik mesaj göndermek için kullanma.
                     </p>
-                    {STATIC_DEMO && !USE_STATIC && (
-                      <p className="grid-note">
-                        Demo sunucusu: bağladığın hesaplar ve mesajları Mivelo'nun sunucusunda yalnız sana ayrılmış alanda tutulur; başkası göremez.
-                        Hesabın silinince hepsi silinir.
-                      </p>
-                    )}
                   </>
                 )}
                 {p === 'gmail' && (
