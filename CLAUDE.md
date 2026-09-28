@@ -89,7 +89,9 @@ Dil: arayüz ve yorumlar Türkçe.
   **Admin → Üyeler** (ayrı sayfa `#p-uye`, Lisanslar'dan taşındı; `members` ucu = members.json'dakiler, `member_delete`): ad, e-posta, kaynak (İndirme
   sayfası / Eski demo üyesi), kayıt zamanı, indirme sayısı + son dosya, anahtar durumu; filtre Tümü/Anahtarsız/Gönderilen/Hatalı/Aynı ad; seç → cihaz +
   süre (vars. 30 gün) → anahtar gönder, Sil (iki tık). Bekleme listesindekilere anahtar: Bekleme listesi toplu çubuğu "Anahtar gönder" (2 cihaz, 30 gün).
-  Lisanslar sayfasında yalnız e-posta taslağı + anahtar üretme + anahtar listesi. `lib-members.php`
+  Lisanslar sayfasında yalnız e-posta taslağı + anahtar üretme + anahtar listesi. Oluştur formunda "Kime / not" ya da "E-posta"ya tıklayınca kayıtlı kişiler
+  (`lic_people`: üyeler + bekleme listesi + demo üyeleri, dupOf hariç) açılır liste `#licPick`: yazarak ad/e-postada arama (Türkçe karakter/büyük-küçük
+  harf duyarsız, çok kelime), ↑/↓/Enter/Esc, seçince ad → not, e-posta → e-posta; etkin anahtarı olan "Anahtarı var" rozeti + uyarı. `lib-members.php`
   demo api/'ye de kopyalanır (deploy-demo.yml). LicenseGate: "anahtarın mivelo.app/indir'den indirirken kayıt olduğun e-postaya gelir".
   (Eski) Demo üyeliği: hazır tek hesap `admin` (şifre karması `SEED_USERS`, `passVersion` artınca users.json'daki karma da güncellenir; editor/misafir
   `REMOVED_USERS` ile silinir). Giriş ekranında "Üyelik oluştur" (`Auth.tsx`, `authRegister`) → `action=register`: ad + soyad (ayrı alanlar; `firstName`/`lastName`, `name` birleşik), e-posta, kullanıcı adı

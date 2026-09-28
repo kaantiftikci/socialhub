@@ -241,6 +241,20 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
 .lic-form{display:grid;grid-template-columns:2fr 2fr 1fr 1.5fr 80px auto;gap:10px;align-items:end}
 .lic-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-3)}
 @media (max-width:900px){.lic-form{grid-template-columns:1fr 1fr}.lic-form .btn{grid-column:1/-1}}
+.pick-wrap{position:relative;display:block}
+.pick-wrap .input{width:100%}
+.lic-pick{position:absolute;z-index:40;left:0;top:calc(100% + 6px);width:max(100%,340px);max-width:calc(100vw - 32px);max-height:320px;overflow:auto;padding:6px;border-radius:14px;background:var(--surface);box-shadow:0 0 0 1px var(--line),var(--card-sh);color:var(--ink)}
+.lic-pick .pk{display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;border:0;border-radius:10px;background:none;text-align:left;cursor:pointer;color:inherit;font:inherit}
+.lic-pick .pk.on,.lic-pick .pk:hover{background:var(--brand-soft)}
+.lic-pick .pk-av{flex:none;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--brand-soft-2);color:var(--brand-ink);font-weight:600;font-size:12px}
+.lic-pick .pk-t{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.lic-pick .pk-t b,.lic-pick .pk-t span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lic-pick .pk-t b{font-weight:600;font-size:13.5px}
+.lic-pick .pk-t span{font-size:12px;color:var(--ink-3)}
+.lic-pick .pk-s{flex:none;font-size:11px;padding:2px 8px;border-radius:99px;background:var(--bg-2);color:var(--ink-3)}
+.lic-pick .pk-s.key{background:var(--brand-soft);color:var(--brand-ink)}
+.lic-pick .pk-h{padding:6px 10px 4px;font-size:11.5px;color:var(--ink-4)}
+.lic-pick mark{background:none;color:var(--brand);font-weight:600}
 .lic-key{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px;letter-spacing:.3px}
 .lic-made{margin-top:14px;padding:12px;border-radius:12px;background:var(--brand-soft);display:flex;flex-direction:column;gap:8px}
 .lic-made .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -449,13 +463,13 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
       </details>
       <div class="card" style="margin-bottom:14px"><h3>Yeni lisans anahtarı <span class="sub">masaüstü uygulaması açılışta anahtar ister; yalnız burada ürettiklerinle açılır</span></h3>
         <form id="licForm" class="lic-form">
-          <label><span>Kime / not</span><input class="input" id="licNote" maxlength="120" placeholder="ör. Ahmet — beta"></label>
-          <label><span>E-posta (isteğe bağlı)</span><input class="input" id="licEmail" type="email" list="licMails" placeholder="bekleme listesinden seç ya da yaz"></label>
+          <label><span>Kime / not</span><span class="pick-wrap"><input class="input" id="licNote" maxlength="120" placeholder="üye ara ya da not yaz" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="licPick" aria-expanded="false"></span></label>
+          <label><span>E-posta (isteğe bağlı)</span><span class="pick-wrap"><input class="input" id="licEmail" type="email" placeholder="üye ara ya da e-posta yaz" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="licPick" aria-expanded="false"></span></label>
           <label><span>Cihaz sınırı</span><select class="input" id="licMax"><option value="1">1 cihaz</option><option value="2" selected>2 cihaz</option><option value="3">3 cihaz</option><option value="5">5 cihaz</option></select></label>
           <label><span>Süre <em class="days-end" id="licDaysEnd"></em></span><span class="days-row"><select class="input" id="licDays"><option value="7">7 gün</option><option value="14">14 gün</option><option value="30" selected>30 gün</option><option value="60">60 gün</option><option value="90">90 gün</option><option value="180">6 ay</option><option value="365">1 yıl</option><option value="0">Süresiz</option><option value="c">Özel…</option></select><input class="input days-c" id="licDaysC" type="number" min="1" max="3650" placeholder="gün" aria-label="Gün sayısı" hidden></span></label>
           <label><span>Adet</span><input class="input" id="licCount" type="number" min="1" max="50" value="1"></label>
           <button class="btn dark" type="submit">Oluştur</button>
-          <datalist id="licMails"></datalist>
+          <div class="lic-pick" id="licPick" role="listbox" hidden></div>
           <label style="flex-direction:row;align-items:center;gap:8px;grid-column:1/-1;font-size:13px;color:inherit"><input type="checkbox" id="licSend" checked> E-posta yazılıysa anahtarı logolu e-postayla hemen gönder</label>
         </form>
         <div id="licMade"></div>
@@ -765,8 +779,44 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   function loadLicKeys(){ return api('licenses').then(function(d){ LIC=d.keys; renderLic(); }).catch(function(e){ toast(e.message,true); }); }
   function loadLic(){
     loadLicKeys();
-    api('waitlist').then(function(d){ $('#licMails').innerHTML=(d.entries||[]).slice(0,500).map(function(e){ return '<option value="'+esc(e.email)+'">'; }).join(''); }).catch(function(){});
+    api('lic_people').then(function(d){ PICK_PEOPLE=d.people||[]; if(PICK_IN) pickRender(); }).catch(function(){});
   }
+  // Kime / E-posta: kayıtlı kişilerden (üyeler + bekleme listesi + demo üyeleri) aranarak seçim
+  var PICK_PEOPLE=[], PICK_IN=null, PICK_I=0, PICK_ROWS=[];
+  var PICK_SRC={indir:'Üye',demo:'Eski demo',waitlist:'Bekleme listesi'};
+  function trFold(s){ return String(s||'').toLocaleLowerCase('tr').replace(/[çğıöşüâîû]/g,function(c){ return {'ç':'c','ğ':'g','ı':'i','ö':'o','ş':'s','ü':'u','â':'a','î':'i','û':'u'}[c]; }); }
+  function pickMark(t,q){ if(!q) return esc(t); var f=trFold(t), i=f.indexOf(q); return i<0?esc(t):esc(t.slice(0,i))+'<mark>'+esc(t.slice(i,i+q.length))+'</mark>'+esc(t.slice(i+q.length)); }
+  function pickRender(){
+    var box=$('#licPick'); if(!PICK_IN) return;
+    var q=trFold(PICK_IN.value.trim()), words=q.split(/\s+/).filter(Boolean);
+    var src=PICK_PEOPLE.filter(function(p){ return !p.dupOf; });
+    PICK_ROWS=(words.length?src.filter(function(p){ var h=trFold(p.name+' '+p.email); return words.every(function(w){ return h.indexOf(w)>=0; }); }):src).slice(0,60);
+    if(PICK_I>=PICK_ROWS.length) PICK_I=0;
+    box.innerHTML=PICK_ROWS.length?'<div class="pk-h">'+(words.length?PICK_ROWS.length+(PICK_ROWS.length===60?'+':'')+' eşleşme':'Kayıtlı kişiler · yazarak ara')+'</div>'+PICK_ROWS.map(function(p,i){
+      var nm=p.name||p.email.split('@')[0], ini=trFold(nm).replace(/[^a-z0-9 ]/g,'').split(' ').filter(Boolean).slice(0,2).map(function(w){ return w[0]; }).join('').toUpperCase()||'?';
+      var srcs=(p.src||[]).map(function(s){ return PICK_SRC[s]||s; }).join(' · ');
+      var ks=p.key?(p.key.status==='active'?'<span class="pk-s key">Anahtarı var</span>':'<span class="pk-s">Anahtar '+(p.key.status==='revoked'?'iptal':'süresi doldu')+'</span>'):'';
+      return '<button type="button" class="pk'+(i===PICK_I?' on':'')+'" role="option" data-pk="'+i+'"><span class="pk-av">'+esc(ini)+'</span><span class="pk-t"><b>'+pickMark(nm,words[0]||'')+'</b><span>'+pickMark(p.email,words[0]||'')+(srcs?' · '+esc(srcs):'')+'</span></span>'+ks+'</button>'; }).join('')
+      :'<div class="pk-h">'+(PICK_PEOPLE.length?'Eşleşen kişi yok — yazdığın olduğu gibi kullanılır':'Henüz kayıtlı kişi yok')+'</div>';
+    PICK_IN.parentNode.appendChild(box); box.hidden=false; PICK_IN.setAttribute('aria-expanded','true');
+  }
+  function pickClose(){ $('#licPick').hidden=true; $$('#licNote,#licEmail').forEach(function(i){ i.setAttribute('aria-expanded','false'); }); PICK_IN=null; }
+  function pickChoose(p){ if(!p) return; $('#licNote').value=p.name||''; $('#licEmail').value=p.email; pickClose();
+    if(p.key&&p.key.status==='active') toast((p.name||p.email)+' için zaten etkin bir anahtar var');
+    $('#licMax').focus(); }
+  $$('#licNote,#licEmail').forEach(function(inp){
+    inp.addEventListener('focus',function(){ PICK_IN=inp; PICK_I=0; pickRender(); });
+    inp.addEventListener('click',function(){ if(PICK_IN!==inp){ PICK_IN=inp; pickRender(); } });
+    inp.addEventListener('input',function(){ PICK_IN=inp; PICK_I=0; pickRender(); });
+    inp.addEventListener('keydown',function(e){ if(PICK_IN!==inp||$('#licPick').hidden) return;
+      if(e.key==='ArrowDown'||e.key==='ArrowUp'){ e.preventDefault(); if(!PICK_ROWS.length) return; PICK_I=(PICK_I+(e.key==='ArrowDown'?1:-1)+PICK_ROWS.length)%PICK_ROWS.length; pickRender(); var on=$('#licPick .pk.on'); if(on) on.scrollIntoView({block:'nearest'}); }
+      else if(e.key==='Enter'&&PICK_ROWS.length&&inp.value.trim()){ e.preventDefault(); pickChoose(PICK_ROWS[PICK_I]); }
+      else if(e.key==='Escape'){ pickClose(); }
+      else if(e.key==='Tab'){ pickClose(); } });
+  });
+  $('#licPick').addEventListener('mousedown',function(e){ e.preventDefault(); });
+  $('#licPick').addEventListener('click',function(e){ var b=e.target.closest('[data-pk]'); if(b) pickChoose(PICK_ROWS[+b.dataset.pk]); });
+  document.addEventListener('mousedown',function(e){ if(PICK_IN&&!e.target.closest('.pick-wrap')) pickClose(); });
   function renderLic(){
     var q=($('#licQ').value||'').toLowerCase();
     var rows=LIC.filter(function(k){
@@ -797,7 +847,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     api('license_create',{note:$('#licNote').value.trim(),email:$('#licEmail').value.trim(),send:$('#licSend').checked,maxDevices:+$('#licMax').value,days:daysOf('licDays'),count:+$('#licCount').value||1}).then(function(d){
       if(d.mail) toast(d.mail.ok?'Anahtar '+d.mail.email+' adresine gönderildi':'Anahtar üretildi ama e-posta gönderilemedi: '+d.mail.error,!d.mail.ok);
       if(d.mail) loadPeople();
-      LIC=d.created.slice().reverse().concat(LIC); renderLic(); $('#licNote').value=''; $('#licEmail').value=''; $('#licCount').value=1;
+      LIC=d.created.slice().reverse().concat(LIC); renderLic(); pickClose(); api('lic_people').then(function(x){ PICK_PEOPLE=x.people||[]; }).catch(function(){}); $('#licNote').value=''; $('#licEmail').value=''; $('#licCount').value=1;
       var keys=d.created.map(function(k){ return k.key; }).join('\n');
       $('#licMade').innerHTML='<div class="lic-made"><b>'+d.created.length+' anahtar oluşturuldu</b>'+d.created.map(function(k){ return '<div class="row"><span class="lic-key">'+esc(k.key)+'</span><button class="btn sm" data-lcopy="'+esc(k.key)+'">Kopyala</button><a class="btn sm soft" href="'+esc(licMail(k))+'">E-postayla gönder</a></div>'; }).join('')+
         (d.created.length>1?'<div class="row"><button class="btn sm" data-lcopy="'+esc(keys)+'">Hepsini kopyala</button></div>':'')+'</div>';
