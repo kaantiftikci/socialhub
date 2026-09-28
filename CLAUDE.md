@@ -9,6 +9,11 @@ Dil: arayüz ve yorumlar Türkçe.
 - Onay sorma, ilerle; belirsizlikte en makul yorumu seç ve ne yaptığını söyle.
 - Yeni npm bağımlılığı eklersen **açıkça** "npm install gerekli" de.
 - Ekran görüntüsü/log gelirse kök nedeni bul, yama yapma; birden fazla sorunu tek turda topluca çöz.
+- **Her değişiklik otomatik yayında**: doğrulamadan sonra commit + main'e push ET (sormadan). Demo: push → `deploy-demo.yml`
+  (demo.mivelo.app + mivelo.app). Yerel (Mac): `npm run autodeploy -- install` ile kurulan LaunchAgent (`scripts/auto-deploy.mjs`,
+  `app.mivelo.autodeploy`) 2 dk'da bir origin/main'i çeker (yalnız main + temiz ağaçta, ff-only), package*.json değiştiyse npm install,
+  çekirdek değiştiyse core build; `Mivelo.app` paketi varsa `desktop:build` + açıksa yeniden başlatır; macOS bildirimi; günlük
+  `~/.kavsak/autodeploy.log` (`-- status`). `npm run dev` açıksa tsx watch/Vite zaten yeniler.
 - Değişiklik sonrası: `npm run typecheck`, `npm run build -w packages/core`, `npm run build -w apps/web`; mümkünse demo
   modunda (`npm run demo`) Playwright ile görsel doğrulama.
 

@@ -17,6 +17,7 @@
     "typecheck": "npm run typecheck -w packages/core && npm run typecheck -w apps/web",
     "app": "npm run desktop:build && node scripts/open-app.mjs",
     "demo:html": "node scripts/demo-html.mjs",
+    "autodeploy": "node scripts/auto-deploy.mjs",
     "e2e": "node scripts/e2e.mjs"
   },
   "devDependencies": {
