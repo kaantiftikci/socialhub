@@ -15,11 +15,13 @@ const IDLE = 12 * 3600;
 const STATUSES = ['waiting', 'invited', 'joined', 'spam'];
 // Lisans e-postasının varsayılan metni (Admin → Lisanslar → E-posta taslağı; yer tutucular lic_mail_render'da)
 const LIC_MAIL_DEFAULT = [
-    'subject' => 'Mivelo lisans anahtarın hazır',
-    'body' => "Merhaba {ad},\n\nMivelo'ya erken erişimin açıldı! Masaüstü uygulaması için kişisel lisans anahtarın:\n\n{anahtar}\n\n"
-        . "Kurulum:\n1. Aşağıdaki bağlantıdan bilgisayarına uygun sürümü indir (Mac ya da Windows).\n2. Uygulamayı açınca bu anahtarı yapıştır.\n3. Kanallarını bağla, hepsi tek gelen kutusunda.\n\n"
-        . "Anahtar en fazla {cihaz} cihazda kullanılabilir · {gecerlilik}.\n\nBir sorun olursa bu e-postayı yanıtlaman yeterli.\n\nSevgiler,\nMivelo ekibi",
+    'subject' => 'Mivelo Masaüstü Uygulaması | Lisans Anahtarınız',
+    'body' => "Sayın {ad},\n\nMivelo erken erişim programına katılımınız onaylanmıştır. Masaüstü uygulaması için size özel lisans anahtarınız aşağıdadır:\n\n{anahtar}\n\n"
+        . "Kurulum adımları:\n1. Aşağıdaki bağlantıdan işletim sisteminize uygun sürümü (macOS veya Windows) indirin.\n2. Uygulamayı ilk kez açtığınızda lisans anahtarınızı girin.\n3. Hesaplarınızı bağlayarak tüm mesajlarınızı tek bir gelen kutusundan yönetmeye başlayın.\n\n"
+        . "Lisans anahtarınız en fazla {cihaz} cihazda kullanılabilir ve {gecerlilik}.\n\nHerhangi bir sorunuz olursa bu e-postayı yanıtlayarak ekibimize ulaşabilirsiniz.\n\nSaygılarımızla,\nMivelo Ekibi",
 ];
+// İlk sürümün varsayılanları: panelden bunlar kaydedildiyse yeni (kurumsal) varsayılan geçerli olur
+const LIC_MAIL_OLD = ['Mivelo lisans anahtarın hazır'];
 
 require_once __DIR__ . '/../api/lib-smtp.php';
 
@@ -737,9 +739,12 @@ if ($a === 'license_delete' && $method === 'POST') {
 function lic_mail_tpl(): array
 {
     $t = read_json('license-mail.json', []);
+    $sub = trim((string) ($t['subject'] ?? ''));
+    $body = trim((string) ($t['body'] ?? ''));
+    $oldDefault = in_array($sub, LIC_MAIL_OLD, true) && strpos($body, "Mivelo'ya erken erişimin açıldı!") !== false;
     return [
-        'subject' => trim((string) ($t['subject'] ?? '')) ?: LIC_MAIL_DEFAULT['subject'],
-        'body' => trim((string) ($t['body'] ?? '')) ?: LIC_MAIL_DEFAULT['body'],
+        'subject' => $sub !== '' && !in_array($sub, LIC_MAIL_OLD, true) ? $sub : LIC_MAIL_DEFAULT['subject'],
+        'body' => $body !== '' && !$oldDefault ? $body : LIC_MAIL_DEFAULT['body'],
     ];
 }
 
@@ -748,28 +753,44 @@ function lic_mail_tpl(): array
  * HTML e-posta istemcileri için tablo düzeni + satır içi stil; logo mivelo.app'teki PNG (SVG Gmail'de görünmez).
  * Yalnız {anahtar} bulunan satır büyük anahtar kutusu olur; indirme düğmesi her zaman eklenir.
  */
-function lic_mail_render(array $tpl, array $k, string $name): array
+/** Logo (PNG, gömülü gönderilir: uzaktan görseli engelleyen istemcilerde de görünür) */
+function lic_logo(): ?string
 {
-    // {ad} = ilk ad ("Merhaba Mehmet,"; soyad resmi durur)
-    $name = explode(' ', trim(preg_replace('/\s+/', ' ', $name) ?? ''))[0];
+    $d = @file_get_contents(dirname(__DIR__) . '/apple-touch-icon.png');
+    return $d === false || $d === '' ? null : $d;
+}
+
+/**
+ * Şablonu doldur → [konu, düz metin, HTML]. Yer tutucular: {ad} (ad soyad) {ilkad} {anahtar} {indir} {cihaz} {gecerlilik}.
+ * HTML e-posta istemcileri için tablo düzeni + satır içi stil. $logoSrc: gönderimde "cid:mivelo-logo" (gömülü), önizlemede data: adresi.
+ * Yalnız {anahtar} bulunan paragraf büyük anahtar kutusu olur; indirme düğmesi her zaman eklenir.
+ */
+function lic_mail_render(array $tpl, array $k, string $name, ?string $logoSrc = null): array
+{
+    $name = trim(preg_replace('/\s+/', ' ', $name) ?? '');
     $vars = [
-        '{ad}' => $name !== '' ? $name : 'merhaba',
+        '{ad}' => $name,
+        '{ilkad}' => explode(' ', $name)[0],
         '{anahtar}' => (string) $k['key'],
         '{indir}' => 'https://mivelo.app/indir/',
         '{cihaz}' => (string) (int) ($k['maxDevices'] ?? 2),
-        '{gecerlilik}' => !empty($k['expiresAt']) ? date('d.m.Y', (int) strtotime((string) $k['expiresAt'])) . ' tarihine kadar geçerli' : 'süresiz',
+        '{gecerlilik}' => !empty($k['expiresAt']) ? date('d.m.Y', (int) strtotime((string) $k['expiresAt'])) . ' tarihine kadar geçerlidir' : 'süresiz geçerlidir',
     ];
-    // "Merhaba merhaba," olmasın: ad yoksa selamlamadaki yer tutucu atılır
-    $body = $name === '' ? preg_replace('/\s*\{ad\}/u', '', $tpl['body']) : $tpl['body'];
+    $body = $tpl['body'];
+    if ($name === '') {
+        // ad bilinmiyorsa: "Sayın {ad}," → "Değerli kullanıcımız,"; diğer yerlerdeki yer tutucu atılır
+        $body = preg_replace('/Sayın\s*\{(ilk)?ad\}/u', 'Değerli kullanıcımız', $body);
+        $body = preg_replace('/\s*\{(ilk)?ad\}/u', '', $body);
+    }
     $subject = strtr($tpl['subject'], $vars);
     $text = strtr($body, $vars);
     if (strpos($body, '{indir}') === false) {
-        $text .= "\n\nİndir: https://mivelo.app/indir/";
+        $text .= "\n\nİndirme bağlantısı: https://mivelo.app/indir/";
     }
     $e = fn ($v) => htmlspecialchars((string) $v, ENT_QUOTES, 'UTF-8');
     $font = "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Helvetica,Arial,sans-serif";
     $keyBox = '<div style="margin:6px 0 18px;padding:18px 12px;border-radius:14px;background:#f3efff;border:1px dashed #b9a6ff;text-align:center">'
-        . '<div style="font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:#6c47ff;font-weight:600;margin-bottom:6px">Lisans anahtarın</div>'
+        . '<div style="font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:#6c47ff;font-weight:600;margin-bottom:6px">Lisans anahtarınız</div>'
         . '<div style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:21px;font-weight:700;letter-spacing:1.5px;color:#1a1530">' . $e($k['key']) . '</div></div>';
     $inline = function (string $line) use ($e, $vars): string {
         $h = $e(strtr($line, array_diff_key($vars, ['{anahtar}' => 1, '{indir}' => 1])));
@@ -788,19 +809,27 @@ function lic_mail_render(array $tpl, array $k, string $name): array
         $html .= $keyBox;
     }
     $btn = '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 6px"><tr><td style="border-radius:12px;background:#6c47ff">'
-        . '<a href="https://mivelo.app/indir/" style="display:inline-block;padding:13px 26px;' . $font . ';font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:12px">Mivelo\'yu indir</a></td></tr></table>';
+        . '<a href="https://mivelo.app/indir/" style="display:inline-block;padding:13px 26px;' . $font . ';font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:12px">Mivelo\'yu İndir</a></td></tr></table>';
+    $logo = $logoSrc ?? 'https://mivelo.app/apple-touch-icon.png';
     $full = '<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>' . $e($subject) . '</title></head>'
         . '<body style="margin:0;padding:0;background:#f4f2fa;' . $font . '">'
-        . '<div style="display:none;max-height:0;overflow:hidden">Lisans anahtarın: ' . $e($k['key']) . '</div>'
+        . '<div style="display:none;max-height:0;overflow:hidden">Mivelo lisans anahtarınız ve kurulum adımları</div>'
         . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f2fa"><tr><td align="center" style="padding:28px 14px">'
-        . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:540px">'
-        . '<tr><td style="padding:0 6px 16px"><table role="presentation" cellpadding="0" cellspacing="0"><tr>'
-        . '<td><img src="https://mivelo.app/apple-touch-icon.png" width="40" height="40" alt="" style="display:block;border-radius:11px"></td>'
-        . '<td style="padding-left:10px;font-size:20px;font-weight:700;letter-spacing:-.3px;color:#1a1530">Mivelo</td></tr></table></td></tr>'
-        . '<tr><td style="background:#ffffff;border-radius:20px;padding:30px 28px;border:1px solid #e8e3f7">' . $html . $btn . '</td></tr>'
+        . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px">'
+        . '<tr><td style="background:#ffffff;border-radius:20px;border:1px solid #e8e3f7;overflow:hidden">'
+        // üst şerit: logo + marka adı
+        . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:24px 28px;border-bottom:1px solid #efebfa">'
+        . '<table role="presentation" cellpadding="0" cellspacing="0"><tr>'
+        . '<td style="vertical-align:middle"><img src="' . $e($logo) . '" width="44" height="44" alt="Mivelo" style="display:block;border:0;border-radius:12px"></td>'
+        . '<td style="vertical-align:middle;padding-left:12px"><div style="font-size:20px;font-weight:700;letter-spacing:-.3px;color:#1a1530;line-height:1.1">Mivelo</div>'
+        . '<div style="font-size:12px;color:#8a85a0;margin-top:2px">Tüm mesajlarınız, tek gelen kutusunda</div></td>'
+        . '</tr></table></td></tr>'
+        . '<tr><td style="padding:28px 28px 30px">' . $html . $btn . '</td></tr></table>'
+        . '</td></tr>'
         . '<tr><td style="padding:18px 8px 0;font-size:12px;line-height:1.6;color:#8a85a0;text-align:center">'
-        . 'Tüm mesajların tek gelen kutusunda · <a href="https://mivelo.app" style="color:#8a85a0">mivelo.app</a><br>'
-        . 'Bu e-postayı Mivelo erken erişim listesine katıldığın için aldın. Anahtarını kimseyle paylaşma.</td></tr>'
+        . '<img src="' . $e($logo) . '" width="20" height="20" alt="" style="display:inline-block;vertical-align:middle;border:0;border-radius:6px;margin-right:6px">'
+        . '<b style="color:#6e6a85;vertical-align:middle">Mivelo</b> · <a href="https://mivelo.app" style="color:#8a85a0">mivelo.app</a> · <a href="mailto:hello@mivelo.app" style="color:#8a85a0">hello@mivelo.app</a><br>'
+        . 'Bu e-posta, Mivelo erken erişim programına kaydınız nedeniyle gönderilmiştir.<br>Lisans anahtarınız kişiseldir; lütfen üçüncü kişilerle paylaşmayınız.</td></tr>'
         . '</table></td></tr></table></body></html>';
     return [$subject, $text, $full];
 }
@@ -849,14 +878,17 @@ if ($a === 'lic_mail_save' && $method === 'POST') {
 
 if ($a === 'lic_mail_preview' && $method === 'POST') {
     $tpl = ['subject' => mb_substr((string) ($body['subject'] ?? ''), 0, 150) ?: LIC_MAIL_DEFAULT['subject'], 'body' => mb_substr(str_replace("\r", '', (string) ($body['body'] ?? '')), 0, 5000) ?: LIC_MAIL_DEFAULT['body']];
-    [$sub, , $html] = lic_mail_render($tpl, ['key' => 'MVL-ABCD-EFGH-JKLM-NPQR', 'maxDevices' => 2, 'expiresAt' => null], (string) ($body['name'] ?? 'Ayşe'));
+    $logo = lic_logo();
+    [$sub, , $html] = lic_mail_render($tpl, ['key' => 'MVL-ABCD-EFGH-JKLM-NPQR', 'maxDevices' => 2, 'expiresAt' => null], (string) ($body['name'] ?? 'Ayşe Yılmaz'),
+        $logo ? 'data:image/png;base64,' . base64_encode($logo) : null);
     out(['subject' => $sub, 'html' => $html]);
 }
 
 if ($a === 'lic_mail_test' && $method === 'POST') {
     $tpl = ['subject' => mb_substr((string) ($body['subject'] ?? ''), 0, 150) ?: LIC_MAIL_DEFAULT['subject'], 'body' => mb_substr(str_replace("\r", '', (string) ($body['body'] ?? '')), 0, 5000) ?: LIC_MAIL_DEFAULT['body']];
-    [$sub, $text, $html] = lic_mail_render($tpl, ['key' => 'MVL-ABCD-EFGH-JKLM-NPQR', 'maxDevices' => 2, 'expiresAt' => null], 'Kaan');
-    $res = mv_send_mail(trim((string) ($body['to'] ?? '')), '[Deneme] ' . $sub, $text, null, $html);
+    $logo = lic_logo();
+    [$sub, $text, $html] = lic_mail_render($tpl, ['key' => 'MVL-ABCD-EFGH-JKLM-NPQR', 'maxDevices' => 2, 'expiresAt' => null], 'Kaan Tiftikci', $logo ? 'cid:mivelo-logo' : null);
+    $res = mv_send_mail(trim((string) ($body['to'] ?? '')), '[Deneme] ' . $sub, $text, null, $html, $logo ? ['mivelo-logo' => ['image/png', $logo]] : []);
     out(['ok' => $res['ok'] && $res['via'] === 'smtp', 'error' => $res['ok'] && $res['via'] === 'smtp' ? '' : ($res['error'] ?? '')]);
 }
 
@@ -886,8 +918,9 @@ if ($a === 'lic_people' && $method === 'GET') {
 /** Anahtarı e-postayla gönder; sonucu anahtar kaydına yaz, başarıda bekleme listesinde "Davet edildi" */
 function lic_send_one(array $k, string $to, string $name): array
 {
-    [$sub, $text, $html] = lic_mail_render(lic_mail_tpl(), $k, $name);
-    $res = mv_send_mail($to, $sub, $text, null, $html);
+    $logo = lic_logo();
+    [$sub, $text, $html] = lic_mail_render(lic_mail_tpl(), $k, $name, $logo ? 'cid:mivelo-logo' : null);
+    $res = mv_send_mail($to, $sub, $text, null, $html, $logo ? ['mivelo-logo' => ['image/png', $logo]] : []);
     $ok = $res['ok'] && $res['via'] === 'smtp';
     $err = $ok ? '' : (string) ($res['error'] ?? 'Gönderilemedi');
     with_json('licenses.json', ['keys' => []], function (array &$d) use ($k, $to, $ok, $err) {

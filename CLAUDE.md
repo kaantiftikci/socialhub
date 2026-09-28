@@ -142,9 +142,11 @@ Dil: arayüz ve yorumlar Türkçe.
   **Üyelere anahtar gönder** (Lisanslar üstü): bekleme listesi + demo üyeleri (spam/reddedilen hariç, e-postayla birleşik; `lic_people`) seçilir →
   `license_issue` kişi başına etkin anahtarı varsa onu, yoksa yenisini (≤50/istek) logolu HTML e-postayla gönderir (`lic_send_one`: anahtara
   `sentAt/sentTo/mailError`, başarıda bekleme listesi Bekliyor → Davet edildi). Oluştur formunda "hemen gönder" kutusu. **E-posta taslağı**
-  (`~/mivelo-data/license-mail.json`, varsayılan `LIC_MAIL_DEFAULT`): konu + metin, yer tutucular {ad} (ilk ad; yoksa atlanır) {anahtar} (tek
-  satırda büyük kutu) {indir} {cihaz} {gecerlilik}; canlı önizleme (`lic_mail_preview`, sandbox iframe) + deneme gönderimi. HTML tablo düzeni,
-  logo `https://mivelo.app/apple-touch-icon.png`, "Mivelo'yu indir" düğmesi; `mv_send_mail(..., $html)` metin+HTML multipart/alternative.
+  (`~/mivelo-data/license-mail.json`, varsayılan `LIC_MAIL_DEFAULT`: kurumsal "siz" dili, konu "Mivelo Masaüstü Uygulaması | Lisans Anahtarınız";
+  eski samimi varsayılan kayıtlıysa `LIC_MAIL_OLD` ile yenisine döner): yer tutucular {ad} (ad soyad; bilinmiyorsa "Sayın {ad}" → "Değerli
+  kullanıcımız") {ilkad} {anahtar} (tek satırda büyük kutu) {indir} {cihaz} {gecerlilik}; canlı önizleme (`lic_mail_preview`, sandbox iframe) +
+  deneme gönderimi. HTML tablo düzeni, üst şeritte logo + "Mivelo", altta küçük logo; logo (`apple-touch-icon.png`) e-postaya GÖMÜLÜ gider
+  (`mv_send_mail(..., $html, $inline)` → multipart/related, `cid:mivelo-logo`; önizlemede data: adresi) — uzaktan görsel engelleyen istemcide de görünür.
   Gönderim SMTP'ye bağlı: Türkticaret giden SMTP'yi açmadıkça "Gönderilemedi" (anahtar yine üretilir). Yerelde sahte SMTP ile sınandı.
   İstemci tarafı denetimdir (paket değiştirilerek aşılabilir); amaç anahtarsız dağıtımı engellemek. Yerel uçtan uca sınandı (php -S + çekirdek).
 - **Windows**: `tauri.windows.conf.json` (NSIS, currentUser, yerel başlık çubuğu) Tauri'nin platform yapılandırma birleştirmesiyle

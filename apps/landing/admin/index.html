@@ -422,13 +422,13 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
         <div class="muted" style="font-size:12px;margin-top:8px">Kişinin etkin anahtarı varsa yenisi üretilmez, aynı anahtar yeniden gönderilir. Başarıyla gönderilen bekleme listesi kaydı "Davet edildi" olur.</div>
         <div id="ppRes"></div>
       </div>
-      <details class="card" id="tplCard" style="margin-bottom:14px"><summary style="cursor:pointer;font-weight:600">E-posta taslağı <span class="sub" style="font-weight:400">anahtarla giden e-postanın metni; logo, anahtar kutusu ve indirme düğmesi kendiliğinden eklenir</span></summary>
+      <details class="card" id="tplCard" style="margin-bottom:14px"><summary style="cursor:pointer;font-weight:600">E-posta taslağı <span class="sub" style="font-weight:400">anahtarla giden e-postanın metni; logo (e-postaya gömülü), anahtar kutusu ve indirme düğmesi kendiliğinden eklenir</span></summary>
         <div class="tpl-grid">
           <div>
             <label class="muted" for="tplSub" style="display:block;font-size:12px">Konu</label>
             <input class="input" id="tplSub" maxlength="150" style="display:block;width:100%;margin:4px 0 10px">
             <label class="muted" for="tplBody" style="display:block;font-size:12px">Metin</label>
-            <div class="tpl-vars" id="tplVars"><button type="button" data-v="{ad}" title="Kişinin adı (yoksa atlanır)">{ad}</button><button type="button" data-v="{anahtar}" title="Tek başına satırda: büyük anahtar kutusu">{anahtar}</button><button type="button" data-v="{indir}" title="mivelo.app/indir bağlantısı">{indir}</button><button type="button" data-v="{cihaz}" title="Cihaz sınırı">{cihaz}</button><button type="button" data-v="{gecerlilik}" title="Süresiz ya da bitiş tarihi">{gecerlilik}</button></div>
+            <div class="tpl-vars" id="tplVars"><button type="button" data-v="{ad}" title="Ad soyad (bilinmiyorsa &quot;Sayın {ad}&quot; → &quot;Değerli kullanıcımız&quot;)">{ad}</button><button type="button" data-v="{ilkad}" title="Yalnız ilk ad">{ilkad}</button><button type="button" data-v="{anahtar}" title="Tek başına satırda: büyük anahtar kutusu">{anahtar}</button><button type="button" data-v="{indir}" title="mivelo.app/indir bağlantısı">{indir}</button><button type="button" data-v="{cihaz}" title="Cihaz sınırı">{cihaz}</button><button type="button" data-v="{gecerlilik}" title="Süresiz ya da bitiş tarihi">{gecerlilik}</button></div>
             <textarea class="input" id="tplBody" maxlength="5000" spellcheck="true"></textarea>
             <div class="pp-foot"><button class="btn dark" id="tplSave" type="button">Kaydet</button><button class="btn" id="tplReset" type="button">Varsayılana dön</button><span class="sp"></span><input class="input" id="tplTo" type="email" placeholder="deneme adresi" style="width:190px;height:34px"><button class="btn" id="tplTest" type="button">Deneme gönder</button></div>
           </div>
