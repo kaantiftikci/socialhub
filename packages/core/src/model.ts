@@ -4,8 +4,8 @@
  * geçmiş yükleme (backfill) ile canlı akış çakıştığında kayıt tekrarlanmaz.
  */
 
-export type Platform = 'whatsapp' | 'telegram' | 'slack' | 'linkedin' | 'x' | 'imessage' | 'instagram' | 'messenger' | 'gmail' | 'outlook' | 'yahoo' | 'yandex' | 'icloud' | 'imap' | 'shopier' | 'trendyol' | 'hepsiburada' | 'etsy' | 'shopify' | 'n11' | 'amazon' | 'pttavm' | 'demo';
-export const ALL_PLATFORMS: readonly Platform[] = ['whatsapp', 'telegram', 'slack', 'linkedin', 'x', 'imessage', 'instagram', 'messenger', 'gmail', 'outlook', 'yahoo', 'yandex', 'icloud', 'imap', 'shopier', 'trendyol', 'hepsiburada', 'etsy', 'shopify', 'n11', 'amazon', 'pttavm', 'demo'];
+export type Platform = 'whatsapp' | 'telegram' | 'slack' | 'linkedin' | 'x' | 'imessage' | 'instagram' | 'messenger' | 'tiktok' | 'gmail' | 'outlook' | 'yahoo' | 'yandex' | 'icloud' | 'imap' | 'shopier' | 'trendyol' | 'hepsiburada' | 'etsy' | 'shopify' | 'n11' | 'amazon' | 'pttavm' | 'demo';
+export const ALL_PLATFORMS: readonly Platform[] = ['whatsapp', 'telegram', 'slack', 'linkedin', 'x', 'imessage', 'instagram', 'messenger', 'tiktok', 'gmail', 'outlook', 'yahoo', 'yandex', 'icloud', 'imap', 'shopier', 'trendyol', 'hepsiburada', 'etsy', 'shopify', 'n11', 'amazon', 'pttavm', 'demo'];
 export const MAIL_PLATFORMS: Platform[] = ['gmail', 'outlook', 'yahoo', 'yandex', 'icloud', 'imap'];
 
 export type AccountStatus = 'disconnected' | 'connecting' | 'pairing' | 'connected' | 'error';

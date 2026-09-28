@@ -83,7 +83,7 @@ const RULES = [
   { re: /güvenlik sınırı|SendBlocked/i, kind: 'gönderim sınırı', hint: 'Mivelo’nun günlük/ilk temas sınırı devrede (send-guard).' },
   { re: /yoklama:|mesajlar alınamadı/i, kind: 'yoklama', hint: 'Tarayıcı köprüsü yoklaması hata verdi.' },
 ];
-const PLATFORM_RE = /\b(whatsapp|telegram|slack|imessage|linkedin|instagram|messenger|x|gmail|outlook|yahoo|icloud|imap|trendyol|hepsiburada|n11|shopier|etsy|shopify|amazon)\b/i;
+const PLATFORM_RE = /\b(whatsapp|telegram|slack|imessage|linkedin|instagram|messenger|tiktok|x|gmail|outlook|yahoo|icloud|imap|trendyol|hepsiburada|n11|shopier|etsy|shopify|amazon)\b/i;
 function classify(line) {
   const rule = RULES.find((r) => r.re.test(line.text));
   const pm = PLATFORM_RE.exec(line.text);
@@ -240,7 +240,7 @@ async function setup() {
 }
 
 /* ───────── tur ───────── */
-const TIMEOUT = { linkedin: 420_000, x: 300_000, messenger: 300_000, instagram: 240_000, gmail: 240_000, outlook: 360_000, icloud: 240_000, yahoo: 240_000, imap: 240_000 };
+const TIMEOUT = { linkedin: 420_000, x: 300_000, messenger: 300_000, tiktok: 300_000, instagram: 240_000, gmail: 240_000, outlook: 360_000, icloud: 240_000, yahoo: 240_000, imap: 240_000 };
 async function roundTrip(live, pair, rl) {
   const id = Math.random().toString(36).slice(2, 7);
   const tag = `#e2e-${id}`;
@@ -477,7 +477,7 @@ async function run(args) {
   }
   const { pairs } = JSON.parse(fs.readFileSync(CFG, 'utf8'));
   const only = args.filter((a) => !a.startsWith('--'));
-  const alias = { wa: 'whatsapp', tg: 'telegram', ig: 'instagram', li: 'linkedin', fb: 'messenger', im: 'imessage' };
+  const alias = { wa: 'whatsapp', tg: 'telegram', ig: 'instagram', li: 'linkedin', fb: 'messenger', im: 'imessage', tt: 'tiktok' };
   const want = only.map((a) => alias[a] ?? a);
   const todo = pairs.filter((p) => !want.length || want.includes(p.platform));
   const live = new Live();

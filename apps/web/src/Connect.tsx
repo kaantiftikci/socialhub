@@ -6,7 +6,7 @@ import { openDemoLoginWindow, staticApi } from './static-demo';
 import { MAC_ONLY, PLATFORMS, type Account, type CoreOs, type Platform } from './types';
 import { Chip, Icon, PasswordInput, SyncBar } from './ui';
 
-const ORDER: Platform[] = ['whatsapp', 'telegram', 'slack', 'imessage', 'linkedin', 'x', 'instagram', 'messenger'];
+const ORDER: Platform[] = ['whatsapp', 'telegram', 'slack', 'imessage', 'linkedin', 'x', 'instagram', 'messenger', 'tiktok'];
 const MAIL_ORDER: Platform[] = ['gmail', 'outlook', 'yahoo', 'yandex', 'icloud', 'imap'];
 // Alışveriş kanalları yalnızca müşteri sorularını/mesajlarını görmek ve yanıtlamak için; Shopier'de mesajlaşma ucu olmadığından listede yok
 /** Resmi (kişisel hesaba açık) API'si olmayan, web oturumu/bağlı cihazla çalışan kanallar: kartta şeffaflık etiketi */

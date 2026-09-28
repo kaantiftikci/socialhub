@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Tarayıcı stratejisini (slack/instagram/linkedin/x/messenger) gerçek oturumla, uygulamaya dokunmadan doğrular:
+ * Tarayıcı stratejisini (slack/instagram/linkedin/x/messenger/tiktok) gerçek oturumla, uygulamaya dokunmadan doğrular:
  *   node scripts/verify-strategy.mjs slack            # ~/.mivelo/sessions/<platform>:<id>/profile'ı /tmp'ye kopyalar
  *   node scripts/verify-strategy.mjs slack /yol/profil # verilen profil kopyasını kullanır
  * Çıktı: sohbet sayısı, ilk 8 sohbet (ad, tür, okunmamış, son etkinlik), ilk 3 sohbette mesajlar (zaman, gönderen, metin, ek),
@@ -13,7 +13,7 @@ import { chromium } from 'playwright';
 
 const [platform, given] = process.argv.slice(2);
 if (!platform) {
-  console.error('kullanım: node scripts/verify-strategy.mjs <slack|instagram|linkedin|x|messenger> [profilKopyası]');
+  console.error('kullanım: node scripts/verify-strategy.mjs <slack|instagram|linkedin|x|messenger|tiktok> [profilKopyası]');
   process.exit(1);
 }
 const mod = await import(`../packages/core/dist/connectors/browser/${platform}.js`);

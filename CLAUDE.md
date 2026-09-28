@@ -224,6 +224,14 @@ Dil: arayüz ve yorumlar Türkçe.
   önce facebook.com/messages, olmazsa messenger.com — Nisan 2026'da kapandı; seçilen adres günlüğe yazılır, `verify-strategy.mjs messenger`
   hangisinin çalıştığını basar; facebook.com düzeni gerçek hesapla henüz doğrulanmadı).
   Çerezli medya `fetchMedia` ile vekilden geçer, `~/.mivelo/sessions/<hesap>/media` önbelleği.
+- **TikTok** (`connectors/browser/tiktok.ts`, DENEYSEL, gerçek hesapla DOĞRULANMADI; arayüzde "deneysel" etiketi): herkese açık DM API'si yok →
+  tiktok.com/messages DOM'u. Seçiciler `data-e2e` (chat-list-item, chat-item, chat-nickname, chat-uniqueid, message-input-area, message-send) + sınıf
+  parçaları (InfoNickname/InfoExtract/InfoTime, TimeContainer) + geometri; ilk turda `TikTok tanı:` günlüğü (sayılar + data-e2e adları, içerik yok) →
+  seçiciler buna göre ayarlanır. Oturum `sessionid`/`sid_tt`; kimlik `__UNIVERSAL_DATA_FOR_REHYDRATION__` user (@uniqueId). Sohbet kimliği görünen addan
+  (aynı ada #2), açılınca @kullanıcı adı → handle/link. Mesaj kimliği sohbet + çözülen ayırıcı zamanı + gönderen + metin ("Bugün"→"Dün" olsa da aynı).
+  Paylaşılan video = kapak + /video/ bağlantısı eki. Gönderim Draft.js'e klavyeyle (satır arası Shift+Enter). Yoklama 60 sn (rtSlowdown 3), captcha →
+  'pairing' + `attention`. Sınırlar: günlük 300, ilk temas 40. Okumak için sohbet açılır → karşı tarafa "Görüldü" gidebilir. Test: tiktok.test.ts
+  (saf fonksiyonlar); DOM kodu yerelde sahte TikTok sayfasıyla sınandı. `verify-strategy.mjs tiktok`, e2e takma adı `tt`.
 - **Bağlanma iptali (29.09, Kaan: X giriş penceresini girişsiz kapattım, "eşleşme bekleniyor"da kaldı)**: köprü `waitForLogin` pencere
   kapanınca/iptalde `loginCancelled` → tarayıcı TAMAMEN kapanır (macOS'ta son pencere kapanınca Chromium açık kalıyordu), hesap 'disconnected'
   "Giriş yapılmadı", `account.login-cancelled` olayı → registry bu oturumda "Bağlan" ile açılmış, hiç bağlanmamış (`fresh`) hesabı kaldırır

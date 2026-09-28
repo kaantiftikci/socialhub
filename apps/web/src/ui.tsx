@@ -3,7 +3,7 @@ import { publicAsset } from './demo-asset';
 import { useEffect, useState, type InputHTMLAttributes, type MouseEvent as ReactMouseEvent } from 'react';
 import type { ReactNode } from 'react';
 import { PLATFORMS, TAG_COLORS, type Platform } from './types';
-import { siWhatsapp, siTelegram, siX, siInstagram, siMessenger, siGmail, siIcloud, siShopify } from 'simple-icons';
+import { siWhatsapp, siTelegram, siX, siInstagram, siMessenger, siTiktok, siGmail, siIcloud, siShopify } from 'simple-icons';
 import { faSlack, faLinkedinIn, faMicrosoft, faYahoo, faYandex } from '@fortawesome/free-brands-svg-icons';
 
 const PATHS: Record<string, ReactNode> = {
@@ -159,7 +159,7 @@ export function Icon({ name, size = 16, color = 'currentColor', sw = 1.8 }: { na
  * - iMessage: Apple, uygulama simgelerinin üçüncü taraflarca kullanımına izin vermez; kendi nötr balon simgemiz.
  * Hiçbir logo 18px altında çizilmez (küçük yerlerde rozet otomatik büyür).
  */
-type Brand = { path: string; bg: string; ratio: number; min?: number; vb?: string };
+type Brand = { path: string; bg: string; ratio: number; min?: number; vb?: string; layers?: Array<{ fill: string; dx: number; dy: number }> };
 // Slack ve LinkedIn simple-icons'ta yok; Font Awesome Free (CC BY 4.0) marka setinden.
 const fa = (i: { icon: [number, number, unknown, unknown, string | string[]] }) => ({ path: Array.isArray(i.icon[4]) ? i.icon[4].join(' ') : i.icon[4], vb: `0 0 ${i.icon[0]} ${i.icon[1]}` });
 
@@ -169,6 +169,8 @@ const BRAND: Partial<Record<Platform, Brand>> = {
   instagram: { path: siInstagram.path, bg: 'linear-gradient(45deg, #FFD600 0%, #FF7A00 25%, #FF0069 50%, #D300C5 75%, #7638FA 100%)', ratio: 0.6 },
   messenger: { path: siMessenger.path, bg: 'linear-gradient(45deg, #0099FF 0%, #A033FF 40%, #FF5280 75%, #FF7061 100%)', ratio: 0.62 },
   x: { path: siX.path, bg: '#000000', ratio: 0.45 },
+  // TikTok: siyah zeminde nota; resmi simgedeki gibi camgöbeği / kırmızı kaymalı katmanlar, üstte beyaz
+  tiktok: { path: siTiktok.path, bg: '#000000', ratio: 0.56, layers: [{ fill: '#25F4EE', dx: -0.7, dy: -0.7 }, { fill: '#FE2C55', dx: 0.7, dy: 0.7 }] },
   // Slack: tek renkli logo, resmi aubergine zemin üzerinde beyaz (marka kılavuzunun izin verdiği kullanım)
   slack: { ...fa(faSlack), bg: '#4A154B', ratio: 0.6 },
   // LinkedIn: "in" logosu, resmi mavi (#0A66C2) zemin üzerinde beyaz
@@ -213,7 +215,8 @@ export function Chip({ platform, size = 18, ring }: { platform: Platform; size?:
     const inner = Math.round(s * brand.ratio);
     return (
       <span className={`plat plat-${platform}`} title={p.name} style={{ ...base, background: brand.bg }}>
-        <svg width={inner} height={inner} viewBox={brand.vb ?? "0 0 24 24"} aria-hidden="true">
+        <svg width={inner} height={inner} viewBox={brand.vb ?? "0 0 24 24"} aria-hidden="true" style={{ overflow: 'visible' }}>
+          {brand.layers?.map((l) => <path key={l.fill} d={brand.path} fill={l.fill} transform={`translate(${l.dx} ${l.dy})`} />)}
           <path d={brand.path} fill="#fff" />
         </svg>
       </span>

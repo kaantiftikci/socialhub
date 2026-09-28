@@ -21,6 +21,7 @@ export const DAILY_LIMIT: Partial<Record<Platform, number>> = {
   x: 450, // X'in kendi günlük DM tavanı 500: onun altında kalınır
   instagram: 600,
   messenger: 600,
+  tiktok: 300,
   imessage: 1500,
   whatsapp: 2500,
   telegram: 2500,
@@ -32,6 +33,7 @@ export const NEW_LIMIT: Partial<Record<Platform, number>> = {
   x: 80,
   instagram: 80,
   messenger: 80,
+  tiktok: 40, // TikTok takip etmeyenlere mesajı istek kutusuna düşürüyor; ilk temas en sıkı sınırda
   whatsapp: 100,
   imessage: 150,
   slack: 300,
@@ -147,5 +149,5 @@ export function resetSendGuard(): void {
 }
 
 function platformName(p: Platform): string {
-  return ({ linkedin: 'LinkedIn', x: 'X', instagram: 'Instagram', messenger: 'Messenger', whatsapp: 'WhatsApp', telegram: 'Telegram', imessage: 'iMessage', slack: 'Slack' } as Partial<Record<Platform, string>>)[p] ?? p;
+  return ({ linkedin: 'LinkedIn', x: 'X', instagram: 'Instagram', messenger: 'Messenger', tiktok: 'TikTok', whatsapp: 'WhatsApp', telegram: 'Telegram', imessage: 'iMessage', slack: 'Slack' } as Partial<Record<Platform, string>>)[p] ?? p;
 }

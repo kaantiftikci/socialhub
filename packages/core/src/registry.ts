@@ -16,6 +16,7 @@ import { linkedin } from './connectors/browser/linkedin.js';
 import { instagram } from './connectors/browser/instagram.js';
 import { x } from './connectors/browser/x.js';
 import { messenger } from './connectors/browser/messenger.js';
+import { tiktok } from './connectors/browser/tiktok.js';
 import { gmail } from './connectors/browser/gmail.js';
 import { outlook } from './connectors/browser/outlook.js';
 import { icloud } from './connectors/browser/icloud.js';
@@ -140,7 +141,7 @@ export class Registry {
 
   private async addNow(platform: Platform, opts: { token?: string; label?: string }): Promise<Account> {
     // Tek hesaplı platformlar: ikinci kez "Bağlan" denirse kopya hesap açma, var olanı yeniden başlat
-    const SINGLE: Platform[] = ['whatsapp', 'telegram', 'slack', 'imessage', 'linkedin', 'x', 'instagram', 'messenger', 'shopier', 'trendyol', 'hepsiburada', 'etsy', 'shopify', 'n11', 'amazon', 'pttavm'];
+    const SINGLE: Platform[] = ['whatsapp', 'telegram', 'slack', 'imessage', 'linkedin', 'x', 'instagram', 'messenger', 'tiktok', 'shopier', 'trendyol', 'hepsiburada', 'etsy', 'shopify', 'n11', 'amazon', 'pttavm'];
     const existing = SINGLE.includes(platform) ? this.list().find((a) => a.platform === platform) : undefined;
     if (existing) {
       if (opts.token) fs.writeFileSync(path.join(sessionDir(existing.id), 'token'), opts.token, { mode: 0o600 });
@@ -285,6 +286,10 @@ export class Registry {
         break;
       case 'messenger':
         c = new BrowserConnector(account, this.store, messenger, 30_000, { rtSlowdown: 5, backfillMs: 10_000 }); // soket/liste canlıyken yedek 2,5 dk
+        break;
+      case 'tiktok':
+        // DOM okuyan deneysel yol; TikTok otomasyona sert (captcha): LinkedIn/X gibi seyrek, soket/liste canlıyken yedek 3 dk
+        c = new BrowserConnector(account, this.store, tiktok, 60_000, { rtSlowdown: 3, backfillMs: 20_000 });
         break;
       case 'shopier': {
         const tokenFile = path.join(sessionDir(account.id), 'token');

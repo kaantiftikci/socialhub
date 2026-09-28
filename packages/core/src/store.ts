@@ -235,7 +235,7 @@ export class Store {
     }
     // Onarım: tarayıcı kanallarında sohbet zamanı olarak yoklama saati yazılmıştı; mesajı olan sohbetleri son mesaj zamanına çek
     this.db.exec(`UPDATE chats SET last_message_at = (SELECT MAX(ts) FROM messages m WHERE m.chat_id = chats.id)
-      WHERE platform IN ('messenger','x','instagram','linkedin','slack')
+      WHERE platform IN ('messenger','x','instagram','linkedin','slack','tiktok')
         AND EXISTS (SELECT 1 FROM messages m WHERE m.chat_id = chats.id)
         AND last_message_at > (SELECT MAX(ts) FROM messages m WHERE m.chat_id = chats.id) + 600000`);
   }

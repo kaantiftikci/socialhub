@@ -1461,7 +1461,7 @@ export const RATE_RE = /\b(429|999)\b|rate.?limit|too many/i;
 /** Mivelo içi giriş ekranının boyutu (CSS px; görüntü 2x) */
 const EMBED_SIZE = { width: 820, height: 700 };
 
-const GENERIC_LABEL = /^(messenger|instagram|x|linkedin|slack|outlook|gmail|icloud mail|yahoo mail|yandex mail|yahoo|yandex|etsy|shopify|amazon|error|hata)$|^olk-|pivot/i;
+const GENERIC_LABEL = /^(messenger|instagram|tiktok|x|linkedin|slack|outlook|gmail|icloud mail|yahoo mail|yandex mail|yahoo|yandex|etsy|shopify|amazon|error|hata)$|^olk-|pivot/i;
 
 /** Kalıcı profilde çerez veritabanı var mı (daha önce giriş denenmiş mi) */
 function hasProfileCookies(profile: string): boolean {

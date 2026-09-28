@@ -1,4 +1,4 @@
-export type Platform = 'whatsapp' | 'telegram' | 'slack' | 'linkedin' | 'x' | 'imessage' | 'instagram' | 'messenger' | 'gmail' | 'outlook' | 'yahoo' | 'yandex' | 'icloud' | 'imap' | 'shopier' | 'trendyol' | 'hepsiburada' | 'etsy' | 'shopify' | 'n11' | 'amazon' | 'pttavm' | 'demo';
+export type Platform = 'whatsapp' | 'telegram' | 'slack' | 'linkedin' | 'x' | 'imessage' | 'instagram' | 'messenger' | 'tiktok' | 'gmail' | 'outlook' | 'yahoo' | 'yandex' | 'icloud' | 'imap' | 'shopier' | 'trendyol' | 'hepsiburada' | 'etsy' | 'shopify' | 'n11' | 'amazon' | 'pttavm' | 'demo';
 export type Category = 'chat' | 'mail' | 'shop';
 export type AccountStatus = 'disconnected' | 'connecting' | 'pairing' | 'connected' | 'error';
 
@@ -202,6 +202,7 @@ export const PLATFORMS: Record<Platform, { name: string; code: string; color: st
   x: { name: 'X', code: 'X', color: '#2B2833', method: 'Hesabınla giriş', available: true, mode: 'browser' },
   instagram: { name: 'Instagram', code: 'IG', color: '#C13584', method: 'Hesabınla giriş', available: true, mode: 'browser' },
   messenger: { name: 'Messenger', code: 'MS', color: '#0866FF', method: 'Hesabınla giriş', available: true, mode: 'browser' },
+  tiktok: { name: 'TikTok', code: 'TT', color: '#111111', method: 'Hesabınla giriş', available: true, mode: 'browser', experimental: true },
   gmail: { name: 'Gmail', code: 'GM', color: '#EA4335', method: 'Google hesabınla giriş', available: true, mode: 'browser', category: 'mail' },
   outlook: { name: 'Outlook', code: 'OL', color: '#0F6CBD', method: 'Microsoft hesabınla giriş', available: true, mode: 'browser', category: 'mail' },
   yahoo: { name: 'Yahoo Mail', code: 'YH', color: '#6001D2', method: 'Yahoo hesabınla giriş', available: true, mode: 'browser', category: 'mail' },
@@ -238,7 +239,7 @@ export const QUICK_REACTIONS = ['👍', '❤️', '😂', '🔥', '👏', '😮'
  * Sohbeti kendi uygulamasında/web'inde açacak bağlantı. Platform sağladıysa chat.link; yoksa kimlikten türetilir.
  * Grup tanıtıcıları (WhatsApp @g.us vb.) için yalnızca uygulama şeması.
  */
-const OPEN_LABEL: Partial<Record<Platform, string>> = { whatsapp: "WhatsApp'ta aç", telegram: "Telegram'da aç", slack: "Slack'te aç", instagram: "Instagram'da aç", messenger: "Messenger'da aç", x: "X'te aç", linkedin: "LinkedIn'de aç", imessage: "Mesajlar'da aç", gmail: "Gmail'de aç", outlook: "Outlook'ta aç", icloud: "iCloud'da aç", demo: 'Uygulamada aç' };
+const OPEN_LABEL: Partial<Record<Platform, string>> = { whatsapp: "WhatsApp'ta aç", telegram: "Telegram'da aç", slack: "Slack'te aç", instagram: "Instagram'da aç", messenger: "Messenger'da aç", tiktok: "TikTok'ta aç", x: "X'te aç", linkedin: "LinkedIn'de aç", imessage: "Mesajlar'da aç", gmail: "Gmail'de aç", outlook: "Outlook'ta aç", icloud: "iCloud'da aç", demo: 'Uygulamada aç' };
 export function openInAppLink(c: Chat): { href: string; label: string } | null {
   const label = OPEN_LABEL[c.platform] ?? `${PLATFORMS[c.platform]?.name ?? c.platform} · aç`;
   const id = c.remoteId;
@@ -258,6 +259,9 @@ export function openInAppLink(c: Chat): { href: string; label: string } | null {
       return { href: c.link || `https://www.instagram.com/direct/t/${id}/`, label };
     case 'messenger':
       return { href: c.link || `https://www.facebook.com/messages/t/${id}/`, label };
+    case 'tiktok':
+      // sohbetin kalıcı adresi yok: profil (biliniyorsa) ya da mesajlar sayfası
+      return { href: c.link || 'https://www.tiktok.com/messages', label };
     case 'x':
       return { href: c.link || `https://x.com/messages/${id}`, label };
     case 'linkedin':

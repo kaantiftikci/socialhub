@@ -257,6 +257,28 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
       ],
     },
   ],
+  tiktok: [
+    {
+      remoteId: 'melis', name: 'melis.style', kind: 'direct', tags: ['fırsat'], unread: 2, handle: '@melis.style', avatar: 'melis.jpg',
+      lines: [
+        [false, 'Merhaba! Keten gömlek videonuz keşfette karşıma çıktı, çok beğendim.'],
+        [true, 'Teşekkürler! Yeni sezon bu hafta sitede.'],
+        [false, 'Kısa bir tanıtım videosu çekmek isterim, ürün gönderebilir misiniz?'],
+        [true, 'Olur. Beden ve renk tercihin?'],
+        [false, 'M beden, ekru. Paylaşım cuma akşamı olur.'],
+        [false, 'Geçen haftaki çekimim.', [vid('tanitim.mp4', 'cicek.mp4', 'elbise.jpg', 2_310_000)]],
+      ],
+    },
+    {
+      remoteId: 'can', name: 'can.kosu', kind: 'direct', tags: ['müşteri'], unread: 0, handle: '@can.kosu', avatar: 'can.jpg',
+      lines: [
+        [false, 'Canlı yayında gösterdiğiniz kupa hâlâ satışta mı?'],
+        [true, 'Satışta. Bağlantıyı bırakıyorum, stokta 6 adet var.'],
+        [true, 'Kupa.', [pic('kupa.jpg', 'kupa.jpg')]],
+        [false, 'Harika, ikisini sepete ekledim.'],
+      ],
+    },
+  ],
   gmail: [
     {
       remoteId: 'fatura', name: 'Eylül faturanız hazır', kind: 'direct', tags: [], unread: 1, handle: 'fatura@bulutdepo.example', avatar: 'fatura.jpg',
@@ -1089,6 +1111,7 @@ const BADGE: Partial<Record<Platform, number>> = {
   x: 13,
   instagram: 3,
   messenger: 36,
+  tiktok: 5,
   gmail: 9,
   outlook: 22,
   yahoo: 0,
