@@ -159,6 +159,8 @@ svg{flex-shrink:0}
 .steps .n{width:32px;height:32px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:var(--brand-soft);color:var(--brand-ink);font-weight:700;font-size:14px}
 .steps li b{font-weight:600}
 .steps li div{font-size:15px;line-height:1.55;color:var(--ink-2);padding-top:4px}
+/* uzun komut (xattr …) kartı genişletip telefonda sağdan taşırıyordu: metin sütunu daralabilsin, komut kendi içinde kaysın */
+.steps li>div{min-width:0}
 .steps li small{display:block;font-size:13px;color:var(--ink-3);margin-top:3px}
 .steps li small code{display:block;margin-top:5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;background:#F2F1F6;padding:6px 9px;border-radius:8px;white-space:nowrap;overflow-x:auto;user-select:all;-webkit-user-select:all;color:var(--ink-2)}
 
@@ -282,6 +284,138 @@ footer a:hover{color:var(--ink)}
 .card .btn svg{color:#fff}
 .card .btn.off{background:#CFCDD6;color:#fff;opacity:1}
 @media (prefers-reduced-motion:reduce){.seg .pill.mv{animation:none}}
+/* ================= macOS "Yine de Aç" anlatımı (#gk): sessiz, ≈10 sn döngü; ana sayfadaki imleçli görevlerle aynı dil =================
+   Sahne 1440×900 koordinatlarında çizilir (--u = 1/1440 genişlik); imleç hedef öğenin gerçek konumuna gider. Sıra: Dock'ta Mivelo →
+   "Mivelo açılmadı" → Bitti → Sistem Ayarları → Gizlilik ve Güvenlik → aşağı kay → Yine de Aç → parola → Yine de Aç → Mivelo açılır (lisans ekranı).
+   Görünmezken / Windows sekmesinde durur; azaltılmış harekette durağan son kare. Alttaki adım kartı sahneyle birlikte vurgulanır. */
+.gk{position:relative;max-width:720px;margin:40px auto 0;aspect-ratio:16/10;border-radius:16px;overflow:hidden;container-type:inline-size;background:#221b4d;
+  box-shadow:0 1px 2px rgba(20,18,40,.08),0 30px 60px -26px rgba(40,30,110,.5),0 0 0 1px rgba(20,18,40,.1);
+  font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Inter',system-ui,sans-serif;color:#1d1d1f;-webkit-font-smoothing:antialiased;user-select:none;-webkit-user-select:none;text-align:left;line-height:1.3}
+.gk[hidden]{display:none}
+.gk *{box-sizing:border-box}
+.gk-s{position:absolute;inset:0;--u:calc(100cqw / 1440);font-size:calc(20*var(--u))}
+.gk-wall{position:absolute;inset:0;background:radial-gradient(55% 65% at 12% 95%,#ff9a4d 0%,rgba(255,154,77,0) 62%),radial-gradient(50% 60% at 88% 12%,#8b6bff 0%,rgba(139,107,255,0) 66%),
+  radial-gradient(70% 70% at 60% 115%,#ff4f8b 0%,rgba(255,79,139,0) 60%),linear-gradient(158deg,#1d2b7a 0%,#3a2c93 42%,#6b39ab 68%,#c2557d 100%)}
+.gk-wall::after{content:"";position:absolute;inset:0;background:radial-gradient(40% 30% at 70% 55%,rgba(255,255,255,.14),transparent 70%)}
+/* menü çubuğu */
+.gk-mb{position:absolute;left:0;right:0;top:0;height:calc(38*var(--u));display:flex;align-items:center;gap:calc(26*var(--u));padding:0 calc(22*var(--u));color:#fff;font-size:calc(19*var(--u));
+  background:rgba(255,255,255,.16);-webkit-backdrop-filter:blur(20px) saturate(160%);backdrop-filter:blur(20px) saturate(160%);z-index:3}
+.gk-mb b{font-weight:700}
+.gk-mb .sp{flex:1}
+.gk-mb svg{height:calc(20*var(--u));width:auto;display:block}
+/* Dock */
+.gk-dock{position:absolute;left:50%;bottom:calc(12*var(--u));transform:translateX(-50%);display:flex;align-items:flex-end;gap:calc(12*var(--u));padding:calc(10*var(--u)) calc(12*var(--u));
+  border-radius:calc(28*var(--u));background:rgba(255,255,255,.26);-webkit-backdrop-filter:blur(24px) saturate(170%);backdrop-filter:blur(24px) saturate(170%);
+  box-shadow:inset 0 0 0 calc(1.5*var(--u)) rgba(255,255,255,.35),0 calc(10*var(--u)) calc(30*var(--u)) rgba(0,0,0,.25);z-index:4}
+.gk-dock .di{position:relative;width:calc(78*var(--u));height:calc(78*var(--u))}
+.gk-dock .di>svg,.gk-dock .di>.ic{width:100%;height:100%;display:block;border-radius:calc(19*var(--u))}
+.gk-dock .sep{width:calc(2*var(--u));height:calc(66*var(--u));background:rgba(255,255,255,.4);margin:0 calc(2*var(--u)) calc(6*var(--u))}
+.gk-dock .di::after{content:"";position:absolute;left:50%;bottom:calc(-7*var(--u));width:calc(6*var(--u));height:calc(6*var(--u));margin-left:calc(-3*var(--u));border-radius:50%;background:rgba(255,255,255,.9);opacity:0;transition:opacity .2s}
+.gk-dock .di.run::after{opacity:1}
+.gk-dock .di.bounce{animation:gkBounce .75s cubic-bezier(.3,.6,.4,1)}
+@keyframes gkBounce{0%,100%{transform:none}30%{transform:translateY(calc(-30*var(--u)))}58%{transform:none}78%{transform:translateY(calc(-11*var(--u)))}}
+/* pencereler */
+.gk-win{position:absolute;border-radius:calc(22*var(--u));overflow:hidden;background:#fbfbfd;box-shadow:0 0 0 calc(1*var(--u)) rgba(0,0,0,.22),0 calc(30*var(--u)) calc(70*var(--u)) rgba(0,0,0,.4);
+  opacity:0;transform:scale(.94);transition:opacity .28s ease,transform .34s cubic-bezier(.2,.9,.3,1.1);pointer-events:none;z-index:5}
+.gk-win.on{opacity:1;transform:none}
+.gk-lights{display:flex;gap:calc(9*var(--u));position:absolute;left:calc(20*var(--u));top:calc(20*var(--u));z-index:2}
+.gk-lights i{width:calc(14*var(--u));height:calc(14*var(--u));border-radius:50%;background:#ff5f57;box-shadow:inset 0 0 0 calc(.8*var(--u)) rgba(0,0,0,.12)}
+.gk-lights i:nth-child(2){background:#febc2e}.gk-lights i:nth-child(3){background:#28c840}
+/* Sistem Ayarları */
+.gk-set{left:calc(150*var(--u));top:calc(78*var(--u));width:calc(1140*var(--u));height:calc(680*var(--u));display:flex}
+.gk-side{width:calc(340*var(--u));flex:none;background:#ececf0;border-right:calc(1*var(--u)) solid #dcdce0;padding:calc(62*var(--u)) calc(12*var(--u)) 0;position:relative}
+.gk-search{height:calc(40*var(--u));border-radius:calc(10*var(--u));background:rgba(0,0,0,.06);display:flex;align-items:center;gap:calc(8*var(--u));padding:0 calc(12*var(--u));color:#8a8a8e;font-size:calc(19*var(--u));margin-bottom:calc(14*var(--u))}
+.gk-search svg{width:calc(18*var(--u));height:calc(18*var(--u))}
+.gk-acct{display:flex;align-items:center;gap:calc(12*var(--u));padding:calc(6*var(--u)) calc(8*var(--u)) calc(14*var(--u))}
+.gk-acct .av{width:calc(44*var(--u));height:calc(44*var(--u));border-radius:50%;background:linear-gradient(160deg,#c9c9ce,#8e8e93);display:grid;place-items:center;color:#fff}
+.gk-acct .av svg{width:62%;height:62%}
+.gk-acct b{display:block;font-size:calc(19*var(--u));font-weight:600}
+.gk-acct small{display:block;font-size:calc(15*var(--u));color:#6e6e73}
+.gk-side ul{list-style:none;margin:0;padding:0}
+.gk-side li{height:calc(40*var(--u));display:flex;align-items:center;gap:calc(11*var(--u));padding:0 calc(8*var(--u));border-radius:calc(9*var(--u));font-size:calc(19*var(--u));color:#1d1d1f;white-space:nowrap}
+.gk-side li.gap{height:calc(12*var(--u))}
+.gk-side li.sel{background:#0a82ff;color:#fff}
+.gk-side .si{width:calc(28*var(--u));height:calc(28*var(--u));border-radius:calc(7*var(--u));background:var(--c);display:grid;place-items:center;flex:none;color:#fff}
+.gk-side .si svg{width:66%;height:66%}
+.gk-main{flex:1;position:relative;overflow:hidden;background:#f5f5f7}
+.gk-head{height:calc(62*var(--u));display:flex;align-items:center;gap:calc(14*var(--u));padding:0 calc(22*var(--u));font-size:calc(23*var(--u));font-weight:700;border-bottom:calc(1*var(--u)) solid #e3e3e6;background:#f5f5f7;position:relative;z-index:2}
+.gk-head .arr{color:#b0b0b5;display:flex;gap:calc(12*var(--u))}
+.gk-head .arr svg{width:calc(18*var(--u));height:calc(18*var(--u))}
+.gk-pane{position:absolute;left:0;right:0;top:calc(62*var(--u));bottom:0;padding:calc(20*var(--u)) calc(30*var(--u));opacity:0;transition:opacity .2s}
+.gk-pane.on{opacity:1}
+.gk-scroll{transition:transform .62s cubic-bezier(.35,.1,.2,1)}
+.gk.scr .gk-scroll{transform:translateY(calc(-342*var(--u)))}
+.gk-hero{text-align:center;padding:calc(6*var(--u)) 0 calc(18*var(--u))}
+.gk-hero .big{width:calc(84*var(--u));height:calc(84*var(--u));border-radius:calc(20*var(--u));margin:0 auto calc(10*var(--u));display:grid;place-items:center;color:#fff;background:var(--c)}
+.gk-hero .big svg{width:62%;height:62%}
+.gk-hero .big.img{background:none;border-radius:0}
+.gk-hero .big.img svg{width:100%;height:100%;border-radius:calc(20*var(--u))}
+.gk-hero b{display:block;font-size:calc(25*var(--u));font-weight:700}
+.gk-hero p{margin:calc(6*var(--u)) auto 0;max-width:calc(560*var(--u));font-size:calc(17*var(--u));color:#6e6e73;line-height:1.4}
+.gk-grp{background:#fff;border-radius:calc(14*var(--u));box-shadow:0 0 0 calc(1*var(--u)) #e3e3e6;margin-bottom:calc(16*var(--u))}
+.gk-row{min-height:calc(50*var(--u));display:flex;align-items:center;gap:calc(12*var(--u));padding:calc(8*var(--u)) calc(16*var(--u));font-size:calc(18.5*var(--u))}
+.gk-row+.gk-row{border-top:calc(1*var(--u)) solid #ececef}
+.gk-row .si{width:calc(28*var(--u));height:calc(28*var(--u));border-radius:calc(7*var(--u));background:var(--c);display:grid;place-items:center;flex:none;color:#fff}
+.gk-row .si svg{width:66%;height:66%}
+.gk-row .v{margin-left:auto;color:#8a8a8e;display:flex;align-items:center;gap:calc(8*var(--u))}
+.gk-row .v svg{width:calc(14*var(--u));height:calc(14*var(--u))}
+.gk-h4{font-size:calc(20*var(--u));font-weight:700;margin:calc(8*var(--u)) 0 calc(10*var(--u)) calc(4*var(--u))}
+.gk-row.blk{align-items:center}
+.gk-row.blk span{flex:1;color:#1d1d1f;line-height:1.35}
+.gk-sel{margin-left:auto;padding:calc(5*var(--u)) calc(12*var(--u));border-radius:calc(8*var(--u));background:#fff;box-shadow:0 0 0 calc(1*var(--u)) #d6d6da,0 calc(1*var(--u)) calc(2*var(--u)) rgba(0,0,0,.06);font-size:calc(17*var(--u));color:#1d1d1f;white-space:nowrap}
+.gk-btn{flex:none;height:calc(38*var(--u));padding:0 calc(20*var(--u));border-radius:calc(9*var(--u));border:0;background:#fff;color:#1d1d1f;font:inherit;font-size:calc(18*var(--u));font-weight:500;
+  box-shadow:0 0 0 calc(1*var(--u)) #cfcfd4,0 calc(1*var(--u)) calc(2*var(--u)) rgba(0,0,0,.08);transition:background .12s,transform .12s}
+.gk-btn.press{background:#e5e5ea;transform:scale(.97)}
+/* uyarılar (macOS 15 düzeni) */
+.gk-al{position:absolute;left:50%;top:calc(150*var(--u));width:calc(500*var(--u));margin-left:calc(-250*var(--u));border-radius:calc(30*var(--u));padding:calc(34*var(--u)) calc(30*var(--u)) calc(26*var(--u));text-align:center;
+  background:rgba(242,242,246,.94);-webkit-backdrop-filter:blur(30px) saturate(180%);backdrop-filter:blur(30px) saturate(180%);box-shadow:0 0 0 calc(1*var(--u)) rgba(0,0,0,.14),0 calc(34*var(--u)) calc(80*var(--u)) rgba(0,0,0,.45);
+  opacity:0;transform:scale(1.08);transition:opacity .2s ease,transform .26s cubic-bezier(.2,.9,.3,1.1);pointer-events:none;z-index:20}
+.gk-al.on{opacity:1;transform:none}
+.gk-al .ic{width:calc(96*var(--u));height:calc(96*var(--u));margin:0 auto calc(16*var(--u));position:relative}
+.gk-al .ic>svg{width:100%;height:100%;display:block;border-radius:calc(22*var(--u));box-shadow:0 calc(6*var(--u)) calc(14*var(--u)) rgba(40,20,120,.28)}
+.gk-al .ic .badge{position:absolute;right:calc(-8*var(--u));bottom:calc(-6*var(--u));width:calc(42*var(--u));height:calc(42*var(--u))}
+.gk-al b{display:block;font-size:calc(24*var(--u));font-weight:700;line-height:1.25}
+.gk-al p{margin:calc(10*var(--u)) 0 calc(24*var(--u));font-size:calc(17*var(--u));color:#3a3a3c;line-height:1.4}
+.gk-al .bt{display:flex;gap:calc(12*var(--u))}
+.gk-al .bt.col{flex-direction:column;gap:calc(10*var(--u))}
+.gk-al .bt span{flex:1;height:calc(48*var(--u));border-radius:calc(14*var(--u));display:grid;place-items:center;font-size:calc(18.5*var(--u));font-weight:500;background:rgba(0,0,0,.07);color:#1d1d1f;transition:filter .12s,transform .12s}
+.gk-al .bt span.def{background:#0a82ff;color:#fff}
+.gk-al .bt.col span{flex:none}
+.gk-al .bt span.press{filter:brightness(.85);transform:scale(.97)}
+.gk-auth .fld{height:calc(48*var(--u));border-radius:calc(11*var(--u));background:#fff;box-shadow:0 0 0 calc(1*var(--u)) #d1d1d6;display:flex;align-items:center;padding:0 calc(14*var(--u));font-size:calc(18*var(--u));color:#8a8a8e;margin-bottom:calc(10*var(--u));text-align:left}
+.gk-auth .fld.pw{box-shadow:0 0 0 calc(3*var(--u)) rgba(10,130,255,.45),0 0 0 calc(1*var(--u)) #0a82ff}
+.gk-auth .dots{color:#1d1d1f;letter-spacing:calc(3*var(--u));font-size:calc(24*var(--u))}
+.gk-auth .fld .car{width:calc(2*var(--u));height:calc(24*var(--u));background:#0a82ff;margin-left:calc(2*var(--u));animation:caret 1s steps(1) infinite}
+.gk-auth p{margin-bottom:calc(16*var(--u))}
+/* Mivelo penceresi (açıldı: lisans ekranı) */
+.gk-app{left:calc(290*var(--u));top:calc(96*var(--u));width:calc(860*var(--u));height:calc(640*var(--u));background:radial-gradient(90% 60% at 50% -10%,rgba(108,71,255,.2),transparent 60%),#f7f6fa;display:grid;place-items:center}
+.gk-card{width:calc(470*var(--u));background:#fff;border-radius:calc(30*var(--u));padding:calc(30*var(--u));box-shadow:0 0 0 calc(1*var(--u)) #e7e5ee,0 calc(40*var(--u)) calc(80*var(--u)) calc(-36*var(--u)) rgba(40,24,120,.45);display:flex;flex-direction:column;gap:calc(12*var(--u))}
+.gk-card .br{display:flex;align-items:center;gap:calc(10*var(--u));font-weight:700;font-size:calc(21*var(--u));letter-spacing:-.02em}
+.gk-card .br svg{width:calc(40*var(--u));height:calc(40*var(--u))}
+.gk-card b{font-size:calc(30*var(--u));letter-spacing:-.04em}
+.gk-card p{margin:0;color:#4a4757;font-size:calc(16*var(--u));line-height:1.45}
+.gk-card .gk-key{height:calc(52*var(--u));border-radius:calc(14*var(--u));box-shadow:0 0 0 calc(1.5*var(--u)) #6c47ff,0 0 0 calc(4*var(--u)) rgba(108,71,255,.18);display:grid;place-items:center;font:600 calc(19*var(--u))/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em;color:#15131c}
+.gk-card .go{height:calc(48*var(--u));border-radius:calc(13*var(--u));background:#d4ff3f;color:#1a2300;display:grid;place-items:center;font-weight:700;font-size:calc(17*var(--u))}
+.gk-app .sp-l{position:absolute;inset:0;display:grid;place-items:center;background:inherit;transition:opacity .45s ease;z-index:2}
+.gk-app .sp-l svg{width:calc(120*var(--u));height:calc(120*var(--u));filter:drop-shadow(0 calc(16*var(--u)) calc(26*var(--u)) rgba(108,71,255,.45))}
+.gk-app.on .sp-l svg{animation:gkLogo .6s cubic-bezier(.2,.9,.3,1.25) both}
+.gk-app.ready .sp-l{opacity:0}
+@keyframes gkLogo{from{transform:scale(.4) rotate(-12deg);opacity:0}to{transform:none;opacity:1}}
+/* imleç (ana sayfadakiyle aynı) */
+.gk-cur{position:absolute;left:62%;top:58%;width:calc(30*var(--u));z-index:40;pointer-events:none;transition-property:left,top;transition-timing-function:cubic-bezier(.45,.05,.25,1);transition-duration:.6s;
+  filter:drop-shadow(0 calc(2*var(--u)) calc(3*var(--u)) rgba(0,0,0,.35))}
+.gk-cur svg{display:block;width:100%;height:auto;transform-origin:15% 10%;transition:transform .12s ease}
+.gk-cur.down svg{transform:scale(.82)}
+.gk-cur .rip{position:absolute;left:0;top:0;width:calc(44*var(--u));height:calc(44*var(--u));margin:calc(-22*var(--u)) 0 0 calc(-22*var(--u));border-radius:50%;background:rgba(255,255,255,.45);transform:scale(0);opacity:0}
+.gk-cur.down .rip{animation:rip .5s ease-out}
+@keyframes rip{0%{transform:scale(.2);opacity:.9}100%{transform:scale(1.4);opacity:0}}
+/* sahnedeki adıma denk gelen kart */
+.steps li{transition:opacity .8s var(--ease),transform .8s var(--ease),box-shadow .35s ease}
+.steps li .n{transition:background .35s ease,color .35s ease}
+.steps li.now{box-shadow:0 0 0 2px var(--brand),0 16px 34px -18px rgba(108,71,255,.55)}
+.steps li.now .n{background:var(--brand);color:#fff}
+.gk:not([hidden])+.steps{margin-top:22px}
+@media (max-width:600px){.gk{border-radius:12px;margin-top:28px}.gk:not([hidden])+.steps{margin-top:16px}}
 </style>
 </head>
 <body>
@@ -343,6 +477,67 @@ footer a:hover{color:var(--ink)}
     <h2 class="h2">Birkaç dakikada hazır</h2>
     <p class="lead" style="max-width:520px;margin:16px auto 0">İlk açılıştaki uyarı bir kez çıkar; sonrası tek tık.</p>
     <div class="seg rv" role="tablist" id="seg"><span class="pill" id="pill"></span><button type="button" role="tab" data-os="mac" aria-selected="true"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04c-2.04.027-3.91 1.183-4.961 3.014c-2.117 3.675-.546 9.103 1.519 12.09c1.013 1.454 2.208 3.09 3.792 3.039c1.52-.065 2.09-.987 3.935-.987c1.831 0 2.35.987 3.96.948c1.637-.026 2.676-1.48 3.676-2.948c1.156-1.688 1.636-3.325 1.662-3.415c-.039-.013-3.182-1.221-3.22-4.857c-.026-3.04 2.48-4.494 2.597-4.559c-1.429-2.09-3.623-2.324-4.39-2.376c-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83c-1.207.052-2.662.805-3.532 1.818c-.78.896-1.454 2.338-1.273 3.714c1.338.104 2.715-.688 3.559-1.701"/></svg>Mac</button><button type="button" role="tab" data-os="win" aria-selected="false"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.1l7.4-1v7.2H3zm0 13.8l7.4 1v-7.1H3zm8.3 1.1L21 21.4v-8.6h-9.7zm0-15.9v7.3H21V2.6z"/></svg>Windows</button></div>
+    <!-- macOS ilk açılış anlatımı (sessiz ≈10 sn döngü; CSS/JS: .gk). Görsel: Sistem Ayarları'ndaki gerçek yol ve metinler -->
+    <div class="gk" id="gk" role="img" aria-label="Animasyon: Mivelo'yu aç, “Mivelo açılmadı” uyarısında Bitti'ye bas, Sistem Ayarları → Gizlilik ve Güvenlik'te en alttaki Yine de Aç'a bas, parolanı gir ve Yine de Aç ile Mivelo'yu başlat.">
+      <div class="gk-s">
+        <div class="gk-wall"></div>
+        <div class="gk-mb"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04c-2.04.027-3.91 1.183-4.961 3.014c-2.117 3.675-.546 9.103 1.519 12.09c1.013 1.454 2.208 3.09 3.792 3.039c1.52-.065 2.09-.987 3.935-.987c1.831 0 2.35.987 3.96.948c1.637-.026 2.676-1.48 3.676-2.948c1.156-1.688 1.636-3.325 1.662-3.415c-.039-.013-3.182-1.221-3.22-4.857c-.026-3.04 2.48-4.494 2.597-4.559c-1.429-2.09-3.623-2.324-4.39-2.376c-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83c-1.207.052-2.662.805-3.532 1.818c-.78.896-1.454 2.338-1.273 3.714c1.338.104 2.715-.688 3.559-1.701"/></svg><b id="gkMbApp">Finder</b><span>Dosya</span><span>Düzen</span><span>Görüntü</span><span>Git</span><span>Pencere</span><span>Yardım</span><span class="sp"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M2.5 9a14 14 0 0 1 19 0M5.8 12.4a9.2 9.2 0 0 1 12.4 0M9.1 15.8a4.5 4.5 0 0 1 5.8 0"/><circle cx="12" cy="19" r="1.3" fill="currentColor" stroke="none"/></svg><svg viewBox="0 0 30 14" aria-hidden="true"><rect x=".8" y=".8" width="24.5" height="12.4" rx="3.5" fill="none" stroke="currentColor" stroke-width="1.3" opacity=".7"/><rect x="2.6" y="2.6" width="17" height="8.8" rx="2" fill="currentColor"/><rect x="26.6" y="4.6" width="2" height="4.8" rx="1" fill="currentColor" opacity=".7"/></svg><span>Paz 28 Eyl 14:32</span></div>
+        <div class="gk-win gk-set" id="gkSet">
+          <div class="gk-lights"><i></i><i></i><i></i></div>
+          <div class="gk-side">
+            <div class="gk-search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L20 20"/></svg>Ara</div>
+            <div class="gk-acct"><span class="av"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 12a3.8 3.8 0 1 0 0-7.6 3.8 3.8 0 0 0 0 7.6zM4.8 20.5c.9-3.9 3.7-6 7.2-6s6.3 2.1 7.2 6"/></svg></span><span><b>Oturum aç</b><small>Apple Hesabı</small></span></div>
+            <ul><li><span class="si" style="--c:#0a82ff"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 9.5a12 12 0 0 1 17 0M6.5 12.8a7.6 7.6 0 0 1 11 0M9.6 16a3.4 3.4 0 0 1 4.8 0M12 19.2h.01"/></svg></span>Wi‑Fi</li><li><span class="si" style="--c:#0a82ff"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7.5l10 9-5 4.5V3l5 4.5-10 9"/></svg></span>Bluetooth</li><li><span class="si" style="--c:#0a82ff"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3.5 9h17M3.5 15h17M12 3c-2.5 2.6-3.6 5.6-3.6 9s1.1 6.4 3.6 9c2.5-2.6 3.6-5.6 3.6-9S14.5 5.6 12 3z"/></svg></span>Ağ</li><li class="gap"></li><li><span class="si" style="--c:#ff3b30"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15zM10 20.5a2.2 2.2 0 0 0 4 0"/></svg></span>Bildirimler</li><li><span class="si" style="--c:#ff2d55"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4zM16 9a4 4 0 0 1 0 6M18.6 6.5a7.6 7.6 0 0 1 0 11"/></svg></span>Ses</li><li><span class="si" style="--c:#5e5ce6"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19.5 14.5A8 8 0 1 1 9.5 4.5a6.4 6.4 0 0 0 10 10z"/></svg></span>Odak</li><li><span class="si" style="--c:#5e5ce6"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3.5h10M7 20.5h10M8 3.5c0 4 8 5 8 8.5s-8 4.5-8 8.5M16 3.5c0 4-8 5-8 8.5s8 4.5 8 8.5"/></svg></span>Ekran Süresi</li><li class="gap"></li><li class="sel" id="gkGen"><span class="si" style="--c:#8e8e93"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>Genel</li><li><span class="si" style="--c:#1d1d1f"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 0 0 17V3.5z"/></svg></span>Görünüm</li><li><span class="si" style="--c:#0a82ff"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5.2a1.7 1.7 0 1 0 0-.01M5 8.5l7 1.5 7-1.5M12 10v4.5M9 21l3-6.5 3 6.5"/></svg></span>Erişilebilirlik</li><li id="gkPriv"><span class="si" style="--c:#0a82ff"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.5 12.5V5.8a1.4 1.4 0 0 1 2.8 0V11M11.3 10.5V4.4a1.4 1.4 0 0 1 2.8 0v6.1M14.1 10.6V5.6a1.4 1.4 0 0 1 2.8 0v7.6M8.5 11.3l-1.1-1.5a1.5 1.5 0 0 0-2.4 1.8l3 4.7a6.3 6.3 0 0 0 5.3 3.2h.5a4.8 4.8 0 0 0 4.8-4.8v-2.5"/></svg></span>Gizlilik ve Güvenlik</li><li><span class="si" style="--c:#1d1d1f"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v14H4zM6.5 15.5h11"/></svg></span>Masaüstü ve Dock</li><li><span class="si" style="--c:#0a82ff"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 5h17v11h-17zM9 20h6M12 16v4"/></svg></span>Ekranlar</li></ul>
+          </div>
+          <div class="gk-main">
+            <div class="gk-head"><span class="arr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></span><span id="gkTitle">Genel</span></div>
+            <div class="gk-pane on" id="gkGenPane">
+              <div class="gk-hero"><span class="big img"><svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="gkG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e3e3e8"/><stop offset="1" stop-color="#8f8f98"/></linearGradient></defs><rect width="64" height="64" rx="15" fill="url(#gkG2)"/><g transform="translate(32 32)" fill="#55555e"><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(0)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(30)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(60)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(90)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(120)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(150)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(180)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(210)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(240)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(270)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(300)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(330)"/><circle r="17"/></g><circle cx="32" cy="32" r="12.5" fill="#7a7a84"/><circle cx="32" cy="32" r="6" fill="#dedee3"/></svg></span><b>Genel</b><p>Mac'inizin genel ayarlarını yönetin: yazılım güncellemeleri, saklama alanı, AirDrop ve daha fazlası.</p></div>
+              <div class="gk-grp"><div class="gk-row"><span class="si" style="--c:#8e8e93"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17zM12 11v5.5M12 7.8h.01"/></svg></span>Hakkında<span class="v"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></span></div><div class="gk-row"><span class="si" style="--c:#8e8e93"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3L19.5 9M19.5 4v5h-5"/></svg></span>Yazılım Güncelleme<span class="v"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></span></div><div class="gk-row"><span class="si" style="--c:#8e8e93"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 13.5l2.3-7.3a2 2 0 0 1 1.9-1.4h7.6a2 2 0 0 1 1.9 1.4l2.3 7.3v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 13.5h16M16.5 16.5h.01"/></svg></span>Saklama Alanı<span class="v"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></span></div><div class="gk-row"><span class="si" style="--c:#0a82ff"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21a2 2 0 0 0 1.5-3.4M7.8 16.2a6 6 0 1 1 8.4 0M4.9 18.9a10 10 0 1 1 14.2 0"/></svg></span>AirDrop ve Handoff<span class="v"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></span></div><div class="gk-row"><span class="si" style="--c:#8e8e93"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 12a3.8 3.8 0 1 0 0-7.6 3.8 3.8 0 0 0 0 7.6zM4.8 20.5c.9-3.9 3.7-6 7.2-6s6.3 2.1 7.2 6"/></svg></span>Oturum Açma Öğeleri<span class="v"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></span></div></div>
+            </div>
+            <div class="gk-pane" id="gkPrivPane">
+              <div class="gk-scroll">
+                <div class="gk-hero"><span class="big" style="--c:#0a82ff"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.5 12.5V5.8a1.4 1.4 0 0 1 2.8 0V11M11.3 10.5V4.4a1.4 1.4 0 0 1 2.8 0v6.1M14.1 10.6V5.6a1.4 1.4 0 0 1 2.8 0v7.6M8.5 11.3l-1.1-1.5a1.5 1.5 0 0 0-2.4 1.8l3 4.7a6.3 6.3 0 0 0 5.3 3.2h.5a4.8 4.8 0 0 0 4.8-4.8v-2.5"/></svg></span><b>Gizlilik ve Güvenlik</b><p>Mac'inizdeki bilgilere hangi uygulamaların erişebileceğini denetleyin; güvenlik ayarlarını yönetin.</p></div>
+                <div class="gk-grp"><div class="gk-row"><span class="si" style="--c:#0a82ff"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20 4L4 10.8l7 2.2 2.2 7z"/></svg></span>Konum Servisleri<span class="v">Açık<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></span></div><div class="gk-row"><span class="si" style="--c:#a2845e"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 11.5a3.3 3.3 0 1 0 0-6.6 3.3 3.3 0 0 0 0 6.6zM5.5 19.5c.8-3.4 3.3-5.3 6.5-5.3s5.7 1.9 6.5 5.3"/></svg></span>Kişiler<span class="v"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></span></div><div class="gk-row"><span class="si" style="--c:#ff3b30"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 6.5h15v13h-15zM4.5 10.5h15M8.5 4v4M15.5 4v4"/></svg></span>Takvimler<span class="v"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></span></div><div class="gk-row"><span class="si" style="--c:#ff9500"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a2.8 2.8 0 0 0-2.8 2.8v5.4a2.8 2.8 0 0 0 5.6 0V6.3A2.8 2.8 0 0 0 12 3.5zM6.5 11.2a5.5 5.5 0 0 0 11 0M12 16.7v3.8"/></svg></span>Mikrofon<span class="v"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></span></div><div class="gk-row"><span class="si" style="--c:#0a82ff"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 7.5a2 2 0 0 1 2-2h4l2 2h5a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2z"/></svg></span>Tam Disk Erişimi<span class="v"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></span></div></div>
+                <div class="gk-h4">Güvenlik</div>
+                <div class="gk-grp">
+                  <div class="gk-row"><span>Şuradan indirilen uygulamalara izin ver</span><span class="gk-sel">App Store ve tanınmış geliştiriciler</span></div>
+                  <div class="gk-row blk"><span>“Mivelo” Mac'inizi korumak için engellendi.</span><button type="button" class="gk-btn" id="gkOpen" tabindex="-1">Yine de Aç</button></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="gk-win gk-app" id="gkApp">
+          <div class="gk-lights"><i></i><i></i><i></i></div>
+          <div class="sp-l"><svg viewBox="0 0 28 28" aria-hidden="true"><rect width="28" height="28" rx="7" fill="#6C47FF"/><path d="M8 8c4.5 0 6 3 6 6s1.5 6 6 6M8 20c4.5 0 6-3 6-6" stroke="#FFFFFF" stroke-width="2.3" fill="none" stroke-linecap="round"/><circle cx="20" cy="8" r="2.5" fill="#D4FF3F"/></svg></div>
+          <div class="gk-card"><div class="br"><svg viewBox="0 0 28 28" aria-hidden="true"><rect width="28" height="28" rx="7" fill="#6C47FF"/><path d="M8 8c4.5 0 6 3 6 6s1.5 6 6 6M8 20c4.5 0 6-3 6-6" stroke="#FFFFFF" stroke-width="2.3" fill="none" stroke-linecap="round"/><circle cx="20" cy="8" r="2.5" fill="#D4FF3F"/></svg>mivelo</div><b>Lisans anahtarın</b><p>Mivelo'yu kullanmak için sana iletilen lisans anahtarını gir.</p><div class="gk-key" id="gkKey">MVL-</div><div class="go">Etkinleştir</div></div>
+        </div>
+        <div class="gk-al" id="gkA1">
+          <div class="ic"><svg viewBox="0 0 28 28" aria-hidden="true"><rect width="28" height="28" rx="7" fill="#6C47FF"/><path d="M8 8c4.5 0 6 3 6 6s1.5 6 6 6M8 20c4.5 0 6-3 6-6" stroke="#FFFFFF" stroke-width="2.3" fill="none" stroke-linecap="round"/><circle cx="20" cy="8" r="2.5" fill="#D4FF3F"/></svg></div>
+          <b>“Mivelo” açılmadı</b>
+          <p>Apple, “Mivelo” uygulamasının Mac'inize zarar verebilecek ya da gizliliğinizi tehlikeye atabilecek kötü amaçlı yazılım içermediğini doğrulayamadı.</p>
+          <div class="bt"><span>Çöp Sepeti'ne Taşı</span><span class="def" id="gkDone">Bitti</span></div>
+        </div>
+        <div class="gk-al gk-auth" id="gkA2">
+          <div class="ic"><svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="gkG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e3e3e8"/><stop offset="1" stop-color="#8f8f98"/></linearGradient></defs><rect width="64" height="64" rx="15" fill="url(#gkG)"/><g transform="translate(32 32)" fill="#55555e"><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(0)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(30)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(60)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(90)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(120)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(150)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(180)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(210)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(240)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(270)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(300)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(330)"/><circle r="17"/></g><circle cx="32" cy="32" r="12.5" fill="#7a7a84"/><circle cx="32" cy="32" r="6" fill="#dedee3"/></svg></div>
+          <b>Gizlilik ve Güvenlik</b>
+          <p>Bu ayarı değiştirmek için parolanızı girin.</p>
+          <div class="fld pw"><span class="dots" id="gkDots"></span><span class="car"></span></div>
+          <div class="bt"><span>Vazgeç</span><span class="def" id="gkMod">Ayarları Değiştir</span></div>
+        </div>
+        <div class="gk-al" id="gkA3">
+          <div class="ic"><svg viewBox="0 0 28 28" aria-hidden="true"><rect width="28" height="28" rx="7" fill="#6C47FF"/><path d="M8 8c4.5 0 6 3 6 6s1.5 6 6 6M8 20c4.5 0 6-3 6-6" stroke="#FFFFFF" stroke-width="2.3" fill="none" stroke-linecap="round"/><circle cx="20" cy="8" r="2.5" fill="#D4FF3F"/></svg></div>
+          <b>“Mivelo” açılsın mı?</b>
+          <p>Apple, “Mivelo” uygulamasının kötü amaçlı yazılım içermediğini doğrulayamadı. Yalnız kaynağına güveniyorsanız açın.</p>
+          <div class="bt col"><span class="def" id="gkOpen2">Yine de Aç</span><span>Çöp Sepeti'ne Taşı</span></div>
+        </div>
+        <div class="gk-dock">
+          <span class="di"><svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="15" fill="#e9f3ff"/><path d="M9 20a5 5 0 0 1 5-5h12l5 5h19a5 5 0 0 1 5 5v21a5 5 0 0 1-5 5H14a5 5 0 0 1-5-5z" fill="#3a9cf2"/><path d="M9 26h46v20a5 5 0 0 1-5 5H14a5 5 0 0 1-5-5z" fill="#69bdff"/><path d="M32 30v13M26.5 38l5.5 5.5 5.5-5.5" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="di" id="gkDockSet"><svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="gkG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e3e3e8"/><stop offset="1" stop-color="#8f8f98"/></linearGradient></defs><rect width="64" height="64" rx="15" fill="url(#gkG)"/><g transform="translate(32 32)" fill="#55555e"><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(0)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(30)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(60)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(90)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(120)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(150)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(180)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(210)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(240)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(270)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(300)"/><rect x="-3.2" y="-23" width="6.4" height="9" rx="1.6" transform="rotate(330)"/><circle r="17"/></g><circle cx="32" cy="32" r="12.5" fill="#7a7a84"/><circle cx="32" cy="32" r="6" fill="#dedee3"/></svg></span><span class="di" id="gkDockApp"><svg viewBox="0 0 28 28" aria-hidden="true"><rect width="28" height="28" rx="7" fill="#6C47FF"/><path d="M8 8c4.5 0 6 3 6 6s1.5 6 6 6M8 20c4.5 0 6-3 6-6" stroke="#FFFFFF" stroke-width="2.3" fill="none" stroke-linecap="round"/><circle cx="20" cy="8" r="2.5" fill="#D4FF3F"/></svg></span><span class="sep"></span><span class="di"><svg viewBox="0 0 64 64" aria-hidden="true"><path d="M15 17h34l-3.6 40a4 4 0 0 1-4 3.6H22.6a4 4 0 0 1-4-3.6z" fill="rgba(255,255,255,.5)" stroke="rgba(255,255,255,.95)" stroke-width="1.6"/><rect x="11" y="10" width="42" height="7.5" rx="3.7" fill="rgba(255,255,255,.85)"/><path d="M25 25l1.2 28M32 25v28M39 25l-1.2 28" stroke="rgba(90,90,110,.35)" stroke-width="2.2" stroke-linecap="round"/></svg></span>
+        </div>
+        <div class="gk-cur" id="gkCur"><span class="rip"></span><svg viewBox="0 0 24 24"><path d="M5.2 2.6l13.4 11.1c.5.4.2 1.2-.4 1.2h-5.6l3.3 6.3c.2.4 0 .9-.4 1.1l-2 1c-.4.2-.9 0-1.1-.4L9.2 16.6l-3.7 3.6c-.4.4-1.2.1-1.2-.5V3c0-.6.6-.8.9-.4z" fill="#111" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg></div>
+      </div>
+    </div>
     <div class="steps">
       <ol id="st-mac" class="on">
         <li style="--k:0"><span class="n">1</span><div>İndirdiğin <b>.dmg</b>'yi aç, Mivelo'yu <b>Uygulamalar</b> klasörüne sürükle.</div></li>
@@ -466,6 +661,69 @@ footer a:hover{color:var(--ink)}
   function bothIcons(){ $('#bigIc').innerHTML=APPLE+WIN; }
   bothIcons();
 
+  /* ---------- macOS "Yine de Aç" anlatımı (#gk): ≈10 sn sessiz döngü; yalnız görünürken ve Mac sekmesindeyken oynar ----------
+     İmleç hedef öğenin o anki gerçek konumuna gider (yüzde); alttaki adım kartı (.now) sahneyle birlikte vurgulanır. */
+  var gk=$('#gk'), gkRun=0, gkVis=false, gkLoop=false;
+  var macLis=[].slice.call(document.querySelectorAll('#st-mac li'));
+  function gq(id){ return document.getElementById(id); }
+  function gsleep(ms,id){ return new Promise(function(res,rej){ setTimeout(function(){ id===gkRun?res():rej('stop'); },ms); }); }
+  function gpos(el,fy){ var a=gk.getBoundingClientRect(), b=el.getBoundingClientRect(); return [(b.left+b.width/2-a.left)/a.width*100,(b.top+b.height*(fy||.55)-a.top)/a.height*100]; }
+  function gmove(el,ms,id,fy){ var c=gq('gkCur'), p=gpos(el,fy); c.style.transitionDuration=ms+'ms'; c.style.left=p[0]+'%'; c.style.top=p[1]+'%'; return gsleep(ms,id); }
+  function gclick(id,btn){ var c=gq('gkCur'); c.classList.add('down'); if(btn) btn.classList.add('press');
+    return gsleep(140,id).then(function(){ c.classList.remove('down'); if(btn) btn.classList.remove('press'); return gsleep(70,id); }); }
+  function gstep(n){ macLis.forEach(function(li,i){ li.classList.toggle('now',i===n); }); }
+  function gbounce(el){ el.classList.remove('bounce'); void el.offsetWidth; el.classList.add('bounce'); }
+  function gprivacy(on){ gq('gkGen').classList.toggle('sel',!on); gq('gkPriv').classList.toggle('sel',on); gq('gkGenPane').classList.toggle('on',!on); gq('gkPrivPane').classList.toggle('on',on); gq('gkTitle').textContent=on?'Gizlilik ve Güvenlik':'Genel'; }
+  function greset(){
+    ['gkSet','gkApp','gkA1','gkA2','gkA3'].forEach(function(k){ gq(k).classList.remove('on','ready'); });
+    gk.classList.remove('scr'); gprivacy(false); gq('gkMbApp').textContent='Finder';
+    gq('gkDots').textContent=''; gq('gkKey').textContent='MVL-';
+    ['gkDockApp','gkDockSet'].forEach(function(k){ gq(k).classList.remove('run','bounce'); });
+    var c=gq('gkCur'); c.style.transitionDuration='0ms'; c.style.left='58%'; c.style.top='50%'; void c.offsetWidth;
+  }
+  async function gplay(id){
+    var da=gq('gkDockApp'), ds=gq('gkDockSet'), i;
+    gstep(1); await gsleep(200,id);
+    await gmove(da,520,id); await gclick(id); gbounce(da);                      // Mivelo'yu aç
+    await gsleep(380,id); gq('gkA1').classList.add('on'); await gsleep(250,id);  // "Mivelo açılmadı"
+    await gmove(gq('gkDone'),420,id); await gclick(id,gq('gkDone')); gq('gkA1').classList.remove('on'); da.classList.remove('bounce');
+    gstep(2); await gsleep(100,id);
+    await gmove(ds,480,id); await gclick(id); ds.classList.add('run'); gq('gkSet').classList.add('on'); gq('gkMbApp').textContent='Sistem Ayarları'; await gsleep(300,id);  // Sistem Ayarları
+    await gmove(gq('gkPriv'),450,id); await gclick(id); gprivacy(true); await gsleep(200,id);                                 // Gizlilik ve Güvenlik
+    gk.classList.add('scr'); await gsleep(650,id);                                                                             // en alta
+    await gmove(gq('gkOpen'),420,id); await gclick(id,gq('gkOpen')); gq('gkA2').classList.add('on'); await gsleep(200,id);  // Yine de Aç
+    for(i=0;i<6;i++){ gq('gkDots').textContent+='•'; await gsleep(60,id); }                                                  // parola
+    await gmove(gq('gkMod'),360,id); await gclick(id,gq('gkMod')); gq('gkA2').classList.remove('on'); await gsleep(150,id);
+    gq('gkA3').classList.add('on'); await gsleep(250,id);
+    await gmove(gq('gkOpen2'),360,id); await gclick(id,gq('gkOpen2'));                                                        // yine Yine de Aç
+    gq('gkA3').classList.remove('on'); gq('gkSet').classList.remove('on'); ds.classList.remove('run');
+    gstep(3); gbounce(da); da.classList.add('run'); gq('gkMbApp').textContent='Mivelo'; await gsleep(250,id);
+    gq('gkApp').classList.add('on'); gmove(gq('gkKey'),700,id,2.2).catch(function(){}); await gsleep(550,id);                // Mivelo açıldı
+    gq('gkApp').classList.add('ready');
+    var full='MVL-7KQ2-XP9M-4HDN-R8TA', k=gq('gkKey');
+    for(i=5;i<=full.length;i++){ k.textContent=full.slice(0,i); await gsleep(20,id); }                                        // lisans anahtarı
+    await gsleep(900,id);
+  }
+  function gkStart(){
+    if(gkLoop) return; gkLoop=true; var id=++gkRun;
+    (async function(){ try{ for(;;){ greset(); await gsleep(180,id); await gplay(id); } }catch(e){} })();
+  }
+  function gkStop(){ gkRun++; gkLoop=false; gstep(-1); }
+  /* azaltılmış harekette durağan kare: Gizlilik ve Güvenlik'te "Yine de Aç" */
+  function gkStill(){ greset(); gq('gkSet').classList.add('on'); gq('gkMbApp').textContent='Sistem Ayarları'; gq('gkDockSet').classList.add('run'); gprivacy(true); gk.classList.add('scr');
+    var c=gq('gkCur'), p=gpos(gq('gkOpen')); c.style.left=p[0]+'%'; c.style.top=p[1]+'%'; }
+  function gkSync(){
+    if(!gk) return;
+    var mac=$('#st-mac').classList.contains('on');
+    gk.hidden=!mac;
+    if(reduce){ if(mac) gkStill(); return; }
+    if(mac && gkVis && !document.hidden) gkStart(); else gkStop();
+  }
+  if(gk){
+    new IntersectionObserver(function(es){ gkVis=es[0].isIntersecting; gkSync(); },{threshold:.35}).observe(gk);
+    document.addEventListener('visibilitychange',gkSync);
+  }
+
   /* Mac / Windows sekmesi: kayan hap (ana sayfadaki görünüm sekmeleri gibi) */
   var seg=$('#seg'), pill=$('#pill'), btns=[].slice.call(seg.querySelectorAll('button'));
   function place(b,anim){ pill.style.width=b.offsetWidth+'px'; pill.style.transform='translateX('+(b.offsetLeft-5)+'px)';
@@ -474,6 +732,7 @@ footer a:hover{color:var(--ink)}
     btns.forEach(function(b){ b.setAttribute('aria-selected',String(b.dataset.os===os)); if(b.dataset.os===os) place(b,anim); });
     ['mac','win'].forEach(function(k){ var ol=$('#st-'+k); ol.classList.toggle('on',k===os); ol.classList.remove('in'); });
     var cur=$('#st-'+os); requestAnimationFrame(function(){ requestAnimationFrame(function(){ if(stepsSeen) cur.classList.add('in'); }); });
+    gkSync();
   }
   var stepsSeen=false;
   seg.addEventListener('click',function(e){ var b=e.target.closest('button'); if(b) setOs(b.dataset.os,true); });
