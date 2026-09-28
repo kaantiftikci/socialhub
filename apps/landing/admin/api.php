@@ -812,8 +812,6 @@ function lic_mail_render(array $tpl, array $k, string $name, ?string $logoSrc = 
     }
     $btn = '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 6px"><tr><td style="border-radius:12px;background:#6c47ff">'
         . '<a href="https://mivelo.app/indir/" style="display:inline-block;padding:13px 26px;' . $font . ';font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:12px">Mivelo\'yu İndir</a></td></tr></table>';
-    $btn .= '<p style="margin:12px 0 0;font-size:12.5px;line-height:1.6;color:#8a85a0">Düğme çalışmazsa indirme sayfasını tarayıcınızda açın:<br>'
-        . '<a href="https://mivelo.app/indir/" style="color:#6c47ff;word-break:break-all">https://mivelo.app/indir/</a></p>';
     $logo = $logoSrc ?? 'https://mivelo.app/apple-touch-icon.png';
     $full = '<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>' . $e($subject) . '</title></head>'
         . '<body style="margin:0;padding:0;background:#f4f2fa;' . $font . '">'
