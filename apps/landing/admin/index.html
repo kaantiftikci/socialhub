@@ -238,7 +238,16 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   .bulk{top:70px}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
-.fb-files{display:flex;gap:8px;flex-wrap:wrap}.fb-media{max-width:240px;max-height:170px;border-radius:10px;border:1px solid var(--line);display:block;background:#000}
+.fb-msg{white-space:pre-wrap;margin:12px 0 0;padding:12px 14px;border-radius:12px;background:var(--bg-2);border:1px solid var(--line);font-size:14px;line-height:1.55}
+.fb-lbl{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-3);margin:14px 0 6px}
+.fb-files{display:flex;gap:8px;flex-wrap:wrap}
+.fb-thumb{position:relative;width:72px;height:72px;padding:0;border-radius:10px;border:1px solid var(--line);overflow:hidden;background:#111;cursor:zoom-in}
+.fb-thumb img,.fb-thumb video{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
+.fb-thumb .play{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;background:rgba(0,0,0,.28)}
+.fb-thumb:hover{outline:2px solid var(--brand);outline-offset:1px}
+.fb-lb{position:fixed;inset:0;z-index:100;background:rgba(10,8,20,.82);display:flex;align-items:center;justify-content:center;padding:32px;cursor:zoom-out}
+.fb-lb img,.fb-lb video{max-width:94vw;max-height:88vh;border-radius:12px;box-shadow:0 30px 80px -20px rgba(0,0,0,.6);cursor:default;background:#000}
+.fb-lb .x{position:absolute;top:18px;right:22px;width:38px;height:38px;border-radius:50%;border:0;background:rgba(255,255,255,.14);color:#fff;font-size:20px;cursor:pointer}
 #smtpForm{max-width:none}
 .sm-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px 12px}.sm-grid .sm-host{grid-column:span 2}.sm-grid label{display:block;margin-bottom:4px}.sm-grid .input{width:100%;box-sizing:border-box}
 @media (max-width:760px){.sm-grid{grid-template-columns:1fr 1fr}.sm-grid .sm-host{grid-column:span 2}}
@@ -653,12 +662,13 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     $('#fbBox').innerHTML=list.length?list.map(function(x){
       var t=FB_TYPE[x.type]||FB_TYPE.other, who=(x.name||'')+(x.user?' (@'+x.user+')':'')+(x.email?' · '+x.email:'');
       var files=(x.files||[]).map(function(f){ var u='api.php?a=fb_file&id='+encodeURIComponent(x.id)+'&f='+encodeURIComponent(f.file);
-        return /^video/.test(f.mime)?'<video src="'+u+'" controls preload="metadata" class="fb-media"></video>':'<a href="'+u+'" target="_blank" rel="noopener"><img src="'+u+'" alt="" class="fb-media" loading="lazy"></a>'; }).join('');
+        var v=/^video/.test(f.mime);
+        return '<button type="button" class="fb-thumb" data-lb="'+esc(u)+'" data-v="'+(v?1:0)+'" title="Büyüt">'+(v?'<video src="'+u+'#t=0.1" preload="metadata" muted></video><span class="play">▶</span>':'<img src="'+u+'" alt="" loading="lazy">')+'</button>'; }).join('');
       return '<div class="card fb-item" style="margin-bottom:12px"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="chip '+t[1]+'"><i></i>'+t[0]+'</span><b>'+esc(who||(x.app==='local'?'Yerel uygulama':'anonim'))+'</b>'+(x.verified?'<span class="chip st-joined" title="Kimlik demo oturumundan (sunucu)">üye</span>':'')+'<span class="muted" style="font-size:12px">'+ago(x.at)+' · '+esc(x.app)+'</span><span class="sp" style="flex:1"></span>'+
         '<select class="input" data-fbst="'+esc(x.id)+'" style="height:30px;width:auto">'+FB_ST.map(function(s){ return '<option value="'+s[0]+'"'+(x.status===s[0]?' selected':'')+'>'+s[1]+'</option>'; }).join('')+'</select>'+
         (x.email?'<a class="btn sm" href="mailto:'+esc(x.email)+'?subject='+encodeURIComponent('Mivelo geri bildirimin hakkında')+'">Yanıtla</a>':'')+
         '<button class="icon-btn" data-fbdel="'+esc(x.id)+'" title="Sil" aria-label="Sil">'+I.trash+'</button></div>'+
-        '<p style="white-space:pre-wrap;margin:10px 0">'+esc(x.message)+'</p>'+(files?'<div class="fb-files">'+files+'</div>':'')+
+        '<div class="fb-msg">'+esc(x.message)+'</div>'+(files?'<div class="fb-lbl">Ekler ('+(x.files||[]).length+')</div><div class="fb-files">'+files+'</div>':'')+
         '<div class="muted" style="font-size:11.5px;margin-top:8px;word-break:break-all">'+esc(x.page)+(x.ua?' · '+esc(x.ua):'')+'</div>'+
         '<input class="input" data-fbnote="'+esc(x.id)+'" value="'+esc(x.note)+'" placeholder="Not (yalnız sen görürsün)" style="margin-top:8px;height:32px"></div>';
     }).join(''):'<div class="card"><div class="empty">'+(FBF==='open'?'Açık geri bildirim yok.':'Kayıt yok.')+'</div></div>';
@@ -667,6 +677,14 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   $('#fbBox').addEventListener('change',function(e){ var el=e.target;
     if(el.dataset.fbst) api('fb_update',{id:el.dataset.fbst,status:el.value}).then(function(){ FB.forEach(function(x){ if(x.id===el.dataset.fbst) x.status=el.value; }); fbCount(); toast('Güncellendi'); }).catch(function(x){ toast(x.message,true); });
     if(el.dataset.fbnote) api('fb_update',{id:el.dataset.fbnote,note:el.value}).then(function(){ toast('Not kaydedildi'); }).catch(function(x){ toast(x.message,true); }); });
+  // ek önizleme: küçük kare → tıklayınca büyük (Esc / dışına tıkla kapatır)
+  function closeLb(){ var o=document.querySelector('.fb-lb'); if(o) o.remove(); }
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape') closeLb(); });
+  $('#fbBox').addEventListener('click',function(e){ var t=e.target.closest('[data-lb]'); if(!t) return;
+    var o=document.createElement('div'); o.className='fb-lb';
+    o.innerHTML=(t.dataset.v==='1'?'<video src="'+t.dataset.lb+'" controls autoplay></video>':'<img src="'+t.dataset.lb+'" alt="">')+'<button class="x" aria-label="Kapat">×</button>';
+    o.addEventListener('click',function(ev){ if(ev.target===o||ev.target.classList.contains('x')) closeLb(); });
+    document.body.appendChild(o); });
   $('#fbBox').addEventListener('click',function(e){ var b=e.target.closest('[data-fbdel]'); if(!b) return;
     if(b.dataset.armed!=='1'){ b.dataset.armed='1'; toast('Silmek için tekrar tıkla'); setTimeout(function(){ b.dataset.armed=''; },3000); return; }
     api('fb_delete',{id:b.dataset.fbdel}).then(function(){ FB=FB.filter(function(x){ return x.id!==b.dataset.fbdel; }); fbCount(); renderFb(); toast('Silindi'); }).catch(function(x){ toast(x.message,true); }); });
