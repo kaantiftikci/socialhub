@@ -645,10 +645,10 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   function renderFb(){
     var list=FB.filter(function(x){ return FBF==='all'||(FBF==='done'?(x.status==='done'||x.status==='wontfix'):(x.status==='new'||x.status==='doing')); });
     $('#fbBox').innerHTML=list.length?list.map(function(x){
-      var t=FB_TYPE[x.type]||FB_TYPE.other, who=(x.name||x.user||'')+(x.email?' · '+x.email:'');
+      var t=FB_TYPE[x.type]||FB_TYPE.other, who=(x.name||'')+(x.user?' (@'+x.user+')':'')+(x.email?' · '+x.email:'');
       var files=(x.files||[]).map(function(f){ var u='api.php?a=fb_file&id='+encodeURIComponent(x.id)+'&f='+encodeURIComponent(f.file);
         return /^video/.test(f.mime)?'<video src="'+u+'" controls preload="metadata" class="fb-media"></video>':'<a href="'+u+'" target="_blank" rel="noopener"><img src="'+u+'" alt="" class="fb-media" loading="lazy"></a>'; }).join('');
-      return '<div class="card fb-item" style="margin-bottom:12px"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="chip '+t[1]+'"><i></i>'+t[0]+'</span><b>'+esc(who||'anonim')+'</b><span class="muted" style="font-size:12px">'+ago(x.at)+' · '+esc(x.app)+'</span><span class="sp" style="flex:1"></span>'+
+      return '<div class="card fb-item" style="margin-bottom:12px"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="chip '+t[1]+'"><i></i>'+t[0]+'</span><b>'+esc(who||(x.app==='local'?'Yerel uygulama':'anonim'))+'</b>'+(x.verified?'<span class="chip st-joined" title="Kimlik demo oturumundan (sunucu)">üye</span>':'')+'<span class="muted" style="font-size:12px">'+ago(x.at)+' · '+esc(x.app)+'</span><span class="sp" style="flex:1"></span>'+
         '<select class="input" data-fbst="'+esc(x.id)+'" style="height:30px;width:auto">'+FB_ST.map(function(s){ return '<option value="'+s[0]+'"'+(x.status===s[0]?' selected':'')+'>'+s[1]+'</option>'; }).join('')+'</select>'+
         (x.email?'<a class="btn sm" href="mailto:'+esc(x.email)+'?subject='+encodeURIComponent('Mivelo geri bildirimin hakkında')+'">Yanıtla</a>':'')+
         '<button class="icon-btn" data-fbdel="'+esc(x.id)+'" title="Sil" aria-label="Sil">'+I.trash+'</button></div>'+
