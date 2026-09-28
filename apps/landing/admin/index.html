@@ -238,6 +238,22 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   .bulk{top:70px}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+.acc{border-bottom:1px solid var(--line-2)}.acc:last-child{border-bottom:0}
+.acc-head{display:flex;align-items:center;gap:10px;width:100%;padding:12px 2px;border:0;background:transparent;text-align:left;cursor:pointer;color:inherit;font:inherit}
+.acc-head:hover .acc-main b{color:var(--brand-ink)}
+.acc-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.acc-main b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.acc-main .muted{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.acc.unread .acc-main b::after{content:'';display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--brand);margin-left:6px;vertical-align:middle}
+.acc-n{display:inline-flex;align-items:center;gap:3px;font-size:12px;flex:none}.acc-n svg{width:13px;height:13px}
+.acc-when{font-size:12px;flex:none;white-space:nowrap}
+.acc-chev{flex:none;display:inline-flex;color:var(--ink-4);transition:transform .18s var(--ease)}.acc-chev svg{width:16px;height:16px}
+.acc.open .acc-chev{transform:rotate(180deg)}
+.acc-body{padding:0 2px 14px;animation:accIn .18s var(--ease)}
+@keyframes accIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.acc-dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0 0 10px;font-size:13px}.acc-dl dt{color:var(--ink-3)}.acc-dl dd{margin:0;min-width:0;word-break:break-word}
+.acc-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.acc-acts .btn svg{width:14px;height:14px;vertical-align:-2px}
+@media (max-width:600px){.acc-when{display:none}}
 .fb-msg{white-space:pre-wrap;margin:12px 0 0;padding:12px 14px;border-radius:12px;background:var(--bg-2);border:1px solid var(--line);font-size:14px;line-height:1.55}
 .fb-lbl{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-3);margin:14px 0 6px}
 .fb-files{display:flex;gap:8px;flex-wrap:wrap}
@@ -350,7 +366,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     <section class="page" id="p-demo">
       <div class="top"><h2>Demo</h2><span class="sp"></span><a class="btn" href="https://demo.mivelo.app" target="_blank" rel="noopener">demo.mivelo.app ↗</a></div>
       <div class="card" style="margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap"><div style="flex:1;min-width:240px"><b>Yeni üyeleri otomatik onayla</b><div class="muted" style="font-size:12.5px;margin-top:3px">Açıkken kayıt olan hemen giriş yapar (onay e-postası beklemez). Kapatınca talepler burada onayını bekler ve onayda e-posta gider.</div></div><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="autoApprove" style="width:18px;height:18px"> <span id="autoApproveTx">—</span></label></div>
-      <div class="card" style="overflow-x:auto"><h3>Demo hesapları <span class="sub">üyelik talepleri burada; onaylayınca kullanıcıya e-posta gider</span></h3><div id="demoBox"></div></div>
+      <div class="card" style="padding-bottom:6px"><h3>Demo hesapları <span class="sub">üyelik talepleri burada; onaylayınca kullanıcıya e-posta gider</span></h3><div id="demoBox"></div></div>
     </section>
 
     <!-- geri bildirim -->
@@ -358,7 +374,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
       <div class="top"><h2>Geri bildirim</h2><span class="sp"></span>
         <div class="seg" id="fbSeg"><button data-f="open" class="on">Açık</button><button data-f="all">Tümü</button><button data-f="done">Çözülen</button></div>
       </div>
-      <div id="fbBox"></div>
+      <div class="card" style="padding:4px 14px"><div id="fbBox"></div></div>
     </section>
 
     <!-- görevler -->
@@ -436,6 +452,8 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     ayar:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>',
     trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 13h9l1-13"/></svg>',
     next:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
+    chev:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
+    clip:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.5l-8.2 8.2a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></svg>',
     prev:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>'
   };
   var PAGES=[['genel','Genel bakış','Genel'],['liste','Bekleme listesi','Liste'],['trafik','Trafik','Trafik'],['demo','Demo','Demo'],['geri','Geri bildirim','Geri'],['gorev','Görevler','Görevler'],['ayar','Ayarlar','Ayarlar']];
@@ -616,26 +634,42 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   });
 
   /* ---------- demo ---------- */
+  var OPEN_D={}, OPEN_F={}, LAST_DEMO=null;
+  document.addEventListener('click',function(e){ var h=e.target.closest('[data-acc]'); if(!h) return;
+    var k=h.dataset.acc, id=k.slice(2), m=k[0]==='d'?OPEN_D:OPEN_F; if(m[id]) delete m[id]; else m[id]=1;
+    if(k[0]==='d') renderDemo(); else renderFb(); });
   var DEMO_ST={pending:['Onay bekliyor','st-invited'],active:['Etkin','st-joined'],rejected:['Reddedildi','st-spam']};
   function setAuto(on){ $('#autoApprove').checked=on; $('#autoApproveTx').textContent=on?'Açık':'Kapalı'; }
   $('#autoApprove').addEventListener('change',function(e){ var on=e.target.checked; api('demo_settings',{autoApprove:on}).then(function(d){ setAuto(d.autoApprove); toast(d.autoApprove?'Otomatik onay açık: yeni üyeler hemen girer':'Otomatik onay kapalı: yeni talepler onay bekler'); }).catch(function(x){ setAuto(!on); toast(x.message,true); }); });
-  function loadDemo(){ api('demo').then(function(d){
+  function loadDemo(){ api('demo').then(function(d){ LAST_DEMO=d; renderDemo(); }).catch(function(e){ toast(e.message,true); }); }
+  function renderDemo(){ var d=LAST_DEMO; if(!d) return;
     setAuto(d.autoApprove!==false);
     var pend=d.users.filter(function(u){ return u.status==='pending'; }).length;
     $('#nc-demo').textContent=pend||'';
-    $('#demoBox').innerHTML=d.users.length?'<table class="t"><thead><tr><th>Kullanıcı</th><th>Durum</th><th class="r">Giriş</th><th>Son giriş</th><th>Bağladığı uygulamalar</th><th></th></tr></thead><tbody>'+d.users.map(function(u){
+    // satır satır (akordeon): özet satırı; dokununca ayrıntılar ve işlemler alta açılır (telefonda tablo taşıyordu)
+    $('#demoBox').innerHTML=d.users.length?d.users.map(function(u){
       var st=DEMO_ST[u.status]||DEMO_ST.active, acts='';
       if(u.id!=='u-admin'){
-        if(u.status!=='active') acts+='<button class="btn sm soft" data-dm="'+esc(u.id)+'" data-to="active">Onayla</button> ';
-        if(u.status==='pending') acts+='<button class="btn sm danger" data-dm="'+esc(u.id)+'" data-to="rejected">Reddet</button> ';
-        if(u.status==='active' && u.email) acts+='<button class="btn sm" data-dmail="'+esc(u.id)+'" title="Onay e-postasını yeniden gönder">E-posta</button> ';
-        if(u.apps.length) acts+='<button class="btn sm" data-dreset="'+esc(u.id)+'" data-name="'+esc(u.username)+'" title="Bağladığı uygulamaları ve demo verisini sil">Verileri sil</button> ';
-        acts+='<button class="icon-btn" data-ddel="'+esc(u.id)+'" data-name="'+esc(u.username)+'" title="Sil" aria-label="Sil">'+I.trash+'</button>';
+        if(u.status!=='active') acts+='<button class="btn sm soft" data-dm="'+esc(u.id)+'" data-to="active">Onayla</button>';
+        if(u.status==='pending') acts+='<button class="btn sm danger" data-dm="'+esc(u.id)+'" data-to="rejected">Reddet</button>';
+        if(u.status==='active' && u.email) acts+='<button class="btn sm" data-dmail="'+esc(u.id)+'" title="Onay e-postasını yeniden gönder">E-posta</button>';
+        if(u.apps.length) acts+='<button class="btn sm" data-dreset="'+esc(u.id)+'" data-name="'+esc(u.username)+'" title="Bağladığı uygulamaları ve demo verisini sil">Verileri sil</button>';
+        acts+='<button class="btn sm" data-ddel="'+esc(u.id)+'" data-name="'+esc(u.username)+'" title="Hesabı sil">'+I.trash+' Sil</button>';
       }
-      var mail=u.mailed===false?' <span class="chip st-spam" title="'+esc(u.mailError||'Sunucu e-postayı gönderemedi')+'">e-posta gitmedi</span>':u.mailed===true?' <span class="chip st-joined">e-posta gitti</span>':'';
-      return '<tr><td><b>'+esc(u.name||u.username)+'</b><div class="muted" style="font-size:12px">'+esc(u.username)+(u.email?' · '+esc(u.email):'')+'</div>'+(u.note?'<div class="muted" style="font-size:12px;max-width:320px">“'+esc(u.note)+'”</div>':'')+(u.requestedAt?'<div class="muted" style="font-size:11.5px">talep '+ago(u.requestedAt)+'</div>':'')+'</td>'+
-        '<td style="white-space:nowrap"><span class="chip '+st[1]+'"><i></i>'+st[0]+'</span>'+mail+'</td><td class="r num">'+fmt(u.logins)+'</td><td style="white-space:nowrap">'+ago(u.lastLogin)+'</td><td>'+(u.apps.length?u.apps.map(function(a){ return '<span class="chip" style="margin:2px 4px 2px 0">'+esc(a)+'</span>'; }).join(''):'<span class="muted">—</span>')+'</td><td style="white-space:nowrap;text-align:right">'+acts+'</td></tr>'; }).join('')+'</tbody></table>':'<div class="empty">Demo henüz hiç açılmamış.</div>';
-  }).catch(function(e){ toast(e.message,true); }); }
+      var mail=u.mailed===false?'<span class="chip st-spam" title="'+esc(u.mailError||'Sunucu e-postayı gönderemedi')+'">e-posta gitmedi</span>':u.mailed===true?'<span class="chip st-joined">e-posta gitti</span>':'';
+      var open=!!OPEN_D[u.id];
+      return '<div class="acc'+(open?' open':'')+'"><button type="button" class="acc-head" data-acc="d:'+esc(u.id)+'" aria-expanded="'+open+'">'+
+        '<span class="acc-main"><b>'+esc(u.name||u.username)+'</b><span class="muted">'+esc(u.username)+(u.lastLogin?' · son giriş '+ago(u.lastLogin):'')+'</span></span>'+
+        '<span class="chip '+st[1]+'"><i></i>'+st[0]+'</span><span class="acc-chev">'+I.chev+'</span></button>'+
+        (open?'<div class="acc-body"><dl class="acc-dl">'+
+          (u.email?'<dt>E-posta</dt><dd>'+esc(u.email)+'</dd>':'')+
+          (u.requestedAt?'<dt>Talep</dt><dd>'+ago(u.requestedAt)+'</dd>':'')+
+          '<dt>Giriş</dt><dd>'+fmt(u.logins)+' kez'+(u.lastLogin?' · son '+ago(u.lastLogin):'')+'</dd>'+
+          (mail?'<dt>E-posta durumu</dt><dd>'+mail+'</dd>':'')+
+          (u.note?'<dt>Not</dt><dd>“'+esc(u.note)+'”</dd>':'')+
+          '<dt>Uygulamalar</dt><dd>'+(u.apps.length?u.apps.map(function(a){ return '<span class="chip" style="margin:2px 4px 2px 0">'+esc(a)+'</span>'; }).join(''):'<span class="muted">—</span>')+'</dd></dl>'+
+          (acts?'<div class="acc-acts">'+acts+'</div>':'')+'</div>':'')+'</div>'; }).join(''):'<div class="empty">Demo henüz hiç açılmamış.</div>';
+  }
   document.addEventListener('click',function(e){
     var b=e.target.closest('[data-dm],[data-dmail],[data-ddel],[data-dreset]'); if(!b) return;
     if(b.dataset.dreset){
@@ -664,14 +698,21 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
       var files=(x.files||[]).map(function(f){ var u='api.php?a=fb_file&id='+encodeURIComponent(x.id)+'&f='+encodeURIComponent(f.file);
         var v=/^video/.test(f.mime);
         return '<button type="button" class="fb-thumb" data-lb="'+esc(u)+'" data-v="'+(v?1:0)+'" title="Büyüt">'+(v?'<video src="'+u+'#t=0.1" preload="metadata" muted></video><span class="play">▶</span>':'<img src="'+u+'" alt="" loading="lazy">')+'</button>'; }).join('');
-      return '<div class="card fb-item" style="margin-bottom:12px"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="chip '+t[1]+'"><i></i>'+t[0]+'</span><b>'+esc(who||(x.app==='local'?'Yerel uygulama':'anonim'))+'</b>'+(x.verified?'<span class="chip st-joined" title="Kimlik demo oturumundan (sunucu)">üye</span>':'')+'<span class="muted" style="font-size:12px">'+ago(x.at)+' · '+esc(x.app)+'</span><span class="sp" style="flex:1"></span>'+
-        '<select class="input" data-fbst="'+esc(x.id)+'" style="height:30px;width:auto">'+FB_ST.map(function(s){ return '<option value="'+s[0]+'"'+(x.status===s[0]?' selected':'')+'>'+s[1]+'</option>'; }).join('')+'</select>'+
-        (x.email?'<a class="btn sm" href="mailto:'+esc(x.email)+'?subject='+encodeURIComponent('Mivelo geri bildirimin hakkında')+'">Yanıtla</a>':'')+
-        '<button class="icon-btn" data-fbdel="'+esc(x.id)+'" title="Sil" aria-label="Sil">'+I.trash+'</button></div>'+
-        '<div class="fb-msg">'+esc(x.message)+'</div>'+(files?'<div class="fb-lbl">Ekler ('+(x.files||[]).length+')</div><div class="fb-files">'+files+'</div>':'')+
-        '<div class="muted" style="font-size:11.5px;margin-top:8px;word-break:break-all">'+esc(x.page)+(x.ua?' · '+esc(x.ua):'')+'</div>'+
-        '<input class="input" data-fbnote="'+esc(x.id)+'" value="'+esc(x.note)+'" placeholder="Not (yalnız sen görürsün)" style="margin-top:8px;height:32px"></div>';
-    }).join(''):'<div class="card"><div class="empty">'+(FBF==='open'?'Açık geri bildirim yok.':'Kayıt yok.')+'</div></div>';
+      var open=!!OPEN_F[x.id], stl=(FB_ST.filter(function(z){ return z[0]===x.status; })[0]||FB_ST[0])[1], nf=(x.files||[]).length;
+      return '<div class="acc'+(open?' open':'')+(x.status==='new'?' unread':'')+'"><button type="button" class="acc-head" data-acc="f:'+esc(x.id)+'" aria-expanded="'+open+'">'+
+        '<span class="chip '+t[1]+'"><i></i>'+t[0]+'</span>'+
+        '<span class="acc-main"><b>'+esc(x.name||x.user||(x.app==='local'?'Yerel uygulama':'anonim'))+'</b><span class="muted acc-snip">'+esc(String(x.message||'').split('\n')[0])+'</span></span>'+
+        (nf?'<span class="muted acc-n" title="'+nf+' ek">'+I.clip+nf+'</span>':'')+
+        '<span class="muted acc-when">'+ago(x.at)+'</span><span class="acc-chev">'+I.chev+'</span></button>'+
+        (open?'<div class="acc-body">'+
+          '<div class="muted" style="font-size:12.5px">'+esc(who||'anonim')+(x.verified?' <span class="chip st-joined" title="Kimlik demo oturumundan (sunucu)">üye</span>':'')+' · '+esc(x.app)+' · durum: '+stl+'</div>'+
+          '<div class="fb-msg">'+esc(x.message)+'</div>'+(files?'<div class="fb-lbl">Ekler ('+nf+')</div><div class="fb-files">'+files+'</div>':'')+
+          '<div class="muted" style="font-size:11.5px;margin-top:10px;word-break:break-all">'+esc(x.page)+(x.ua?' · '+esc(x.ua):'')+'</div>'+
+          '<input class="input" data-fbnote="'+esc(x.id)+'" value="'+esc(x.note)+'" placeholder="Not (yalnız sen görürsün)" style="margin-top:10px;height:34px;width:100%">'+
+          '<div class="acc-acts"><select class="input" data-fbst="'+esc(x.id)+'" style="height:32px;width:auto">'+FB_ST.map(function(z){ return '<option value="'+z[0]+'"'+(x.status===z[0]?' selected':'')+'>'+z[1]+'</option>'; }).join('')+'</select>'+
+          (x.email?'<a class="btn sm" href="mailto:'+esc(x.email)+'?subject='+encodeURIComponent('Mivelo geri bildirimin hakkında')+'">Yanıtla</a>':'')+
+          '<button class="btn sm" data-fbdel="'+esc(x.id)+'" title="Sil">'+I.trash+' Sil</button></div></div>':'')+'</div>';
+    }).join(''):'<div class="empty">'+(FBF==='open'?'Açık geri bildirim yok.':'Kayıt yok.')+'</div>';
   }
   $('#fbSeg').addEventListener('click',function(e){ var b=e.target.closest('button'); if(!b) return; FBF=b.dataset.f; $$('#fbSeg button').forEach(function(x){ x.classList.toggle('on',x===b); }); renderFb(); });
   $('#fbBox').addEventListener('change',function(e){ var el=e.target;
