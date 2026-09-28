@@ -30,7 +30,7 @@ Dil: arayüz ve yorumlar Türkçe.
   `~/.kavsak/sessions/<hesapId>/`. REST + WS sunucu 127.0.0.1:7788 (`server.ts`). `registry.ts` hesap↔connector.
   Ortak model `model.ts` (Account/Chat/Message/Participant/Attachment; Chat.handle/link/participants/meta).
   Connector arayüzü `connectors/base.ts` (start(opts)/stop/sendText, isteğe bağlı fetchMedia/openDirect/logout/action/loadHistory).
-- `apps/web` — Vite + React 19, açık + gece modu (Inter, mor #6c47ff, lime #d4ff3f). Tema `theme.ts` (Ayarlar → Görünüm: Sistem/Açık/Koyu,
+- `apps/web` — Vite + React 19, açık + gece modu (Inter, mor #6c47ff, lime #d4ff3f). Tema `theme.ts` (kenar çubuğu altındaki ay/güneş düğmesi `.theme-tg` açık⇄koyu; seçim yoksa sistem teması,
   localStorage `mivelo.theme`, `<html data-theme>`; index.html'deki satır içi betik ilk karede uygular, Tauri `setTheme`). Renkler YALNIZ
   token'la (`styles.css` :root + `:root[data-theme="dark"]`: --card/--field/--raise/--ctx-bg/--danger*/--warn*/--avN/--tg-*/--scN…); yeni
   stilde sabit açık renk (#fff zemin vb.) yazma. İkon rengi `color="var(--v)"` olabilir (Icon style üzerinden currentColor). `App.tsx` (liste/filtre/kanallar/ayarlar),
@@ -155,6 +155,9 @@ Dil: arayüz ve yorumlar Türkçe.
   `POST /api/calendar {mode:'device', calendar}` → `{added, calendar}`; izin reddi `{denied}` (arayüz "Sistem Ayarları'nı aç" →
   `POST /api/calendars/permission`, Otomasyon bölmesi); diğer hatada .ics takvim uygulamasında açılır (`fallback`). Uzak (telefon)
   erişimde .ics indirilir. Demoda taklit (indirme yok). `npm run dev`de izin Terminal adına sorulur. Ön doldurma `apps/web/src/when.ts` (Türkçe tarih/saat tahmini); AI taslağı `events` da döndürür.
+- **Ayarlar penceresi** (`Settings.tsx`, sol alttaki ayar düğmesi): solda bölümler Bildirimler · Uygulama sesleri · AI özellikleri ·
+  Telefondan erişim (· Hesap: yalnız web demo), sağda açıklamalı satırlar + `.sw` anahtarları; mobilde bölümler üstte kaydırmalı sekme.
+  Görünüm burada YOK (kenar çubuğu düğmesi).
 - **AI anahtarı**: Ayarlar → AI özellikleri → "Anthropic anahtarı" (`POST /api/ai/key`, yalnız yerel); `secrets.ts` ile Anahtar Zinciri/
   DPAPI/0600 dosyada; ortam değişkeni `ANTHROPIC_API_KEY` yedek. Değer asla geri döndürülmez (yalnız maske).
 - **AI özellikleri anahtarları** (Ayarlar → AI özellikleri; `apps/web/src/ai-prefs.ts`, localStorage `mivelo.aiPrefs`): Özetler / Taslaklar /
@@ -242,7 +245,7 @@ Dil: arayüz ve yorumlar Türkçe.
 - "PIN'i gir" hızlı yol: `registry.restart` eski connector'da `attention` varsa `start({window:true})` → köprü görünmez denetim turunu
   (headless aç + needsWindow + kapat, 10-20 sn) atlar, görünür pencereyi hemen açar; çerezler varsa doğrudan `afterLogin` (`visibleLogin`).
 - Bildirimler (desktop.ts): Ayarlar → Bildirimler: `kavsak.soundsOn` (tüm sesler), `kavsak.volume` 0–100 (varsayılan 60, kazanç 0,5·v²),
-  `kavsak.bannersOn` (sistem kartı). Uygulama ayarları kartı: zil sesi, `kavsak.vol.<platform>` (genelin yüzdesi), Açık/Kapalı ('off' = ne ses
+  `kavsak.bannersOn` (sistem kartı). Ayarlar → Uygulama sesleri (platform başına satır): zil sesi, `kavsak.vol.<platform>` (genelin yüzdesi), Açık/Kapalı ('off' = ne ses
   ne kart). Tek giriş `playNotifySound(platform)`; `unlockAudio()` ilk tıklamada AudioContext'i açar (yoksa etkileşimsiz açılışta ses çıkmıyordu).
 - Gönderim hızı: arayüz iyimser (`outbox`, Conversation.tsx) — Enter'da "Gönderiliyor" balonu hemen, gerçek kayıt gelince kopya gizlenir,
   hata olursa metin kutuya döner; ardışık gönderimler `sendChain` ile sıralı. Köprü: send/react/sendFile `urgent()` — yoklama turu sürüyorsa

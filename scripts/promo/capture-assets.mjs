@@ -105,11 +105,11 @@ const desk = { viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, col
   await shot(p, 'dt-connect');
   await p.keyboard.press('Escape');
   await wait(p, 400);
-  // Ayarlar → Uygulama ayarları (zil sesi / ses düzeyi / bildirim)
+  // Ayarlar → Uygulama sesleri (zil sesi / ses düzeyi / bildirim)
   await p.click('button[aria-label="Ayarlar"]');
   await wait(p, 500);
   await shot(p, 'dt-settings-full');
-  await p.locator('text=Uygulama ayarları').first().click();
+  await p.locator('.set-tab', { hasText: 'Uygulama sesleri' }).first().click();
   await wait(p, 700);
   await shot(p, 'dt-appsettings');
   await p.context().close();

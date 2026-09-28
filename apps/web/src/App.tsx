@@ -5,13 +5,12 @@ import { Avatar, Chip, Icon, IconText, stripLeadIcon, Logo, Resizer, SyncBar, Ta
 import { Conversation, REACT_TEXT, refreshScheduled, startScheduledSends } from './Conversation';
 import { ConnectModal } from './Connect';
 import { Focus } from './Focus';
-import { getThemePref, setThemePref, type ThemePref } from './theme';
+import { onThemeChange, resolvedTheme, setThemePref } from './theme';
+import { SettingsModal } from './Settings';
 import { SearchPalette } from './SearchPalette';
 import { CalendarView, ymd } from './CalendarView';
-import { MOD_KEY, isTauri, notify as desktopNotify, onDesktopEvent, playPing, SOUNDS, getPlatformSound, getPlatformTone, setPlatformSound, setPlatformTone, setBadge, windowFocused, coreInfo, playNotifySound, platformNotifyOn, soundsEnabled, setSoundsEnabled, bannersEnabled, setBannersEnabled, groupsNotify, setGroupsNotify, getVolume, setVolume, getPlatformVolume, setPlatformVolume, unlockAudio } from './desktop';
-import { DEMO_OFFLINE, PROFILE_NAME, STATIC_DEMO } from './profile';
-import { leaveDemoPanel } from './demo-session';
-import { setAiPrefs, useAiPrefs } from './ai-prefs';
+import { MOD_KEY, isTauri, notify as desktopNotify, onDesktopEvent, playPing, setBadge, windowFocused, coreInfo, playNotifySound, platformNotifyOn, soundsEnabled, bannersEnabled, groupsNotify, unlockAudio } from './desktop';
+import { PROFILE_NAME, STATIC_DEMO } from './profile';
 
 export type View = 'inbox' | 'focus' | 'calendar' | 'archived' | 'muted' | 'hidden';
 const FLAG_VIEWS: Array<{ view: View; flag: 'archived' | 'muted' | 'hidden'; label: string; icon: string; empty: string }> = [
@@ -101,33 +100,10 @@ export default function App() {
   }, [isMobile]);
   const [booting, setBooting] = useState(false);
   const [bootSince] = useState(() => Date.now());
-  const [pSounds, setPSounds] = useState<Record<string, string>>({});
-  const [appSettingsOpen, setAppSettingsOpen] = useState(false);
-  const appSettingsP = useClosing(appSettingsOpen || null);
-  const changePlatformTone = (platform: string, id: string) => {
-    setPlatformTone(platform, id);
-    const cur = pSounds[platform] ?? getPlatformSound(platform);
-    if (cur !== 'off') {
-      setPlatformSound(platform, id);
-      setPSounds((p) => ({ ...p, [platform]: id }));
-    }
-    playPing(id, true);
-  };
-  // genel bildirim ayarları (localStorage; değişince yeniden çizilsin)
-  const [sndOn, setSndOn] = useState(soundsEnabled);
-  const [bnrOn, setBnrOn] = useState(bannersEnabled);
-  const [grpOn, setGrpOn] = useState(groupsNotify);
-  const [vol, setVol] = useState(getVolume);
-  const [pVols, setPVols] = useState<Record<string, number>>({});
-  const [themePref, setThemePrefState] = useState<ThemePref>(getThemePref);
+  // gece/gündüz düğmesi: görünen tema (sistem teması değişince de güncellenir)
+  const [theme, setThemeState] = useState<'light' | 'dark'>(() => resolvedTheme());
+  useEffect(() => onThemeChange(setThemeState), []);
   useEffect(() => unlockAudio(), []);
-  const changePlatformNotify = (platform: string, on: boolean) => {
-    const tone = getPlatformTone(platform);
-    const id = on ? tone : 'off';
-    setPlatformSound(platform, id);
-    setPSounds((p) => ({ ...p, [platform]: id }));
-    if (on) playPing(tone, true);
-  };
   /** Mobil: sağ panel tam ekran kaydırmalı kart olarak, yalnızca isteyince (avatar/isme dokununca) */
   const [mobileDetails, setMobileDetails] = useState(false);
   useEffect(() => setMobileDetails(false), [selected]);
@@ -236,7 +212,6 @@ export default function App() {
   }, []);
   const [prompts, setPrompts] = useState<Record<string, { prompt: 'phone' | 'code' | 'password'; message: string }>>({});
   const [ai, setAi] = useState(false);
-  const aiPrefs = useAiPrefs();
   const [online, setOnline] = useState(false);
   const [toast, setToast] = useState<{ text: string; err?: boolean } | null>(null);
   /** Pencere öndeyken başka sohbete gelen mesaj: sağ üstte platform rozetli küçük kart (sistem bildirimi kapalı olabilir) */
@@ -751,8 +726,7 @@ export default function App() {
       if (e.key === 'Escape') {
         if (e.defaultPrevented) return; // bir katman (medya penceresi, açılır menü) Esc'i zaten kullandı
         // önce en üstteki pencere/menü kapanır; sohbet ancak hiçbiri açık değilse
-        if (appSettingsOpen) setAppSettingsOpen(false);
-        else if (settingsOpen) setSettingsOpen(false);
+        if (settingsOpen) setSettingsOpen(false);
         else if (typing) return;
         else if (connectOpen) setConnectOpen(false);
         else if (view !== 'inbox') setView('inbox');
@@ -774,7 +748,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [chatList, selected, view, connectOpen, viewTags, settingsOpen, appSettingsOpen]);
+  }, [chatList, selected, view, connectOpen, viewTags, settingsOpen]);
 
   const orderedAccounts = useMemo(() => {
     const idx = new Map(chanOrder.map((id, i) => [id, i]));
@@ -1041,100 +1015,18 @@ export default function App() {
             <span className="n">{PROFILE_NAME}</span>
             <span className="s">{accounts.length} uygulama{STATIC_DEMO ? '' : ' · Pro'}</span>
           </span>
-          <button className="btn ghost sm icon b" aria-label="Ayarlar" onClick={() => setSettingsOpen(!settingsOpen)}>
+          <button
+            className="btn ghost sm icon b theme-tg"
+            aria-label={theme === 'dark' ? 'Gündüz moduna geç' : 'Gece moduna geç'}
+            title={theme === 'dark' ? 'Gündüz moduna geç' : 'Gece moduna geç'}
+            onClick={() => setThemePref(theme === 'dark' ? 'light' : 'dark')}
+          >
+            <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={16} />
+          </button>
+          <button className="btn ghost sm icon b" aria-label="Ayarlar" title="Ayarlar" onClick={() => setSettingsOpen(!settingsOpen)}>
             <Icon name="sliders" size={16} />
           </button>
         </div>
-        {settingsP.value && (
-          <div className={`settings ${settingsP.closing ? 'closing' : ''}`} role="dialog" aria-label="Ayarlar">
-            <div className="section-head" style={{ marginBottom: 6 }}>
-              <span className="label">Ayarlar</span>
-              <button className="btn ghost xs icon b" onClick={() => setSettingsOpen(false)} aria-label="Kapat">
-                <Icon name="x" size={13} sw={2} />
-              </button>
-            </div>
-            <button className="row-toggle b psounds-head" onClick={() => setAppSettingsOpen(true)}>
-              <span>Uygulama ayarları</span>
-              <span style={{ display: 'inline-flex', transform: 'rotate(-90deg)' }}>
-                <Icon name="chev" size={14} sw={2} />
-              </span>
-            </button>
-            <span className="set-sub">Görünüm</span>
-            <div className="seg3" role="radiogroup" aria-label="Görünüm">
-              {(
-                [
-                  ['system', 'Sistem', 'monitor'],
-                  ['light', 'Açık', 'sun'],
-                  ['dark', 'Koyu', 'moon'],
-                ] as const
-              ).map(([k, l, ic]) => (
-                <button key={k} type="button" role="radio" aria-checked={themePref === k} className={themePref === k ? 'on' : ''} onClick={() => (setThemePref(k), setThemePrefState(k))}>
-                  <Icon name={ic} size={14} />
-                  {l}
-                </button>
-              ))}
-            </div>
-            {/* AI senin kontrolünde: her özellik ayrı açılıp kapanır (cihaza özel) */}
-            <span className="set-sub">AI özellikleri{!ai && <em> · anahtar yok</em>}</span>
-            <AiKeyRow ai={ai} onChange={(on) => setAi(on)} notify={notify} />
-            {(
-              [
-                ['summary', 'Özetler'],
-                ['drafts', 'Taslaklar'],
-                ['actions', 'Aksiyon çıkarma'],
-                ['focusAuto', "Odak'ta taslakları kendiliğinden hazırla"],
-              ] as const
-            ).map(([k, l]) => (
-              <label key={k} className="row-toggle">
-                <span>{l}</span>
-                <input type="checkbox" checked={aiPrefs[k]} onChange={(e) => setAiPrefs({ [k]: e.target.checked })} />
-              </label>
-            ))}
-            <span className="set-sub">Bildirimler</span>
-            <label className="row-toggle">
-              <span>Bildirim sesleri</span>
-              <input type="checkbox" checked={sndOn} onChange={(e) => (setSoundsEnabled(e.target.checked), setSndOn(e.target.checked), e.target.checked && playPing(undefined, true, vol / 100))} />
-            </label>
-            <label className={`row-toggle vol-row ${sndOn ? '' : 'dim'}`}>
-              <span>Ses düzeyi</span>
-              <span className="vol">
-                <Icon name={vol === 0 ? 'mute' : 'volume'} size={14} />
-                <input type="range" min={0} max={100} step={5} value={vol} disabled={!sndOn} aria-label="Genel ses düzeyi" onChange={(e) => (setVolume(+e.target.value), setVol(+e.target.value))} onPointerUp={() => playPing(undefined, true, vol / 100)} onKeyUp={() => playPing(undefined, true, vol / 100)} />
-                <em>{vol}</em>
-              </span>
-            </label>
-            <label className="row-toggle">
-              <span>Masaüstü bildirimleri{<em className="set-hint">Uygulama arka plandayken sistem kartı</em>}</span>
-              <input type="checkbox" checked={bnrOn} onChange={(e) => (setBannersEnabled(e.target.checked), setBnrOn(e.target.checked))} />
-            </label>
-            <label className="row-toggle">
-              <span>Grup ve kanal bildirimleri{<em className="set-hint">Kapalıysa yalnız birebir sohbetler bildirir</em>}</span>
-              <input type="checkbox" checked={grpOn} onChange={(e) => (setGroupsNotify(e.target.checked), setGrpOn(e.target.checked))} />
-            </label>
-            <span className="set-sub">Genel</span>
-            <label className="row-toggle">
-              <span>Aynı Wi‑Fi'daki telefondan aç{STATIC_DEMO && <em className="set-hint">Masaüstü uygulamasında</em>}</span>
-              <input type="checkbox" disabled={STATIC_DEMO} checked={!!lan?.enabled} onChange={(e) => api.setLan(e.target.checked).then(setLanState).catch((err) => notify(err.message, true))} />
-            </label>
-            {/* tek dosya (çevrimdışı) demoda giriş ekranı yok → çıkış da yok */}
-            {STATIC_DEMO && !DEMO_OFFLINE && (
-              <button className="row-toggle b psounds-head" onClick={() => leaveDemoPanel()}>
-                <span>Çıkış yap</span>
-              </button>
-            )}
-            {lan?.enabled && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: 'var(--text2)' }}>
-                {lan.qr && <img src={lan.qr} alt="Bağlantı QR kodu" style={{ width: 150, height: 150, borderRadius: 10, border: '1px solid var(--line)', background: '#fff' }} />}
-                {lan.urls.map((u) => (
-                  <code key={u} style={{ fontSize: 11, wordBreak: 'break-all', userSelect: 'all' }}>
-                    {u}
-                  </code>
-                ))}
-                <span style={{ color: 'var(--text3)' }}>Bağlantı gizli bir anahtar içerir; yalnızca kendi cihazlarına ver. Mac uyurken erişim durur.</span>
-              </div>
-            )}
-          </div>
-        )}
       </nav>
       <Resizer pane="side" />
 
@@ -1439,83 +1331,18 @@ export default function App() {
         )}
       </div>
 
-      {appSettingsP.value && (
-        <div className={`overlay app-settings ${appSettingsP.closing ? 'closing' : ''}`} onClick={() => setAppSettingsOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Uygulama ayarları">
-            <div className="modal-scroll">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <h2 style={{ fontSize: 26 }}>Uygulama ayarları</h2>
-              <span style={{ flexGrow: 1 }} />
-              <button className="btn icon b b2" onClick={() => setAppSettingsOpen(false)} aria-label="Kapat">
-                <Icon name="x" size={15} sw={2} />
-              </button>
-            </div>
-            {accounts.length === 0 ? (
-              <p style={{ margin: 0, color: 'var(--text2)', fontSize: 14 }}>Bağlı uygulama yok.</p>
-            ) : (
-              <div className="app-set-list">
-                {accounts.map((a) => {
-                  const stored = pSounds[a.platform] ?? getPlatformSound(a.platform);
-                  const notifyOn = stored !== 'off';
-                  const tone = getPlatformTone(a.platform);
-                  const handle = handleOf(a);
-                  return (
-                    <div key={a.id} className="app-set-card">
-                      <div className="who">
-                        <Chip platform={a.platform} size={36} />
-                        <span>
-                          <b>{PLATFORMS[a.platform].name}</b>
-                          {handle && <span className="sub">{handle}</span>}
-                        </span>
-                      </div>
-                      <div className="pref-block">
-                        <span className="k">Zil sesi</span>
-                        <div className="tones" role="radiogroup" aria-label={`${PLATFORMS[a.platform].name} zil sesi`}>
-                          {SOUNDS.map((sn) => (
-                            <button key={sn.id} type="button" className={tone === sn.id ? 'on' : ''} aria-checked={tone === sn.id} role="radio" onClick={() => changePlatformTone(a.platform, sn.id)}>
-                              {sn.name}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div className={`pref-block ${notifyOn && sndOn ? '' : 'dim'}`}>
-                        <span className="k">Ses düzeyi{!sndOn && <em className="set-hint"> · bildirim sesleri genel ayardan kapalı</em>}</span>
-                        <span className="vol">
-                          <Icon name={(pVols[a.platform] ?? getPlatformVolume(a.platform)) === 0 ? 'mute' : 'volume'} size={14} />
-                          <input
-                            type="range"
-                            min={0}
-                            max={100}
-                            step={5}
-                            value={pVols[a.platform] ?? getPlatformVolume(a.platform)}
-                            disabled={!notifyOn || !sndOn}
-                            aria-label={`${PLATFORMS[a.platform].name} ses düzeyi`}
-                            onChange={(e) => (setPlatformVolume(a.platform, +e.target.value), setPVols((p) => ({ ...p, [a.platform]: +e.target.value })))}
-                            onPointerUp={() => playNotifySound(a.platform)}
-                            onKeyUp={() => playNotifySound(a.platform)}
-                          />
-                          <em>{pVols[a.platform] ?? getPlatformVolume(a.platform)}</em>
-                        </span>
-                      </div>
-                      <div className="pref-block">
-                        <span className="k">Bildirim tercihi</span>
-                        <div className="tones" role="radiogroup" aria-label={`${PLATFORMS[a.platform].name} bildirim`}>
-                          <button type="button" className={notifyOn ? 'on' : ''} aria-checked={notifyOn} role="radio" onClick={() => changePlatformNotify(a.platform, true)}>
-                            Açık
-                          </button>
-                          <button type="button" className={!notifyOn ? 'on' : ''} aria-checked={!notifyOn} role="radio" onClick={() => changePlatformNotify(a.platform, false)}>
-                            Kapalı
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-            </div>
-          </div>
-        </div>
+      {settingsP.value && (
+        <SettingsModal
+          closing={settingsP.closing}
+          onClose={() => setSettingsOpen(false)}
+          accounts={accounts}
+          handleOf={handleOf}
+          ai={ai}
+          setAi={setAi}
+          notify={notify}
+          lan={lan}
+          setLan={setLanState}
+        />
       )}
       {alertPop &&
         (() => {
@@ -1987,58 +1814,3 @@ function ChatRow({
 }
 
 /** Ayarlar → AI anahtarı: kullanıcının kendi Anthropic anahtarı; çekirdekte Anahtar Zinciri/DPAPI'de saklanır, geri okunmaz */
-function AiKeyRow({ ai, onChange, notify }: { ai: boolean; onChange: (on: boolean) => void; notify: (t: string, err?: boolean) => void }) {
-  const [info, setInfo] = useState<{ set: boolean; source: 'settings' | 'env' | null; hint: string | null } | null>(null);
-  const [editing, setEditing] = useState(false);
-  const [val, setVal] = useState('');
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    api.aiKey().then(setInfo).catch(() => setInfo(null));
-  }, [ai]);
-  const save = (key: string | null) => {
-    setBusy(true);
-    api
-      .setAiKey(key)
-      .then((r) => {
-        onChange(r.ai);
-        setEditing(false);
-        setVal('');
-        notify(key ? 'AI anahtarı kaydedildi' : 'AI anahtarı kaldırıldı');
-        return api.aiKey().then(setInfo);
-      })
-      .catch((e) => notify((e as Error).message, true))
-      .finally(() => setBusy(false));
-  };
-  if (editing)
-    return (
-      <form className="ai-key-form" onSubmit={(e) => (e.preventDefault(), val.trim() && save(val.trim()))}>
-        <input autoFocus type="password" placeholder="sk-ant-…" value={val} onChange={(e) => setVal(e.target.value)} aria-label="Anthropic API anahtarı" autoComplete="off" spellCheck={false} />
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button type="submit" className="btn primary xs b b2" disabled={busy || !val.trim()}>
-            Kaydet
-          </button>
-          <button type="button" className="btn ghost xs b b2" onClick={() => (setEditing(false), setVal(''))}>
-            Vazgeç
-          </button>
-        </div>
-        <span className="ai-key-note">Anahtar bu bilgisayarda güvenli depoda saklanır. AI kullandığında ilgili sohbetin son mesajları Anthropic'e gönderilir.</span>
-      </form>
-    );
-  return (
-    <div className="row-toggle ai-key-row">
-      <span>
-        Anthropic anahtarı
-        <em>{info?.set ? (info.source === 'env' ? 'ortam değişkeninden' : info.hint) : 'eklenmedi'}</em>
-      </span>
-      {info?.source === 'settings' ? (
-        <button type="button" className="btn ghost xs b b2" onClick={() => save(null)} disabled={busy}>
-          Kaldır
-        </button>
-      ) : (
-        <button type="button" className="btn soft xs b b2" onClick={() => setEditing(true)}>
-          {info?.set ? 'Değiştir' : 'Ekle'}
-        </button>
-      )}
-    </div>
-  );
-}
