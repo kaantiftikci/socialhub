@@ -144,11 +144,10 @@ Dil: arayüz ve yorumlar Türkçe.
   takvim, kanallar/gizlilik) iOS uyarlaması; `node design/appstore/render.mjs` → `out/` 1290×2796 PNG (git dışı). Ayrıntı README.
 - **Masaüstü paketleri (DMG + EXE, gerçek kullanım yolu — demo sunucusu değil; ban/gizlilik: kullanıcının kendi IP'si ve cihazı)**:
   `.github/workflows/build-desktop.yml` (eski build-windows.yml'in yerine): YALNIZ elle (Actions → Run workflow) ya da v* etiketi — main'e itme
-  sürüm YAYINLAMAZ. **Sürümü Claude otomatik çıkarır (Kaan, 29.09: "sen otomatik yap sürüm işlerini")** — AMA GitHub Actions KOTASI SINIRLI
-  (özel depo, ayda 2.000 dk ücretsiz; macOS dakikası ×10, Windows ×2 → bir sürüm ≈ 2 Mac işi × ~12 dk × 10 + Windows ≈ 250-270 kota dakikası;
-  ayda en çok ~7 sürüm; aşım ÜCRETLİ, Kaan ücretli hiçbir şey istemiyor). 29.09'da takılan 0.1.7 derlemesi kotanın %90'ını bitirdi → iki derleme
-  iptal edildi, kota 1 Ekim'de sıfırlanıyor. Kural: değişiklikleri biriktir, en çok GÜNDE BİR sürüm; kalan kota bir sürüme yetmiyorsa
-  (GitHub'dan 80/90% uyarısı geldiyse) sürüm ÇIKARMA, Kaan'a söyle. Tetik: GitHub MCP `actions_run_trigger run_workflow build-desktop.yml ref main`
+  sürüm YAYINLAMAZ. **Sürümü Claude otomatik çıkarır (Kaan, 29.09: "sen otomatik yap sürüm işlerini")**: doğrulanmış her iş turu main'e
+  itildikten sonra. Depo 29.09'dan beri HERKESE AÇIK → standart GitHub Actions makineleri ücretsiz ve kotasız (özelken macOS ×10 dakika
+  sayılıyordu; takılan 0.1.7 derlemesi 2.000 dk'lık kotanın %90'ını bitirmişti). Depo yeniden özele dönerse kota kuralı geri gelir: en çok
+  günde bir sürüm, GitHub kota uyarısında sürüm çıkarma. Tetik: GitHub MCP `actions_run_trigger run_workflow build-desktop.yml ref main`
   (etiket itmek bu ortamda proxy 403 veriyor; sürüm 0.1.<run>), sonucu kontrol et; takılırsa HEMEN iptal et. Birim testleri yalnız ayrı
   `test` işinde (ubuntu, 1×, ≤10 dk; sonucu paketlemeyi durdurmaz), `build` işi ≤30 dk; `npm test` `--test-force-exit --test-timeout=120000`. Sürüm 0.1.<run> (etikette
   etiketinki), `--config {"version"}` ile. Matris: mac-arm64 (macos-14), mac-intel (macos-14 + x64 Node/Rosetta + x86_64-apple-darwin), windows-x64 (NSIS).
