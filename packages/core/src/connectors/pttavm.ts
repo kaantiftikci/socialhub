@@ -5,6 +5,7 @@ import type { Participant } from '../model.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
 import { PollTimer, marketDelay } from './poll-timer.js';
+import { ingestChunked, writeJsonAtomic } from './market-state.js';
 import { xmlBlocks, xmlEscape, xmlText } from './n11.js';
 
 /**
@@ -105,6 +106,8 @@ export class PttAvmConnector extends BaseConnector {
   private stopping = false;
   private seen: Record<string, string> = {};
   private stateFile: string;
+  /** Son hatasız yoklamanın zamanı: 3 günü aşan uyku/kopma sonrası aradaki dönem de istenir (en çok 4 hafta) */
+  private lastOk = 0;
 
   constructor(account: BaseConnector['account'], store: BaseConnector['store'], config: string) {
     super(account, store);
@@ -187,20 +190,41 @@ export class PttAvmConnector extends BaseConnector {
     this.polling = true;
     try {
       const now = Date.now();
-      // ilk eşitleme geriye 4 hafta (haftalık dilimler), sonra son 3 gün
-      const spans: Array<[number, number]> = first ? Array.from({ length: 4 }, (_, i) => [now - (i + 1) * WINDOW, now - i * WINDOW]) : [[now - 3 * DAY, now]];
-      const byNo = new Map<string, OrderRec>();
-      for (const [a, b] of spans) for (const o of await this.fetchOrders(a, b)) if (!byNo.has(o.no)) byNo.set(o.no, o);
-      let changed = 0;
-      for (const o of [...byNo.values()].sort((x, y) => x.date - y.date)) if (this.ingest(o, !first)) changed++;
-      if (changed || first) bus.log('info', `ePttAVM: ${byNo.size} sipariş (${changed} güncellendi)`);
-      const keep = Object.entries(this.seen).slice(-MAX_STORED);
-      this.seen = Object.fromEntries(keep);
-      try {
-        fs.writeFileSync(this.stateFile, JSON.stringify({ seen: this.seen }));
-      } catch {
-        /* disk */
+      // ilk eşitleme geriye 4 hafta (haftalık dilimler), sonra son 3 gün — son başarılı yoklama daha eskiyse (uyku/kopma)
+      // oradan bu yana (10 dk pay, en çok 4 hafta) haftalık dilimlerle
+      let spans: Array<[number, number]>;
+      if (first || !this.lastOk) spans = Array.from({ length: 4 }, (_, i) => [now - (i + 1) * WINDOW, now - i * WINDOW]);
+      else {
+        const from = Math.max(now - 4 * WINDOW, Math.min(now - 3 * DAY, this.lastOk - 10 * 60_000));
+        spans = [];
+        for (let b = now; b > from; b -= WINDOW) spans.push([Math.max(from, b - WINDOW), b]);
       }
+      const byNo = new Map<string, OrderRec>();
+      let err: Error | undefined;
+      for (const [a, b] of spans) {
+        try {
+          for (const o of await this.fetchOrders(a, b)) if (!byNo.has(o.no)) byNo.set(o.no, o);
+        } catch (e) {
+          // ilk eşitlemede ve kimlik hatasında eskisi gibi; sonraki turda alınan dilimler atılmaz, imleç ilerlemez
+          if (first || e instanceof PttAvmAuthError) throw e;
+          err ??= e as Error;
+        }
+      }
+      let changed = 0;
+      const done = await ingestChunked(this.store, [...byNo.values()].sort((x, y) => x.date - y.date), (o) => {
+        if (this.ingest(o, !first)) changed++;
+      }, () => this.stopping);
+      if (changed || first) bus.log('info', `ePttAVM: ${byNo.size} sipariş (${changed} güncellendi)`);
+      if (done && !err) this.lastOk = now;
+      if (changed || first) {
+        this.seen = Object.fromEntries(Object.entries(this.seen).slice(-MAX_STORED));
+        try {
+          writeJsonAtomic(this.stateFile, { seen: this.seen });
+        } catch {
+          /* disk */
+        }
+      }
+      if (err) throw err;
     } catch (e) {
       if (first) throw e;
       if (e instanceof PttAvmAuthError) {
@@ -220,8 +244,10 @@ export class PttAvmConnector extends BaseConnector {
     const sts = o.items.map((i) => pttStatus(i.status));
     const sig = JSON.stringify([o.items.map((i) => i.status), o.cargo]);
     const prev = this.seen[rid];
-    if (prev === sig) return false;
+    // son görülme sırası (kırpma en uzun süredir görülmeyenleri atsın)
+    delete this.seen[rid];
     this.seen[rid] = sig;
+    if (prev === sig) return false;
     const open = sts.some((s) => !/^(Delivered|Cancelled|Returned|Shipped)$/.test(s.code));
     const main = sts.find((s) => s.code === 'Created') ?? sts[0] ?? pttStatus('');
     const total = o.items.reduce((n, i) => n + i.total, 0);
@@ -257,7 +283,7 @@ export class PttAvmConnector extends BaseConnector {
     const st = sts[0];
     if (st && st.code !== 'Created') {
       const icon = st.code === 'Shipped' ? '📦' : st.code === 'Delivered' ? '✅' : st.code === 'Cancelled' ? '❌' : '↩';
-      this.upsertMessage({ remoteChatId: rid, remoteId: `st-${o.no}-${st.code}`, senderId: 'me', senderName: 'Ben', fromMe: true, text: `${icon} ${st.label}${o.cargo && st.code === 'Shipped' ? ` · takip: ${o.cargo}` : ''}`, ts: Date.now(), status: 'sent' });
+      this.upsertMessage({ remoteChatId: rid, remoteId: `st-${o.no}-${st.code}`, senderId: 'me', senderName: 'Ben', fromMe: true, text: `${icon} ${st.label}${o.cargo && st.code === 'Shipped' ? ` · takip: ${o.cargo}` : ''}`, ts: prev ? Date.now() : o.date + 1, status: 'sent' });
     }
     return true;
   }

@@ -48,11 +48,26 @@ export function bootOrder(list: BootInfo[], now = Date.now()): BootInfo[] {
   return [...light, ...heavy];
 }
 
+/**
+ * Chromium'a ayrılabilecek bellek. macOS'ta os.freemem() yalnız libuv free_count (inactive/purgeable/sıkıştırılmış sayfalar yok):
+ * normal kullanımda 100-800 MB → her zaman 1 yuva çıkıyor, tarayıcı kanalları tek tek açılıyordu. Orada toplam belleğin %35'i.
+ * Windows (ullAvailPhys) ve Linux (MemAvailable) değeri gerçekçi.
+ */
+export function memForBrowsers(platform: NodeJS.Platform = process.platform): number {
+  return platform === 'darwin' ? os.totalmem() * 0.35 : os.freemem();
+}
+
 /** Aynı anda açılabilecek tarayıcı kanalı sayısı (makineye göre) */
-export function browserSlots(cpus = os.cpus().length, freeMem = os.freemem()): number {
+export function browserSlots(cpus = os.cpus().length, freeMem = memForBrowsers()): number {
   const forced = Number(process.env.MIVELO_BOOT_SLOTS);
   if (forced >= 1) return Math.min(8, Math.floor(forced));
   const byCpu = Math.floor(cpus / 3);
   const byMem = Math.floor(freeMem / (700 * 1024 * 1024));
   return Math.max(1, Math.min(4, byCpu, byMem));
+}
+
+let slotsCache: number | undefined;
+/** Süreç boyunca tek değer (köprü yuvaları ve günlükteki "aynı anda N" aynı sayıyı görsün) */
+export function bootSlots(): number {
+  return (slotsCache ??= browserSlots());
 }

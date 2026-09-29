@@ -35,7 +35,22 @@ const webDist = path.join(root, 'apps', 'web', 'dist');
 fs.rmSync(path.join(out, 'web'), { recursive: true, force: true });
 if (fs.existsSync(webDist)) fs.cpSync(webDist, path.join(out, 'web'), { recursive: true });
 
-const bundlePkg = { name: 'kavsak-core-bundle', version: pkg.version, private: true, type: 'module', main: 'dist/index.js', dependencies: pkg.dependencies };
+// Aralıklar (^7.0.0-rc14 …) yerine testlerin ve geliştirmenin kullandığı, kök kilitten (`npm ci`) kurulu TAM sürümler: paket
+// her derlemede o günün en yeni sürümlerini çözmesin (denenmemiş Baileys/imapflow sürümü DMG/EXE'ye girmesin, matris işleri
+// aynı sürümü taşısın). Kurulu değilse aralık kalır.
+const dependencies = {};
+for (const [dep, range] of Object.entries(pkg.dependencies ?? {})) {
+  const f = [path.join(coreDir, 'node_modules', dep, 'package.json'), path.join(root, 'node_modules', dep, 'package.json')].find((p) => fs.existsSync(p));
+  let version = null;
+  try {
+    version = f ? JSON.parse(fs.readFileSync(f, 'utf8')).version : null;
+  } catch {
+    /* okunamadı: aralık */
+  }
+  dependencies[dep] = typeof version === 'string' && version ? version : range;
+  if (dependencies[dep] === range) console.warn(`[bundle-core] uyarı: ${dep} kurulu bulunamadı, aralık kullanılıyor (${range})`);
+}
+const bundlePkg = { name: 'kavsak-core-bundle', version: pkg.version, private: true, type: 'module', main: 'dist/index.js', dependencies };
 const pkgPath = path.join(out, 'package.json');
 const prev = fs.existsSync(pkgPath) ? fs.readFileSync(pkgPath, 'utf8') : '';
 const next = JSON.stringify(bundlePkg, null, 2);

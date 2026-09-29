@@ -4,7 +4,8 @@ import { UpdateBanner } from './UpdateBanner';
 import { PermissionBanner } from './PermissionBanner';
 import { trPreview } from './reaction-text';
 import { clearOpening as clearOpeningFor, markOpening, useLoginOpening } from './login-opening';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { applyAccount, applyRead, mergeAccountsSnapshot, mergeChatsSnapshot, mergeFresh, newTouched, type Touched } from './sync-merge';
 import { api, connectEvents } from './api';
 import { PLATFORMS, ORDER_Q_PLATFORMS, isOrderPage, questionOrderRef, shopKind, shopPending, shopTabOf, type Account, type Chat, type ChatFlags, type CoreEvent, type Message, type Platform, type ShopTab, DEFAULT_TAGS } from './types';
 import { Avatar, Chip, Icon, IconText, stripLeadIcon, Logo, Resizer, SyncBar, Tag, ago, fmtTime, loadPaneSizes, useClosing } from './ui';
@@ -307,18 +308,31 @@ export default function App() {
     return p;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // refresh uçuştayken WS'den dokunulan hesap/sohbet kimlikleri: yanıt gelince anlık görüntü (T0) bunları eski halleriyle
+  // ezmesin (açılışta /api/chats saniyeler sürerken gelen 'connected' durumu yeniden 'disconnected'a dönüyordu)
+  const touched = useRef<Touched | null>(null);
   const refreshNow = async () => {
-    const [a, c, h] = await Promise.all([api.accounts(), api.chats(), api.health()]);
-    setAccounts(a);
+    const t = newTouched();
+    touched.current = t;
+    let a: Account[], c: Chat[], h: Awaited<ReturnType<typeof api.health>>;
+    try {
+      [a, c, h] = await Promise.all([api.accounts(), api.chats(), api.health()]);
+    } finally {
+      if (touched.current === t) touched.current = null;
+    }
+    setAccounts((prev) => mergeAccountsSnapshot(prev, a, t));
     setQr((q) => {
       const next = { ...q };
       for (const acc of a) if (acc.qrDataUrl) next[acc.id] = acc.qrDataUrl;
       return next;
     });
     setFallbackProfileName(h.user);
-    setChats(new Map(c.map((x) => [x.id, x])));
+    setChats((prev) => mergeChatsSnapshot(prev, c, t));
     setAi(h.ai);
   };
+
+  // "Daha eski mesajlar" ile yüklenenler sohbet başına bellekte tutulur; geri dönünce yeniden 100'e düşmez (en son açılan 20 sohbet)
+  const msgCache = useRef(new Map<string, Message[]>());
 
   // ---- olay akışı ----
   useEffect(() => {
@@ -402,21 +416,59 @@ export default function App() {
       });
     };
     const queueChat = (chat: Chat) => {
+      touched.current?.chats.add(chat.id);
       pendingDeletes.delete(chat.id);
       pendingChats.set(chat.id, chat);
       if (flushTimer === undefined) flushTimer = window.setTimeout(flushChats, 150);
+    };
+    // Açık sohbeti okundu işaretleme: sohbet başına tek uçuş + en çok 2 sn'de bir (arada gelenler sona tek çağrıyla ertelenir)
+    const readAt = new Map<string, number>();
+    const readBusy = new Set<string>();
+    const readTimers = new Map<string, number>();
+    const readSoon = (id: string) => {
+      if (readTimers.has(id)) return;
+      const wait = (readAt.get(id) ?? 0) + 2000 - Date.now();
+      if (readBusy.has(id) || wait > 0) {
+        readTimers.set(
+          id,
+          window.setTimeout(() => {
+            readTimers.delete(id);
+            if (id === visibleChatRef.current) readSoon(id);
+          }, Math.max(wait, 500)),
+        );
+        return;
+      }
+      readBusy.add(id);
+      readAt.set(id, Date.now());
+      void windowFocused()
+        .then((f) => f && api.markRead(id))
+        .catch(() => undefined)
+        .finally(() => readBusy.delete(id));
+    };
+    // Açık sohbeti depodan yeniden oku (tek uçuş; uçuştayken gelen istek bitince bir kez daha)
+    const refetching = new Map<string, boolean>();
+    const refetchOpen = (sel: string) => {
+      if (refetching.has(sel)) return void refetching.set(sel, true);
+      refetching.set(sel, false);
+      void api
+        .messages(sel)
+        .then((m) => {
+          if (selectedRef.current !== sel) return;
+          setMessages((prev) => mergeFresh(prev, m, sel));
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          const again = refetching.get(sel);
+          refetching.delete(sel);
+          if (again && selectedRef.current === sel) refetchOpen(sel);
+        });
     };
     const onEvent = (ev: CoreEvent) => {
       if (pushLoginEvent(ev)) return; // Mivelo içi giriş ekranı kareleri App durumundan geçmez
       switch (ev.type) {
         case 'account.status':
-          setAccounts((prev) => {
-            const i = prev.findIndex((x) => x.id === ev.account.id);
-            if (i < 0) return [...prev, ev.account];
-            const next = [...prev];
-            next[i] = ev.account;
-            return next;
-          });
+          touched.current?.acc.add(ev.account.id);
+          setAccounts((prev) => applyAccount(prev, ev.account));
           if (ev.account.status === 'connected') setQr((q) => ({ ...q, [ev.account.id]: '' }));
           break;
         case 'account.qr':
@@ -435,6 +487,7 @@ export default function App() {
           }
           break;
         case 'chat.delete':
+          touched.current?.chats.add(ev.chatId);
           pendingChats.delete(ev.chatId);
           pendingDeletes.add(ev.chatId);
           if (flushTimer === undefined) flushTimer = window.setTimeout(flushChats, 150);
@@ -449,7 +502,9 @@ export default function App() {
               return next;
             }
             const cur = prev[ev.accountId];
-            return { ...prev, [ev.accountId]: { progress: Math.max(ev.progress, cur?.progress ?? 0), since: cur?.since ?? Date.now(), label: ev.label } };
+            const progress = Math.max(ev.progress, cur?.progress ?? 0);
+            if (cur && cur.label === ev.label && cur.progress === progress) return prev; // değişiklik yok: yeniden çizim olmasın
+            return { ...prev, [ev.accountId]: { progress, since: cur?.since ?? Date.now(), label: ev.label } };
           });
           break;
         case 'chat.typing':
@@ -464,33 +519,24 @@ export default function App() {
           });
           break;
         case 'messages.read': {
-          if (ev.chatId === selectedRef.current) setMessages((prev) => prev.map((m) => (m.fromMe && m.ts <= ev.before && m.status !== 'read' ? { ...m, status: 'read' } : m)));
-          // listedeki son mesaj tiki (çekirdek de chat.upsert gönderir; eski olay sırası için yerelde de işlenir)
-          const c = chatsRef.current.get(ev.chatId);
+          if (ev.chatId === selectedRef.current) setMessages((prev) => applyRead(prev, ev.before));
+          // listedeki son mesaj tiki (çekirdek de chat.upsert gönderir; eski olay sırası için yerelde de işlenir). Taban kuyruktaki
+          // sürüm: aynı demette gelen taze sohbet (yanıtın önizlemesi/okunmamış) son çizimdeki eski kopyayla ezilmesin
+          const c = pendingChats.get(ev.chatId) ?? chatsRef.current.get(ev.chatId);
           if (c?.lastFromMe && c.lastMessageAt <= ev.before && c.lastStatus !== 'read') queueChat({ ...c, lastStatus: 'read' });
           break;
         }
         case 'messages.refetch':
           // geçmiş eşitlemesinde çok sayıda mesaj yazıldı (tek tek gönderilmedi): açık sohbetse depodan yeniden oku
-          if (selectedRef.current && ev.chatIds.includes(selectedRef.current)) {
-            const sel = selectedRef.current;
-            void api
-              .messages(sel)
-              .then((m) => {
-                if (selectedRef.current !== sel) return;
-                setMessages((prev) => {
-                  const ids = new Set(m.map((x) => x.id));
-                  return [...prev.filter((x) => x.chatId === sel && !ids.has(x.id)), ...m].sort((x, y) => x.ts - y.ts);
-                });
-              })
-              .catch(() => undefined);
-          }
+          if (selectedRef.current && ev.chatIds.includes(selectedRef.current)) refetchOpen(selectedRef.current);
           break;
         case 'account.login-cancelled':
           clearOpeningFor(ev.accountId);
           notify('Giriş penceresi kapatıldı; bağlanma iptal edildi');
           break;
         case 'account.removed':
+          touched.current?.acc.add(ev.accountId);
+          touched.current?.removedAcc.add(ev.accountId);
           setAccounts((prev) => prev.filter((a) => a.id !== ev.accountId));
           setChats((prev) => {
             if (![...prev.values()].some((c) => c.accountId === ev.accountId)) return prev;
@@ -536,9 +582,13 @@ export default function App() {
           });
           break;
         }
-        case 'message.delete':
+        case 'message.delete': {
           if (ev.chatId === selectedRef.current) setMessages((prev) => prev.filter((m) => m.id !== ev.messageId));
+          // kapalı sohbetin önbelleğinden de: yerini gerçek kaydın aldığı local-/ikiz kayıt geri dönünce ikinci balon olmasın
+          const cached = msgCache.current.get(ev.chatId);
+          if (cached && ev.chatId !== selectedRef.current) msgCache.current.set(ev.chatId, cached.filter((m) => m.id !== ev.messageId));
           break;
+        }
         case 'message.upsert': {
           // demette sohbet aynı çerçevede gelir; sohbet bu arada silindiyse (birleştirme) listedeki kopyası kullanılır
           const chat = ev.chat ?? chatsRef.current.get(ev.message.chatId);
@@ -567,8 +617,10 @@ export default function App() {
               }
               return [...prev, ev.message].sort((x, y) => x.ts - y.ts);
             });
-            // pencere arka plandaysa okundu sayma (rozet/okunmamış sayacı korunur)
-            if (!ev.message.fromMe && ev.message.chatId === visibleChatRef.current) void windowFocused().then((f) => f && api.markRead(ev.message.chatId)).catch(() => undefined);
+            // pencere arka plandaysa okundu sayma (rozet/okunmamış sayacı korunur). Yalnız canlı mesajda ya da sohbette okunmamış
+            // varken ve kısılarak: geçmiş sayfası/tepki/durum güncellemesi başına ayrı POST /read (+ WhatsApp presence) gitmesin
+            const cur = ev.chat ?? pendingChats.get(ev.message.chatId) ?? chatsRef.current.get(ev.message.chatId);
+            if (!ev.message.fromMe && ev.message.chatId === visibleChatRef.current && (ev.live || (cur?.unread ?? 0) > 0)) readSoon(ev.message.chatId);
           }
           break;
         }
@@ -576,7 +628,16 @@ export default function App() {
     };
     const stop = connectEvents(onEvent, (open) => {
       setOnline(open);
-      if (open) refresh().catch(() => undefined);
+      if (!open) return;
+      // çekirdek istemci yokken olayları atar: kopukluk sırasında yazılan mesajlar açık sohbette de görünsün, okundu sayılsın
+      const sel = selectedRef.current;
+      void refresh()
+        .catch(() => undefined)
+        .then(() => {
+          if (!sel || selectedRef.current !== sel) return;
+          refetchOpen(sel);
+          if (sel === visibleChatRef.current) readSoon(sel);
+        });
     });
     const t = window.setInterval(() => tick((x) => x + 1), 60_000); // "1 sa" gibi göreli süreler
     return () => {
@@ -584,16 +645,19 @@ export default function App() {
       stop();
       clearInterval(t);
       if (flushTimer !== undefined) clearTimeout(flushTimer);
+      for (const x of readTimers.values()) clearTimeout(x);
     };
   }, [refresh, notify]);
 
   // ---- seçili sohbetin mesajları ----
-  // "Daha eski mesajlar" ile yüklenenler sohbet başına bellekte tutulur; geri dönünce yeniden 100'e düşmez
-  const msgCache = useRef(new Map<string, Message[]>());
   /** `messages` dizisinin hangi sohbete ait olduğu: seçim değiştiği anda eski mesajlar yeni kimlikle önbelleğe yazılmasın */
   const msgOwner = useRef<string | null>(null);
   useEffect(() => {
-    if (selected && msgOwner.current === selected && messages.length) msgCache.current.set(selected, messages);
+    if (!selected || msgOwner.current !== selected || !messages.length) return;
+    const cache = msgCache.current;
+    cache.delete(selected); // en son kullanılan sona
+    cache.set(selected, messages);
+    while (cache.size > 20) cache.delete(cache.keys().next().value!);
   }, [messages, selected]);
   useEffect(() => {
     msgOwner.current = selected;
@@ -605,10 +669,8 @@ export default function App() {
       .messages(selected)
       .then((m) => {
         if (!alive) return;
-        // yeni gelenleri önbellekteki daha eski mesajlarla birleştir
-        const prev = (msgCache.current.get(selected) ?? []).filter((x) => x.chatId === selected);
-        const ids = new Set(m.map((x) => x.id));
-        setMessages([...prev.filter((x) => !ids.has(x.id)), ...m].sort((x, y) => x.ts - y.ts));
+        // yeni gelenleri önbellekteki daha eski mesajlarla birleştir (pencere içindeki bayat/silinmiş kayıtlar düşer)
+        setMessages(mergeFresh(msgCache.current.get(selected) ?? [], m, selected));
         // hiç mesaj yoksa (örn. yalnızca sohbet listesinden geldi) platformdan geçmişi iste
         if (m.length === 0) api.loadHistory(selected).then(() => api.messages(selected)).then((m2) => alive && m2.length && setMessages(m2)).catch(() => undefined);
       })
@@ -1358,7 +1420,7 @@ export default function App() {
                     return list.length === 0 ? (
                       <div className="empty">{f.empty}</div>
                     ) : (
-                      list.map((c) => <ChatRow key={c.id} chat={c} selected={c.id === selected} onClick={() => setSelected(c.id)} />)
+                      list.map((c) => <ChatRow key={c.id} chat={c} selected={c.id === selected} onSelect={setSelected} />)
                     );
                   })()
                 ) : chatList.length === 0 ? (
@@ -1380,7 +1442,7 @@ export default function App() {
                         <span className="label">{day}</span>
                       </div>
                       {items.map((c) => (
-                        <ChatRow key={c.id} chat={c} selected={c.id === selected} onClick={() => setSelected(c.id)} typing={typing[c.id] ? typing[c.id].name ?? '' : null} />
+                        <ChatRow key={c.id} chat={c} selected={c.id === selected} onSelect={setSelected} typing={typing[c.id] ? typing[c.id].name ?? '' : null} />
                       ))}
                     </div>
                   ))
@@ -1470,11 +1532,21 @@ export default function App() {
                       return;
                     }
                     // önce depodaki daha eski mesajlar; depoda yoksa platformdan iste (WhatsApp/Telegram/Instagram/…)
-                    let more = await api.messages(current.id, 300, oldest.ts);
+                    // before = oldest.ts + 1 (kapsayıcı): zaman damgaları saniye hassasiyetli platformlarda (WhatsApp/Telegram) aynı
+                    // saniyedeki albüm/iletilen mesajların pencere dışında kalanları dışlayıcı sınırla hiç yüklenmiyordu. Zaten
+                    // görünenler kimlikle ayıklanır; "daha eski yok" kararı yeni kimlik gelmemesine göre
+                    const known = new Set(currentMessages.map((m) => m.id));
+                    const readOlder = async () => {
+                      const got = await api.messages(current.id, 300, oldest.ts + 1);
+                      const fresh = got.filter((m) => !known.has(m.id));
+                      // aynı saniyede 300'den çok mesaj (uç durum): ilerleyebilmek için dışlayıcı sınıra düş
+                      return fresh.length || got.length < 300 ? fresh : (await api.messages(current.id, 300, oldest.ts)).filter((m) => !known.has(m.id));
+                    };
+                    let more = await readOlder();
                     let r: { timedOut?: boolean; unavailable?: string } | undefined;
                     if (more.length === 0) {
                       r = await api.loadHistory(current.id, oldest.ts, 100);
-                      more = await api.messages(current.id, 300, oldest.ts);
+                      more = await readOlder();
                     }
                     if (selectedRef.current !== current.id) return; // sohbet değişti: eski mesajlar yeni sohbete karışmasın
                     if (more.length === 0) {
@@ -1487,7 +1559,7 @@ export default function App() {
                     }
                     setMessages((prev) => {
                       const ids = new Set(prev.map((m) => m.id));
-                      return [...more.filter((m) => !ids.has(m.id)), ...prev];
+                      return [...more.filter((m) => !ids.has(m.id)), ...prev].sort((a, b) => a.ts - b.ts);
                     });
                   } catch (e) {
                     notify((e as Error).message, true);
@@ -1987,7 +2059,9 @@ function groupByDay(list: Chat[]): Array<[string, Chat[]]> {
   for (const c of list) {
     const d = new Date(c.lastMessageAt);
     const key = d.toDateString() === now.toDateString() ? 'Bugün' : d.toDateString() === y.toDateString() ? 'Dün' : 'Daha eski';
-    out.set(key, [...(out.get(key) ?? []), c]);
+    const arr = out.get(key);
+    if (arr) arr.push(c);
+    else out.set(key, [c]);
   }
   return [...out.entries()];
 }
@@ -2005,15 +2079,16 @@ function NavItem({ icon, label, count, active, onClick, badge, title }: { icon: 
   );
 }
 
-function ChatRow({
+// memo: satır yalnız kendi sohbeti/seçimi/yazıyor durumu değişince yeniden çizilir (liste 300-3000 satır)
+const ChatRow = memo(function ChatRow({
   chat,
   selected,
-  onClick,
+  onSelect,
   typing,
 }: {
   chat: Chat;
   selected: boolean;
-  onClick: () => void;
+  onSelect: (id: string) => void;
   /** yazıyor: null = hayır, "" = evet, "Ad" = grupta kim */
   typing?: string | null;
 }) {
@@ -2023,6 +2098,7 @@ function ChatRow({
   // E-posta: üstte gönderen, ortada konu, altta özet (posta istemcisi düzeni)
   const mailSender = isMail ? (chat.participants?.[0]?.name || chat.handle || '').replace(/<.*>/, '').trim() : '';
   const mailPreview = isMail && mailSender && chat.lastPreview?.startsWith(mailSender + ':') ? chat.lastPreview.slice(mailSender.length + 1).trim() : chat.lastPreview;
+  const onClick = () => onSelect(chat.id);
   return (
     <div className={`row ${selected ? 'selected' : ''} ${chat.unread > 0 ? 'unread' : ''} ${isMail ? 'mailrow' : ''}`} onClick={onClick} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onClick()}>
       <span className="avwrap">
@@ -2062,6 +2138,6 @@ function ChatRow({
       </span>
     </div>
   );
-}
+});
 
 /** Ayarlar → AI anahtarı: kullanıcının kendi Anthropic anahtarı; çekirdekte Anahtar Zinciri/DPAPI'de saklanır, geri okunmaz */

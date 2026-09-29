@@ -1,7 +1,7 @@
 import type { Frame, Locator, Page } from 'playwright';
 import { hashId, type Msg, type Strategy, type Thread } from './bridge.js';
 import { bus } from '../../bus.js';
-import { fillListTimes, parseMailDate, persistSessionCookies, pickFileInput } from './outlook.js';
+import { fillListTimes, mailState, parseMailDate, persistSessionCookies, pickFileInput } from './outlook.js';
 import { cleanMailHtml } from '../mail-html.js';
 
 /**
@@ -25,7 +25,6 @@ async function signInVisible(page: Page): Promise<boolean> {
   return (await page.locator('ui-button.sign-in-button, .sign-in-button').count().catch(() => 0)) > 0;
 }
 
-let meEmail = '';
 /** Liste satırının zamanı (ileti görünümünde zaman okunamazsa yedek) */
 const threadTs = new Map<string, number>();
 
@@ -95,8 +94,8 @@ export const icloud: Strategy = {
     const email = await page
       .evaluate(() => (document.body.innerText.match(/[\w.+-]+@(icloud|me|mac)\.com/i) ?? [])[0] ?? '')
       .catch(() => '');
-    meEmail = email.toLowerCase();
-    return { id: meEmail, label: email || 'iCloud Mail' };
+    mailState(page).me = email.toLowerCase();
+    return { id: mailState(page).me, label: email || 'iCloud Mail' };
   },
 
   async threads(page): Promise<Thread[]> {
@@ -110,7 +109,7 @@ export const icloud: Strategy = {
       bus.log('warn', `iCloud Mail: ileti listesi bulunamadı (sayfa: ${page.url()}; çerçeveler: ${frames}). Kanala sağ tık → Yeniden bağlan ile pencereyi açıp kontrol et.`);
       return [];
     }
-    if (!meEmail) await this.me(page, {});
+    if (!mailState(page).me) await this.me(page, {});
     const rows = await readRows(f);
     const timeOf = (r: (typeof rows)[number]) => r.lines.find((l) => parseMailDate(l) !== undefined) ?? '';
     const times = fillListTimes(rows.map((r) => parseMailDate(timeOf(r))));
@@ -245,7 +244,7 @@ async function readThread(page: Page, threadId: string, limit: number, restore: 
   if (restore && wasUnread) await markUnread(page, threadId);
   return rows
     .map((r, i) => {
-      const fromMe = !!meEmail && r.from.toLowerCase() === meEmail;
+      const fromMe = !!mailState(page).me && r.from.toLowerCase() === mailState(page).me;
       return { id: hashId(threadId + '|' + r.from + '|' + r.text.slice(0, 120)), text: r.text.replace(/[ \t\u00a0]+$/gm, '').replace(/\n{3,}/g, '\n\n').slice(0, 20_000), html: cleanMailHtml(r.html, 'https://www.icloud.com/'), ts: parseMailDate(r.time) ?? (threadTs.get(threadId) ?? Date.now()) - (rows.length - 1 - i) * 60_000, fromMe, senderId: fromMe ? 'me' : r.from || threadId, senderName: fromMe ? 'Ben' : r.from || 'Gönderen' };
     })
     .slice(-limit);

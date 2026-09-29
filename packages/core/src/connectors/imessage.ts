@@ -8,7 +8,8 @@ import { BaseConnector, type StartOptions } from './base.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
 import { openExternal } from '../platform.js';
-import { chatId as chatIdOf, type Attachment } from '../model.js';
+import { chatId as chatIdOf, messageId as messageIdOf, type Attachment, type Message } from '../model.js';
+import { trReactionText } from '../reaction-text.js';
 import { normalizePhone as normalizeContactPhone } from '../contacts-mac.js';
 
 const execFileP = promisify(execFile);
@@ -42,8 +43,12 @@ interface Row {
   item_type: number;
   /** 0 bilinen, 1 bilinmeyen gönderen, 2 istenmeyen ("(filtered)"), 4 filtrelenen SMS ("(smsft)") */
   is_filtered: number | null;
-  /** Mesajlar'da "Son Silinenler"e taşınmışsa geri çekilme zamanı */
+  /** Gönderimi geri alma (Undo Send) zamanı; içerik boşaltılır, satır yerinde güncellenir (yeni ROWID yok) */
   date_retracted: number | null;
+  /** Düzenleme zamanı (macOS 13+): metin yerinde değişir */
+  date_edited?: number | null;
+  /** Mesajlar → Son Silinenler (chat_recoverable_message_join) satırı */
+  recoverable?: number | null;
   /** 0 normal mesaj; 2000-2007 tapback (beğendi/güldü…), 3000+ tapback geri alma, 1000 çıkartma/uygulama eki */
   associated_message_type: number | null;
   /** Tapback'in hedef mesajı: "p:0/<guid>" ya da "bp:<guid>" (eski şemada yok) */
@@ -64,10 +69,10 @@ interface AttRow {
 }
 
 /** SELECT + JOIN gövdesi: mesaj + sohbet + gönderen (WHERE/ORDER dışarıdan eklenir) */
-const SELECT_ROWS = (retractedCol: string, filteredCol: string, assocCol: string, assocGuidCol = 'NULL', assocEmojiCol = 'NULL') =>
+const SELECT_ROWS = (retractedCol: string, filteredCol: string, assocCol: string, assocGuidCol = 'NULL', assocEmojiCol = 'NULL', editedCol = 'NULL') =>
   `SELECT m.ROWID AS rowid, m.guid, m.text, m.attributedBody, m.date, m.is_from_me, m.cache_has_attachments, m.item_type,
           m.is_delivered, m.is_read, m.date_read, m.error,
-          ${retractedCol} AS date_retracted, ${assocCol} AS associated_message_type,
+          ${retractedCol} AS date_retracted, ${editedCol} AS date_edited, ${assocCol} AS associated_message_type,
           ${assocGuidCol} AS associated_message_guid, ${assocEmojiCol} AS associated_message_emoji,
           h.id AS handle, c.chat_identifier, c.guid AS chat_guid, c.display_name, ${filteredCol} AS is_filtered
      FROM message m
@@ -131,6 +136,7 @@ export class IMessageConnector extends BaseConnector {
   private lastRowId = 0;
   private names = new Map<string, string>();
   private retractedCol = 'NULL';
+  private editedCol = 'NULL';
   private filteredCol = 'NULL';
   private assocCol = 'NULL';
   private assocGuidCol = 'NULL';
@@ -167,6 +173,7 @@ export class IMessageConnector extends BaseConnector {
       const mcols = new Set((this.db.prepare('PRAGMA table_info(message)').all() as Array<{ name: string }>).map((c) => c.name));
       const ccols = new Set((this.db.prepare('PRAGMA table_info(chat)').all() as Array<{ name: string }>).map((c) => c.name));
       this.retractedCol = mcols.has('date_retracted') ? 'm.date_retracted' : 'NULL';
+      this.editedCol = mcols.has('date_edited') ? 'm.date_edited' : 'NULL';
       this.filteredCol = ccols.has('is_filtered') ? 'c.is_filtered' : 'NULL';
       this.assocCol = mcols.has('associated_message_type') ? 'm.associated_message_type' : 'NULL';
       this.assocGuidCol = mcols.has('associated_message_guid') ? 'm.associated_message_guid' : 'NULL';
@@ -219,11 +226,13 @@ export class IMessageConnector extends BaseConnector {
     this.scanRecoverable();
     this.watchDb();
     // yedek yoklama: FSEvents olay kaçırabilir (uyku, kopya disk) — izleyici varken 15 sn, yoksa eskisi gibi 3 sn
-    this.timer = setInterval(() => this.poll(this.watcher ? 'yedek 15 sn' : 'yoklama 3 sn'), this.watcher ? 15_000 : 3000);
+    this.timer = setInterval(() => void this.poll(this.watcher ? 'yedek 15 sn' : 'yoklama 3 sn'), this.watcher ? 15_000 : 3000);
   }
 
   private watcher?: fs.FSWatcher;
   private watchDebounce?: NodeJS.Timeout;
+  /** Bekleyen izleyici olaylarının ilki (ms): debounce'un üst sınırı için */
+  private watchFirst = 0;
   /**
    * Anlık algılama (BlueBubbles, mautrix-imessage): Messages klasörü izlenir; chat.db / chat.db-wal değişince 150 ms sonra
    * yalnız yeni satırlar okunur. Dosya değil klasör izlenir: WAL denetim noktasında kısaltılıp yeniden oluşturulunca dosya
@@ -235,7 +244,14 @@ export class IMessageConnector extends BaseConnector {
       this.watcher = fs.watch(path.dirname(DB), { persistent: false }, (_ev, name) => {
         if (name && !String(name).startsWith('chat.db')) return;
         if (this.watchDebounce) clearTimeout(this.watchDebounce);
-        this.watchDebounce = setTimeout(() => this.poll('izleyici'), 150);
+        // Üst sınırlı debounce: yazımlar 150 ms'den sık geldikçe (iCloud eşitlemesi) tur hiç çalışmıyor, canlı mesaj 15 sn'lik
+        // yedeği bekliyordu → ilk olaydan en geç 1 sn sonra yoklanır
+        if (!this.watchFirst) this.watchFirst = Date.now();
+        const wait = Math.max(0, Math.min(150, 1000 - (Date.now() - this.watchFirst)));
+        this.watchDebounce = setTimeout(() => {
+          this.watchFirst = 0;
+          void this.poll('izleyici');
+        }, wait);
       });
       this.watcher.on('error', () => {
         this.watcher?.close();
@@ -251,6 +267,7 @@ export class IMessageConnector extends BaseConnector {
     this.watcher?.close();
     this.watcher = undefined;
     if (this.watchDebounce) clearTimeout(this.watchDebounce);
+    this.watchFirst = 0;
     if (this.timer) clearInterval(this.timer);
     this.pendingAtt.clear();
     this.db?.close();
@@ -259,10 +276,43 @@ export class IMessageConnector extends BaseConnector {
   }
 
   async sendText(remoteChatId: string, text: string): Promise<{ remoteId: string }> {
+    const t0 = Date.now() - 200;
     await this.deliver(remoteChatId, { text });
     const id = `local-${Date.now()}`;
     this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent' });
+    this.dropLocalIfIngested(remoteChatId, t0, { text });
     return { remoteId: id };
+  }
+
+  /**
+   * Gerçek satır, osascript dönmeden (dosyada `delay 1`) yoklamayla gelip yazıldıysa o anda silinecek yerel kayıt yoktu;
+   * sonradan yazılan "local-" kopya sohbette ikinci balon olarak kalıyordu. Gönderimden beri benden çıkan satır depoda varsa
+   * yerel kopyalar şimdi düşürülür (yoksa her zamanki yol: gerçek satır gelince base.upsertMessage düşürür).
+   */
+  private dropLocalIfIngested(remoteChatId: string, sinceMs: number, payload: { text: string } | { file: string }): void {
+    const cid = chatIdOf(this.account.id, remoteChatId);
+    const guids = this.sentRowsSince(remoteChatId, sinceMs, payload);
+    if (!guids.some((g) => this.store.hasMessage(messageIdOf(cid, g)))) return;
+    for (const mid of this.store.dropLocalDuplicates(cid)) bus.emit({ type: 'message.delete', chatId: cid, messageId: mid });
+  }
+
+  /** chat.db'de bu sohbette `sinceMs`'ten beri benden çıkan satırlar (metinde aynı metin, dosyada ekli satır); guid listesi */
+  private sentRowsSince(remoteChatId: string, sinceMs: number, payload: { text: string } | { file: string }): string[] {
+    if (!this.db) return [];
+    try {
+      const isFile = 'file' in payload;
+      const rows = this.db
+        .prepare(
+          `SELECT m.guid, m.text, m.attributedBody FROM message m JOIN chat_message_join cmj ON cmj.message_id = m.ROWID JOIN chat c ON c.ROWID = cmj.chat_id
+            WHERE c.guid = ? AND m.is_from_me = 1 AND m.date >= ? ${isFile ? 'AND m.cache_has_attachments = 1' : ''} ORDER BY m.ROWID`,
+        )
+        .all(remoteChatId, this.msToApple(sinceMs)) as Array<{ guid: string; text: string | null; attributedBody: Buffer | null }>;
+      if (isFile) return rows.map((r) => r.guid);
+      const want = payload.text.trim();
+      return rows.filter((r) => ((r.text ?? '').replace(/\uFFFC/g, '').trim() || decodeAttributedBody(r.attributedBody)) === want).map((r) => r.guid);
+    } catch {
+      return []; // eski şema: denetlenemedi
+    }
   }
 
   /**
@@ -279,6 +329,7 @@ export class IMessageConnector extends BaseConnector {
     const copy = path.join(dir, local);
     fs.copyFileSync(file.path, copy);
     fs.writeFileSync(copy + '.type', file.mime || mimeFromName(file.name));
+    const t0 = Date.now() - 200;
     await this.deliver(remoteChatId, { file: copy });
     // Altyazı hemen ardından sendText ile gider; aynı milisaniyede aynı "local-<ts>" kimliği üretilmesin
     const id = `local-${Date.now()}f`;
@@ -295,6 +346,7 @@ export class IMessageConnector extends BaseConnector {
       status: 'sent',
       attachments: [{ kind, name: file.name, mime: file.mime, size: file.size, ...(kind === 'image' ? { url: proxied, link: proxied } : { link: proxied }) }],
     });
+    this.dropLocalIfIngested(remoteChatId, t0, { file: copy });
     if (caption) await this.sendText(remoteChatId, caption);
     return { remoteId: id };
   }
@@ -329,6 +381,10 @@ export class IMessageConnector extends BaseConnector {
         execFile('osascript', ['-e', script], { timeout: 45_000 }, (err, _out, stderr) => (err ? reject(new Error(stderr || err.message)) : resolve()));
       });
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    // AppleEvent zaman aşımı gönderimi İPTAL ETMEZ: Mesajlar kuyruktaki send'i yine yürütür. Yeniden denemeden önce chat.db'de
+    // gitmiş mi bakılır (yoksa aynı mesaj/dosya iki kez gidiyordu). chat.db açık değilse (izin yok) eski davranış.
+    const startMs = Date.now() - 200;
+    const wentOut = () => this.sentRowsSince(remoteChatId, startMs, payload).length > 0;
     try {
       // Sıra (mautrix-imessage + BlueBubbles): 1) sohbet kimliği (guid) — hizmeti Mesajlar seçer; 2) -1728'de 1 sn bekleyip
       // sohbet kimliği hizmet üzerinden; 3) birebirde kişi + hizmet. Zaman aşımı/-1002'de Mesajlar yeniden başlatılıp bir kez daha.
@@ -337,12 +393,27 @@ export class IMessageConnector extends BaseConnector {
       } catch (e) {
         const msg = (e as Error).message;
         if (/timed out|-1712|1002|ETIMEDOUT|killed/i.test(msg)) {
+          if (this.db) {
+            for (let i = 0; i < 16; i++) {
+              if (wentOut()) {
+                bus.log('warn', 'iMessage: Mesajlar yanıtı gecikti ama mesaj gitmiş; yeniden gönderilmedi');
+                return;
+              }
+              await sleep(500);
+            }
+          }
           bus.log('warn', 'iMessage: Mesajlar yanıt vermedi, yeniden başlatılıp tekrar deneniyor');
           await run('tell application "Messages" to quit').catch(() => undefined);
           await sleep(3000);
           await run('tell application "Messages" to launch').catch(() => undefined);
           await sleep(2000);
-          await run(byChat);
+          try {
+            await run(byChat);
+          } catch (e3) {
+            // ikinci deneme de zaman aşımına düştü ama gittiyse başarı say (zamanlanmış gönderimin yeniden denemesi çift göndermesin)
+            if (this.db && wentOut()) return;
+            throw e3;
+          }
           return;
         }
         await sleep(1000);
@@ -406,7 +477,7 @@ export class IMessageConnector extends BaseConnector {
   }
 
   private get selectSql(): string {
-    return SELECT_ROWS(this.retractedCol, this.filteredCol, this.assocCol, this.assocGuidCol, this.assocEmojiCol);
+    return SELECT_ROWS(this.retractedCol, this.filteredCol, this.assocCol, this.assocGuidCol, this.assocEmojiCol, this.editedCol);
   }
 
   private appleToMs(d: number): number {
@@ -569,16 +640,26 @@ export class IMessageConnector extends BaseConnector {
   private syncUnread(): void {
     if (!this.db) return;
     try {
+      // Satır satır (tarihli): Mivelo'da okunan sohbette (read_upto) Mesajlar'da is_read=0 kalan eski mesajlar sayılmaz. Eskiden
+      // sohbet başına toplam sayılıyordu → yeni tek mesajda rozet eski okunmamışlarla şişiyor, yeni mesaj yokken de depo 0'a
+      // zorladığı için her turda aynı sohbet yeniden yazılıp chat.upsert yayılıyordu.
       const rows = this.db
         .prepare(
-          `SELECT c.guid AS guid, COUNT(*) AS n FROM message m
+          `SELECT c.guid AS guid, m.date AS date FROM message m
              JOIN chat_message_join j ON j.message_id = m.ROWID JOIN chat c ON c.ROWID = j.chat_id
-            WHERE m.is_from_me = 0 AND m.is_read = 0 AND m.item_type = 0 AND COALESCE(${this.assocCol}, 0) NOT BETWEEN 2000 AND 3999 GROUP BY c.guid`,
+            WHERE m.is_from_me = 0 AND m.is_read = 0 AND m.item_type = 0 AND COALESCE(${this.assocCol}, 0) NOT BETWEEN 2000 AND 3999`,
         )
-        .all() as Array<{ guid: string; n: number }>;
-      const counts = new Map(rows.map((r) => [r.guid, r.n]));
+        .all() as Array<{ guid: string; date: number }>;
+      const byChat = new Map<string, number[]>();
+      for (const r of rows) {
+        let list = byChat.get(r.guid);
+        if (!list) byChat.set(r.guid, (list = []));
+        list.push(this.appleToMs(r.date));
+      }
       for (const chat of this.store.listChatsOf(this.account.id)) {
-        const n = counts.get(chat.remoteId) ?? 0;
+        const upto = chat.readUpto ?? 0;
+        let n = (byChat.get(chat.remoteId) ?? []).filter((ms) => ms > upto).length;
+        if (upto && chat.lastMessageAt <= upto) n = 0; // depo da 0'a zorlar; saat kaymasında sonsuz yeniden yazım olmasın
         if (n !== chat.unread) this.upsertChat({ remoteId: chat.remoteId, name: chat.name, unread: n });
       }
     } catch (e) {
@@ -594,22 +675,31 @@ export class IMessageConnector extends BaseConnector {
       const rows = this.db
         .prepare(
           `SELECT m.ROWID AS rowid, m.guid, m.text, m.attributedBody, m.date, m.is_from_me, m.cache_has_attachments, m.item_type,
-                  m.is_delivered, m.is_read, m.date_read, m.error, 1 AS date_retracted, ${this.assocCol} AS associated_message_type,
+                  m.is_delivered, m.is_read, m.date_read, m.error, ${this.retractedCol} AS date_retracted, ${this.editedCol} AS date_edited,
+                  1 AS recoverable, ${this.assocCol} AS associated_message_type,
                   ${this.assocGuidCol} AS associated_message_guid, ${this.assocEmojiCol} AS associated_message_emoji, h.id AS handle, c.chat_identifier, c.guid AS chat_guid, c.display_name,
                   ${this.filteredCol} AS is_filtered
              FROM chat_recoverable_message_join j JOIN message m ON m.ROWID = j.message_id JOIN chat c ON c.ROWID = j.chat_id
              LEFT JOIN handle h ON h.ROWID = m.handle_id`,
         )
         .all() as Row[];
-      for (const r of rows) this.ingest(r, false);
+      // Yalnız henüz işlenmemişler yazılır: eskiden dakikada bir TÜM kurtarılabilir mesajlar işlemsiz yeniden yazılıyordu
+      // (binlerce satırda ~0,5 sn kilit + satır başına chat.upsert). Tapback'ler yalnız ilk taramada uygulanır.
+      const first = !this.recoverableScanned;
+      this.recoverableScanned = true;
+      const todo = rows.filter((r) => r.item_type === 0 && (isAssociatedReaction(r.associated_message_type) ? first : !this.retractedDone(r)));
+      if (todo.length) this.store.transaction(() => todo.forEach((r) => this.ingest(r, false)));
       // Son Silinenler'den geri alınan / kalıcı silinen mesajların sohbeti artık "silinmiş" klasöründe görünmesin
+      // (sohbet kümesi değişmediyse tüm sohbetlerin meta'sını dakikada bir yeniden çözmeye gerek yok)
       const still = new Set(rows.map((r) => r.chat_guid));
-      for (const chat of this.store.listChatsOf(this.account.id)) {
+      const sig = [...still].sort().join('\n');
+      if (sig !== this.recoverableSig || todo.length) for (const chat of this.store.listChatsOf(this.account.id)) {
         if (!chat.meta?.deleted || still.has(chat.remoteId)) continue;
         const { deleted: _d, ...meta } = chat.meta;
         this.upsertChat({ remoteId: chat.remoteId, name: chat.name, meta });
       }
       // yalnız sayı değişince yaz (dakikada bir aynı satır günlüğü dolduruyordu)
+      this.recoverableSig = sig;
       if (rows.length && rows.length !== this.retractedLogged) bus.log('info', `iMessage: son silinenlerde ${rows.length} mesaj`);
       this.retractedLogged = rows.length;
     } catch {
@@ -617,23 +707,68 @@ export class IMessageConnector extends BaseConnector {
     }
   }
 
+  private recoverableScanned = false;
+  private recoverableSig?: string;
+
+  /** Son Silinenler satırı daha önce işlendi mi (depoda 🗑 önekiyle ya da silinmiş olarak duruyor) */
+  private retractedDone(r: Row): boolean {
+    const m = this.store.getMessage(messageIdOf(chatIdOf(this.account.id, r.chat_guid), r.guid));
+    return !!m && (m.deleted === true || m.text.startsWith('🗑'));
+  }
+
   private rescanRetracted(): void {
+    // Gönderimi geri alınan (date_retracted) mesajlar syncEdits ile işlenir; burada yalnız Son Silinenler
     this.scanRecoverable();
-    if (this.retractedCol === 'NULL' || !this.db) return;
-    for (const r of this.query(Math.max(0, this.lastRowId - 5000), 500, true)) this.ingest(r, false);
+  }
+
+  /** guid → son görülen "düzenleme|geri alma" zamanı (değişmeyeni yeniden işlememek için) */
+  private editSeen = new Map<string, string>();
+  /**
+   * Düzenleme ve gönderimi geri alma (macOS 13+) satırı YERİNDE günceller, yeni ROWID gelmez; yoklama `ROWID > son` okuduğu için
+   * yalnız yeniden başlatınca görünüyordu. Apple sınırları (düzenleme 15 dk, geri alma 2 dk) nedeniyle son 2 saatin mesajlarına
+   * bakılır (message_date indeksli, ucuz).
+   */
+  private syncEdits(): void {
+    if (!this.db || (this.editedCol === 'NULL' && this.retractedCol === 'NULL')) return;
+    try {
+      const since = this.msToApple(Date.now() - 2 * 3600e3);
+      const rows = this.db
+        .prepare(`${this.selectSql} WHERE ${this.dateCol} > ? AND (COALESCE(${this.editedCol}, 0) > 0 OR COALESCE(${this.retractedCol}, 0) > 0) ORDER BY m.ROWID LIMIT 500`)
+        .all(since) as Row[];
+      const todo: Row[] = [];
+      for (const r of rows) {
+        const sig = `${r.date_edited ?? 0}|${r.date_retracted ?? 0}`;
+        if (this.editSeen.get(r.guid) === sig) continue;
+        this.editSeen.set(r.guid, sig);
+        todo.push(r);
+      }
+      if (todo.length) this.store.transaction(() => todo.forEach((r) => this.ingest(r, false)));
+      if (this.editSeen.size > 5000) this.editSeen.clear();
+    } catch (e) {
+      bus.log('warn', `iMessage düzenleme taraması: ${(e as Error).message}`);
+    }
   }
 
   /**
-   * Satırları 800'lük tek işlemli dilimlerle yaz, aralarda olay döngüsünü bırak: 60 bin satırlık açılış yüklemesi tek parça
-   * çalışınca çekirdek saniyelerce yanıt vermiyordu (arayüz "Çekirdek başlatılıyor", diğer kanalların bağlantı yoklamaları).
+   * Satırları tek işlemli dilimlerle yaz (≤800 satır ya da ≈25 ms), aralarda olay döngüsünü bırak: 60 bin satırlık açılış
+   * yüklemesi / iCloud birikmesi tek parça çalışınca çekirdek saniyelerce yanıt vermiyordu. stop() olursa false.
    */
-  private async ingestChunked(rows: Row[]): Promise<void> {
-    for (let i = 0; i < rows.length; i += 800) {
-      if (this.stopped || !this.db) return;
-      const part = rows.slice(i, i + 800);
-      this.store.transaction(() => part.forEach((r) => this.ingest(r, false)));
-      if (i + 800 < rows.length) await new Promise((r) => setImmediate(r));
+  private async ingestChunked(rows: Row[], liveOf: (r: Row) => boolean = () => false): Promise<boolean> {
+    let i = 0;
+    while (i < rows.length) {
+      if (this.stopped || !this.db) return false;
+      const t0 = performance.now();
+      const end = Math.min(rows.length, i + 800);
+      this.store.transaction(() => {
+        while (i < end) {
+          const r = rows[i++];
+          this.ingest(r, liveOf(r));
+          if (performance.now() - t0 > 25) break;
+        }
+      });
+      if (i < rows.length) await new Promise((r) => setImmediate(r));
     }
+    return true;
   }
 
   private async backfill(): Promise<void> {
@@ -691,7 +826,28 @@ export class IMessageConnector extends BaseConnector {
     }
   }
 
-  private poll(trigger = 'ilk'): void {
+  /** Yoklama sürüyor (dilimli yazım olay döngüsünü bırakırken yeni tur başlamasın); sürerken gelen tetik bir tur daha çalıştırır */
+  private polling = false;
+  private pollAgain?: string;
+
+  private async poll(trigger = 'ilk'): Promise<void> {
+    if (!this.db) return;
+    if (this.polling) {
+      this.pollAgain = trigger;
+      return;
+    }
+    this.polling = true;
+    try {
+      await this.pollOnce(trigger);
+    } finally {
+      this.polling = false;
+    }
+    const again = this.pollAgain;
+    this.pollAgain = undefined;
+    if (again && this.db && !this.stopped) await this.poll(again);
+  }
+
+  private async pollOnce(trigger: string): Promise<void> {
     if (!this.db) return;
     try {
       // Birikmiş mesajların hepsi (iCloud eşitlemesi bir anda binlerce yazabilir): 500'lük parçalar, tur başına ≤10 parça
@@ -707,17 +863,23 @@ export class IMessageConnector extends BaseConnector {
       const top = Math.max(before, ...rows.map((r) => r.rowid));
       this.trackUnjoined(before, top, new Set(rows.map((r) => r.rowid)));
       rows.push(...this.recheckUnjoined());
+      // tapback'ler hedef mesajlardan SONRA (bağsız kalıp bu turda gelen hedef listenin sonundaydı → tepki uygulanamıyordu)
+      const ordered = [...rows.filter((r) => !isAssociatedReaction(r.associated_message_type)), ...rows.filter((r) => isAssociatedReaction(r.associated_message_type))];
       let fresh = 0;
       let oldest = Infinity;
-      for (const r of rows) {
+      const now0 = Date.now();
+      const liveSet = new Set<Row>();
+      for (const r of ordered) {
         // iCloud eşitlemesi eski mesajları da yeni ROWID'lerle düşürür: yalnızca gerçekten yeni (son 10 dk) olanlar canlı
         // sayılsın; eskiler bildirim çalmadan, okunmamış sayacını oynatmadan yazılsın (sayaç syncUnread ile is_read'den gelir).
         const sentMs = this.appleToMs(r.date);
-        const live = Date.now() - sentMs < 10 * 60_000;
-        if (live && !r.is_from_me) (fresh++, (oldest = Math.min(oldest, sentMs)));
-        this.ingest(r, live);
-        this.lastRowId = Math.max(this.lastRowId, r.rowid);
+        if (now0 - sentMs >= 10 * 60_000) continue;
+        liveSet.add(r);
+        if (!r.is_from_me) (fresh++, (oldest = Math.min(oldest, sentMs)));
       }
+      // Tek işlemli dilimler (satır başına ayrı commit 5000 satırda ~3 sn kilitliyordu); imleç ancak hepsi yazılınca ilerler
+      if (!(await this.ingestChunked(ordered, (r) => liveSet.has(r)))) return;
+      this.lastRowId = Math.max(this.lastRowId, top);
       // Tanı: gönderenin zamanından Mivelo'da görünene kadar. "yedek" tetik → klasör izleyicisi olayı kaçırdı;
       // "izleyici" tetikle yüksek gecikme → mesaj bu Mac'in chat.db'sine geç yazıldı (Apple teslimi / iCloud eşitlemesi)
       if (fresh) bus.log('info', `imessage: gecikme ${((Date.now() - oldest) / 1000).toFixed(1)} sn (${fresh} yeni mesaj) — tetik: ${trigger}`);
@@ -733,6 +895,7 @@ export class IMessageConnector extends BaseConnector {
         this.unreadAt = now; // telefonda okununca burada da düşer
         this.syncUnread();
         this.syncReceipts();
+        this.syncEdits();
       }
     } catch (e) {
       bus.log('warn', `iMessage yoklama: ${(e as Error).message}`);
@@ -842,8 +1005,12 @@ export class IMessageConnector extends BaseConnector {
     let text = (r.text ?? '').replace(/\uFFFC/g, '').trim() || decodeAttributedBody(r.attributedBody);
     // Mesajlar satırı ek dosyası inmeden yazar: canlı mesajın eki henüz yoksa ROWID beklemeye alınır, poll yeniden bakar
     const attachments = this.attachmentsOf(r, live ? () => this.trackPendingAttachment(r.rowid) : undefined);
-    if (!text && !attachments) return;
-    const deleted = !!r.date_retracted;
+    if (!text && !attachments) {
+      // Gönderimi geri alındı (Undo Send): içerik boşaltılır → depodaki özgün metin "silindi" olur (depoda yoksa kayıt açılmaz)
+      if (r.date_retracted && !r.recoverable) this.applyEdited(r.chat_guid, r.guid, null);
+      return;
+    }
+    const deleted = !!r.recoverable;
     if (deleted) text = `🗑 ${text || '(ek)'}`; // Mesajlar → Son Silinenler
     const isGroup = r.chat_identifier.startsWith('chat');
     // chat_identifier filtrelenmiş sohbetlerde "+90…(smsft)" / "(filtered)" ekiyle gelir; ad/numara eşlemesinde ek atılır
@@ -858,20 +1025,44 @@ export class IMessageConnector extends BaseConnector {
     if (!existing || existing.name !== chatName || JSON.stringify(meta) !== JSON.stringify(existing.meta ?? {}))
       this.upsertChat({ remoteId: r.chat_guid, name: chatName, kind: isGroup ? 'group' : 'direct', meta });
     const ms = this.appleToMs(r.date);
+    const status = r.is_from_me ? imessageStatus(r) : 'delivered';
+    const edited = !!r.date_edited && !r.date_retracted && !deleted;
+    // Açılış yüklemesi / yeniden taramalar depoda aynı duran mesajı yeniden yazmasın (UPDATE + FTS + chat.upsert yayını;
+    // her açılışta 13-60 bin satır). Alındı, sonradan inen ek, metin değişikliği yine yazılır.
+    const senderName = r.is_from_me ? 'Ben' : this.nameOf(r.handle, null, r.chat_identifier);
+    if (!live && this.unchanged(r, text, status, attachments, senderName)) {
+      if (edited) this.applyEdited(r.chat_guid, r.guid, text);
+      return;
+    }
     this.upsertMessage(
       {
         remoteChatId: r.chat_guid,
         remoteId: r.guid,
         senderId: r.is_from_me ? 'me' : (r.handle ?? 'unknown'),
-        senderName: r.is_from_me ? 'Ben' : this.nameOf(r.handle, null, r.chat_identifier),
+        senderName,
         fromMe: r.is_from_me === 1,
         text,
         ts: ms,
-        status: r.is_from_me ? imessageStatus(r) : 'delivered',
+        status,
         attachments,
       },
       { live },
     );
+    // karşı tarafın (ya da benim) düzenlemem: metin yerinde değişti → "düzenlendi" işareti + önizleme
+    if (edited) this.applyEdited(r.chat_guid, r.guid, text);
+  }
+
+  /** Depodaki mesaj chat.db satırıyla aynı mı (metin, ekler; durum geri gitmez) — öyleyse yeniden yazmaya gerek yok */
+  private unchanged(r: Row, text: string, status: Message['status'], attachments: Attachment[] | undefined, senderName: string): boolean {
+    const m = this.store.getMessage(messageIdOf(chatIdOf(this.account.id, r.chat_guid), r.guid));
+    if (!m) return false;
+    if (m.deleted) return true; // silinen geri gelmez (depo da ezmez)
+    if (m.text !== trReactionText(text)) return false;
+    if (senderName && m.senderName !== senderName) return false; // rehber adı sonradan öğrenildi → eski mesajlar da adlansın
+    const RANK: Record<string, number> = { failed: -1, pending: 0, sent: 1, delivered: 2, read: 3 };
+    if (m.status !== status && (status === 'failed' || (RANK[status] ?? 0) > (RANK[m.status] ?? 0))) return false;
+    const a = (x: Attachment[] | undefined) => (x?.length ? JSON.stringify(x) : '');
+    return a(m.attachments) === a(attachments);
   }
 }
 

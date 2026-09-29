@@ -61,7 +61,16 @@ export class SlackConnector extends BaseConnector {
   /** iş parçacığı: `kanal/üst ts` → son görülen latest_reply (değişmediyse conversations.replies istenmez) */
   private threadsSeen = new Map<string, string>();
   private meId = '';
+  /** sohbet → bu ts'e kadar (dahil) tüm mesajlar alındı; kalıcı (meta `slack_last:<hesap>`), yeniden açılışta kaldığı yerden */
   private lastTs = new Map<string, string>();
+  /** bu oturumda en az bir kez geçmişi çekilen sohbetler (kalıcı imleçle gelen birikmiş eskiler canlı sayılmasın) */
+  private sessionKnown = new Set<string>();
+  /**
+   * Sayfa sınırında kalan boşluk: (lastTs, top) aralığı henüz alınmadı; high = o sırada alınmış en yeni ts.
+   * Boşluk kapanınca imleç high'a ilerler (aradaki mesajlar kaybolmaz).
+   */
+  private gaps = new Map<string, { top: string; high: string }>();
+  private saveTimer?: NodeJS.Timeout;
   private polling = false;
   private stopped = false;
   private convs: Array<{ id: string; name: string; kind: 'direct' | 'group' | 'channel' }> = [];
@@ -100,6 +109,7 @@ export class SlackConnector extends BaseConnector {
     }
     this.stopped = false;
     this.startedAt = Date.now();
+    this.loadCursors();
     await this.poll(true);
     this.schedule();
     if (this.appToken) void this.openSocket();
@@ -120,6 +130,11 @@ export class SlackConnector extends BaseConnector {
     if (this.timer) clearTimeout(this.timer);
     if (this.sockTimer) clearTimeout(this.sockTimer);
     if (this.dirtyTimer) clearTimeout(this.dirtyTimer);
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = undefined;
+      this.saveCursors();
+    }
     this.sock?.removeAllListeners();
     this.sock?.close();
     this.sock = undefined;
@@ -274,7 +289,8 @@ export class SlackConnector extends BaseConnector {
 
   /** Mivelo'da okununca Slack'te de okundu (conversations.mark; *:write kapsamları) */
   async markRead(remoteChatId: string): Promise<void> {
-    const ts = this.lastTs.get(remoteChatId) ?? (await this.web.conversations.history({ channel: remoteChatId, limit: 1 })).messages?.[0]?.ts;
+    // boşluk kapanana dek imleç geride kalır: alınmış en yeni mesaj (gap.high) okundu sayılsın
+    const ts = this.gaps.get(remoteChatId)?.high ?? this.lastTs.get(remoteChatId) ?? (await this.web.conversations.history({ channel: remoteChatId, limit: 1 })).messages?.[0]?.ts;
     if (!ts) return;
     try {
       await this.web.conversations.mark({ channel: remoteChatId, ts: String(ts) });
@@ -371,8 +387,13 @@ export class SlackConnector extends BaseConnector {
   private pickForPoll(first: boolean): typeof this.convs {
     const HISTORY_PER_POLL = first ? 40 : 20;
     if (this.convs.length <= HISTORY_PER_POLL) return this.convs;
+    // sayfa sınırında boşluğu kalan sohbetler önce (kalan aralık hemen alınsın)
     const recent = [...this.convs]
-      .sort((a, b) => Number(this.lastTs.get(b.id) ?? 0) + (b.kind === 'direct' ? 1e9 : 0) - (Number(this.lastTs.get(a.id) ?? 0) + (a.kind === 'direct' ? 1e9 : 0)))
+      .sort(
+        (a, b) =>
+          Number(this.gaps.has(b.id)) - Number(this.gaps.has(a.id)) ||
+          Number(this.lastTs.get(b.id) ?? 0) + (b.kind === 'direct' ? 1e9 : 0) - (Number(this.lastTs.get(a.id) ?? 0) + (a.kind === 'direct' ? 1e9 : 0)),
+      )
       .slice(0, HISTORY_PER_POLL / 2);
     const picked = new Set(recent.map((c) => c.id));
     const out = [...recent];
@@ -422,24 +443,109 @@ export class SlackConnector extends BaseConnector {
     this.convsAt = Date.now();
   }
 
-  private async fetchHistory(c: { id: string }, first: boolean, older?: { limit: number; latest?: string }): Promise<void> {
-    const hist = await this.web.conversations.history({
-      channel: c.id,
-      limit: older?.limit ?? (first ? 30 : 20),
-      ...(older ? (older.latest ? { latest: older.latest } : {}) : { oldest: first ? undefined : this.lastTs.get(c.id) }),
-      inclusive: false,
-    });
-    const msgs = (hist.messages ?? []) as SlackMsg[];
-    // İmleci olmayan sohbet (ilk turda seçilmemiş ya da sonradan listeye girmiş): oldest verilmedi, son mesajlar geldi —
-    // yalnız bağlandıktan sonra yazılanlar canlı (eskiler bildirim/okunmamış üretmesin)
-    const known = this.lastTs.has(c.id);
-    const live = !first && !older;
-    for (const m of [...msgs].reverse()) {
-      await this.ingest(c.id, m, live && (known || Number(m.ts) * 1000 > this.startedAt));
-      const prev = this.lastTs.get(c.id);
-      if (!older && m.ts && (!prev || Number(m.ts) > Number(prev))) this.lastTs.set(c.id, String(m.ts));
+  private cursorKey(): string {
+    return `slack_last:${this.account.id}`;
+  }
+
+  /** Kalıcı imleçler (depo meta): yeniden açılışta kapalıyken gelen mesajlar oldest=imleç ile alınır */
+  private loadCursors(): void {
+    if (this.lastTs.size) return;
+    try {
+      const raw = this.store.meta(this.cursorKey());
+      const j = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+      for (const [k, v] of Object.entries(j)) if (typeof v === 'string' && /^\d+(\.\d+)?$/.test(v)) this.lastTs.set(k, v);
+    } catch {
+      /* bozuk kayıt: ilk kurulum gibi davran */
     }
-    // iş parçacığı yanıtları history'de yok: yanıtı olan (ve yeni yanıt gelmiş) üst mesajlarınki ayrıca, tur başına en çok 5
+  }
+
+  private saveCursors(): void {
+    try {
+      this.store.setFlag(this.cursorKey(), JSON.stringify(Object.fromEntries(this.lastTs)));
+    } catch {
+      /* depo kapalı (durdurma sırasında) */
+    }
+  }
+
+  /** İmleç yazımı birkaç saniyede bir toplu */
+  private cursorsDirty(): void {
+    if (this.saveTimer) return;
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = undefined;
+      this.saveCursors();
+    }, 3000);
+    this.saveTimer.unref?.();
+  }
+
+  private async fetchHistory(c: { id: string }, first: boolean, older?: { limit: number; latest?: string }): Promise<void> {
+    if (older) {
+      const hist = await this.web.conversations.history({ channel: c.id, limit: older.limit, ...(older.latest ? { latest: older.latest } : {}), inclusive: false });
+      const msgs = (hist.messages ?? []) as SlackMsg[];
+      for (const m of [...msgs].reverse()) await this.ingest(c.id, m, false);
+      await this.threadReplies(c.id, msgs, false);
+      return;
+    }
+    const floor = this.lastTs.get(c.id);
+    // İmleci olmayan sohbet (ilk kurulum / sonradan listeye girmiş): oldest verilmedi, son mesajlar geldi — yalnız
+    // bağlandıktan sonra yazılanlar canlı (eskiler bildirim/okunmamış üretmesin). Kalıcı imleçle gelen, kapalıyken
+    // birikmiş mesajlar da bu oturumda ilk çekilişte canlı sayılmaz.
+    const known = this.sessionKnown.has(c.id);
+    const live = !first;
+    this.sessionKnown.add(c.id);
+    if (!floor) {
+      const hist = await this.web.conversations.history({ channel: c.id, limit: first ? 30 : 20, inclusive: false });
+      const msgs = (hist.messages ?? []) as SlackMsg[];
+      for (const m of [...msgs].reverse()) {
+        await this.ingest(c.id, m, live && (known || Number(m.ts) * 1000 > this.startedAt));
+        const prev = this.lastTs.get(c.id);
+        if (m.ts && (!prev || Number(m.ts) > Number(prev))) this.lastTs.set(c.id, String(m.ts));
+      }
+      if (this.lastTs.has(c.id)) this.cursorsDirty();
+      await this.threadReplies(c.id, msgs, live);
+      return;
+    }
+    // İmleçten sonrası TAMAMI: Slack oldest verilince aralığın EN YENİ `limit` mesajını döndürür → imleçle (cursor)
+    // sayfala. Sınırda hâlâ daha eski mesaj varsa imleç ilerlemez; kalan aralık (floor, top) sonraki turda alınır.
+    const gap = this.gaps.get(c.id);
+    const msgs: SlackMsg[] = [];
+    let cursor: string | undefined;
+    let complete = false;
+    for (let page = 0; page < HISTORY_PAGES; page++) {
+      const hist = await this.web.conversations.history({
+        channel: c.id,
+        limit: 200,
+        oldest: floor,
+        ...(gap ? { latest: gap.top } : {}),
+        inclusive: false,
+        ...(cursor ? { cursor } : {}),
+      });
+      msgs.push(...((hist.messages ?? []) as SlackMsg[]));
+      cursor = (hist as { response_metadata?: { next_cursor?: string } }).response_metadata?.next_cursor || undefined;
+      if (!cursor || !hist.has_more) {
+        complete = true;
+        break;
+      }
+    }
+    const sorted = msgs.filter((m) => m.ts).sort((a, b) => Number(a.ts) - Number(b.ts));
+    for (const m of sorted) await this.ingest(c.id, m, live && (known || Number(m.ts) * 1000 > this.startedAt));
+    const newest = sorted.length ? String(sorted[sorted.length - 1].ts) : undefined;
+    const high = [gap?.high, newest].filter((x): x is string => !!x).reduce<string | undefined>((a, b) => (!a || Number(b) > Number(a) ? b : a), undefined);
+    if (complete) {
+      this.gaps.delete(c.id);
+      // eşzamanlı çağrı (Socket Mode olayı + yoklama) imleci daha ileri taşımış olabilir: geri alma
+      if (high && Number(high) > Number(this.lastTs.get(c.id) ?? floor)) {
+        this.lastTs.set(c.id, high);
+        this.cursorsDirty();
+      }
+    } else if (sorted.length) {
+      this.gaps.set(c.id, { top: String(sorted[0].ts), high: high ?? String(sorted[0].ts) });
+    }
+    await this.threadReplies(c.id, msgs, live);
+  }
+
+  /** iş parçacığı yanıtları history'de yok: yanıtı olan (ve yeni yanıt gelmiş) üst mesajlarınki ayrıca, tur başına en çok 5 */
+  private async threadReplies(channel: string, msgs: SlackMsg[], live: boolean): Promise<void> {
+    const c = { id: channel };
     let n = 0;
     for (const m of msgs) {
       if (!m.reply_count || !m.ts || n >= 5) continue;
@@ -521,6 +627,9 @@ export class SlackConnector extends BaseConnector {
     );
   }
 }
+
+/** İmleçten sonrası için tur başına en çok sayfa (×200 mesaj); fazlası boşluk kaydıyla sonraki turda */
+const HISTORY_PAGES = 5;
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type SlackMsg = {

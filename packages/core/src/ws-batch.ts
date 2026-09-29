@@ -33,6 +33,8 @@ export class EventBatcher {
   private refetch = new Set<string>();
   private quiet = 0;
   private logs = 0;
+  /** Bu demette `messages.read` gelen sohbetler: sohbetin son hali olayların SONUNA da eklenir (take) */
+  private readChats = new Set<string>();
 
   get empty(): boolean {
     return !this.chats.size && !this.deletes.size && !this.events.length && !this.refetch.size;
@@ -86,6 +88,10 @@ export class EventBatcher {
       case 'chat.typing':
         this.replace(`t:${ev.chatId}`, ev);
         return;
+      case 'messages.read':
+        this.readChats.add(ev.chatId);
+        this.events.push(ev);
+        return;
       case 'log':
         if (this.logs >= LOG_MAX) return;
         this.logs++;
@@ -99,6 +105,13 @@ export class EventBatcher {
   /** Biriken demeti al ve sıfırla (boşsa undefined) */
   take(): WsBatch | undefined {
     if (this.empty) return undefined;
+    // Arayüz demeti "önce sohbetler, sonra olaylar" diye açar; messages.read işleyicisi sohbeti arayüzdeki (henüz güncellenmemiş)
+    // ESKİ halinden alıp "görüldü" tikiyle yeniden yazıyor → aynı demetteki taze sohbet (yeni önizleme/okunmamış) eziliyordu.
+    // Tek tek olay döneminde sıra read → chat.upsert idi (taze hal sonda kazanıyordu): aynı sıra olayların sonuna eklenerek korunur.
+    for (const id of this.readChats) {
+      const c = this.chats.get(id);
+      if (c) this.events.push({ type: 'chat.upsert', chat: c });
+    }
     const batch: WsBatch = {
       type: 'batch',
       chats: [...this.chats.values()],
@@ -111,6 +124,7 @@ export class EventBatcher {
     this.events = [];
     this.slots.clear();
     this.refetch.clear();
+    this.readChats.clear();
     this.quiet = 0;
     this.logs = 0;
     return batch;

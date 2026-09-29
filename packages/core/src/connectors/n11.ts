@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ordersFlag, BaseConnector, type StartOptions } from './base.js';
 import { PollTimer, marketDelay, retryAfterSec } from './poll-timer.js';
+import { ingestChunked, writeJsonAtomic } from './market-state.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
 import type { Participant } from '../model.js';
@@ -45,6 +46,8 @@ const DAY = 86_400_000;
 const WINDOW = 14 * DAY - 60_000;
 const PAGE_SIZE = 100;
 const Q_PAGE_SIZE = 50;
+/** Tarihi alınamayan sorunun ayrıntısı en erken bu kadar sonra yeniden istenir */
+const DETAIL_RETRY_MS = 6 * 3600_000;
 
 export const PACKAGE_STATUS: Record<string, string> = {
   Created: '🛍️ Sipariş oluşturuldu',
@@ -144,6 +147,8 @@ interface QuestionRec {
   answeredDate?: number;
   /** son yoklamadaki liste imzası (soru+cevap metni) */
   listSig?: string;
+  /** ayrıntı denendi ama tarih alınamadı (ms): 6 sa boyunca yeniden istenmez, soru tarihsiz (0) işlenir */
+  detailTried?: number;
 }
 
 interface State {
@@ -158,6 +163,8 @@ export class N11Connector extends BaseConnector {
   private ordersOn = false;
   private timer?: PollTimer;
   private polling = false;
+  /** soru kayıtları (liste imzası/ayrıntı) bu turda değişti: durum dosyası yazılsın */
+  private qDirty = false;
   private stopping = false;
   private cfg?: N11Config;
   private state: State = { seen: {}, questions: {} };
@@ -255,10 +262,12 @@ export class N11Connector extends BaseConnector {
     const seenEntries = Object.entries(this.state.seen).slice(-4000);
     const keep = new Set(seenEntries.filter(([k]) => k.startsWith('q-')).map(([k]) => k.slice(2)));
     const questions: Record<string, QuestionRec> = {};
-    for (const [k, v] of Object.entries(this.state.questions)) if (keep.has(k)) questions[k] = v;
+    // tarihi henüz alınmamış ve ayrıntısı denenmemiş (işlenmemiş, seen'de olmayan) sorular da kalsın: ayrıntıları sonraki
+    // turlarda çekilecek (denenmiş olanlar işlendi, seen'le birlikte kırpılır — tarih biçimi bozulursa dosya sınırsız büyümesin)
+    for (const [k, v] of Object.entries(this.state.questions)) if (keep.has(k) || (!v.questionDate && !v.detailTried)) questions[k] = v;
     this.state = { seen: Object.fromEntries(seenEntries), questions, perStatus: this.state.perStatus };
     try {
-      fs.writeFileSync(this.stateFile, JSON.stringify(this.state));
+      writeJsonAtomic(this.stateFile, this.state);
     } catch (e) {
       bus.log('warn', `n11 durum dosyası yazılamadı: ${(e as Error).message}`);
     }
@@ -269,6 +278,7 @@ export class N11Connector extends BaseConnector {
     this.polling = true;
     try {
       const now = Date.now();
+      const perStatusBefore = this.state.perStatus;
       // REST ve SOAP ayrı servisler: biri çökerse öteki yine işlensin
       // sipariş sohbetleri isteğe bağlı (varsayılan kapalı: yalnız müşteri soruları)
       const [ro, rq] = await Promise.allSettled([this.ordersOn
@@ -291,13 +301,19 @@ export class N11Connector extends BaseConnector {
       let changedOrders = 0;
       // eskiden yeniye: sohbet listesi sırası doğru kurulsun
       const groups = [...orders.values()].sort((a, b) => this.orderDate(a[0]) - this.orderDate(b[0]));
-      for (const group of groups) if (this.ingestOrder(group, !first)) changedOrders++;
+      const done = await ingestChunked(this.store, groups, (group) => {
+        if (this.ingestOrder(group, !first)) changedOrders++;
+      }, () => this.stopping);
       let changedQuestions = 0;
-      for (const q of questions) if (this.ingestQuestion(q, !first)) changedQuestions++;
+      if (done) await ingestChunked(this.store, questions, (q) => {
+        if (this.ingestQuestion(q, !first)) changedQuestions++;
+      }, () => this.stopping);
       if (changedOrders || changedQuestions || first) {
         bus.log('info', `n11: ${orders.size} sipariş (${changedOrders} güncellendi), ${questions.length} soru (${changedQuestions} güncellendi)`);
       }
-      this.saveState();
+      // durum dosyası yalnız bir şey değiştiyse (soru kayıtları liste/ayrıntı yanıtıyla da değişebilir: qDirty)
+      if (changedOrders || changedQuestions || first || this.qDirty || this.state.perStatus !== perStatusBefore) this.saveState();
+      this.qDirty = false;
       if (first && failed && ro.status === 'rejected' && rq.status === 'rejected') throw failed;
     } catch (e) {
       if (e instanceof N11AuthError) {
@@ -435,7 +451,25 @@ export class N11Connector extends BaseConnector {
   /** Liste + (değişenler için) ayrıntı. Liste imzası aynıysa ayrıntı yeniden çekilmez. */
   private async fetchQuestions(maxPages: number): Promise<QuestionRec[]> {
     const out: QuestionRec[] = [];
-    let detailBudget = 20;
+    // ilk eşitlemede daha geniş bütçe: tarihi (yalnız ayrıntıda) olmayan soru işlenmez, yoksa eşitleme anına yazılıyordu
+    let detailBudget = maxPages > 2 ? 200 : 20;
+    const listed = new Set<string>();
+    const needsDetail = (prev: QuestionRec | undefined, listSig?: string) =>
+      (listSig !== undefined && prev?.listSig !== listSig) || (!prev?.questionDate && !((prev?.detailTried ?? 0) > Date.now() - DETAIL_RETRY_MS));
+    const detail = async (rec: QuestionRec): Promise<QuestionRec> => {
+      detailBudget--;
+      try {
+        const dx = await this.soap('GetProductQuestionDetail', `<sch:productQuestionId>${xmlEscape(rec.id)}</sch:productQuestionId>`);
+        const d = xmlBlocks(dx, 'productQuestion')[0] ?? dx;
+        rec = { ...rec, fullName: xmlText(d, 'fullName') ?? rec.fullName, email: xmlText(d, 'email') ?? rec.email, status: xmlText(d, 'status') ?? rec.status, questionDate: parseDate(xmlText(d, 'questionDate')) ?? rec.questionDate, answeredDate: parseDate(xmlText(d, 'answeredDate')) ?? rec.answeredDate, answer: xmlText(d, 'answer') ?? rec.answer, question: xmlText(d, 'question') ?? rec.question };
+      } catch (e) {
+        if (e instanceof N11AuthError) throw e;
+        bus.log('warn', `n11 soru ayrıntısı #${rec.id}: ${(e as Error).message}`);
+      }
+      // hata ya da çözülemeyen tarih: aynı soru her turda yeniden istenmesin
+      if (!rec.questionDate) rec.detailTried = Date.now();
+      return rec;
+    };
     for (let page = 0; page < maxPages; page++) {
       const xml = await this.soap('GetProductQuestionList', `<sch:productQuestionSearch/><sch:pagingData><sch:currentPage>${page}</sch:currentPage><sch:pageSize>${Q_PAGE_SIZE}</sch:pageSize></sch:pagingData>`);
       const items = xmlBlocks(xml, 'productQuestion');
@@ -444,24 +478,25 @@ export class N11Connector extends BaseConnector {
         if (!id) continue;
         const listSig = JSON.stringify([xmlText(it, 'question'), xmlText(it, 'answer')]);
         const prev = this.state.questions[id];
-        let rec: QuestionRec = { ...(prev ?? { id }), productId: xmlText(it, 'productId') ?? prev?.productId, productTitle: xmlText(it, 'productTitle') ?? prev?.productTitle, subject: xmlText(it, 'questionSubject') ?? prev?.subject, question: xmlText(it, 'question') ?? prev?.question, answer: xmlText(it, 'answer') ?? prev?.answer };
-        if ((prev?.listSig !== listSig || !prev?.questionDate) && detailBudget > 0) {
-          detailBudget--;
-          try {
-            const dx = await this.soap('GetProductQuestionDetail', `<sch:productQuestionId>${xmlEscape(id)}</sch:productQuestionId>`);
-            const d = xmlBlocks(dx, 'productQuestion')[0] ?? dx;
-            rec = { ...rec, fullName: xmlText(d, 'fullName') ?? rec.fullName, email: xmlText(d, 'email') ?? rec.email, status: xmlText(d, 'status') ?? rec.status, questionDate: parseDate(xmlText(d, 'questionDate')) ?? rec.questionDate, answeredDate: parseDate(xmlText(d, 'answeredDate')) ?? rec.answeredDate, answer: xmlText(d, 'answer') ?? rec.answer, question: xmlText(d, 'question') ?? rec.question };
-          } catch (e) {
-            if (e instanceof N11AuthError) throw e;
-            bus.log('warn', `n11 soru ayrıntısı #${id}: ${(e as Error).message}`);
-          }
-        }
+        let rec: QuestionRec = { ...(prev ?? { id }), productId: xmlText(it, 'productId') ?? prev?.productId, productTitle: xmlText(it, 'productTitle') ?? prev?.productTitle, subject: xmlText(it, 'questionSubject') ?? prev?.subject, question: xmlText(it, 'question') ?? prev?.question, answer: xmlText(it, 'answer') ?? prev?.answer, questionDate: prev?.questionDate ?? parseDate(xmlText(it, 'questionDate')) };
+        if (needsDetail(prev, listSig) && detailBudget > 0) rec = await detail(rec);
         rec.listSig = listSig;
+        if (JSON.stringify(prev) !== JSON.stringify(rec)) this.qDirty = true;
         this.state.questions[id] = rec;
+        listed.add(id);
         out.push(rec);
       }
       const pageCount = Number(xmlText(xml, 'pageCount') ?? 1);
       if (page + 1 >= pageCount || items.length < Q_PAGE_SIZE) break;
+    }
+    // listede (ilk sayfalarda) görünmeyen ama tarihi hâlâ eksik kalan sorular: kalan bütçeyle ayrıntı
+    for (const rec of Object.values(this.state.questions)) {
+      if (detailBudget <= 0) break;
+      if (listed.has(rec.id) || !needsDetail(rec)) continue;
+      const next = await detail(rec);
+      this.qDirty = true;
+      this.state.questions[rec.id] = next;
+      out.push(next);
     }
     // eskiden yeniye
     return out.sort((a, b) => (a.questionDate ?? 0) - (b.questionDate ?? 0));
@@ -471,14 +506,17 @@ export class N11Connector extends BaseConnector {
   private ingestQuestion(q: QuestionRec, live: boolean): boolean {
     const rid = `q-${q.id}`;
     const answered = !!q.answer || /answered|cevaplan/i.test(q.status ?? '');
-    const sig = JSON.stringify([q.question, q.answer, q.status, q.answeredDate]);
+    // tarih yalnız ayrıntıda: gelene dek işleme (eşitleme anına yazılıp sıra kalıcı bozuluyordu); seen'e de yazılmaz
+    if (!q.questionDate && !q.detailTried) return false;
+    const sig = JSON.stringify([q.question, q.answer, q.status, q.answeredDate, q.questionDate]);
     const prev = this.state.seen[rid];
     if (prev === sig) return false;
     // az önce cevapladık ama liste cevabı henüz göstermiyor (onay/gecikme): soruyu yeniden açma
     if (!answered && answeredRecently(prev)) return false;
     this.state.seen[rid] = sig;
 
-    const created = q.questionDate ?? Date.now();
+    // ayrıntı alınamadıysa tarihsiz (0): "şimdi" yazmak soruyu kalıcı olarak listenin en üstüne taşırdı
+    const created = q.questionDate ?? q.answeredDate ?? 0;
     const name = q.fullName || 'Müşteri';
     const participant: Participant = { id: q.email || `q-${q.id}`, name, handle: q.email || undefined };
     const product = q.productTitle || 'Ürün';

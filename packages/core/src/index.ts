@@ -3,9 +3,8 @@ import { Store } from './store.js';
 import { Registry } from './registry.js';
 import { createServer } from './server.js';
 import { bus } from './bus.js';
-import fs from 'node:fs';
-import path from 'node:path';
 import { DEMO_MODE, PORT, ensureDirs, DATA_DIR } from './config.js';
+import { pruneMediaCache } from './media-prune.js';
 import { getDbKey } from './dbkey.js';
 import { startStallWatch } from './stall-watch.js';
 import { LICENSE_REQUIRED, licensed, onLicenseChange, startLicenseChecks, whenLicensed } from './license.js';
@@ -38,41 +37,10 @@ for (const k of ['error', 'log', 'warn', 'info', 'debug'] as const) {
 process.on('unhandledRejection', (e) => bus.log('error', `Yakalanmamış söz reddi: ${(e as Error)?.stack ?? String(e)}`));
 process.on('uncaughtException', (e) => bus.log('error', `Yakalanmamış hata: ${e.stack ?? String(e)}`));
 
-/** 60 günden eski medya önbelleği dosyalarını sil (sessions/<hesap>/media, media-index): disk sınırsız büyümesin */
-function pruneMediaCache(): void {
-  try {
-    const sessions = path.join(DATA_DIR, 'sessions');
-    if (!fs.existsSync(sessions)) return;
-    const cutoff = Date.now() - 60 * 86_400_000;
-    let n = 0;
-    for (const acc of fs.readdirSync(sessions)) {
-      for (const sub of ['media', 'media-index']) {
-        const dir = path.join(sessions, acc, sub);
-        if (!fs.existsSync(dir)) continue;
-        for (const f of fs.readdirSync(dir)) {
-          const fp = path.join(dir, f);
-          try {
-            if (fs.statSync(fp).mtimeMs < cutoff) {
-              fs.rmSync(fp, { force: true });
-              n++;
-            }
-          } catch {
-            /* yok */
-          }
-        }
-      }
-    }
-    if (n) bus.log('info', `Medya önbelleği: ${n} eski dosya silindi`);
-  } catch {
-    /* yok */
-  }
-}
-
 async function main(): Promise<void> {
   // Yeni dosyalar (oturum, önbellek, günlük) yalnızca bu kullanıcıya okunur olsun
   process.umask(0o077);
   ensureDirs();
-  pruneMediaCache();
   const store = new Store(undefined, getDbKey()); // diskte şifreli (SQLCipher); anahtar Anahtar Zinciri'nde
   const registry = new Registry(store);
   bus.log('info', `Veri dizini: ${DATA_DIR}${DEMO_MODE ? '  (DEMO MODU)' : ''}`);
@@ -108,22 +76,6 @@ async function main(): Promise<void> {
     if (existing) await registry.restart(existing.id);
     else await registry.add('demo', { label: 'Demo hesabı' });
   }
-  // Paketli uygulama: lisans etkinleşmeden hiçbir kanal başlamaz; lisans iptal edilirse kanallar durur
-  startLicenseChecks();
-  if (LICENSE_REQUIRED && !licensed()) bus.log('info', 'Lisans bekleniyor: kanallar lisans etkinleşince başlayacak');
-  await whenLicensed();
-  await registry.bootAll();
-  let booted = true;
-  onLicenseChange((valid) => {
-    if (!valid && booted) {
-      booted = false;
-      bus.log('warn', 'Lisans geçersiz: kanallar durduruldu');
-      void registry.stopAll();
-    } else if (valid && !booted) {
-      booted = true;
-      void registry.bootAll();
-    }
-  });
 
   let closing = false;
   const shutdown = async () => {
@@ -141,8 +93,32 @@ async function main(): Promise<void> {
     }
     process.exit(0);
   };
+  // lisans beklenirken de kapanış düzgün olsun: işleyiciler bekleme öncesi kurulur
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+
+  // Paketli uygulama: lisans etkinleşmeden hiçbir kanal başlamaz; lisans iptal edilirse kanallar durur
+  startLicenseChecks();
+  if (LICENSE_REQUIRED && !licensed()) bus.log('info', 'Lisans bekleniyor: kanallar lisans etkinleşince başlayacak');
+  await whenLicensed();
+  let booted = true;
+  // dinleyici bootAll'dan ÖNCE: açılış sürerken lisans iptal edilirse de kanallar durur
+  onLicenseChange((valid) => {
+    if (closing) return;
+    if (!valid && booted) {
+      booted = false;
+      bus.log('warn', 'Lisans geçersiz: kanallar durduruldu');
+      void registry.stopAll();
+    } else if (valid && !booted) {
+      booted = true;
+      void registry.bootAll();
+    }
+  });
+  await registry.bootAll();
+  // medya önbelleği budaması kanallar açıldıktan 5 dk sonra (açılışı yavaşlatmasın), sonra günde bir
+  const prune = () => void pruneMediaCache(store).catch(() => undefined);
+  setTimeout(prune, 5 * 60_000).unref();
+  setInterval(prune, 6 * 3_600_000).unref();
 }
 
 main().catch((e) => {

@@ -191,7 +191,8 @@ export abstract class BaseConnector implements Connector {
   }): Chat {
     this.touchSync();
     const id = chatId(this.account.id, input.remoteId);
-    const existing = this.store.getChat(id);
+    // katılımcısız okuma: liste depoda ayrı tabloda durur, verilmezse korunur (büyük grupta çözüp aynen geri yazmak ms'ler sürüyordu)
+    const existing = this.store.getChatLite(id);
     const chat = this.store.upsertChat({
       id,
       accountId: this.account.id,
@@ -207,7 +208,7 @@ export abstract class BaseConnector implements Connector {
       tags: existing?.tags ?? [],
       handle: input.handle ?? existing?.handle,
       link: input.link ?? existing?.link,
-      participants: input.participants ?? existing?.participants,
+      participants: input.participants,
       meta: input.meta ?? existing?.meta,
     });
     bus.emit({ type: 'chat.upsert', chat });
@@ -245,6 +246,15 @@ export abstract class BaseConnector implements Connector {
     return m;
   }
 
+  /**
+   * Yankı süzgeci: gönderdiğim mesaj başka kimlikle "gelen" gibi dönebilen kanallarda (DOM okuyan köprüler, e-posta) açık.
+   * WhatsApp/Telegram'da "benden" bilgisi protokolden kesin gelir; süzgeç orada başkalarının aynı metinli gerçek mesajlarını
+   * ("Hayırlı cumalar herkese" gibi grupta art arda yazılanlar) kalıcı olarak yutuyordu → kapalı. Alt sınıf değiştirebilir.
+   */
+  protected get echoFilter(): boolean {
+    return this.account.platform !== 'whatsapp' && this.account.platform !== 'telegram';
+  }
+
   protected upsertMessage(
     input: Omit<Message, 'id' | 'chatId' | 'hasHtml'> & { remoteChatId: string; html?: string },
     opts: { live?: boolean; bump?: boolean } = {},
@@ -258,7 +268,7 @@ export abstract class BaseConnector implements Connector {
     // platformun İngilizce tepki satırı ("Liked a message", SMS'ten 'Liked “…”') Türkçe görünsün
     if (message.text) message.text = trReactionText(message.text);
     // gönderdiğim mesajın "gelen" gibi dönen yankısı: kaydetme (sayaç artmasın, kopya balon çıkmasın)
-    if (!input.fromMe && input.text && !this.store.hasMessage(message.id) && this.store.isOwnEcho(cid, input.text, input.ts)) {
+    if (this.echoFilter && !input.fromMe && input.text && !this.store.hasMessage(message.id) && this.store.isOwnEcho(cid, input.text, input.ts)) {
       bus.log('info', `${this.account.platform}: kendi mesajının yankısı gelen sayılmadı (${input.remoteId})`);
       return undefined;
     }

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ordersFlag, BaseConnector, type StartOptions } from './base.js';
 import { PollTimer, marketDelay } from './poll-timer.js';
+import { ingestChunked, writeJsonAtomic } from './market-state.js';
 import { BrowserConnector } from './browser/bridge.js';
 import { makeShopifyInbox } from './browser/shopify.js';
 import { bus } from '../bus.js';
@@ -232,23 +233,43 @@ export class ShopifyConnector extends BaseConnector {
     }
     const startedAt = new Date(Date.now() - 2 * 60_000).toISOString(); // saat kayması payı
     try {
-      const orders: J[] = [];
-      // ilk yoklama: en yeni siparişlerden 3 sayfa; sonrakiler: son yoklamadan beri değişenler
-      let url: string | undefined = first || !this.since ? '/orders.json?status=any&limit=50&order=created_at%20desc' : `/orders.json?status=any&limit=50&updated_at_min=${encodeURIComponent(this.since)}`;
-      const maxPages = first ? 10 : 10;
-      for (let page = 0; url && page < maxPages; page++) {
-        const { data, headers } = await this.api(url);
-        const list: J[] = Array.isArray(data.orders) ? data.orders : [];
-        orders.push(...list);
-        url = list.length ? nextLink(headers.get('link')) : undefined;
+      /** Sayfalı çek; sınır dolduğunda hâlâ sonraki sayfa varsa truncated */
+      const fetchPages = async (start: string, maxPages: number): Promise<{ list: J[]; truncated: boolean }> => {
+        const list: J[] = [];
+        let url: string | undefined = start;
+        for (let page = 0; url && page < maxPages; page++) {
+          const { data, headers } = await this.api(url);
+          const got: J[] = Array.isArray(data.orders) ? data.orders : [];
+          list.push(...got);
+          url = got.length ? nextLink(headers.get('link')) : undefined;
+        }
+        return { list, truncated: !!url };
+      };
+      const byId = new Map<string, J>();
+      // ilk kurulum / açılış: en yeni oluşturulan siparişler
+      if (first || !this.since) for (const o of (await fetchPages('/orders.json?status=any&limit=50&order=created_at%20desc', 10)).list) byId.set(String(o.id), o);
+      // kalıcı imleç varsa (açılışta da): o andan beri DEĞİŞENLER, eskiden yeniye — kapalıyken güncellenen eski sipariş kaçmasın
+      let nextSince = startedAt;
+      if (this.since) {
+        const inc = await fetchPages(`/orders.json?status=any&limit=50&updated_at_min=${encodeURIComponent(this.since)}&order=updated_at%20asc`, 10);
+        for (const o of inc.list) byId.set(String(o.id), o);
+        // sayfa sınırı doldu: imleç yalnız işlenen son değişikliğe ilerler (kalanlar sonraki turda)
+        const last = inc.list[inc.list.length - 1]?.updated_at;
+        if (inc.truncated && last) nextSince = String(last);
       }
+      const orders = [...byId.values()];
       let changed = 0;
       // eskiden yeniye: sohbet sırası ve "canlı" bildirimler doğru olsun
       orders.sort((a, b) => (Date.parse(a.created_at ?? '') || 0) - (Date.parse(b.created_at ?? '') || 0));
-      for (const o of orders) if (this.ingest(o, !first)) changed++;
+      const done = await ingestChunked(this.store, orders, (o) => {
+        if (this.ingest(o, !first)) changed++;
+      }, () => this.stopping);
+      if (!done) return; // durduruldu: imleç ilerlemesin
       if (changed) bus.log('info', `Shopify: ${changed} sipariş güncellendi`);
-      this.since = startedAt;
-      this.saveState();
+      const moved = nextSince !== startedAt;
+      this.since = nextSince;
+      // durum dosyası yalnız değişince (dosyadaki eski since yalnız daha geniş aralık ister, kayıp olmaz)
+      if (changed || first || moved) this.saveState();
     } catch (e) {
       if (e instanceof AuthError) {
         this.timer?.stop();
@@ -267,7 +288,7 @@ export class ShopifyConnector extends BaseConnector {
     const seen: Record<string, string> = {};
     for (const [k, v] of [...this.seen.entries()].slice(-3000)) seen[k] = v;
     try {
-      fs.writeFileSync(this.stateFile, JSON.stringify({ seen, since: this.since }));
+      writeJsonAtomic(this.stateFile, { seen, since: this.since });
     } catch {
       /* yazılamadı */
     }

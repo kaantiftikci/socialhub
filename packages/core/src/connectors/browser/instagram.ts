@@ -455,8 +455,13 @@ export const instagram: Strategy = {
     // /items/<id>/seen/ ve mark_seen uçları web oturumuyla 404/400 (25 Eyl 2026'da yeniden denendi); web istemcisi okunduyu
     // GraphQL mutation ile gönderiyor. Sohbet sayfasını GÖRÜNÜR olarak açmak bu mutation'ı tetikler: köprünün gizli sekme
     // taklidi (visibilityState=hidden) istemcinin okundu göndermesini engelliyordu → #mivelo-visible ile taklit kapatılır.
+    // Okundu isteği görülünce kısa pay bırakıp çık (eskiden koşulsuz 7 sn: bu sürede kullanıcının gönderimi kuyrukta bekliyordu);
+    // istek hiç görülmezse üst sınır yine 7 sn. Bekleyici gezinmeden ÖNCE kurulur (istek sayfa yüklenirken gidebilir).
+    const seen = page
+      .waitForRequest((r) => isSeenRequest(r.url(), r.postData() ?? ''), { timeout: 7000 })
+      .catch(() => undefined);
     await page.goto(`https://www.instagram.com/direct/t/${threadId}/#mivelo-visible`, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
-    await page.waitForTimeout(7000);
+    if (await seen) await page.waitForTimeout(500);
     // Açık tutulan sayfa görünür sohbette kalmasın: yoksa sonraki gelen mesajlar kendiliğinden "Görüldü" olur.
     // Gelen kutusuna (#mivelo-visible olmadan → gizli sekme taklidi geri gelir) dön; sayfa başka yere gittiyse dokunma.
     if (page.url().includes('mivelo-visible')) await page.goto(this.home, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
@@ -613,3 +618,20 @@ export const instagram: Strategy = {
     return r?.payload?.item_id ? String(r.payload.item_id) : undefined;
   },
 };
+
+/**
+ * Sayfanın okundu isteği mi: REST `…/direct_v2/…/seen/` ya da GraphQL mutation adı (fb_api_req_friendly_name) okundu/görüldü
+ * bildiriyor. Bilerek dar tutulur ("thread" gibi kelimelerde "read" geçer): tanınmayan istek → eski 7 sn üst sınır.
+ */
+export function isSeenRequest(url: string, postData: string): boolean {
+  if (/\/api\/v1\/direct_v2\/.*\/seen\/?(\?|$)/.test(url)) return true;
+  if (!/\/graphql|\/api\/graphql/.test(url)) return false;
+  const raw = (postData.match(/(?:^|&)fb_api_req_friendly_name=([^&]*)/)?.[1] ?? '').replace(/\+/g, ' ');
+  let name = raw;
+  try {
+    name = decodeURIComponent(raw);
+  } catch {
+    /* bozuk kodlama: ham ad */
+  }
+  return /Mark\w{0,20}(Read|Seen)|(Read|Seen)Receipt|SendSeen|ThreadSeen|ItemSeen/i.test(name);
+}

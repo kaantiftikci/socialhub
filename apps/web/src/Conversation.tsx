@@ -853,6 +853,226 @@ export function Conversation({
     },
     [mediaList],
   );
+  // Balon listesi yalnız mesajlar/sohbet/açık menüler değişince yeniden kurulur: yazma alanındaki her tuş vuruşunda
+  // (text durumu bu bileşende) ve App'in ilgisiz çizimlerinde 300-1000 balon baştan üretilmesin. Tıklama işleyicileri
+  // her çizimde yenilenen işlevleri act ref'inden okur (bayat kapanış olmaz).
+  const act = useRef({ react, startEdit, unsend, setFollowUp, calFromText, notify });
+  act.current = { react, startEdit, unsend, setFollowUp, calFromText, notify };
+  const bubbleList = useMemo(
+    () =>
+      groups.map((g) =>
+            g.kind === 'day' ? (
+              <div key={g.key} className="datepill">
+                {g.label}
+              </div>
+            ) : (
+              <div key={g.key} className={`grp ${g.fromMe ? 'me' : ''}`}>
+                {!g.fromMe && <Avatar name={g.senderName} size={28} url={g.items.find((m) => m.senderAvatarUrl)?.senderAvatarUrl ?? avatarOf.get(g.items[0].senderId) ?? (chat.kind === 'direct' ? chat.avatarUrl : undefined)} />}
+                <div className="col">
+                  {!g.fromMe && chat.kind !== 'direct' && (
+                    <span className="sender" style={{ color: senderColor(g.items[0].senderId || g.senderName) }}>
+                      {g.senderName}
+                    </span>
+                  )}
+                  {toUnits(g.items).map((u) => {
+                    if (u.kind === 'album') {
+                      // art arda gelen fotoğraf/videolar tek balonda (WhatsApp albümü gibi); saat ve tik son mesajın
+                      const last = u.items[u.items.length - 1];
+                      const end = u.i + u.items.length - 1;
+                      const pos = g.items.length === u.items.length ? 'first last' : u.i === 0 ? 'first' : end === g.items.length - 1 ? 'last' : 'mid';
+                      const reacts = u.items.flatMap((x) => x.reactions ?? []);
+                      return (
+                        <div key={u.items[0].id} data-mid={u.items[0].id} className={`bwrap ${g.fromMe ? 'me' : ''}`}>
+                          <div className={`bub album-bub ${pos}`}>
+                            <AlbumView items={u.items} onOpen={setLightbox} />
+                            <time className="bt" dateTime={new Date(last.ts).toISOString()} title={fmtStamp(last.ts)}>
+                              {fmtTime(last.ts)}
+                              {g.fromMe && statusIcon(last.status)}
+                            </time>
+                          </div>
+                          {reacts.length ? <ReactionChips list={reacts} onToggle={canReact ? (e) => act.current.react(last, e) : undefined} /> : null}
+                        </div>
+                      );
+                    }
+                    const { m, i } = u;
+                    const replyable = canReplyChat && !m.remoteId.startsWith('local-') && !m.remoteId.startsWith('out-') && !m.id.startsWith('out-');
+                    const isReact = /^(👍|❤️|😂|🔥|👏|😮) .+ (bir mesajı beğendi|mesajına tepki verdi)$/.test(m.text);
+                    const parent = m.threadId ? byRemote.get(m.threadId) : undefined;
+                    const url = !isReact && !m.attachments?.length && !m.deleted ? firstUrl(m.text) : undefined;
+                    // kendi mesajım: düzenle (yalnız metin, süre sınırı içinde) / herkesten sil
+                    const own = m.fromMe && !m.deleted && !isReact && !m.remoteId.startsWith('local-') && !m.id.startsWith('out-') && !m.remoteId.startsWith('out-');
+                    const editable = own && canEditChat && !!m.text.trim() && !m.attachments?.some((a) => a.kind !== 'other') && within(m.ts, EDIT_LIMIT_MS[chat.platform]);
+                    const unsendable = own && canUnsendChat && within(m.ts, UNSEND_LIMIT_MS[chat.platform]);
+                    return (
+                      <div key={m.id} data-mid={m.id} className={`bwrap ${g.fromMe ? 'me' : ''}`} {...(replyable && !isReact ? swipeProps(m) : {})}>
+                        {m.threadId && !threadFocus && (
+                          <button type="button" className="tq b" onClick={() => setThreadFocus(m.threadId!)} title="İş parçacığını aç">
+                            <Icon name="reply" size={12} sw={2} />
+                            <span className="tq-h">Bir iş parçacığına yanıt</span>
+                            <span className="tq-t">{parent?.text || 'İş parçacığı'}</span>
+                          </button>
+                        )}
+                        <div className={`bub ${g.items.length === 1 ? 'first last' : i === 0 ? 'first' : i === g.items.length - 1 ? 'last' : 'mid'} ${isReact ? 'react' : ''} ${m.deleted ? 'deleted' : ''}`}>
+                          {m.replyTo && (
+                            // alıntı: tıklayınca yanıtlanan mesaja kaydır ve vurgula
+                            <button
+                              type="button"
+                              className={`quote b ${m.replyTo.fromMe ? 'mine' : ''}`}
+                              onClick={() => {
+                                const el = document.querySelector<HTMLElement>(`[data-mid="${CSS.escape(`${chat.id}#${m.replyTo!.remoteId}`)}"]`);
+                                if (!el) return act.current.notify('Yanıtlanan mesaj yüklenmemiş (daha eski)');
+                                el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                                el.classList.remove('flash');
+                                void el.offsetWidth;
+                                el.classList.add('flash');
+                              }}
+                            >
+                              <b>{m.replyTo.fromMe ? 'Sen' : m.replyTo.senderName}</b>
+                              <span>{m.replyTo.text || 'Mesaj'}</span>
+                            </button>
+                          )}
+                          {m.attachments?.map((a, j) => (
+                            <AttachmentView key={j} a={a} onOpen={setLightbox} />
+                          ))}
+                          {(() => {
+                            const timeEl = !isReact ? (
+                              <time className="bt" dateTime={new Date(m.ts).toISOString()} title={fmtStamp(m.ts)}>
+                                {m.edited && !m.deleted && <span className="edited">düzenlendi</span>}
+                                {fmtTime(m.ts)}
+                                {g.fromMe && statusIcon(m.status)}
+                              </time>
+                            ) : null;
+                            if (m.text && m.attachments?.length)
+                              return (
+                                <span className="bub-text">
+                                  {bubbleText(m.text)}
+                                  {timeEl}
+                                </span>
+                              );
+                            return (
+                              <>
+                                {m.text ? bubbleText(m.text) : null}
+                                {timeEl}
+                              </>
+                            );
+                          })()}
+                        </div>
+                        {url && <LinkCard url={url} />}
+                        {m.reactions?.length ? <ReactionChips list={m.reactions} onToggle={canReact ? (e) => act.current.react(m, e) : undefined} /> : null}
+                        {!!m.replyCount && !threadFocus && (
+                          <button type="button" className="treplies b" onClick={() => setThreadFocus(m.remoteId)}>
+                            <span className="tav">
+                              {[...new Map((byRemote.size ? messages.filter((x) => x.threadId === m.remoteId) : []).map((x) => [x.senderId, x])).values()].slice(0, 3).map((x) => (
+                                <Avatar key={x.senderId} name={x.senderName} size={18} url={x.senderAvatarUrl} />
+                              ))}
+                            </span>
+                            {m.replyCount} yanıt
+                            {(() => {
+                              const last = messages.filter((x) => x.threadId === m.remoteId).at(-1);
+                              return last ? <span className="tago"> · {ago(last.ts)}</span> : null;
+                            })()}
+                          </button>
+                        )}
+                        {!isReact &&
+                          !m.deleted &&
+                          [
+                            replyable && (
+                              <button key="y" type="button" className="rtrig" aria-label="Yanıtla" title="Yanıtla (ya da balonu sağa kaydır)" onClick={() => (startReply(m), setBarFor(null))}>
+                                <Icon name="reply" size={14} />
+                              </button>
+                            ),
+                            (canReact || chat.platform === 'slack') && (
+                              <button key="r" type="button" className={`rtrig ${barFor === m.id ? 'on' : ''}`} aria-label={canReact ? 'Tepki ver' : 'Hızlı işlemler'} title={canReact ? 'Tepki ver' : 'Hızlı işlemler'} onClick={() => (setBarFor(barFor === m.id ? null : m.id), setReactPick(null))}>
+                                <Icon name={canReact ? 'smile' : 'thread'} size={15} />
+                              </button>
+                            ),
+                            !!m.text && (
+                              <button key="c" type="button" className="rtrig cal" aria-label="Takvime ekle" title="Takvime ekle" onClick={() => (setCalFor({ ...act.current.calFromText(m.text, `${m.fromMe ? 'Ben' : m.senderName}: ${m.text}`), messageId: m.id }), setBarFor(null))}>
+                                <Icon name="calendar" size={14} />
+                              </button>
+                            ),
+                            canFollow && (
+                              <button key="f" type="button" className={`rtrig ${chat.followUp ? 'rtrig-on' : ''}`} aria-label={chat.followUp ? 'Takip hatırlatıcısını kaldır' : '2 gün yanıt gelmezse hatırlat'} title={chat.followUp ? 'Takip hatırlatıcısını kaldır' : 'Takip: 2 gün yanıt gelmezse hatırlat'} onClick={() => void act.current.setFollowUp(chat.followUp ? null : 2)}>
+                                <Icon name="bell" size={14} />
+                              </button>
+                            ),
+                            (editable || unsendable) && (
+                              <button key="o" type="button" className={`rtrig ${ownFor === m.id ? 'on' : ''}`} aria-label="Düzenle veya herkesten sil" title={editable ? 'Düzenle / herkesten sil' : 'Herkesten sil'} aria-expanded={ownFor === m.id} onClick={() => (setOwnFor(ownFor === m.id ? null : m.id), setDelAsk(null), setBarFor(null))}>
+                                <Icon name="dots" size={15} />
+                              </button>
+                            ),
+                          ]
+                            .filter(Boolean)
+                            .map((b, i) => (
+                              <span key={i} className={`rpos p${i}`}>
+                                {b}
+                              </span>
+                            ))}
+                        {!isReact && barFor === m.id && (canReact || chat.platform === 'slack') && (
+                          <span className="rbar" role="toolbar" aria-label="Hızlı işlemler">
+                            {canReact &&
+                              QUICK_REACTIONS.map((e) => (
+                                <button key={e} type="button" className={m.reactions?.some((r) => r.fromMe && r.emoji === e) ? 'on' : ''} onClick={() => (act.current.react(m, e), setBarFor(null))} title={`${e} tepkisi`}>
+                                  {e}
+                                </button>
+                              ))}
+                            {canReact && (
+                              <button
+                                type="button"
+                                className="more"
+                                title="Başka emoji"
+                                aria-label="Başka emoji"
+                                onClick={(ev) => {
+                                  const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+                                  setReactPick(reactPick?.id === m.id ? null : { id: m.id, top: r.bottom + 6, left: Math.max(8, Math.min(window.innerWidth - 300, r.left - 120)) });
+                                }}
+                              >
+                                <Icon name="smile" size={14} />
+                              </button>
+                            )}
+                            {chat.platform === 'slack' && !m.threadId && (
+                              <button type="button" className="more" title="İş parçacığında yanıtla" aria-label="İş parçacığında yanıtla" onClick={() => (setThreadFocus(m.remoteId), setBarFor(null))}>
+                                <Icon name="thread" size={14} />
+                              </button>
+                            )}
+                          </span>
+                        )}
+                        {ownFor === m.id && (editable || unsendable) && (
+                          <span className="rbar own-menu" role="menu" aria-label="Mesaj işlemleri">
+                            {editable && (
+                              <button type="button" role="menuitem" onClick={() => act.current.startEdit(m)}>
+                                <Icon name="pen" size={14} /> Düzenle
+                              </button>
+                            )}
+                            {unsendable &&
+                              (delAsk === m.id ? (
+                                <button type="button" role="menuitem" className="danger" onClick={() => void act.current.unsend(m)} autoFocus>
+                                  <Icon name="trash" size={14} /> Emin misin? Sil
+                                </button>
+                              ) : (
+                                <button type="button" role="menuitem" onClick={() => setDelAsk(m.id)}>
+                                  <Icon name="trash" size={14} /> Herkesten sil
+                                </button>
+                              ))}
+                          </span>
+                        )}
+                        {reactPick?.id === m.id && (
+                          <div className="react-pick" style={{ top: reactPick.top, left: reactPick.left }}>
+                            <EmojiPicker compact onPick={(e) => act.current.react(m, e)} onClose={() => setReactPick(null)} />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {g.fromMe && g.items[g.items.length - 1].status === 'failed' && <span className="meta" style={{ color: 'var(--danger)' }}>Gönderilemedi</span>}
+                </div>
+              </div>
+            ),
+          ),
+    // swipeProps yalnız ref'lerle ve sabit startReply ile çalışır; süre sınırı (within) bir sonraki değişimde tazelenir
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [groups, chat, avatarOf, byRemote, messages, threadFocus, barFor, ownFor, delAsk, reactPick, setLightbox, startReply],
+  );
   const lastIncoming = [...messages].reverse().find((m) => !m.fromMe);
   const needsReply = !!lastIncoming && messages[messages.length - 1]?.id === lastIncoming.id;
   const [mediaOpen, setMediaOpen] = useState(false);
@@ -1103,215 +1323,7 @@ export function Conversation({
             </div>
           )}
           {messages.length > 0 && shown.length === 0 && <div className="empty">Aramayla eşleşen mesaj yok.</div>}
-          {groups.map((g) =>
-            g.kind === 'day' ? (
-              <div key={g.key} className="datepill">
-                {g.label}
-              </div>
-            ) : (
-              <div key={g.key} className={`grp ${g.fromMe ? 'me' : ''}`}>
-                {!g.fromMe && <Avatar name={g.senderName} size={28} url={g.items.find((m) => m.senderAvatarUrl)?.senderAvatarUrl ?? avatarOf.get(g.items[0].senderId) ?? (chat.kind === 'direct' ? chat.avatarUrl : undefined)} />}
-                <div className="col">
-                  {!g.fromMe && chat.kind !== 'direct' && (
-                    <span className="sender" style={{ color: senderColor(g.items[0].senderId || g.senderName) }}>
-                      {g.senderName}
-                    </span>
-                  )}
-                  {toUnits(g.items).map((u) => {
-                    if (u.kind === 'album') {
-                      // art arda gelen fotoğraf/videolar tek balonda (WhatsApp albümü gibi); saat ve tik son mesajın
-                      const last = u.items[u.items.length - 1];
-                      const end = u.i + u.items.length - 1;
-                      const pos = g.items.length === u.items.length ? 'first last' : u.i === 0 ? 'first' : end === g.items.length - 1 ? 'last' : 'mid';
-                      const reacts = u.items.flatMap((x) => x.reactions ?? []);
-                      return (
-                        <div key={u.items[0].id} data-mid={u.items[0].id} className={`bwrap ${g.fromMe ? 'me' : ''}`}>
-                          <div className={`bub album-bub ${pos}`}>
-                            <AlbumView items={u.items} onOpen={setLightbox} />
-                            <time className="bt" dateTime={new Date(last.ts).toISOString()} title={fmtStamp(last.ts)}>
-                              {fmtTime(last.ts)}
-                              {g.fromMe && statusIcon(last.status)}
-                            </time>
-                          </div>
-                          {reacts.length ? <ReactionChips list={reacts} onToggle={canReact ? (e) => react(last, e) : undefined} /> : null}
-                        </div>
-                      );
-                    }
-                    const { m, i } = u;
-                    const replyable = canReplyChat && !m.remoteId.startsWith('local-') && !m.remoteId.startsWith('out-') && !m.id.startsWith('out-');
-                    const isReact = /^(👍|❤️|😂|🔥|👏|😮) .+ (bir mesajı beğendi|mesajına tepki verdi)$/.test(m.text);
-                    const parent = m.threadId ? byRemote.get(m.threadId) : undefined;
-                    const url = !isReact && !m.attachments?.length && !m.deleted ? firstUrl(m.text) : undefined;
-                    // kendi mesajım: düzenle (yalnız metin, süre sınırı içinde) / herkesten sil
-                    const own = m.fromMe && !m.deleted && !isReact && !m.remoteId.startsWith('local-') && !m.id.startsWith('out-') && !m.remoteId.startsWith('out-');
-                    const editable = own && canEditChat && !!m.text.trim() && !m.attachments?.some((a) => a.kind !== 'other') && within(m.ts, EDIT_LIMIT_MS[chat.platform]);
-                    const unsendable = own && canUnsendChat && within(m.ts, UNSEND_LIMIT_MS[chat.platform]);
-                    return (
-                      <div key={m.id} data-mid={m.id} className={`bwrap ${g.fromMe ? 'me' : ''}`} {...(replyable && !isReact ? swipeProps(m) : {})}>
-                        {m.threadId && !threadFocus && (
-                          <button type="button" className="tq b" onClick={() => setThreadFocus(m.threadId!)} title="İş parçacığını aç">
-                            <Icon name="reply" size={12} sw={2} />
-                            <span className="tq-h">Bir iş parçacığına yanıt</span>
-                            <span className="tq-t">{parent?.text || 'İş parçacığı'}</span>
-                          </button>
-                        )}
-                        <div className={`bub ${g.items.length === 1 ? 'first last' : i === 0 ? 'first' : i === g.items.length - 1 ? 'last' : 'mid'} ${isReact ? 'react' : ''} ${m.deleted ? 'deleted' : ''}`}>
-                          {m.replyTo && (
-                            // alıntı: tıklayınca yanıtlanan mesaja kaydır ve vurgula
-                            <button
-                              type="button"
-                              className={`quote b ${m.replyTo.fromMe ? 'mine' : ''}`}
-                              onClick={() => {
-                                const el = document.querySelector<HTMLElement>(`[data-mid="${CSS.escape(`${chat.id}#${m.replyTo!.remoteId}`)}"]`);
-                                if (!el) return notify('Yanıtlanan mesaj yüklenmemiş (daha eski)');
-                                el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-                                el.classList.remove('flash');
-                                void el.offsetWidth;
-                                el.classList.add('flash');
-                              }}
-                            >
-                              <b>{m.replyTo.fromMe ? 'Sen' : m.replyTo.senderName}</b>
-                              <span>{m.replyTo.text || 'Mesaj'}</span>
-                            </button>
-                          )}
-                          {m.attachments?.map((a, j) => (
-                            <AttachmentView key={j} a={a} onOpen={setLightbox} />
-                          ))}
-                          {(() => {
-                            const timeEl = !isReact ? (
-                              <time className="bt" dateTime={new Date(m.ts).toISOString()} title={fmtStamp(m.ts)}>
-                                {m.edited && !m.deleted && <span className="edited">düzenlendi</span>}
-                                {fmtTime(m.ts)}
-                                {g.fromMe && statusIcon(m.status)}
-                              </time>
-                            ) : null;
-                            if (m.text && m.attachments?.length)
-                              return (
-                                <span className="bub-text">
-                                  {bubbleText(m.text)}
-                                  {timeEl}
-                                </span>
-                              );
-                            return (
-                              <>
-                                {m.text ? bubbleText(m.text) : null}
-                                {timeEl}
-                              </>
-                            );
-                          })()}
-                        </div>
-                        {url && <LinkCard url={url} />}
-                        {m.reactions?.length ? <ReactionChips list={m.reactions} onToggle={canReact ? (e) => react(m, e) : undefined} /> : null}
-                        {!!m.replyCount && !threadFocus && (
-                          <button type="button" className="treplies b" onClick={() => setThreadFocus(m.remoteId)}>
-                            <span className="tav">
-                              {[...new Map((byRemote.size ? messages.filter((x) => x.threadId === m.remoteId) : []).map((x) => [x.senderId, x])).values()].slice(0, 3).map((x) => (
-                                <Avatar key={x.senderId} name={x.senderName} size={18} url={x.senderAvatarUrl} />
-                              ))}
-                            </span>
-                            {m.replyCount} yanıt
-                            {(() => {
-                              const last = messages.filter((x) => x.threadId === m.remoteId).at(-1);
-                              return last ? <span className="tago"> · {ago(last.ts)}</span> : null;
-                            })()}
-                          </button>
-                        )}
-                        {!isReact &&
-                          !m.deleted &&
-                          [
-                            replyable && (
-                              <button key="y" type="button" className="rtrig" aria-label="Yanıtla" title="Yanıtla (ya da balonu sağa kaydır)" onClick={() => (startReply(m), setBarFor(null))}>
-                                <Icon name="reply" size={14} />
-                              </button>
-                            ),
-                            (canReact || chat.platform === 'slack') && (
-                              <button key="r" type="button" className={`rtrig ${barFor === m.id ? 'on' : ''}`} aria-label={canReact ? 'Tepki ver' : 'Hızlı işlemler'} title={canReact ? 'Tepki ver' : 'Hızlı işlemler'} onClick={() => (setBarFor(barFor === m.id ? null : m.id), setReactPick(null))}>
-                                <Icon name={canReact ? 'smile' : 'thread'} size={15} />
-                              </button>
-                            ),
-                            !!m.text && (
-                              <button key="c" type="button" className="rtrig cal" aria-label="Takvime ekle" title="Takvime ekle" onClick={() => (setCalFor({ ...calFromText(m.text, `${m.fromMe ? 'Ben' : m.senderName}: ${m.text}`), messageId: m.id }), setBarFor(null))}>
-                                <Icon name="calendar" size={14} />
-                              </button>
-                            ),
-                            canFollow && (
-                              <button key="f" type="button" className={`rtrig ${chat.followUp ? 'rtrig-on' : ''}`} aria-label={chat.followUp ? 'Takip hatırlatıcısını kaldır' : '2 gün yanıt gelmezse hatırlat'} title={chat.followUp ? 'Takip hatırlatıcısını kaldır' : 'Takip: 2 gün yanıt gelmezse hatırlat'} onClick={() => void setFollowUp(chat.followUp ? null : 2)}>
-                                <Icon name="bell" size={14} />
-                              </button>
-                            ),
-                            (editable || unsendable) && (
-                              <button key="o" type="button" className={`rtrig ${ownFor === m.id ? 'on' : ''}`} aria-label="Düzenle veya herkesten sil" title={editable ? 'Düzenle / herkesten sil' : 'Herkesten sil'} aria-expanded={ownFor === m.id} onClick={() => (setOwnFor(ownFor === m.id ? null : m.id), setDelAsk(null), setBarFor(null))}>
-                                <Icon name="dots" size={15} />
-                              </button>
-                            ),
-                          ]
-                            .filter(Boolean)
-                            .map((b, i) => (
-                              <span key={i} className={`rpos p${i}`}>
-                                {b}
-                              </span>
-                            ))}
-                        {!isReact && barFor === m.id && (canReact || chat.platform === 'slack') && (
-                          <span className="rbar" role="toolbar" aria-label="Hızlı işlemler">
-                            {canReact &&
-                              QUICK_REACTIONS.map((e) => (
-                                <button key={e} type="button" className={m.reactions?.some((r) => r.fromMe && r.emoji === e) ? 'on' : ''} onClick={() => (react(m, e), setBarFor(null))} title={`${e} tepkisi`}>
-                                  {e}
-                                </button>
-                              ))}
-                            {canReact && (
-                              <button
-                                type="button"
-                                className="more"
-                                title="Başka emoji"
-                                aria-label="Başka emoji"
-                                onClick={(ev) => {
-                                  const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
-                                  setReactPick(reactPick?.id === m.id ? null : { id: m.id, top: r.bottom + 6, left: Math.max(8, Math.min(window.innerWidth - 300, r.left - 120)) });
-                                }}
-                              >
-                                <Icon name="smile" size={14} />
-                              </button>
-                            )}
-                            {chat.platform === 'slack' && !m.threadId && (
-                              <button type="button" className="more" title="İş parçacığında yanıtla" aria-label="İş parçacığında yanıtla" onClick={() => (setThreadFocus(m.remoteId), setBarFor(null))}>
-                                <Icon name="thread" size={14} />
-                              </button>
-                            )}
-                          </span>
-                        )}
-                        {ownFor === m.id && (editable || unsendable) && (
-                          <span className="rbar own-menu" role="menu" aria-label="Mesaj işlemleri">
-                            {editable && (
-                              <button type="button" role="menuitem" onClick={() => startEdit(m)}>
-                                <Icon name="pen" size={14} /> Düzenle
-                              </button>
-                            )}
-                            {unsendable &&
-                              (delAsk === m.id ? (
-                                <button type="button" role="menuitem" className="danger" onClick={() => void unsend(m)} autoFocus>
-                                  <Icon name="trash" size={14} /> Emin misin? Sil
-                                </button>
-                              ) : (
-                                <button type="button" role="menuitem" onClick={() => setDelAsk(m.id)}>
-                                  <Icon name="trash" size={14} /> Herkesten sil
-                                </button>
-                              ))}
-                          </span>
-                        )}
-                        {reactPick?.id === m.id && (
-                          <div className="react-pick" style={{ top: reactPick.top, left: reactPick.left }}>
-                            <EmojiPicker compact onPick={(e) => react(m, e)} onClose={() => setReactPick(null)} />
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {g.fromMe && g.items[g.items.length - 1].status === 'failed' && <span className="meta" style={{ color: 'var(--danger)' }}>Gönderilemedi</span>}
-                </div>
-              </div>
-            ),
-          )}
+          {bubbleList}
           {aiP.actions && draft && (draft.events?.length ?? 0) > 0 && (
             <div className="actions">
               <div className="h">

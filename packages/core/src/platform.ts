@@ -37,19 +37,37 @@ export function openExternal(target: string): void {
 
 /**
  * Komut satırında `fragment` geçen süreçleri kapat (ör. profil kilidini tutan eski Chromium: `--user-data-dir=<profil>`).
- * macOS/Linux: pkill -f; Windows: PowerShell + Win32_Process (pkill yok). Hata sessizce yutulur.
+ * macOS/Linux: pkill -f; Windows: PowerShell + Win32_Process (pkill yok). true = eşleşen süreç kalmadı.
+ * Unix'te kalıp `--` ardından ve regex olarak kaçırılmış verilir: `--user-data-dir=…` eskiden seçenek sanılıyordu (pkill
+ * "unrecognized/illegal option" ile 2 dönüp hiçbir şeyi öldürmüyordu). SIGTERM'den sonra ≤5 sn beklenir, kalan SIGKILL alır.
  */
-export function killProcessesMatching(fragment: string): Promise<void> {
-  return new Promise<void>((resolve) => {
-    if (IS_WINDOWS) {
-      // tek tırnak PowerShell dizesi: ' → '' ; -like jokerleri ([ ] * ?) kaçırılır
+export function killProcessesMatching(fragment: string): Promise<boolean> {
+  if (IS_WINDOWS) {
+    return new Promise<boolean>((resolve) => {
+      // tek tırnak PowerShell dizesi: ' → '' ; -like jokerleri ([ ] * ?) kaçırılır; PowerShell'in kendisi (komut satırında
+      // kalıp geçer) atlanır
       const pat = fragment.replace(/'/g, "''").replace(/([[\]*?])/g, '`$1');
-      const script = `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*${pat}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
-      execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true }, () => resolve());
-    } else {
-      execFile('pkill', ['-f', fragment], () => resolve());
+      const script = `Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like '*${pat}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
+      execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 15_000 }, () => resolve(true));
+    });
+  }
+  const re = fragment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const run = (cmd: string, args: string[]) =>
+    new Promise<number>((resolve) => {
+      execFile(cmd, args, { timeout: 5000 }, (e) => resolve(e ? (typeof (e as { code?: unknown }).code === 'number' ? ((e as { code: number }).code) : -1) : 0));
+    });
+  // pgrep: 0 = eşleşen var, 1 = yok, diğerleri = sorulamadı (araç yok vb.)
+  const alive = async () => (await run('pgrep', ['-f', '--', re])) === 0;
+  return (async () => {
+    await run('pkill', ['-f', '--', re]);
+    for (let i = 0; i < 20; i++) {
+      if (!(await alive())) return true;
+      await new Promise((r) => setTimeout(r, 250));
     }
-  });
+    await run('pkill', ['-KILL', '-f', '--', re]);
+    await new Promise((r) => setTimeout(r, 250));
+    return !(await alive());
+  })();
 }
 
 /**

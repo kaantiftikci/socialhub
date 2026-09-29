@@ -114,7 +114,7 @@ export class Store {
       CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
         INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
       END;
-      CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE OF text ON messages BEGIN
+      CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE OF text ON messages WHEN old.text IS NOT new.text BEGIN
         INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
         INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text);
       END;
@@ -145,6 +145,44 @@ export class Store {
     // gönderen bazlı güncellemeler (ad/fotoğraf/lid→numara) tam tablo taraması yapmasın
     this.db.exec('CREATE INDEX IF NOT EXISTS messages_sender ON messages(sender_id)');
     this.db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    // Sonradan eklenen dizinler (ilk açılışta bir kez kurulur; 300 bin şifreli mesajda toplam ~3-4 sn, sonra anında):
+    // - messages_remote: findMessageByRemote (WhatsApp alındı yedeği, Telegram silme) her çağrıda tüm tabloyu tarıyordu
+    // - messages_ts / messages_att: genel arama tüm FTS eşleşmelerini sıralıyor, ek adları için tabloyu baştan sona tarıyordu
+    // - messages_mine: AI taslağı/üslup (myTexts, styleSamples) kendi mesajlarımı tüm geçmişte arıyordu
+    const idx = new Set((this.stmt("SELECT name FROM sqlite_master WHERE type = 'index'").all() as Array<{ name: string }>).map((r) => r.name));
+    const want: Array<[string, string]> = [
+      ['messages_remote', 'CREATE INDEX IF NOT EXISTS messages_remote ON messages(remote_id)'],
+      ['messages_ts', 'CREATE INDEX IF NOT EXISTS messages_ts ON messages(ts)'],
+      ['messages_att', 'CREATE INDEX IF NOT EXISTS messages_att ON messages(ts, attachments) WHERE attachments IS NOT NULL'],
+      ['messages_mine', 'CREATE INDEX IF NOT EXISTS messages_mine ON messages(ts, chat_id) WHERE from_me = 1'],
+    ];
+    const missing = want.filter(([n]) => !idx.has(n));
+    if (missing.length) {
+      const t0 = Date.now();
+      for (const [, sql] of missing) this.db.exec(sql);
+      const ms = Date.now() - t0;
+      if (ms > 200) bus.log('info', `Veritabanı dizinleri oluşturuldu (${missing.map(([n]) => n).join(', ')}; ${ms} ms, bir kez)`);
+    }
+    // FTS güncelleme tetikleyicisi metin DEĞİŞMEDİĞİNDE de çalışıyordu (her yeniden upsert'te FTS'ye sil+ekle, dizin şişmesi):
+    // eski kurulumlarda tetikleyici WHEN koşuluyla yeniden kurulur (CREATE ... IF NOT EXISTS var olanı değiştirmez)
+    if (!this.flag('fts_au_when_v1')) {
+      this.db.exec(`DROP TRIGGER IF EXISTS messages_au;
+        CREATE TRIGGER messages_au AFTER UPDATE OF text ON messages WHEN old.text IS NOT new.text BEGIN
+          INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+          INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text);
+        END;`);
+      this.setFlag('fts_au_when_v1');
+    }
+    // Katılımcı listesi ayrı tabloda: büyük gruplarda (50-300 KB JSON) chats satırında durunca her mesajın özet UPDATE'i satırı ve
+    // taşma sayfalarını baştan yazdırıyordu (SQLCipher her sayfayı yeniden şifreler). chats.participants sütunu kalır (boş).
+    this.db.exec('CREATE TABLE IF NOT EXISTS chat_participants (chat_id TEXT PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE, json TEXT NOT NULL)');
+    if (!this.flag('participants_table_v1')) {
+      this.transaction(() => {
+        this.db.exec("INSERT OR REPLACE INTO chat_participants (chat_id, json) SELECT id, participants FROM chats WHERE participants IS NOT NULL AND participants <> ''");
+        this.db.exec('UPDATE chats SET participants = NULL WHERE participants IS NOT NULL');
+        this.setFlag('participants_table_v1');
+      });
+    }
     // Mivelo takvimi: "Takvime ekle" ve Takvim görünümünden eklenen etkinlikler (yerel; isteğe bağlı cihaz takvimine de yazılır)
     this.db.exec(`CREATE TABLE IF NOT EXISTS events (
       id TEXT PRIMARY KEY,
@@ -344,10 +382,15 @@ export class Store {
 
   // ---------- chats ----------
   upsertChat(c: Chat): Chat {
+    this.transaction(() => this.writeChat(c));
+    return this.getChat(c.id)!;
+  }
+
+  private writeChat(c: Chat): void {
     this
       .stmt(
-        `INSERT INTO chats (id, account_id, platform, remote_id, name, kind, unread, last_message_at, last_preview, avatar_url, tags, handle, link, participants, meta, last_from_me)
-         VALUES (@id, @accountId, @platform, @remoteId, @name, @kind, @unread, @lastMessageAt, @lastPreview, @avatarUrl, @tags, @handle, @link, @participants, @meta, @lastFromMe)
+        `INSERT INTO chats (id, account_id, platform, remote_id, name, kind, unread, last_message_at, last_preview, avatar_url, tags, handle, link, meta, last_from_me)
+         VALUES (@id, @accountId, @platform, @remoteId, @name, @kind, @unread, @lastMessageAt, @lastPreview, @avatarUrl, @tags, @handle, @link, @meta, @lastFromMe)
          ON CONFLICT(id) DO UPDATE SET
            name = CASE WHEN excluded.name <> '' THEN excluded.name ELSE chats.name END,
            kind = excluded.kind,
@@ -358,20 +401,31 @@ export class Store {
            avatar_url = COALESCE(excluded.avatar_url, chats.avatar_url),
            handle = COALESCE(excluded.handle, chats.handle),
            link = COALESCE(excluded.link, chats.link),
-           participants = COALESCE(excluded.participants, chats.participants),
            meta = COALESCE(excluded.meta, chats.meta)`,
       )
       .run({
-        ...c,
+        id: c.id,
+        accountId: c.accountId,
+        platform: c.platform,
+        remoteId: c.remoteId,
+        name: c.name,
+        kind: c.kind,
+        unread: c.unread,
+        lastMessageAt: c.lastMessageAt,
+        lastPreview: c.lastPreview,
         avatarUrl: c.avatarUrl ?? null,
         tags: JSON.stringify(c.tags ?? []),
         handle: c.handle ?? null,
         link: c.link ?? null,
-        participants: c.participants ? JSON.stringify(c.participants) : null,
         meta: c.meta ? JSON.stringify(c.meta) : null,
         lastFromMe: c.lastFromMe ? 1 : 0,
       });
-    return this.getChat(c.id)!;
+    // katılımcılar yalnız verildiyse ve değiştiyse yazılır (verilmezse eskisi kalır; önceki COALESCE davranışı)
+    if (c.participants) {
+      this
+        .stmt('INSERT INTO chat_participants (chat_id, json) VALUES (?, ?) ON CONFLICT(chat_id) DO UPDATE SET json = excluded.json WHERE chat_participants.json IS NOT excluded.json')
+        .run(c.id, JSON.stringify(c.participants));
+    }
   }
 
   /** Bir sohbetin mesajlarını başka bir sohbete taşı ve kaynağı sil (aynı kişinin lid/numara kopyaları). */
@@ -422,7 +476,7 @@ export class Store {
   }
 
   getChat(id: string): Chat | undefined {
-    const r = this.stmt(`SELECT *, ${LAST_STATUS} FROM chats WHERE id = ?`).get(id);
+    const r = this.stmt(`SELECT *, ${PJSON}, ${LAST_STATUS} FROM chats WHERE id = ?`).get(id);
     return r ? rowToChat(r) : undefined;
   }
 
@@ -455,7 +509,7 @@ export class Store {
   listChats(perAccount = 3000): Chat[] {
     const rows = this
       .stmt(
-        `SELECT *, ${LAST_STATUS} FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY account_id ORDER BY last_message_at DESC) AS rn FROM chats) AS chats
+        `SELECT *, ${PJSON}, ${LAST_STATUS} FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY account_id ORDER BY last_message_at DESC) AS rn FROM chats) AS chats
           WHERE rn <= ? OR unread > 0 OR flags IS NOT NULL OR followup IS NOT NULL
              OR (platform = 'imessage' AND (meta LIKE '%"folder"%' OR meta LIKE '%"deleted"%'))
           ORDER BY last_message_at DESC`,
@@ -467,7 +521,7 @@ export class Store {
 
   /** Bir hesabın tüm sohbetleri (sınırsız; connector içi toplu işlemler için). */
   listChatsOf(accountId: string): Chat[] {
-    return this.stmt('SELECT * FROM chats WHERE account_id = ? ORDER BY last_message_at DESC').all(accountId).map(rowToChat);
+    return this.stmt(`SELECT *, ${PJSON} FROM chats WHERE account_id = ? ORDER BY last_message_at DESC`).all(accountId).map(rowToChat);
   }
 
   /** Sohbet Mivelo'da okundu: sayaç 0 ve okuma noktası = son mesaj zamanı (kalıcı; yeni mesaj gelene dek platform geri açamaz) */
@@ -483,7 +537,7 @@ export class Store {
   /** Mesajı kaydeder; sohbetin özetini (son mesaj, okunmamış) günceller. Yeni eklendiyse true döner. */
   upsertMessage(m: Message, opts: { bumpUnread?: boolean; html?: string } = {}): boolean {
     const existed = this.hasMessage(m.id);
-    this
+    const row = this
       .stmt(
         `INSERT INTO messages (id, chat_id, remote_id, sender_id, sender_name, from_me, text, ts, status, attachments, sender_avatar, reactions, thread_id, reply_count, reply_to, html, edited, deleted)
          VALUES (@id, @chatId, @remoteId, @senderId, @senderName, @fromMe, @text, @ts, @status, @attachments, @senderAvatar, @reactions, @threadId, @replyCount, @replyTo, @html, @edited, @deleted)
@@ -511,9 +565,10 @@ export class Store {
            thread_id = COALESCE(excluded.thread_id, messages.thread_id),
            reply_count = COALESCE(excluded.reply_count, messages.reply_count),
            reply_to = COALESCE(excluded.reply_to, messages.reply_to),
-           html = COALESCE(excluded.html, messages.html)`,
+           html = COALESCE(excluded.html, messages.html)
+         RETURNING text, attachments`,
       )
-      .run({
+      .get({
         ...m,
         fromMe: m.fromMe ? 1 : 0,
         attachments: m.attachments ? JSON.stringify(m.attachments) : null,
@@ -525,24 +580,32 @@ export class Store {
         html: opts.html ? opts.html.slice(0, 1_500_000) : null,
         edited: m.edited ? 1 : null,
         deleted: m.deleted ? 1 : null,
-      });
+      }) as { text: string; attachments: string | null } | undefined;
     const inserted = !existed;
+    const saved = existed ? row : undefined;
     // yalnız özet sütunları (katılımcı/meta JSON'u çözülmez: mesaj başına çalışan en sık yol)
-    const chat = this.stmt('SELECT kind, unread, last_message_at, last_preview, last_from_me, read_upto FROM chats WHERE id = ?').get(m.chatId) as
-      | { kind: string; unread: number; last_message_at: number; last_preview: string; last_from_me: number; read_upto: number }
+    const chat = this.stmt('SELECT kind, unread, last_message_at, last_preview, last_from_me, read_upto, last_reaction FROM chats WHERE id = ?').get(m.chatId) as
+      | { kind: string; unread: number; last_message_at: number; last_preview: string; last_from_me: number; read_upto: number; last_reaction: number }
       | undefined;
     if (chat) {
-      const body = m.text || (m.attachments?.length ? `[${m.attachments[0].name ?? m.attachments[0].kind}]` : '');
+      // önizleme DEPODAKİ halden: silinen/düzenlenen mesaj özgün metinle yeniden eşitlenince listede eski içerik görünmesin
+      const text = saved ? saved.text : m.text;
+      const atts: Message['attachments'] = saved ? (saved.attachments ? safeJson<Message['attachments']>(saved.attachments, undefined) : undefined) : m.attachments;
+      const body = text || (atts?.length ? `[${atts[0].name ?? atts[0].kind}]` : '');
       // grup/kanalda önizlemede kim yazdı görünsün: "Ali: mesaj" / "Sen: mesaj"
       const preview = chat.kind !== 'direct' && body ? `${m.fromMe ? 'Sen' : (m.senderName || '').split(/\s+/)[0] || '?'}: ${body}` : body;
       const last = Number(chat.last_message_at);
-      const isNewer = m.ts >= last;
+      // var olan son mesajın yeniden yazımı tepki önizlemesini ("❤️ Ayşe mesajına tepki verdi") silmez; yalnız yeni mesaj ezer
+      const isNewer = m.ts >= last && (inserted || Number(chat.last_reaction ?? 0) !== 1);
+      const unread = opts.bumpUnread && inserted && !m.fromMe && m.ts > Number(chat.read_upto ?? 0) ? Number(chat.unread) + 1 : Number(chat.unread);
+      // eski bir mesajın yeniden yazımı özeti değiştirmez: boşuna UPDATE yok (iMessage açılışta 60 bin mesajı yeniden yazıyor)
+      if (!isNewer && m.ts <= last && unread === Number(chat.unread)) return inserted;
       this
         .stmt('UPDATE chats SET last_message_at = ?, last_preview = ?, unread = ?, last_from_me = ?, last_reaction = CASE WHEN ? THEN 0 ELSE last_reaction END WHERE id = ?')
         .run(
           Math.max(last, m.ts),
           isNewer ? preview : chat.last_preview,
-          opts.bumpUnread && inserted && !m.fromMe && m.ts > Number(chat.read_upto ?? 0) ? Number(chat.unread) + 1 : Number(chat.unread),
+          unread,
           isNewer ? (m.fromMe ? 1 : 0) : Number(chat.last_from_me ?? 0) === 1 ? 1 : 0,
           isNewer ? 1 : 0,
           m.chatId,
@@ -664,8 +727,12 @@ export class Store {
   dropLocalDuplicates(chatId: string): string[] {
     const rows = this
       .stmt(
-        `SELECT l.id FROM messages l WHERE l.chat_id = ? AND l.remote_id LIKE 'local-%' AND l.from_me = 1
-           AND EXISTS (SELECT 1 FROM messages m WHERE m.chat_id = l.chat_id AND m.from_me = 1 AND m.remote_id NOT LIKE 'local-%' AND m.text = l.text AND ABS(m.ts - l.ts) < 600000)`,
+        // Aralık koşulları dizinden aranır: remote_id 'local-'…'local.' ('.' = '-'den sonraki karakter; LIKE büyük/küçük harf
+        // duyarsız olduğundan dizini kullanamıyor, her fromMe mesajında sohbetin tamamını tarıyordu → geçmiş eşitlemesi O(n²)),
+        // zaman penceresi messages_chat_ts (chat_id, ts) üzerinden
+        `SELECT l.id FROM messages l WHERE l.chat_id = ? AND l.remote_id >= 'local-' AND l.remote_id < 'local.' AND l.from_me = 1
+           AND EXISTS (SELECT 1 FROM messages m WHERE m.chat_id = l.chat_id AND m.from_me = 1 AND m.remote_id NOT LIKE 'local-%' AND m.text = l.text
+                       AND m.ts > l.ts - 600000 AND m.ts < l.ts + 600000)`,
       )
       .all(chatId) as Array<{ id: string }>;
     for (const r of rows) this.stmt('DELETE FROM messages WHERE id = ?').run(r.id);
@@ -702,12 +769,15 @@ export class Store {
     return r ? this.getMessage(r.id) : undefined;
   }
 
-  /** Var olan ikiz yer tutucuları temizle: her kümeden en iyi durumlu (sonra en eski) kalır. Silinen kimlikleri döndürür. */
+  /**
+   * Var olan ikiz yer tutucuları temizle: her kümeden en iyi durumlu (sonra en eski) kalır. Silinen kimlikleri döndürür.
+   * Zaman koşulu BETWEEN: eşi messages_chat_ts (chat_id, ts) aralığından bulunur (ABS(...) ile 'me' göndereni üzerinden tarıyordu).
+   */
   dropTwins(text: string): string[] {
     const rows = this
       .stmt(
         `SELECT b.id FROM messages a JOIN messages b ON b.chat_id = a.chat_id AND b.id <> a.id AND b.from_me = a.from_me AND b.sender_id = a.sender_id
-           AND b.text = a.text AND ABS(b.ts - a.ts) <= 10000
+           AND b.text = a.text AND b.ts BETWEEN a.ts - 10000 AND a.ts + 10000
          WHERE a.text = ? AND (
            (CASE a.status WHEN 'read' THEN 3 WHEN 'delivered' THEN 2 WHEN 'sent' THEN 1 ELSE 0 END) > (CASE b.status WHEN 'read' THEN 3 WHEN 'delivered' THEN 2 WHEN 'sent' THEN 1 ELSE 0 END)
            OR ((CASE a.status WHEN 'read' THEN 3 WHEN 'delivered' THEN 2 WHEN 'sent' THEN 1 ELSE 0 END) = (CASE b.status WHEN 'read' THEN 3 WHEN 'delivered' THEN 2 WHEN 'sent' THEN 1 ELSE 0 END) AND (a.ts < b.ts OR (a.ts = b.ts AND a.id < b.id))))`,
@@ -748,42 +818,64 @@ export class Store {
     const since = Date.now() - 365 * 86_400_000;
     const out: Array<{ them: string; me: string; scope: 'chat' | 'platform' | 'all' }> = [];
     const seen = new Set<string>();
-    const add = (where: string, arg: string | null, scope: 'chat' | 'platform' | 'all', n: number) => {
+    const add = (rows: () => Array<{ text: string; prev_text: string }>, scope: 'chat' | 'platform' | 'all', n: number) => {
       if (out.length >= limit) return;
-      const sql = `SELECT text, prev_text FROM (
-           SELECT text, from_me, ts,
-                  LAG(text) OVER (PARTITION BY chat_id ORDER BY ts) AS prev_text,
-                  LAG(from_me) OVER (PARTITION BY chat_id ORDER BY ts) AS prev_me
-           FROM messages WHERE ${where} AND ts > ?
-         ) WHERE from_me = 1 AND prev_me = 0 AND length(text) BETWEEN 2 AND 400 AND length(prev_text) BETWEEN 1 AND 400
-         ORDER BY ts DESC LIMIT ?`;
-      const rows = (arg === null ? this.stmt(sql).all(since, n * 3) : this.stmt(sql).all(arg, since, n * 3)) as Array<{ text: string; prev_text: string }>;
-      for (const r of rows) {
+      for (const r of rows()) {
         if (out.length >= limit || seen.has(r.text)) continue;
         seen.add(r.text);
         out.push({ them: r.prev_text, me: r.text, scope });
         if (out.filter((o) => o.scope === scope).length >= n) break;
       }
     };
-    add('chat_id = ?', chatId, 'chat', 6);
-    add("chat_id IN (SELECT id FROM chats WHERE platform = ? AND kind = 'direct')", platform, 'platform', 4);
-    add("chat_id IN (SELECT id FROM chats WHERE kind = 'direct')", null, 'all', limit);
+    // tek sohbet: messages_chat_ts üzerinden hızlı (pencere işlevi yalnız bu sohbetin satırlarında)
+    const chatSql = `SELECT text, prev_text FROM (
+         SELECT text, from_me, ts,
+                LAG(text) OVER (PARTITION BY chat_id ORDER BY ts) AS prev_text,
+                LAG(from_me) OVER (PARTITION BY chat_id ORDER BY ts) AS prev_me
+         FROM messages WHERE chat_id = ? AND ts > ?
+       ) WHERE from_me = 1 AND prev_me = 0 AND length(text) BETWEEN 2 AND 400 AND length(prev_text) BETWEEN 1 AND 400
+       ORDER BY ts DESC LIMIT ?`;
+    // platform / tümü: eskiden tüm bir yılın geçmişinde LAG penceresi (500 bin mesajda şifreli DB'de ~5 sn kilit). Şimdi kendi
+    // mesajlarımın en yeni 1000'i messages_mine kapsayan diziniyle alınır, her birinin hemen önceki mesajı chat_ts dizininden bulunur.
+    const wideSql = (withPlatform: boolean) => `SELECT m.text AS text, p.text AS prev_text FROM (
+         SELECT m2.rowid AS rid FROM messages m2 INDEXED BY messages_mine CROSS JOIN chats c ON c.id = m2.chat_id
+          WHERE m2.from_me = 1 AND m2.ts > ? AND c.kind = 'direct'${withPlatform ? ' AND c.platform = ?' : ''}
+          ORDER BY m2.ts DESC LIMIT 1000
+       ) k JOIN messages m ON m.rowid = k.rid
+         JOIN messages p ON p.rowid = (SELECT x.rowid FROM messages x WHERE x.chat_id = m.chat_id AND x.ts < m.ts ORDER BY x.ts DESC LIMIT 1)
+       WHERE length(m.text) BETWEEN 2 AND 400 AND p.from_me = 0 AND p.ts > ? AND length(p.text) BETWEEN 1 AND 400
+       ORDER BY m.ts DESC LIMIT ?`;
+    type Pair = { text: string; prev_text: string };
+    add(() => this.stmt(chatSql).all(chatId, since, 6 * 3) as Pair[], 'chat', 6);
+    add(() => this.stmt(wideSql(true)).all(since, platform, since, 4 * 3) as Pair[], 'platform', 4);
+    add(() => this.stmt(wideSql(false)).all(since, since, limit * 3) as Pair[], 'all', limit);
     return out;
   }
 
   /** Son yazdığım mesajlar (üslup istatistiği için; platform verilirse önce o platform) */
   myTexts(platform?: string, limit = 400): string[] {
-    const sql = platform
-      ? "SELECT m.text FROM messages m JOIN chats c ON c.id = m.chat_id WHERE m.from_me = 1 AND c.platform = ? AND length(m.text) > 1 ORDER BY m.ts DESC LIMIT ?"
-      : 'SELECT text FROM messages WHERE from_me = 1 AND length(text) > 1 ORDER BY ts DESC LIMIT ?';
-    const rows = (platform ? this.stmt(sql).all(platform, limit) : this.stmt(sql).all(limit)) as Array<{ text: string }>;
+    // platformlu biçim iki adımda: aday satırlar messages_mine kapsayan dizininden (tablo satırı okunmadan), metin sonra
+    const rows = (
+      platform
+        ? this
+            .stmt(
+              `SELECT text FROM messages WHERE rowid IN (
+                 SELECT m.rowid FROM messages m INDEXED BY messages_mine CROSS JOIN chats c ON c.id = m.chat_id WHERE m.from_me = 1 AND c.platform = ? ORDER BY m.ts DESC LIMIT ?
+               ) AND length(text) > 1 ORDER BY ts DESC LIMIT ?`,
+            )
+            .all(platform, limit * 2, limit)
+        : this.stmt('SELECT text FROM messages INDEXED BY messages_mine WHERE from_me = 1 AND length(text) > 1 ORDER BY ts DESC LIMIT ?').all(limit)
+    ) as Array<{ text: string }>;
     return rows.map((r) => r.text);
   }
 
   search(q: string, limit = 50): Array<{ message: Message; chat: Chat }> {
     const rows = this
       .stmt(
-        `SELECT m.* FROM messages_fts f JOIN messages m ON m.rowid = f.rowid WHERE messages_fts MATCH ? ORDER BY m.ts DESC LIMIT ?`,
+        // ts dizininde yeniden eskiye yürünür, her satır FTS eşleşme kümesinde aranır; limit dolunca durur (eskiden tüm eşleşmeler
+        // okunup geçici ağaçta sıralanıyordu: yaygın kelimede 300 bin mesajda ~0,6-0,9 sn olay döngüsü kilidi). INDEXED BY şart:
+        // planlayıcı yoksa rowid aramasına + geçici ağaca dönüyor.
+        `SELECT m.* FROM messages m INDEXED BY messages_ts WHERE m.rowid IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?) ORDER BY m.ts DESC LIMIT ?`,
       )
       .all(ftsQuery(q), limit)
       .map(rowToMessage);
@@ -793,7 +885,8 @@ export class Store {
       const seen = new Set(rows.map((m) => m.id));
       const like = `%"name":"%${term.replace(/[\\%_"]/g, (c) => '\\' + c)}%`;
       const extra = this
-        .stmt(`SELECT * FROM messages WHERE attachments IS NOT NULL AND attachments LIKE ? ESCAPE '\\' ORDER BY ts DESC LIMIT ?`)
+        // kısmi dizin (ts, attachments): LIKE dizin kaydında değerlendirilir, satır yalnız eşleşince okunur (eskiden tam tablo taraması)
+        .stmt(`SELECT * FROM messages INDEXED BY messages_att WHERE attachments IS NOT NULL AND attachments LIKE ? ESCAPE '\\' ORDER BY ts DESC LIMIT ?`)
         .all(like, limit - rows.length)
         .map(rowToMessage)
         .filter((m) => !seen.has(m.id) && (m.attachments ?? []).some((a) => (a.name ?? '').toLocaleLowerCase('tr-TR').includes(term.toLocaleLowerCase('tr-TR'))));
@@ -936,6 +1029,8 @@ function rowToAccount(r: unknown): Account {
 }
 
 /** Sohbetin son mesajının durumu (listede tik: gönderildi/iletildi/görüldü); messages_chat_ts dizininden tek arama */
+/** Katılımcı listesi ayrı tablodan (chat_participants); eski sütun göçte boşaltıldı, yedek olarak okunur */
+const PJSON = '(SELECT p.json FROM chat_participants p WHERE p.chat_id = chats.id) AS pjson';
 const LAST_STATUS = '(SELECT m.status FROM messages m WHERE m.chat_id = chats.id ORDER BY m.ts DESC, m.rowid DESC LIMIT 1) AS last_status';
 
 function rowToChat(r: unknown): Chat {
@@ -943,7 +1038,7 @@ function rowToChat(r: unknown): Chat {
   const chat = rowToChatBase(x);
   // Katılımcı listesi (büyük gruplarda onlarca KB JSON) yalnız okununca çözülür: mesaj başına getChat'te boşuna ayrıştırılmasın.
   // JSON.stringify / {...chat} okur → yayında ve kopyada tam veri.
-  const raw = x.participants;
+  const raw = x.pjson ?? x.participants;
   if (typeof raw === 'string' && raw) {
     let parsed: Chat['participants'] | null = null;
     Object.defineProperty(chat, 'participants', {

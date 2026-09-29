@@ -1,7 +1,7 @@
 import type { Locator, Page } from 'playwright';
 import { hashId, type Msg, type Strategy, type Thread } from './bridge.js';
 import { bus } from '../../bus.js';
-import { fillListTimes, parseMailDate, persistSessionCookies } from './outlook.js';
+import { fillListTimes, mailState, parseMailDate, persistSessionCookies } from './outlook.js';
 import { cleanMailHtml } from '../mail-html.js';
 
 /**
@@ -20,7 +20,6 @@ const YANDEX_COOKIE_DOMAINS = /(^|\.)yandex\.(com|com\.tr|ru)$/;
 // (Kaan: bugünkü ve bazı eski e-postalar yoktu — hepsi dizi satırıydı). En dıştaki eşleşme satır sayıldığı için iç içe eşleşme sorun değil.
 const ROW_SEL = '.ns-view-messages-item-wrap a.mail-MessageSnippet, a.mail-MessageSnippet, .mail-MessageSnippet, [data-testid="message-list-item"], [data-testid*="message-snippet" i], [role="listitem"] a[href*="message"]';
 
-let meEmail = '';
 /** Liste satırının zamanı (ileti görünümünde zaman okunamazsa yedek; "şimdi" yazılınca sıra bozuluyordu) */
 const threadTs = new Map<string, number>();
 
@@ -207,7 +206,7 @@ async function readThread(page: Page, threadId: string, limit: number, restore: 
   }
   return good
     .map((r, i) => {
-      const fromMe = !!meEmail && r.from.toLowerCase() === meEmail;
+      const fromMe = !!mailState(page).me && r.from.toLowerCase() === mailState(page).me;
       return {
         id: hashId(threadId + '|' + r.from + '|' + r.text.slice(0, 120)),
         text: r.text.replace(/[ \t\u00a0]+$/gm, '').replace(/\n{3,}/g, '\n\n').slice(0, 20_000),
@@ -296,8 +295,8 @@ export const yandex: Strategy = {
     const login = decodeURIComponent(cookies?.yandex_login ?? '').trim();
     if (/^[\w.+-]+(@[\w.-]+)?$/.test(login)) {
       const email = login.includes('@') ? login : `${login}@yandex.com`;
-      meEmail = email.toLowerCase();
-      return { id: meEmail, label: email };
+      mailState(page).me = email.toLowerCase();
+      return { id: mailState(page).me, label: email };
     }
     await openMail(page);
     const email = await page
@@ -311,8 +310,8 @@ export const yandex: Strategy = {
         return document.body.innerText.match(/[\w.+-]+@yandex\.[a-z.]+/i)?.[0] ?? '';
       })
       .catch(() => '');
-    meEmail = email.toLowerCase();
-    return { id: meEmail || 'yandex', label: email || 'Yandex Mail' };
+    mailState(page).me = email.toLowerCase();
+    return { id: mailState(page).me || 'yandex', label: email || 'Yandex Mail' };
   },
 
   async threads(page, cookies): Promise<Thread[]> {
@@ -323,7 +322,7 @@ export const yandex: Strategy = {
       return [];
     }
     await persistSessionCookies(page.context(), YANDEX_COOKIE_DOMAINS).catch(() => 0);
-    if (!meEmail) await this.me(page, cookies);
+    if (!mailState(page).me) await this.me(page, cookies);
     await diagnose(page);
     const rows = await readRows(page);
     const times = fillListTimes(rows.map((r) => parseMailDate(r.time)));

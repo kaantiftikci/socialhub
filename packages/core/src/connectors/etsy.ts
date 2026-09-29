@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import { ordersFlag, BaseConnector, type StartOptions } from './base.js';
 import { PollTimer, marketDelay, retryAfterSec } from './poll-timer.js';
+import { ingestChunked, writeJsonAtomic } from './market-state.js';
 import { BrowserConnector } from './browser/bridge.js';
 import { etsy as etsyStrategy } from './browser/etsy.js';
 import { OAUTH_CALLBACK, waitOAuth, withAuthWindow } from './mail.js';
@@ -131,8 +132,11 @@ export class EtsyConnector extends BaseConnector {
     this.stateFile = path.join(dir, 'etsy-state.json');
     this.tokenFile = path.join(dir, 'token');
     try {
-      const st = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) as Record<string, string>;
-      for (const [k, v] of Object.entries(st)) this.seen.set(k, v);
+      // yeni biçim {seen, since}; eski biçim düz seen haritası (since saklanmıyordu)
+      const st = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) as Record<string, unknown>;
+      const nested = st.seen && typeof st.seen === 'object' && !Array.isArray(st.seen);
+      for (const [k, v] of Object.entries((nested ? st.seen : st) as Record<string, unknown>)) if (typeof v === 'string') this.seen.set(k, v);
+      if (nested && typeof st.since === 'number') this.since = st.since;
     } catch {
       /* ilk çalıştırma */
     }
@@ -311,23 +315,42 @@ export class EtsyConnector extends BaseConnector {
     }
     const startedAt = Date.now();
     try {
-      const receipts: J[] = [];
-      // ilk yoklama: en yeni 500 sipariş (oluşturmaya göre); sonrakiler: son yoklamadan beri DEĞİŞENLER (eski siparişin kargo/iade/
-      // tamamlanma olayı da gelsin; yalnız en yeni 50'ye bakmak bunları kaçırıyordu)
-      const incremental = !first && this.since !== undefined;
-      const filter = incremental ? `&min_last_modified=${Math.floor((this.since! - 5 * 60_000) / 1000)}&sort_on=updated` : '&sort_on=created';
-      const pages = 10;
-      for (let i = 0; i < pages; i++) {
-        const data = await this.api(`/shops/${encodeURIComponent(this.cfg.shopId ?? '')}/receipts?limit=50&offset=${i * 50}${filter}&sort_order=desc`);
-        const list: J[] = Array.isArray(data.results) ? data.results : [];
-        receipts.push(...list);
-        if (list.length < 50 || (typeof data.count === 'number' && receipts.length >= data.count)) break;
+      /** offset'li sayfalar; 10. sayfa da doluysa truncated */
+      const fetchPages = async (filter: string): Promise<{ list: J[]; truncated: boolean }> => {
+        const list: J[] = [];
+        for (let i = 0; i < 10; i++) {
+          const data = await this.api(`/shops/${encodeURIComponent(this.cfg.shopId ?? '')}/receipts?limit=50&offset=${i * 50}${filter}`);
+          const got: J[] = Array.isArray(data.results) ? data.results : [];
+          list.push(...got);
+          if (got.length < 50 || (typeof data.count === 'number' && list.length >= data.count)) return { list, truncated: false };
+        }
+        return { list, truncated: true };
+      };
+      const byId = new Map<string, J>();
+      const add = (r: J) => byId.set(String(r.receipt_id ?? r.id ?? ''), r);
+      // ilk kurulum / açılış: en yeni 500 sipariş (oluşturmaya göre)
+      if (first || this.since === undefined) (await fetchPages('&sort_on=created&sort_order=desc')).list.forEach(add);
+      // kalıcı imleç varsa (açılışta da): o andan beri DEĞİŞENLER, eskiden yeniye (eski siparişin kargo/iade/tamamlanma olayı
+      // kapalıyken olduysa da gelsin); sınır dolarsa imleç yalnız işlenen son değişikliğe ilerler
+      let nextSince = startedAt;
+      if (this.since !== undefined) {
+        const inc = await fetchPages(`&min_last_modified=${Math.floor((this.since - 5 * 60_000) / 1000)}&sort_on=updated&sort_order=asc`);
+        inc.list.forEach(add);
+        const last = Number(inc.list[inc.list.length - 1]?.updated_timestamp ?? inc.list[inc.list.length - 1]?.update_timestamp);
+        if (inc.truncated && last) nextSince = last * 1000;
       }
+      const created = (r: J) => Number(r.create_timestamp ?? r.created_timestamp ?? 0);
+      const receipts = [...byId.values()].sort((a, b) => created(a) - created(b));
       let changed = 0;
-      for (const r of receipts.reverse()) if (this.ingest(r, !first)) changed++;
+      const done = await ingestChunked(this.store, receipts, (r) => {
+        if (this.ingest(r, !first)) changed++;
+      }, () => this.stopping);
+      if (!done) return; // durduruldu: imleç ilerlemesin
       if (changed) bus.log('info', `Etsy: ${changed} sipariş güncellendi`);
-      this.since = startedAt;
-      this.saveState();
+      const moved = nextSince !== startedAt || this.since === undefined;
+      this.since = nextSince;
+      // durum dosyası yalnız değişince (dosyadaki eski since yalnız daha geniş aralık ister, kayıp olmaz)
+      if (changed || first || moved) this.saveState();
     } catch (e) {
       bus.log('warn', `Etsy yoklama: ${(e as Error).message}`);
       if (first) throw e;
@@ -342,7 +365,7 @@ export class EtsyConnector extends BaseConnector {
     const obj: Record<string, string> = {};
     for (const [k, v] of [...this.seen.entries()].slice(-3000)) obj[k] = v;
     try {
-      fs.writeFileSync(this.stateFile, JSON.stringify(obj));
+      writeJsonAtomic(this.stateFile, { seen: obj, since: this.since });
     } catch {
       /* yazılamadı */
     }

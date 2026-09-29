@@ -185,6 +185,8 @@ const snowflakeFromMs = (ms: number) => String((BigInt(Math.max(0, Math.floor(ms
 const apiMissing = new Set<string>();
 /** Önceki yoklamada görülen DOM önizlemesi (DB yoksa yedek yol): değiştiyse sohbet "yeni etkinlik" sayılır */
 const domPreview = new Map<string, string>();
+/** DOM önizlemesinin son değiştiği an (bir tur sonra 0'a dönmesin: ertelenen/okunamayan sohbet köprüde "değişmiş" kalır) */
+const domChangedAt = new Map<string, number>();
 
 // ───────────────────────── Kodlayıcılar: CBOR (yerel DB içerikleri) ve Thrift (GraphQL olayları) ─────────────────────────
 type CborValue = unknown;
@@ -294,9 +296,16 @@ let snap: { db: Database.Database; at: number; mtime: number; file: string; me: 
  * Profilde birden çok hesabın yedeği olabilir (chat_<kimlik>.db): kendi kimliğimizinki tercih edilir.
  * Yedek son okumadan beri değişmediyse (lastModified aynı) yeniden aktarılmaz.
  */
-async function readSnapshot(page: Page): Promise<boolean> {
-  const r = await page
-    .evaluate(async ({ me, since }) => {
+/** Tek uçuş: aynı anda iki aktarım aynı yan dosyaya yazmasın */
+let snapFlight: Promise<boolean> | undefined;
+function readSnapshot(page: Page): Promise<boolean> {
+  if (!snapFlight) snapFlight = readSnapshotOnce(page).finally(() => (snapFlight = undefined));
+  return snapFlight;
+}
+async function readSnapshotOnce(page: Page): Promise<boolean> {
+  // 1) yalnız üst bilgi (veri taşımadan): değişmediyse eldeki anlık görüntü geçerli
+  const meta = await page
+    .evaluate(async ({ me }) => {
       const root = await navigator.storage.getDirectory();
       const dir = await root.getDirectoryHandle('backups').catch(() => undefined);
       if (!dir) return undefined;
@@ -305,37 +314,70 @@ async function readSnapshot(page: Page): Promise<boolean> {
       const pick = files.find((f) => me && f.name.includes(me)) ?? files[0];
       if (!pick) return undefined;
       const f = await pick.h.getFile();
-      if (since && f.lastModified <= since) return { name: pick.name, b64: '', lastModified: f.lastModified };
-      const buf = new Uint8Array(await f.arrayBuffer());
-      let s = '';
-      for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, Array.from(buf.subarray(i, i + 0x8000)));
-      return { name: pick.name, b64: btoa(s), lastModified: f.lastModified };
-    }, { me: meId, since: snap && snap.me === meId ? snap.mtime : 0 })
+      return { name: pick.name, size: f.size, lastModified: f.lastModified };
+    }, { me: meId })
     .catch(() => undefined);
-  if (!r) return false;
-  if (!r.b64 && snap) {
+  if (!meta) return false;
+  const since = snap && snap.me === meId ? snap.mtime : 0;
+  if (since && meta.lastModified <= since && snap) {
     snap.at = Date.now(); // değişmemiş: eldeki anlık görüntü geçerli
     return true;
   }
-  if (!r.b64) return false;
+  if (!meta.size) return false;
+  // 2) parça parça aktar (tek dev base64 iletisi + senkron çözme olay döngüsünü yüzlerce ms kilitliyordu); her parça ayrı await
+  const parts: Buffer[] = [];
+  for (let off = 0; off < meta.size; off += SNAP_CHUNK) {
+    const c = await page
+      .evaluate(async ({ name, off, len }) => {
+        const root = await navigator.storage.getDirectory();
+        const dir = await root.getDirectoryHandle('backups');
+        const f = await (await dir.getFileHandle(name)).getFile();
+        const buf = new Uint8Array(await f.slice(off, off + len).arrayBuffer());
+        let s = '';
+        for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, Array.from(buf.subarray(i, i + 0x8000)));
+        return { b64: btoa(s), lastModified: f.lastModified, size: f.size };
+      }, { name: meta.name, off, len: SNAP_CHUNK })
+      .catch(() => undefined);
+    // aktarım sırasında yedek yeniden yazıldı (ya da okunamadı): bu turu bırak, eldeki anlık görüntüyle devam
+    if (!c || c.lastModified !== meta.lastModified || c.size !== meta.size) {
+      if (snap && snap.me === meId) {
+        snap.at = Date.now();
+        return true;
+      }
+      return false;
+    }
+    parts.push(Buffer.from(c.b64, 'base64'));
+  }
   // süreç başına ayrı dosya: aynı hesabı açan ikinci çekirdek (geliştirme + paketli uygulama) açık DB'nin altından dosyayı değiştirmesin
   const file = path.join(os.tmpdir(), `kavsak-xchat-${meId || 'x'}-${process.pid}.db`);
+  const tmp = `${file}.new`;
   cleanStaleSnapshots();
+  // 3) eşzamansız yazım yan dosyaya (bu sırada eski anlık görüntü kullanılabilir), sonra kapat → yerine koy → aç
+  try {
+    await fs.promises.writeFile(tmp, Buffer.concat(parts), { mode: 0o600 }); // çözülmüş DM kopyası yalnızca bu kullanıcıya okunur
+  } catch (e) {
+    fs.rmSync(tmp, { force: true });
+    bus.log('warn', `X yerel veritabanı yazılamadı: ${(e as Error).message}`);
+    return !!snap && snap.me === meId;
+  }
   snap?.db.close();
   snap = undefined;
-  fs.writeFileSync(file, Buffer.from(r.b64, 'base64'), { mode: 0o600 }); // çözülmüş DM kopyası yalnızca bu kullanıcıya okunur
   try {
-    snap = { db: new Database(file, { readonly: true, fileMustExist: true }), at: Date.now(), mtime: r.lastModified, file, me: meId };
+    fs.renameSync(tmp, file);
+    snap = { db: new Database(file, { readonly: true, fileMustExist: true }), at: Date.now(), mtime: meta.lastModified, file, me: meId };
     // sağlamlık: yedek yazılırken kopyalandıysa açılır ama sorgu patlar; burada yakala
     snap.db.prepare('select count(*) n from dm_conversation').get();
     return true;
   } catch (e) {
     snap?.db.close();
     snap = undefined;
+    fs.rmSync(tmp, { force: true });
     bus.log('warn', `X yerel veritabanı okunamadı: ${(e as Error).message}`);
     return false;
   }
 }
+/** OPFS yedeğinin tek aktarım parçası (CDP iletisi başına ≈2,7 MB base64) */
+const SNAP_CHUNK = 2 * 1024 * 1024;
 /** Kapanmış süreçlerden kalan anlık görüntü dosyalarını sil (süreç başına bir kez) */
 let cleaned = false;
 function cleanStaleSnapshots(): void {
@@ -343,7 +385,7 @@ function cleanStaleSnapshots(): void {
   cleaned = true;
   try {
     for (const f of fs.readdirSync(os.tmpdir())) {
-      const m = f.match(/^kavsak-xchat-.+?(?:-(\d+))?\.db$/);
+      const m = f.match(/^kavsak-xchat-.+?(?:-(\d+))?\.db(?:\.new)?$/);
       if (!m) continue;
       const pid = Number(m[1]);
       if (pid === process.pid) continue;
@@ -1122,17 +1164,18 @@ export const x: Strategy & { fetchMedia(page: Page, cookies: Record<string, stri
         for (const d of await domInbox(page)) {
           const prev = domPreview.get(d.id);
           domPreview.set(d.id, d.preview);
-          const changed = prev !== undefined && prev !== d.preview;
+          if (prev !== undefined && prev !== d.preview) domChangedAt.set(d.id, Date.now());
+          const changedAt = domChangedAt.get(d.id) ?? 0;
           const ex = byId.get(d.id);
           if (ex) {
             if (d.preview && d.preview !== ex.preview.replace(/^(You|Sen):\s*/, '')) {
               ex.preview = d.preview;
-              if (changed) ex.lastTs = Math.max(ex.lastTs, Date.now());
+              ex.lastTs = Math.max(ex.lastTs, changedAt);
             }
             ex.unread = d.unread ? Math.max(1, ex.unread) : 0;
           } else {
             // DOM'da yalnızca göreli süre var → zaman 0 (mesajlar okununca gerçek değeri alır), önizleme değişince "şimdi"
-            byId.set(d.id, { id: d.id, name: d.name || 'Sohbet', kind: d.id.startsWith('g') ? 'group' : 'direct', lastTs: changed ? Date.now() : 0, preview: d.preview, unread: d.unread ? 1 : 0 });
+            byId.set(d.id, { id: d.id, name: d.name || 'Sohbet', kind: d.id.startsWith('g') ? 'group' : 'direct', lastTs: changedAt, preview: d.preview, unread: d.unread ? 1 : 0 });
           }
         }
       } catch (e) {

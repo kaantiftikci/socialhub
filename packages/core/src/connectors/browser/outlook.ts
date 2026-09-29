@@ -195,7 +195,38 @@ export function parseOutlookDate(s: string | undefined | null, now = new Date())
   return Number.isFinite(p) ? p : undefined;
 }
 
-let meEmail = '';
+/**
+ * Hesap başına durum ("ben" adresi, sayfa boyu, klasör sayacı). Strateji nesnesi aynı sağlayıcının TÜM hesaplarında ortak;
+ * modül değişkeninde tutulunca son açılan hesabın adresi ötekinin fromMe'sini bozuyordu. Her hesabın kendi kalıcı profili
+ * (BrowserContext) var → anahtar o (bağlamı olmayan sahte sayfada sayfanın kendisi).
+ */
+export interface MailPageState {
+  me: string;
+  pageSize: number;
+}
+const mailStates = new WeakMap<object, MailPageState>();
+export function mailState(page: Page): MailPageState {
+  let key: object = page;
+  try {
+    key = (typeof page.context === 'function' && page.context()) || page;
+  } catch {
+    /* bağlamsız sahte sayfa */
+  }
+  let s = mailStates.get(key);
+  if (!s) mailStates.set(key, (s = { me: '', pageSize: 0 }));
+  return s;
+}
+/**
+ * Gönderilenler/Gereksiz her 8. yoklamada (ilk dahil). Sayaç "ben" adresine bağlı, bağlama DEĞİL: boşta tarayıcıyı kapatan
+ * kanallarda (Gmail unloadWhenIdle) her yoklama yeni bağlam açıyor → bağlama bağlı sayaç her turda 0'dan başlayıp klasörler her turda okunurdu.
+ */
+const folderTicks = new Map<string, number>();
+export function folderDue(page: Page): boolean {
+  const k = mailState(page).me;
+  const n = folderTicks.get(k) ?? 0;
+  folderTicks.set(k, n + 1);
+  return n % 8 === 0;
+}
 let warnedEmpty = false;
 
 type InboxState = 'ok' | 'empty' | 'login' | 'missing';
@@ -386,8 +417,8 @@ export const outlook: Strategy = {
         return { email, name: label.replace(/[\w.+-]+@[\w.-]+/, '').replace(/^(Hesap yöneticisi|Account manager)( for)?:?/i, '').trim() };
       })
       .catch(() => ({ email: '', name: '' }));
-    meEmail = info.email.toLowerCase();
-    return { id: meEmail, label: info.email || info.name || 'Outlook' };
+    mailState(page).me = info.email.toLowerCase();
+    return { id: mailState(page).me, label: info.email || info.name || 'Outlook' };
   },
 
   async threads(page): Promise<Thread[]> {
@@ -407,7 +438,7 @@ export const outlook: Strategy = {
       warnedEmpty = true;
       return [];
     }
-    if (!meEmail) await this.me(page, {});
+    if (!mailState(page).me) await this.me(page, {});
     // moreThreads listeyi aşağı kaydırmışsa (liste sanal: üstteki satırlar DOM'dan düşer) başa dön
     if (await scrollList(page, 'top')) await page.waitForTimeout(1200);
     const raw = await readListRows(page);
@@ -415,7 +446,7 @@ export const outlook: Strategy = {
     const out: Thread[] = raw.map((r) => ({ ...rawToThread(r), meta: { folder: 'inbox' } }));
     const ids = new Set(out.map((t) => t.id));
     // Gönderilenler ve Gereksiz klasörleri: her 8. yoklamada okunur, sonra gelen kutusuna dönülür
-    if (folderTick++ % 8 === 0) {
+    if (folderDue(page)) {
       for (const [path, folder] of [['sentitems', 'sent'], ['junkemail', 'junk']] as const) {
         try {
           await page.goto(BASE + path, { waitUntil: 'domcontentloaded', timeout: 30_000 });
@@ -521,7 +552,7 @@ export const outlook: Strategy = {
       .map((r) => ({ ...r, text: cleanMailText(r.text) }))
       .filter((r) => r.text || r.files.length)
       .map((r, i) => {
-        const fromMe = !!meEmail && r.email === meEmail;
+        const fromMe = !!mailState(page).me && r.email === mailState(page).me;
         return {
           id: hashId(threadId + '|' + r.email + '|' + r.time + '|' + r.text.slice(0, 80)),
           text: r.text.slice(0, 20_000),
@@ -602,7 +633,6 @@ export const FILE_INPUT = 'input[type="file"][data-testid="local-computer-filein
 
 /** threads()/moreThreads ile depoya yazılmış satır kimlikleri (moreThreads yalnızca yenilerini döndürür) */
 const listed = new Set<string>();
-let folderTick = 0;
 /** liste satırından okunan zaman (ileti zamanı okunamazsa yedek) */
 const threadTs = new Map<string, number>();
 

@@ -38,6 +38,9 @@ let myHandle = '';
 const handles = new Map<string, string>();
 /** Son görülen önizleme: değiştiyse sohbette yeni etkinlik ("şimdi") */
 const lastPreview = new Map<string, string>();
+/** Sohbetin son bilinen zamanı (önizleme değişmedikçe sabit): göreli liste zamanı ("1 g", "2h") her turda yeniden hesaplanınca
+ *  zaman kayıyor → köprü değişmeyen sohbeti her turda "değişti" sayıp açıyordu ("Görüldü" riski) ve sohbet listede üste çıkıyordu */
+const stableTs = new Map<string, number>();
 
 interface ListRow {
   name: string;
@@ -181,8 +184,10 @@ export function toThreads(rows: ListRow[], now = Date.now()): Thread[] {
     const id = ids[i];
     const prev = lastPreview.get(id);
     lastPreview.set(id, r.preview);
-    // önizleme değiştiyse yeni etkinlik (şimdi); ilk görüşte listedeki kısa zaman (okunamazsa 0: mesajlar çekilince gerçek zaman yazılır)
-    const lastTs = prev !== undefined && prev !== r.preview ? now : listTime(r.time, new Date(now));
+    // önizleme değiştiyse yeni etkinlik (şimdi); ilk görüşte listedeki kısa zaman (okunamazsa 0: mesajlar çekilince gerçek zaman yazılır);
+    // değişmediyse önceki değer aynen (değişim anı da korunur: bu turda okunamayan sohbet sonraki turda yine "değişmiş" kalır)
+    const lastTs = prev !== undefined && prev !== r.preview ? now : (stableTs.get(id) ?? listTime(r.time, new Date(now)));
+    stableTs.set(id, lastTs);
     const handle = handles.get(id);
     return {
       id,
@@ -353,17 +358,23 @@ function readItems(page: Page, mine: string): Promise<RawItem[]> {
 
 /**
  * Ham satırlar → mesajlar. Zaman ayırıcıdaki (çözülen, mutlak) zaman sonraki mesajların tabanı; kimlik sohbet + ayırıcı zamanı +
- * gönderen + metin (+ aynı blokta aynı metin tekrarında sıra no). Ayırıcıdan önceki (henüz yüklenmemiş bloğun) mesajları 'x' tabanlı.
+ * gönderen + metin (+ aynı blokta aynı metin tekrarında sıra no). Çözülebilen bir ayırıcı varsa ondan önceki (henüz ayırıcısı
+ * yüklenmemiş bloğun) mesajları ATLANIR: zamanları bilinmiyor (eskiden "şimdi" alıp sohbeti üste taşıyor, ayırıcı yüklenince
+ * başka kimlikle ikinci kez yazılıyordu); yukarı kaydırınca (loadOlder) doğru zaman ve kalıcı kimlikle gelir. Hiç ayırıcı yoksa
+ * 'x' tabanlı, zamanı `fallbackTs − kalan sıra` (sohbet satırının zamanı; yoksa şimdi).
  */
-export function toMessages(threadId: string, name: string, items: RawItem[], now = new Date()): Msg[] {
+export function toMessages(threadId: string, name: string, items: RawItem[], now = new Date(), fallbackTs?: number): Msg[] {
   const out: Msg[] = [];
   let base: number | undefined;
   let baseKey = 'x';
   let step = 0;
   const dupes = new Map<string, number>();
+  const sepTime = (sep: string) => parseDate(sep, now) ?? listTime(sep, now);
+  const hasSep = items.some((it) => it.sep !== undefined && !!sepTime(it.sep));
+  const anchor = fallbackTs && fallbackTs > 0 ? Math.min(fallbackTs, now.getTime()) : now.getTime();
   for (const it of items) {
     if (it.sep !== undefined) {
-      const t = parseDate(it.sep, now) ?? listTime(it.sep, now);
+      const t = sepTime(it.sep);
       if (t) {
         base = t;
         baseKey = String(t);
@@ -371,6 +382,7 @@ export function toMessages(threadId: string, name: string, items: RawItem[], now
       }
       continue;
     }
+    if (hasSep && base === undefined) continue;
     const fromMe = !!it.me;
     const text = (it.text ?? '').trim();
     const key = `${threadId}|${baseKey}|${fromMe ? 'me' : 'o'}|${text}|${(it.attachments ?? []).map((a) => a.link ?? a.name).join(',')}`;
@@ -380,8 +392,8 @@ export function toMessages(threadId: string, name: string, items: RawItem[], now
     out.push({
       id: hashId(n ? `${key}#${n}` : key),
       text,
-      // bloğun zamanı + sıra (ms): sıralama korunur; ayırıcı yoksa (en eski yüklenmemiş blok) şimdi − kalan sıra
-      ts: base !== undefined ? base + step : now.getTime() - (items.length - step),
+      // bloğun zamanı + sıra (ms): sıralama korunur; hiç ayırıcı yoksa sohbet zamanı − kalan sıra
+      ts: base !== undefined ? base + step : anchor - (items.length - step),
       fromMe,
       senderId: fromMe ? 'me' : threadId,
       senderName: fromMe ? 'Ben' : name || 'Karşı taraf',
@@ -453,7 +465,7 @@ export const tiktok: Strategy = {
       bus.log('warn', 'TikTok: sohbet açıldı ama mesajlar okunamadı; sayfa düzeni tanısı:');
       await diagnose(page);
     }
-    const msgs = toMessages(threadId, head.name, items);
+    const msgs = toMessages(threadId, head.name, items, new Date(), stableTs.get(threadId));
     const out = before ? msgs.filter((m) => m.ts < before) : msgs;
     return out.slice(-limit);
   },

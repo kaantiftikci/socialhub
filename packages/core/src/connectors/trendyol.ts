@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ordersFlag, BaseConnector, type StartOptions } from './base.js';
 import { PollTimer, marketDelay, retryAfterSec } from './poll-timer.js';
+import { ingestChunked, writeJsonAtomic } from './market-state.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
 import type { Participant } from '../model.js';
@@ -90,6 +91,12 @@ const answeredSentinel = () => `${ANSWERED_SENTINEL_PREFIX}${Date.now()}`;
 const answeredRecently = (prev: string | undefined) => !!prev && prev.startsWith(ANSWERED_SENTINEL_PREFIX) && Date.now() - Number(prev.slice(ANSWERED_SENTINEL_PREFIX.length)) < 30 * 60_000;
 /** Durum dosyasında paketleri saklanan en fazla sipariş (en son güncellenenler) */
 const MAX_STORED_ORDERS = 2000;
+/** Durum dosyasında saklanan en fazla imza (sipariş + soru; son görülme sırasına göre, LRU) */
+const MAX_SEEN = 8000;
+/** Kaçan aralık telafisi: son başarılı yoklamadan bu kadar öncesinden başla (saat/API gecikmesi payı) */
+const CATCHUP_SLACK = 10 * 60_000;
+/** Başarısız geniş isteğin yeniden denenme aralığı */
+const WIDE_RETRY = 10 * 60_000;
 
 const pick = (o: J | undefined, keys: string[]): J | undefined => {
   if (!o || typeof o !== 'object') return undefined;
@@ -152,6 +159,15 @@ export class TrendyolConnector extends BaseConnector {
    */
   private packages = new Map<string, J[]>();
   private stateFile: string;
+  /**
+   * Son hatasız tamamlanan yoklamanın zamanı (ms; sorular / siparişler). Sonraki tur [min(şimdi-3g, lastOk-10dk), şimdi]
+   * aralığını ister: 3 günü aşan uyku ya da yarım kalan ilk eşitleme telafi edilir. 0 = tam ilk eşitleme gerekiyor.
+   */
+  private lastOkQ = 0;
+  private lastOkO = 0;
+  /** Son geniş isteğin (tam eşitleme / çok dilimli telafi) zamanı: başarısızsa WIDE_RETRY dolmadan yinelenmez */
+  private wideAtQ = 0;
+  private wideAtO = 0;
 
   constructor(account: BaseConnector['account'], store: BaseConnector['store'], config: string) {
     super(account, store);
@@ -159,8 +175,10 @@ export class TrendyolConnector extends BaseConnector {
     this.ordersOn = ordersFlag(config);
     this.stateFile = path.join(sessionDir(account.id), 'trendyol-state.json');
     try {
-      const st = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) as { seen?: Record<string, string>; gw?: number; packages?: Record<string, J[]> };
+      const st = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) as { seen?: Record<string, string>; gw?: number; packages?: Record<string, J[]>; lastOkQ?: number; lastOkO?: number };
       for (const [k, v] of Object.entries(st.seen ?? {})) this.seen.set(k, v);
+      if (typeof st.lastOkQ === 'number') this.lastOkQ = st.lastOkQ;
+      if (typeof st.lastOkO === 'number') this.lastOkO = st.lastOkO;
       for (const [k, v] of Object.entries(st.packages ?? {})) if (Array.isArray(v)) this.packages.set(k, v);
       if (typeof st.gw === 'number' && GATEWAYS[st.gw]) this.gw = st.gw;
     } catch {
@@ -251,53 +269,101 @@ export class TrendyolConnector extends BaseConnector {
     this.polling = true;
     try {
       const now = Date.now();
-      const startDate = now - (first ? FIRST_WINDOW : NEXT_WINDOW);
+      const gwBefore = this.gw;
       // İki servis ayrı hız sınırına sahip: biri 429 verirse öteki yine işlensin
-      // sipariş sohbetleri isteğe bağlı (varsayılan kapalı: yalnız müşteri soruları)
       // API tek istekte en çok 2 haftalık aralık kabul ediyor: ilk eşitlemede geriye doğru 2 haftalık dilimler
-      // (sorular ~6 ay, siparişler ~3 ay); sonraki yoklamalarda yalnız son 3 gün
-      const spans = (n: number): Array<[number, number]> => (first ? Array.from({ length: n }, (_, i) => [now - (i + 1) * FIRST_WINDOW, now - i * FIRST_WINDOW] as [number, number]) : [[startDate, now]]);
+      // (sorular ~6 ay, siparişler ~3 ay); sonraki yoklamalarda son 3 gün — ya da son başarılı yoklamadan beri (uyku/kopma
+      // 3 günü aştıysa aynı 2 haftalık dilimlerle, üst sınır ilk eşitleme penceresi). İlk eşitleme yarım kaldıysa (lastOk 0) yeniden tam.
+      // Geniş istek (tam eşitleme ya da çok dilimli telafi) başarısız kaldıysa her 30 sn'de yeniden değil, en çok WIDE_RETRY'da
+      // bir denenir (kalıcı hata veren eski bir dilim her turda yüzlerce istek üretmesin); arada yalnız son 3 gün, imleç ilerlemez.
+      const plan = (n: number, lastOk: number, wideAt: number): { spans: Array<[number, number]>; pages: number; wide: boolean; narrow: boolean } => {
+        const wide = first || !lastOk || lastOk - CATCHUP_SLACK < now - NEXT_WINDOW;
+        if (wide && !first && now - wideAt < WIDE_RETRY) return { spans: [[now - NEXT_WINDOW, now]], pages: 5, wide: false, narrow: true };
+        if (first || !lastOk) return { spans: Array.from({ length: n }, (_, i) => [now - (i + 1) * FIRST_WINDOW, now - i * FIRST_WINDOW] as [number, number]), pages: 50, wide: true, narrow: false };
+        const from = Math.max(now - n * FIRST_WINDOW, Math.min(now - NEXT_WINDOW, lastOk - CATCHUP_SLACK));
+        const spans: Array<[number, number]> = [];
+        for (let b = now; b > from; b -= FIRST_WINDOW) spans.push([Math.max(from, b - FIRST_WINDOW), b]);
+        return { spans, pages: spans.length > 1 ? 50 : 5, wide, narrow: false };
+      };
+      const pO = plan(this.noOrdersV2 ? 6 : 2, this.lastOkO, this.wideAtO);
+      const pQ = plan(13, this.lastOkQ, this.wideAtQ);
+      // ilk turun hatası hemen bir kez daha geniş denensin; sonrakiler aralıklı
+      if (pO.wide && this.ordersOn && !first) this.wideAtO = now;
+      if (pQ.wide && !first) this.wideAtQ = now;
+      /** Dilimler tek tek: biri düşerse öncekiler atılmaz; kimlik hatası ölümcül, hız sınırında kalan dilimler denenmez */
+      const slices = async <T>(p: ReturnType<typeof plan>, fetchOne: (a: number, b: number, pages: number) => Promise<T>, add: (v: T) => void): Promise<Error | undefined> => {
+        let err: Error | undefined;
+        for (const [a, b] of p.spans) {
+          try {
+            add(await fetchOne(a, b, p.pages));
+          } catch (e) {
+            if (e instanceof TrendyolAuthError) throw e;
+            err ??= e as Error;
+            if (e instanceof TrendyolRateLimit) break;
+          }
+        }
+        return err;
+      };
       const allOrders = async () => {
         const m = new Map<string, J[]>();
         // dilimler birleşir (aynı siparişin paketleri farklı dilimlere düşebilir); önce görülen (daha yeni dilim) kazanır
         // v2 yalnız son 1 ayı veriyor: ilk eşitleme 2 dilim (≈4 hafta); v1'e düşüldüyse eskisi gibi 6 dilim (≈3 ay)
-        for (const [a, b] of spans(this.noOrdersV2 ? 6 : 2)) for (const [k, v] of await this.fetchOrders(a, b, first ? 50 : 5)) m.set(k, mergePackages(m.get(k) ?? [], v));
-        return m;
+        const err = await slices(pO, (a, b, pages) => this.fetchOrders(a, b, pages), (v) => {
+          for (const [k, pk] of v) m.set(k, mergePackages(m.get(k) ?? [], pk));
+        });
+        return { m, err };
       };
       const allQuestions = async () => {
         const out: J[] = [];
         const ids = new Set<string>();
-        for (const [a, b] of spans(13)) for (const q of await this.fetchQuestions(a, b, first ? 50 : 5)) if (!ids.has(String(q.id))) (ids.add(String(q.id)), out.push(q));
-        return out;
+        const err = await slices(pQ, (a, b, pages) => this.fetchQuestions(a, b, pages), (v) => {
+          for (const q of v) if (!ids.has(String(q.id))) (ids.add(String(q.id)), out.push(q));
+        });
+        return { out, err };
       };
-      const [ro, rq] = await Promise.allSettled([this.ordersOn ? allOrders() : Promise.resolve(new Map<string, J[]>()), allQuestions()]);
+      const [ro, rq] = await Promise.allSettled([this.ordersOn ? allOrders() : Promise.resolve({ m: new Map<string, J[]>(), err: undefined }), allQuestions()]);
       // kimlik hatası ancak soru tarafı da reddedildiyse ölümcül; yalnız sipariş ucu reddederse (yetki kapsamı) sorular sürsün
       if (rq.status === 'rejected' && rq.reason instanceof TrendyolAuthError) throw rq.reason;
       if (ro.status === 'rejected' && ro.reason instanceof TrendyolAuthError && rq.status === 'rejected') throw ro.reason;
-      const orders = ro.status === 'fulfilled' ? ro.value : new Map<string, J[]>();
-      const questions = rq.status === 'fulfilled' ? rq.value : [];
+      const orders = ro.status === 'fulfilled' ? ro.value.m : new Map<string, J[]>();
+      const questions = rq.status === 'fulfilled' ? rq.value.out : [];
+      const oErr = ro.status === 'rejected' ? (ro.reason as Error) : ro.value.err;
+      const qErr = rq.status === 'rejected' ? (rq.reason as Error) : rq.value.err;
       let failed: Error | undefined;
-      for (const r of [ro, rq]) {
-        if (r.status !== 'rejected') continue;
-        bus.log('warn', `Trendyol yoklama: ${(r.reason as Error).message}`);
-        if (!(r.reason instanceof TrendyolRateLimit)) failed = r.reason as Error;
+      for (const e of [oErr, qErr]) {
+        if (!e) continue;
+        bus.log('warn', `Trendyol yoklama: ${e.message}`);
+        if (!(e instanceof TrendyolRateLimit)) failed = e;
       }
+      // Siparişler eskiden yeniye (son paket değişikliğine göre): packages/seen sonunda en yeniler kalsın (kırpma eskileri atar)
+      const lastMod = (g: J[]) => Math.max(0, ...g.map((p) => Number(p.lastModifiedDate) || 0));
+      const orderList = [...orders].sort((a, b) => lastMod(a[1]) - lastMod(b[1]));
       let changedOrders = 0;
-      for (const [k, group] of orders) {
+      let done = await ingestChunked(this.store, orderList, ([k, group]) => {
         // bilinen paketlerle birleştir (gelen güncel olanı kazanır), en yeni kullanılan sona taşınsın (sınır eskileri atar)
         const merged = mergePackages(group.map(stripPackage), this.packages.get(k) ?? []);
         this.packages.delete(k);
         this.packages.set(k, merged);
         if (this.ingestOrder(merged, !first)) changedOrders++;
-      }
+      }, () => this.stopping);
       let changedQuestions = 0;
-      for (const q of questions.reverse()) if (this.ingestQuestion(q, !first)) changedQuestions++;
+      if (done) done = await ingestChunked(this.store, questions.reverse(), (q) => {
+        if (this.ingestQuestion(q, !first)) changedQuestions++;
+      }, () => this.stopping);
       if (changedOrders || changedQuestions || first) {
         bus.log('info', `Trendyol: ${orders.size} sipariş (${changedOrders} güncellendi), ${questions.length} soru (${changedQuestions} güncellendi)`);
       }
-      this.saveState();
-      // ilk yoklamada her iki servis de (hız sınırı dışında) çöktüyse bağlantı kurulamadı say
-      if (first && failed && ro.status === 'rejected' && rq.status === 'rejected') throw failed;
+      // imleç yalnız hatasız ve tamamen işlenmiş aralıkta ilerler; eksik aralık sonraki turda yeniden istenir
+      const pendingBefore = !this.lastOkQ || (this.ordersOn && !this.lastOkO);
+      // başarılı turda geniş istek kısıtı kalkar (yalnız başarısız geniş istek aralıklı yinelenir)
+      if (done && !qErr && !pQ.narrow) (this.lastOkQ = now), (this.wideAtQ = 0);
+      if (done && this.ordersOn && !oErr && !pO.narrow) (this.lastOkO = now), (this.wideAtO = 0);
+      const pendingAfter = !this.lastOkQ || (this.ordersOn && !this.lastOkO);
+      // durum dosyası yalnız bir şey değiştiyse (her 30 sn'de MB'larca yeniden yazılıyordu). Dosyadaki imleç eski kalabilir:
+      // zararsız (açılış zaten tam eşitleme; eski imleç yalnız daha geniş aralık ister)
+      if (changedOrders || changedQuestions || first || pendingBefore !== pendingAfter || this.gw !== gwBefore) this.saveState();
+      // ilk yoklamada her iki servis de (hız sınırı dışında) çöktü ve hiçbir şey alınamadıysa bağlantı kurulamadı say
+      if (first && failed && oErr && qErr && !orders.size && !questions.length) throw failed;
     } catch (e) {
       if (e instanceof TrendyolAuthError) {
         if (first) throw e;
@@ -344,14 +410,23 @@ export class TrendyolConnector extends BaseConnector {
 
   private saveState(): void {
     const seen: Record<string, string> = {};
-    for (const [k, v] of [...this.seen.entries()].slice(-4000)) seen[k] = v;
+    // seen son görülme sırasında (touchSeen): kırpma en uzun süredir görülmeyenleri atar
+    const seenKeep = [...this.seen.entries()].slice(-MAX_SEEN);
+    if (seenKeep.length < this.seen.size) this.seen = new Map(seenKeep);
+    for (const [k, v] of seenKeep) seen[k] = v;
     const keep = [...this.packages.entries()].slice(-MAX_STORED_ORDERS);
     if (keep.length < this.packages.size) this.packages = new Map(keep);
     try {
-      fs.writeFileSync(this.stateFile, JSON.stringify({ seen, gw: this.gw, packages: Object.fromEntries(keep) }));
+      writeJsonAtomic(this.stateFile, { seen, gw: this.gw, packages: Object.fromEntries(keep), lastOkQ: this.lastOkQ, lastOkO: this.lastOkO });
     } catch (e) {
       bus.log('warn', `Trendyol durum dosyası yazılamadı: ${(e as Error).message}`);
     }
+  }
+
+  /** seen'i LRU tut: var olan anahtar da sona taşınır (Map.set yerinde bırakıyordu → kırpma en yenileri atıyordu) */
+  private touchSeen(rid: string, sig: string): void {
+    this.seen.delete(rid);
+    this.seen.set(rid, sig);
   }
 
   /** Aynı siparişin paketleri → tek sohbet + olay mesajları. Değişiklik varsa true. */
@@ -361,8 +436,8 @@ export class TrendyolConnector extends BaseConnector {
     const rid = `order-${orderNumber}`;
     const sig = JSON.stringify(packages.map((p) => [p.id, p.status, p.shipmentPackageStatus, p.cargoTrackingNumber, (p.packageHistories ?? p.packageHistory ?? []).length, (p.lines ?? []).map((l: J) => l.orderLineItemStatusName)]));
     const prev = this.seen.get(rid);
+    this.touchSeen(rid, sig);
     if (prev === sig) return false;
-    this.seen.set(rid, sig);
 
     const addr: J = first.shipmentAddress ?? {};
     const customer = [first.customerFirstName, first.customerLastName].filter(Boolean).join(' ') || addr.fullName || 'Müşteri';
@@ -448,11 +523,11 @@ export class TrendyolConnector extends BaseConnector {
     const rid = `q-${id}`;
     const sig = JSON.stringify([q.status, q.answer?.text, q.answer?.creationDate, q.rejectedAnswer?.text, q.reportReason]);
     const prev = this.seen.get(rid);
-    if (prev === sig) return false;
+    if (prev === sig) return this.touchSeen(rid, sig), false;
     const status = String(q.status ?? 'WAITING_FOR_ANSWER');
     // az önce cevapladık ama API hâlâ "cevap bekliyor" diyor: soruyu yeniden açma
-    if (status === 'WAITING_FOR_ANSWER' && answeredRecently(prev)) return false;
-    this.seen.set(rid, sig);
+    if (status === 'WAITING_FOR_ANSWER' && answeredRecently(prev)) return this.touchSeen(rid, prev!), false;
+    this.touchSeen(rid, sig);
 
     const created = Number(q.creationDate) || Date.now();
     const name = (q.showUserName === false ? '' : q.userName) || 'Müşteri';
@@ -481,7 +556,7 @@ export class TrendyolConnector extends BaseConnector {
       this.upsertMessage({ remoteChatId: rid, remoteId: `ra-${id}`, senderId: 'me', senderName: 'Ben', fromMe: true, text: `🚫 Reddedilen cevap: ${q.rejectedAnswer.text}`, ts: Number(q.rejectedAnswer.creationDate) || created + 2000, status: 'failed' });
     }
     if (status === 'REPORTED') {
-      this.upsertMessage({ remoteChatId: rid, remoteId: `rep-${id}`, senderId: 'me', senderName: 'Ben', fromMe: true, text: `⚠️ Soru raporlandı${q.reportReason ? `: ${q.reportReason}` : ''}`, ts: Date.now(), status: 'sent' });
+      this.upsertMessage({ remoteChatId: rid, remoteId: `rep-${id}`, senderId: 'me', senderName: 'Ben', fromMe: true, text: `⚠️ Soru raporlandı${q.reportReason ? `: ${q.reportReason}` : ''}`, ts: prev ? Date.now() : Number(q.lastModifiedDate) || created + 3000, status: 'sent' });
     }
     return true;
   }
@@ -501,7 +576,7 @@ export class TrendyolConnector extends BaseConnector {
       const q = (chat?.meta?.question ?? {}) as J;
       this.upsertChat({ remoteId: remoteChatId, name: chat?.name ?? remoteChatId, lastMessageAt: now, meta: { ...chat?.meta, question: { ...q, status: 'ANSWERED', statusLabel: `${QUESTION_STATUS.ANSWERED} (onay bekliyor)` } } });
       // bir sonraki yoklama API'nin kaydettiği cevabı getirince imza değişsin ve mesaj güncellensin
-      this.seen.set(remoteChatId, answeredSentinel());
+      this.touchSeen(remoteChatId, answeredSentinel());
       this.saveState();
       return { remoteId: rid };
     }

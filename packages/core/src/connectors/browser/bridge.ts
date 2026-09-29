@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import type { APIRequestContext, BrowserContext, CDPSession, Page } from 'playwright';
 import { BaseConnector, type ComposeDraft, type LoginInput, type SendOptions, type StartOptions } from '../base.js';
 import { chatId, messageId } from '../../model.js';
+import { trReactionText } from '../../reaction-text.js';
 import { persistSessionCookies } from './outlook.js';
 import { bus } from '../../bus.js';
 import { sessionDir } from '../../config.js';
@@ -306,6 +307,16 @@ export class BrowserConnector extends BaseConnector {
   /** unloadWhenIdle: yoklamalar arasında tarayıcı kapalı (bellek); bir sonraki yoklama/işlem yeniden açar */
   private idleClosed = false;
   private known = new Map<string, number>(); // threadId → son görülen ts
+  /**
+   * Değişimi görülüp mesajları henüz alınamamış sohbetler (tur sınırı dışında kaldı / istek düştü / zaman aşımı). Önizleme
+   * değişimine dayalı stratejilerde (Messenger, X DOM yedeği) değişim sinyali tek turluk: sonraki turda lastTs=0 → sohbet
+   * bir daha 'changed' sayılmıyor, yeni mesaj hiç çekilmiyordu. Hata alan sohbet üstel bekler (30 sn·2^n ≤ 30 dk, ≤6 deneme).
+   */
+  private pendingFetch = new Map<string, { tries: number; next: number }>();
+  /** markRead birleştirme: aynı sohbet için kuyrukta bekleyen okundu işi varsa yenisi eklenmez */
+  private pendingRead = new Set<string>();
+  /** Bu oturumda Mivelo'dan yazılan sohbetler: kendi yeni mesajımız depoda "güncel" sanılıp eski mesajların alınması atlanmasın */
+  private sentHere = new Set<string>();
   /** Bu turda mesajına yeni tepki gelen sohbetler (önizleme metni) ve yeni gelen mesajı olan sohbetler */
   private turnReacted = new Map<string, string>();
   private turnIncoming = new Set<string>();
@@ -477,6 +488,12 @@ export class BrowserConnector extends BaseConnector {
     if (this.strategy.pageless && !interactive && fs.existsSync(this.stateFile)) {
       try {
         await this.openApi(JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) as StorageState);
+        if (this.stopping) {
+          await this.api?.dispose().catch(() => undefined);
+          this.api = undefined;
+          this.pageless = false;
+          return;
+        }
         this.syncProgress(45, 'oturum (sayfasız)');
         await this.finishStart();
         if (this.account.status === 'connected') return;
@@ -563,9 +580,11 @@ export class BrowserConnector extends BaseConnector {
     } catch {
       /* etiket kalsın */
     }
+    if (this.stopping) return;
     this.setStatus('connected');
     await this.poll(true);
-    if (this.account.status !== 'connected') return;
+    // durdurulan connector zamanlayıcı/odak dinleyicisi kurmasın (sızıntı)
+    if (this.stopping || this.account.status !== 'connected') return;
     this.syncProgress(100);
     this.schedule();
     // uyarlamalı yoklama: arayüz boştan etkine geçince uzun bekleyen turu öne çek
@@ -682,6 +701,11 @@ export class BrowserConnector extends BaseConnector {
           ...(hidden ? [] : [`--app=${this.strategy.home}`, '--window-size=760,860', '--window-position=140,60']),
         ],
       });
+      // açılış sürerken stop() geldi (Kaldır/Çıkış/stopAll): o an this.ctx boştu, kapatılacak bir şey yoktu → tarayıcı sahipsiz kalıyordu
+      if (this.stopping) {
+        await this.closeCtx();
+        return false;
+      }
       // tsx (npm run dev) esbuild keepNames ile iç fonksiyonlara __name(...) ekler; page.evaluate / init betiklerine giden
       // kodda sayfada bu yardımcı yoktur → "ReferenceError: __name is not defined" (Messenger mesajları, LinkedIn akış
       // dinleyicisi). Derlenmiş (tsc) sürümde etkisiz; her belgeye (iframe'ler dahil) en önce tanımlanır.
@@ -733,6 +757,7 @@ export class BrowserConnector extends BaseConnector {
       this.unschedule();
     });
     if (navigate) await this.page.goto(this.strategy.home, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+    if (this.stopping) return false; // gezinme sırasında durduruldu (stop bağlamı kapattı): akış 'pairing'/'connected' yazmasın
     return true;
   }
 
@@ -1038,7 +1063,12 @@ export class BrowserConnector extends BaseConnector {
   /** Strateji çağrıları tek sayfayı paylaşır: yoklama, gönderme ve geçmiş isteği sırayla çalışsın (sayfa gezintisi çakışmasın). */
   private queue: Promise<unknown> = Promise.resolve();
   private serial<T>(fn: () => Promise<T>): Promise<T> {
-    const next = this.queue.then(fn, fn);
+    // her iş başlamadan önce bekleyen kullanıcı işlemleri (gönderim/tepki) koşar: kuyrukta bekleyen tur/okundu işinin önüne geçer
+    const run = async () => {
+      await this.runUrgent();
+      return fn();
+    };
+    const next = this.queue.then(run, run);
     this.queue = next.catch(() => undefined);
     return next;
   }
@@ -1052,10 +1082,14 @@ export class BrowserConnector extends BaseConnector {
   private inPoll = false;
   private urgentQ: Array<() => Promise<void>> = [];
   private urgent<T>(fn: () => Promise<T>): Promise<T> {
-    if (!this.inPoll) return this.serial(fn);
-    return new Promise<T>((resolve, reject) => {
+    // Eskiden yalnız tur KOŞARKEN öne geçiyordu: kuyrukta bekleyen tur ya da okundu gezinmesi (5-15 sn) varsa gönderim
+    // hepsinin arkasına giriyordu (10-40 sn "Gönderiliyor"). Artık her zaman acil kuyruğa yazılır; tur dışındaysa bir boşaltma
+    // adımı da kuyruğa girer — kuyruk boşsa hemen koşar, doluysa o an çalışan iş bitince bekleyenlerin önünde koşar (serial).
+    const p = new Promise<T>((resolve, reject) => {
       this.urgentQ.push(() => fn().then(resolve, reject));
     });
+    if (!this.inPoll) void this.serial(async () => undefined).catch(() => undefined);
+    return p;
   }
   private async runUrgent(clearFlag = false): Promise<void> {
     while (this.urgentQ.length) await this.urgentQ.shift()!();
@@ -1066,6 +1100,7 @@ export class BrowserConnector extends BaseConnector {
   async sendText(remoteChatId: string, text: string, opts?: SendOptions): Promise<{ remoteId: string }> {
     if (!this.pageless && !(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
     const id = (await this.urgent(async () => this.run((p, c) => this.strategy.send(p, c, remoteChatId, text, opts)))) ?? `local-${Date.now()}`;
+    this.sentHere.add(remoteChatId);
     const replyTo = opts?.replyTo && this.strategy.canReply ? { remoteId: opts.replyTo, ...this.replyInfo(remoteChatId, opts.replyTo) } : undefined;
     this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts: Date.now(), status: 'sent', threadId: opts?.threadId, replyTo });
     return { remoteId: id };
@@ -1105,6 +1140,7 @@ export class BrowserConnector extends BaseConnector {
     if (!this.strategy.sendFile) throw new Error('Bu platformda dosya gönderme desteklenmiyor');
     if (!this.pageless && !(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
     const id = (await this.urgent(async () => this.run((p, c) => this.strategy.sendFile!(p, c, remoteChatId, file, caption)))) ?? `local-${Date.now()}`;
+    this.sentHere.add(remoteChatId);
     const kind = file.mime.startsWith('image/') ? 'image' : file.mime.startsWith('video/') ? 'video' : file.mime.startsWith('audio/') ? 'audio' : 'file';
     this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text: caption ?? '', ts: Date.now(), status: 'sent', attachments: [{ kind, name: file.name, mime: file.mime, size: file.size }] });
     return { remoteId: id };
@@ -1122,9 +1158,9 @@ export class BrowserConnector extends BaseConnector {
   }
 
   /** Klasör bilgisi: gelen kutusunda görülen bir dizi, Gönderilenler/Gereksiz listesinde de çıksa gelen kutusundan düşmez */
-  private folderMeta(remoteId: string, meta?: Record<string, unknown>): Record<string, unknown> | undefined {
+  private folderMeta(remoteId: string, meta?: Record<string, unknown>, chat?: Chat): Record<string, unknown> | undefined {
     if (!meta) return undefined;
-    const ex = this.store.getChat(chatId(this.account.id, remoteId))?.meta;
+    const ex = (chat ?? this.store.getChat(chatId(this.account.id, remoteId)))?.meta;
     if (ex?.folder === 'inbox' && meta.folder !== 'inbox') return ex;
     return { ...ex, ...meta };
   }
@@ -1134,7 +1170,7 @@ export class BrowserConnector extends BaseConnector {
     if (!this.strategy.moreThreads) throw new Error('Bu platformda daha eski sohbet listesi desteklenmiyor');
     if (!this.pageless && !(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
     const idx = this.morePage + 1;
-    const threads = await this.serial(async () => this.run((p, c) => this.strategy.moreThreads!(p, c, idx)));
+    const threads = await this.serial(async () => withTimeout(this.run((p, c) => this.strategy.moreThreads!(p, c, idx)), 60_000, 'eski sohbetler'));
     let added = 0;
     for (const t of threads) {
       if (!this.store.getChat(chatId(this.account.id, t.id))) added++;
@@ -1153,20 +1189,26 @@ export class BrowserConnector extends BaseConnector {
     const chat = this.store.getChat(chatId(this.account.id, remoteChatId));
     this.localRead.set(remoteChatId, { at: Date.now(), lastTs: chat?.lastMessageAt ?? Date.now(), retries: 0 });
     if (!this.strategy.markRead || (!this.pageless && !(await this.ensureOpen()))) return;
-    const last = this.store.listMessages(chatId(this.account.id, remoteChatId), 30).filter((m) => !m.fromMe).pop();
-    await this.serial(async () => this.run((p, c) => this.strategy.markRead!(p, c, remoteChatId, last?.remoteId)));
+    // hızlı gezinmede aynı sohbet için birden çok okundu gezinmesi kuyruğa girmesin
+    if (this.pendingRead.has(remoteChatId)) return;
+    this.pendingRead.add(remoteChatId);
+    await this.serial(async () => {
+      this.pendingRead.delete(remoteChatId);
+      const last = this.store.listMessages(chatId(this.account.id, remoteChatId), 30).filter((m) => !m.fromMe).pop();
+      return withTimeout(this.run((p, c) => this.strategy.markRead!(p, c, remoteChatId, last?.remoteId)), 30_000, 'okundu');
+    });
   }
 
   async openDirect(p: Participant): Promise<string> {
     if (!this.strategy.openDirect) throw new Error('Bu platformda doğrudan sohbet açma desteklenmiyor');
     if (!this.pageless && !(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
-    return this.serial(async () => this.run((pg, c) => this.strategy.openDirect!(pg, c, p)));
+    return this.serial(async () => withTimeout(this.run((pg, c) => this.strategy.openDirect!(pg, c, p)), 60_000, 'sohbet açma'));
   }
 
   async loadHistory(remoteChatId: string, limit = 50, before?: number): Promise<void> {
     // Sayfasız modda (Instagram, Slack) this.page yoktur: istek Node'dan atılır; sayfalı modda tarayıcı açık olmalı
     if (!this.pageless && !(await this.ensureOpen())) throw new Error('Tarayıcı oturumu açık değil');
-    const msgs = await this.serial(async () => this.run((p, c) => this.strategy.messages(p, c, remoteChatId, limit, before)));
+    const msgs = await this.serial(async () => withTimeout(this.run((p, c) => this.strategy.messages(p, c, remoteChatId, limit, before)), 60_000, 'eski mesajlar'));
     for (const m of msgs) this.ingest(remoteChatId, m, false);
   }
 
@@ -1188,7 +1230,7 @@ export class BrowserConnector extends BaseConnector {
     if (!/^https?:\/\//.test(url)) {
       // özel şema: stratejinin kancası (sayfa bağlamından okur; tek sayfayı paylaştığı için sırayla)
       if (!this.strategy.fetchMedia || (!this.pageless && !(await this.ensureOpen()))) return undefined;
-      const r = await this.serial(async () => this.run((p, c) => this.strategy.fetchMedia!(p, c, url)));
+      const r = await this.serial(async () => withTimeout(this.run((p, c) => this.strategy.fetchMedia!(p, c, url)), 30_000, 'medya'));
       if (!r) return undefined;
       ({ body, type } = r);
     } else {
@@ -1288,7 +1330,7 @@ export class BrowserConnector extends BaseConnector {
     if (cur && cur !== this.account.platform && !GENERIC_LABEL.test(cur)) return;
     this.labelTriedAt = Date.now();
     try {
-      const me = await this.strategy.me(this.target(), await this.cookies());
+      const me = await withTimeout(this.strategy.me(this.target(), await this.cookies()), 15_000, 'hesap adı');
       if (!me.label || GENERIC_LABEL.test(me.label.trim())) return;
       this.account.label = me.label;
       this.store.upsertAccount(this.account);
@@ -1365,6 +1407,9 @@ export class BrowserConnector extends BaseConnector {
         // okunmamış platformun değeri (telefonda okunan burada da okunur); Mivelo'da okunan sohbeti depo kalıcı olarak korur
         // (chats.read_upto: yeni mesaj gelmedikçe platform geri açamaz). Platform hâlâ 'okunmamış' diyorsa işaretleme 2 kez yinelenir.
         // son etkinliği tepki olan sohbet: yeni etkinlik gelene dek platformun "okunmamış"ı yok sayılır
+        // Tepki durumu yalnız bellekteydi: çekirdek yeniden başlayınca tepki alan sohbet ilk turda platformun "okunmamış"ı ve
+        // eski mesaj önizlemesiyle geri geliyordu. Depodaki last_reaction açılışta belleğe geri yüklenir (yeni etkinlik gelmediyse).
+        if (first && ex?.lastReaction && !this.reactionOnly.has(t.id) && t.lastTs && t.lastTs <= ex.lastMessageAt) this.reactionOnly.set(t.id, ex.lastMessageAt);
         const rxAt = this.reactionOnly.get(t.id);
         if (rxAt !== undefined && t.lastTs > rxAt) this.reactionOnly.delete(t.id);
         const quiet = this.reactionOnly.has(t.id) || !!t.reactionPreview;
@@ -1378,7 +1423,13 @@ export class BrowserConnector extends BaseConnector {
             retryRead.push(t.id);
           }
         }
-        this.upsertChat({ remoteId: t.id, name: t.name, kind: t.kind, unread, lastMessageAt: t.lastTs || undefined, lastPreview: fresh && !t.reactionPreview ? t.preview || undefined : undefined, avatarUrl: t.avatarUrl, handle: t.handle, link: t.link, participants: t.participants, meta: this.folderMeta(t.id, t.meta) });
+        // sessiz (son etkinliği tepki) sohbette platform önizlemesi tepki önizlemesini ve last_reaction'ı ezmesin
+        const lastPreview = fresh && !quiet ? t.preview || undefined : undefined;
+        const meta = this.folderMeta(t.id, t.meta, ex);
+        // Değişmeyen sohbet yeniden yazılmaz: her turda tüm liste (Slack/X yüzlerce sohbet) ayrı ayrı yazılıp chat.upsert
+        // olarak yayınlanıyordu (1000 sohbette ≈140 ms tek parça kilit + 1000 olay; arayüz listeyi boşuna yeniden çiziyordu)
+        if (first || !ex || this.chatDiffers(ex, t, unread, lastPreview, meta))
+          this.upsertChat({ remoteId: t.id, name: t.name, kind: t.kind, unread, lastMessageAt: t.lastTs || undefined, lastPreview, avatarUrl: t.avatarUrl, handle: t.handle, link: t.link, participants: t.participants, meta });
         if (t.reactionPreview && fresh) {
           this.reactionPreview(t.id, t.reactionPreview);
           this.reactionOnly.set(t.id, t.lastTs);
@@ -1392,7 +1443,16 @@ export class BrowserConnector extends BaseConnector {
             bus.emit({ type: 'chat.delete', chatId: from });
           }
         }
-        if (!this.known.has(t.id) || (this.known.get(t.id) ?? 0) < t.lastTs) changed.push(t);
+        // Yeniden başlatma (çekirdek/iyileşme/Yeniden bağlan): known boş başlıyordu → mesajları depoda olan TÜM sohbetler yeniden
+        // çekiliyordu (Slack'te hız sınırı, e-posta tarayıcı yollarında her dizi açılıp okundu→okunmadı geri alınıyordu). Depodaki
+        // en yeni mesaj platformun son etkinliğine yetişmişse sohbet güncel sayılır. lastTs=0 (zaman vermeyen DOM stratejisi) eski
+        // davranışta kalır: önizleme karşılaştırması güvenilir değil (değişim turunda depo önizlemesi zaten yeni değere yazılıyor).
+        if (!this.known.has(t.id) && ex && t.lastTs > 0 && !this.localRead.has(t.id) && !this.pendingFetch.has(t.id) && !this.sentHere.has(t.id)) {
+          const newest = this.store.listMessages(chatId(this.account.id, t.id), 1)[0]?.ts ?? 0;
+          if (newest > 0 && newest >= t.lastTs - 1000) this.known.set(t.id, t.lastTs);
+        }
+        const pf = this.pendingFetch.get(t.id);
+        if (!this.known.has(t.id) || (this.known.get(t.id) ?? 0) < t.lastTs || (pf && Date.now() >= pf.next)) changed.push(t);
       }
       for (const id of retryRead.slice(0, 3)) {
         try {
@@ -1406,6 +1466,9 @@ export class BrowserConnector extends BaseConnector {
       // öncelik: okunmamış, sonra en yeni etkinlik (kullanıcının bakacağı sohbetler önce dolsun)
       changed.sort((a, b) => Number(b.unread > 0) - Number(a.unread > 0) || (b.lastTs || 0) - (a.lastTs || 0));
       const batch = changed.slice(0, first ? 16 : 8);
+      // tur sınırı dışında kalanlar: değişim sinyali kaybolmasın (sonraki turda lastTs=0 dönse de çekilir)
+      for (const t of changed.slice(batch.length)) if (!this.pendingFetch.has(t.id)) this.pendingFetch.set(t.id, { tries: 0, next: 0 });
+      const tried = new Set<string>();
       const monthAgo = Date.now() - 30 * 86_400_000;
       this.backlogLeft = changed.slice(batch.length).filter((t) => t.unread > 0 || !t.lastTs || t.lastTs > monthAgo).length;
       const failed: string[] = [];
@@ -1418,15 +1481,18 @@ export class BrowserConnector extends BaseConnector {
         await this.runUrgent();
         await Promise.all(
           batch.slice(i, i + width).map(async (t) => {
+            tried.add(t.id);
             try {
               const msgs = await withTimeout(this.strategy.messages(page, cookies, t.id, first ? 25 : 15), 60_000, 'mesajlar');
               this.turnReacted.delete(t.id);
               this.turnIncoming.delete(t.id);
               for (const m of msgs) this.ingest(t.id, m, !first && !this.hasMessage(t.id, m.id));
               this.known.set(t.id, t.lastTs);
+              this.pendingFetch.delete(t.id);
               if (!first) this.settleReaction(t, prevUnread.get(t.id) ?? 0);
             } catch (e) {
               failed.push(t.id);
+              this.fetchFailed(t.id);
               const em = (e as Error).message;
               firstErr ||= em;
               if (!fatalErr && (VERIFY_RE.test(em) || RATE_RE.test(em))) fatalErr = em;
@@ -1435,6 +1501,8 @@ export class BrowserConnector extends BaseConnector {
         );
         if (fatalErr) break; // hız sınırı/doğrulamada kalan sohbetlere istek atma
       }
+      // denenmeden kalanlar (hız sınırı/doğrulama sonrası): deneme sayılmadan bekleyen listesinde kalsın
+      for (const t of batch) if (!tried.has(t.id) && !this.pendingFetch.has(t.id)) this.pendingFetch.set(t.id, { tries: 0, next: 0 });
       // aynı hata her sohbet için ayrı satır basmasın: yoklama başına tek özet
       if (failed.length) bus.log('warn', `${this.account.platform} mesajlar alınamadı: ${failed.length}/${batch.length} sohbet (ilk: ${failed[0]}): ${firstErr}`);
       if (fatalErr) throw new Error(fatalErr);
@@ -1460,10 +1528,20 @@ export class BrowserConnector extends BaseConnector {
         bus.log('warn', `${this.account.platform}: hız sınırı, ${mins} dk beklenecek`);
         return;
       }
+      // Ağ hatası (çevrimdışı, DNS, bağlantı koptu) oturum düşmesi değildir: Chromium açıp oturum denetlemek (sayfasız kanalda
+      // her turda tarayıcı açılışı) ve 'pairing' → iyileşme → sayfasız 'connected' → yine düşüş döngüsü yerine kısa geri çekilme
+      if (NET_RE.test(msg)) {
+        this.backoffUntil = Date.now() + 60_000;
+        return;
+      }
       if (!(await this.isLoggedIn())) {
         bus.log('warn', `${this.account.platform}: oturum düşmüş, yeniden giriş gerekli`);
         this.unschedule();
         this.polling = false;
+        this.pendingFetch.clear();
+        // Sayfasız kanalın kayıtlı durumu artık geçersiz: iyileşme denemesi tarayıcı yolundan gerçek oturum denetimiyle açılsın
+        // (yoksa sayfasız açılış oturumu doğrulamadan 'connected' yayınlıyor, iyileşme sayacı sıfırlanıp sonsuz döngü oluyordu)
+        if (this.strategy.pageless) fs.rmSync(this.stateFile, { force: true });
         await this.closeCtx();
         this.setStatus('pairing', 'Oturum düştü — kanala sağ tıklayıp "Yeniden bağlan" de');
         return;
@@ -1504,6 +1582,32 @@ export class BrowserConnector extends BaseConnector {
     this.reactionOnly.set(t.id, t.lastTs);
     const cur = this.store.getChatLite(chatId(this.account.id, t.id));
     if (cur && cur.unread > before) this.upsertChat({ remoteId: t.id, name: cur.name, unread: before });
+  }
+
+  /** Mesajları alınamayan sohbet: üstel bekleme (30 sn·2^n ≤ 30 dk); 6 denemeden sonra bırakılır (bir kez günlük) */
+  private fetchFailed(id: string): void {
+    const p = this.pendingFetch.get(id) ?? { tries: 0, next: 0 };
+    p.tries++;
+    if (p.tries >= 6) {
+      this.pendingFetch.delete(id);
+      bus.log('warn', `${this.account.platform}: sohbet mesajları ${p.tries} denemede alınamadı, yeni etkinliğe dek bırakıldı (${id.slice(0, 24)})`);
+      return;
+    }
+    p.next = Date.now() + Math.min(30_000 * 2 ** p.tries, 30 * 60_000);
+    this.pendingFetch.set(id, p);
+  }
+
+  /** Platformun verdiği sohbet depodakinden farklı mı (değilse yazım ve chat.upsert yayını atlanır) */
+  private chatDiffers(ex: Chat, t: Thread, unread: number, lastPreview: string | undefined, meta: Record<string, unknown> | undefined): boolean {
+    if (t.lastTs && t.lastTs > ex.lastMessageAt) return true;
+    if (unread !== ex.unread) return true;
+    if ((t.name && t.name !== ex.name) || (t.kind && t.kind !== ex.kind)) return true;
+    if ((t.avatarUrl && t.avatarUrl !== ex.avatarUrl) || (t.handle && t.handle !== ex.handle) || (t.link && t.link !== ex.link)) return true;
+    if (lastPreview !== undefined && trReactionText(lastPreview) !== ex.lastPreview) return true;
+    if (meta && JSON.stringify(meta) !== JSON.stringify(ex.meta ?? null)) return true;
+    // katılımcılar en sonda: depodan çözmek pahalı
+    if (t.participants && JSON.stringify(t.participants) !== JSON.stringify(ex.participants ?? null)) return true;
+    return false;
   }
 
   private ingest(threadId: string, m: Msg, live: boolean): void {
@@ -1555,6 +1659,11 @@ function isMediaFile(u: string | undefined): boolean {
 /** Platform doğrulama/kilit sayfası (yoklama durur) ve hız sınırı (üstel geri çekilme) hata kalıpları */
 export const VERIFY_RE = /checkpoint|challenge_required|captcha|account\/access|\/authwall|verify it'?s you/i;
 export const RATE_RE = /\b(429|999)\b|rate.?limit|too many/i;
+/**
+ * Ağ hatası (oturum düşmesi sayılmaz; kısa geri çekilme). net::ERR_ABORTED / TOO_MANY_REDIRECTS / BLOCKED_* bağlantı sorunu
+ * değil: gezinmenin giriş sayfasına yönlenip kesilmesi olabilir → oturum denetiminden geçmeli.
+ */
+export const NET_RE = /net::ERR_(?!ABORTED|TOO_MANY_REDIRECTS|BLOCKED)|ENOTFOUND|EAI_AGAIN|ECONN(RESET|REFUSED|ABORTED)|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|fetch failed|Failed to fetch|NetworkError|socket hang up|ağ hatası/i;
 
 /** Genel ya da hatalı etiket (eski sürümlerin yazdığı "Error" / "olk-mail_…" dahil): yenisi gelince üstüne yazılabilir */
 /** Mivelo içi giriş ekranının boyutu (CSS px; görüntü 2x) */

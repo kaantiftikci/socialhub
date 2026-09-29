@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ordersFlag, BaseConnector, type StartOptions } from './base.js';
 import { PollTimer, marketDelay, retryAfterSec } from './poll-timer.js';
+import { ingestChunked, writeJsonAtomic } from './market-state.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
 import type { Attachment, Participant } from '../model.js';
@@ -207,6 +208,9 @@ export class HepsiburadaConnector extends BaseConnector {
     this.setStatus('disconnected');
   }
 
+  /** son yazılan durum (değişmediyse dosya yeniden yazılmaz) */
+  private savedJson = '';
+
   private saveState(): void {
     // imza haritasını sınırlı tut (eski siparişler düşer, yeniden görülürse "yeni" sayılmaz çünkü orders'ta kalır)
     const seenEntries = Object.entries(this.state.seen).slice(-4000);
@@ -216,7 +220,11 @@ export class HepsiburadaConnector extends BaseConnector {
     for (const [k, v] of Object.entries(this.state.orders)) if (keep.has(k)) orders[k] = v;
     for (const [k, v] of Object.entries(this.state.packages)) if (keep.has(k)) packages[k] = v;
     this.state = { seen: Object.fromEntries(seenEntries), orders, packages };
-    fs.writeFileSync(this.stateFile, JSON.stringify(this.state));
+    // yalnız içerik değiştiyse ve atomik (her yoklamada baştan, yarım kalabilen yazım yerine)
+    const json = JSON.stringify(this.state);
+    if (json === this.savedJson) return;
+    writeJsonAtomic(this.stateFile, this.state);
+    this.savedJson = json;
   }
 
   private async poll(first: boolean): Promise<void> {
@@ -350,7 +358,9 @@ export class HepsiburadaConnector extends BaseConnector {
     // 5) sohbet + mesajlar (eskiden yeniye)
     const ordered = [...touched].filter((n) => this.state.orders[n]).sort((a, b) => Date.parse(this.state.orders[a].orderDate ?? '') - Date.parse(this.state.orders[b].orderDate ?? ''));
     let changed = 0;
-    for (const n of ordered) if (this.ingestOrder(n, !first)) changed++;
+    await ingestChunked(this.store, ordered, (n) => {
+      if (this.ingestOrder(n, !first)) changed++;
+    }, () => this.stopping);
     return changed;
   }
 
@@ -560,7 +570,9 @@ export class HepsiburadaConnector extends BaseConnector {
     }
     const ordered = [...byNo.values()].sort((a, b) => (Date.parse(a.createdAt ?? '') || 0) - (Date.parse(b.createdAt ?? '') || 0));
     let changed = 0;
-    for (const q of ordered) if (this.ingestQuestion(q, !first)) changed++;
+    await ingestChunked(this.store, ordered, (q) => {
+      if (this.ingestQuestion(q, !first)) changed++;
+    }, () => this.stopping);
     return changed;
   }
 

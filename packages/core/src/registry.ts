@@ -33,7 +33,7 @@ import { N11Connector } from './connectors/n11.js';
 import { PttAvmConnector } from './connectors/pttavm.js';
 import { AmazonConnector } from './connectors/amazon.js';
 import { MAIL_PLATFORMS } from './model.js';
-import { bootOrder, browserSlots, type BootInfo } from './boot-plan.js';
+import { bootOrder, bootSlots, type BootInfo } from './boot-plan.js';
 
 /** Hesap ↔ connector eşlemesi. Açılışta kayıtlı hesapları kaldırır, yenilerini oluşturur. */
 /** Asılı kalan stop()/logout() HTTP isteğini sonsuza dek bekletmesin */
@@ -64,7 +64,7 @@ export class Registry {
    * de tutmazsa uyarı çıkar. Şifre reddi, kısıtlama, captcha/güvenlik doğrulaması, QR/PIN bekleyen eşleşme, kullanıcı iptali denenmez
    * (tekrarlı deneme hesabı kilitleyebilir ya da kullanıcı eylemi gerekir).
    */
-  private heal = new Map<string, { tries: number; timer?: NodeJS.Timeout; conn?: Connector }>();
+  private heal = new Map<string, { tries: number; timer?: NodeJS.Timeout; conn?: Connector; visible?: boolean }>();
   private halted = false;
   private static HEAL_DELAYS = [15_000, 45_000, 120_000];
 
@@ -101,24 +101,29 @@ export class Registry {
     }
     const st = h ?? { tries: 0 };
     if (st.timer) {
-      a.autoRetry = true;
+      if (!st.visible) a.autoRetry = true;
       return;
     }
     if (st.tries >= Registry.HEAL_DELAYS.length) {
       // denemeler bitti: uyarı çıksın (sonraki başarılı bağlanmada sayaç sıfırlanır)
       return;
     }
-    const delay = Registry.HEAL_DELAYS[st.tries] * (0.8 + Math.random() * 0.4);
+    // sağlayıcı açıkça "bekle" dediyse (e-posta [LIMIT]/çok bağlantı → 15 dk, connector `retryAfterMs` ile bildirir) o süreden önce yeni
+    // oturum açılmaz: yeni connector bekleme bilgisini taşımıyor, 15 sn sonra yeniden LOGIN kilitlenme riskini artırıyordu
+    const hint = Math.max(0, Number((c as { retryAfterMs?: number }).retryAfterMs) || 0);
+    const delay = Math.max(Registry.HEAL_DELAYS[st.tries] * (0.8 + Math.random() * 0.4), hint * (1 + Math.random() * 0.2));
     st.tries++;
     st.conn = c;
+    // uzun bekleme (>2 dk) sessiz geçmesin: uyarı görünür kalır, deneme yine arka planda yapılır
+    st.visible = hint > 120_000;
     st.timer = setTimeout(() => void this.healNow(a.id, st), delay);
     st.timer.unref?.();
     this.heal.set(a.id, st);
-    a.autoRetry = true; // bu olay (arayüze giden kopya) uyarısız gösterilsin
-    bus.log('info', `${a.platform}: geçici sorun (${(a.detail ?? a.status).slice(0, 80)}); ${Math.round(delay / 1000)} sn sonra arka planda yeniden denenecek (${st.tries}/${Registry.HEAL_DELAYS.length})`);
+    if (!st.visible) a.autoRetry = true; // bu olay (arayüze giden kopya) uyarısız gösterilsin
+    bus.log('info', `${a.platform}: ${st.visible ? 'sağlayıcı sınırı' : 'geçici sorun'} (${(a.detail ?? a.status).slice(0, 80)}); ${delay >= 120_000 ? `${Math.round(delay / 60_000)} dk` : `${Math.round(delay / 1000)} sn`} sonra arka planda yeniden denenecek (${st.tries}/${Registry.HEAL_DELAYS.length})`);
   }
 
-  private healNow(id: string, st: { tries: number; timer?: NodeJS.Timeout; conn?: Connector }): Promise<void> {
+  private healNow(id: string, st: { tries: number; timer?: NodeJS.Timeout; conn?: Connector; visible?: boolean }): Promise<void> {
     return this.serial(id, async () => {
       st.timer = undefined;
       const a = this.store.getAccount(id);
@@ -129,6 +134,8 @@ export class Registry {
       this.connectors.delete(id);
       if (c) await withTimeout(c.stop(), 15_000).catch(() => undefined);
       const last = st.tries >= Registry.HEAL_DELAYS.length;
+      // tarayıcı kanalı açılış yuvası beklerken eski connector'ın ayrıntısız 'disconnected'ı uyarı gibi görünmesin
+      if (isBrowserAccount(a)) this.markStarting(a);
       await this.spawn(a, false);
       // son deneme de düşerse onStatusForHeal yeni zamanlayıcı kurmaz → uyarı görünür; kurulmuşsa bir sonraki denemeyi bekler
       if (last) bus.log('info', `${a.platform}: son otomatik yeniden deneme başlatıldı`);
@@ -195,7 +202,8 @@ export class Registry {
     // attention kalıcı değil: çalışan connector'dan eklenir; autoRetry arka plan denemesi sürerken
     return this.store.listAccounts().map((a) => {
       const att = (this.connectors.get(a.id) as { attention?: string } | undefined)?.attention;
-      const retry = a.status !== 'connected' && !!this.heal.get(a.id)?.timer;
+      const h = this.heal.get(a.id);
+      const retry = a.status !== 'connected' && !!h?.timer && !h.visible;
       return att || retry ? { ...a, ...(att ? { attention: att } : {}), ...(retry ? { autoRetry: true } : {}) } : a;
     });
   }
@@ -223,14 +231,28 @@ export class Registry {
       }));
     const order = bootOrder(infos);
     const heavy = order.filter((b) => b.browser);
-    if (heavy.length) bus.log('info', `Açılış sırası (tarayıcı kanalları, aynı anda ${browserSlots()}): ${heavy.map((b) => `${b.account.platform}${b.unread ? `(${b.unread} okunmamış)` : ''}`).join(' → ')}`);
-    for (const { account: a } of order) {
+    if (heavy.length) bus.log('info', `Açılış sırası (tarayıcı kanalları, aynı anda ${bootSlots()}): ${heavy.map((b) => `${b.account.platform}${b.unread ? `(${b.unread} okunmamış)` : ''}`).join(' → ')}`);
+    const slots = bootSlots();
+    for (const b of order) {
+      const a = b.account;
       try {
+        // sıradaki tarayıcı kanalı yuva beklerken son kapanıştan kalan 'disconnected' (kırmızı uyarı) ya da çökme sonrası kalan
+        // 'connected' (sahte yeşil) görünmesin
+        if (b.browser) this.markStarting(a, heavy.indexOf(b) >= slots ? 'Açılış sırası bekleniyor' : undefined);
         await this.spawn(a, false);
       } catch (e) {
         bus.log('error', `${a.platform} başlatılamadı: ${(e as Error).message}`);
       }
     }
+  }
+
+  /** Başlatılacak hesabı 'connecting' göster (yuva sırasında durum yazılmıyordu); QR/PIN bekleyen 'pairing'e dokunulmaz */
+  private markStarting(a: Account, detail?: string): void {
+    const cur = this.store.getAccount(a.id) ?? a;
+    if (cur.status === 'pairing' || (cur.status === 'connecting' && cur.detail === detail)) return;
+    const next: Account = { ...cur, status: 'connecting', detail };
+    this.store.upsertAccount(next);
+    bus.emit({ type: 'account.status', account: next });
   }
 
   add(platform: Platform, opts: { token?: string; label?: string } = {}): Promise<Account> {

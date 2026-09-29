@@ -5,6 +5,7 @@ import { BrowserConnector } from './browser/bridge.js';
 import { makeAmazonMessaging, marketplaceOf, DEFAULT_MARKETPLACE, type Marketplace } from './browser/amazon.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
+import { writeJsonAtomic } from './market-state.js';
 import { chatId, type AccountStatus, type Participant } from '../model.js';
 import type { Store } from '../store.js';
 
@@ -382,7 +383,8 @@ export class AmazonConnector extends BaseConnector {
       }
       if (changed) bus.log('info', `Amazon: ${changed} sipariş güncellendi`);
       this.since = startedAt;
-      this.saveState();
+      // durum dosyası yalnız değişince (dosyadaki eski since yalnız daha geniş aralık ister, kayıp olmaz)
+      if (changed || first) this.saveState();
     } catch (e) {
       if (e instanceof AuthError) {
         if (this.timer) clearInterval(this.timer);
@@ -401,7 +403,7 @@ export class AmazonConnector extends BaseConnector {
     const seen: Record<string, string> = {};
     for (const [k, v] of [...this.seen.entries()].slice(-3000)) seen[k] = v;
     try {
-      fs.writeFileSync(this.stateFile, JSON.stringify({ seen, since: this.since }));
+      writeJsonAtomic(this.stateFile, { seen, since: this.since });
     } catch {
       /* yazılamadı */
     }

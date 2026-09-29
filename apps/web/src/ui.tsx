@@ -283,29 +283,39 @@ export function Logo({ size = 28 }: { size?: number }) {
   );
 }
 
+// Seçenekli toLocale*String her çağrıda yeni Intl.DateTimeFormat kurar (~70-90 µs); balon/satır başına birkaç kez çağrıldığı
+// için 1000 mesajda çizim başına ~200 ms ediyordu. Biçimleyiciler bir kez (ilk kullanımda) kurulur; çıktı birebir aynı.
+const fmtCache = new Map<string, Intl.DateTimeFormat>();
+function dtf(key: string, opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  let f = fmtCache.get(key);
+  if (!f) fmtCache.set(key, (f = new Intl.DateTimeFormat('tr-TR', opts)));
+  return f;
+}
+const hm = (d: Date) => dtf('hm', { hour: '2-digit', minute: '2-digit' }).format(d);
+
 export function fmtTime(ts: number): string {
   if (!ts) return '';
   const d = new Date(ts);
   const now = new Date();
   const sameDay = d.toDateString() === now.toDateString();
-  if (sameDay) return d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+  if (sameDay) return hm(d);
   const y = new Date(now);
   y.setDate(now.getDate() - 1);
   if (d.toDateString() === y.toDateString()) return 'Dün';
-  return d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
+  return dtf('dm', { day: 'numeric', month: 'short' }).format(d);
 }
 
 /** Mesaj balonu damgası: bugün → 14:32, dün → Dün 14:32, eski → 24 Eyl 14:32 */
 export function fmtStamp(ts: number): string {
   if (!ts) return '';
   const d = new Date(ts);
-  const time = d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+  const time = hm(d);
   const now = new Date();
   if (d.toDateString() === now.toDateString()) return time;
   const y = new Date(now);
   y.setDate(now.getDate() - 1);
   if (d.toDateString() === y.toDateString()) return `Dün ${time}`;
-  const day = d.toLocaleDateString('tr-TR', d.getFullYear() === now.getFullYear() ? { day: 'numeric', month: 'short' } : { day: 'numeric', month: 'short', year: 'numeric' });
+  const day = d.getFullYear() === now.getFullYear() ? dtf('dm', { day: 'numeric', month: 'short' }).format(d) : dtf('dmy', { day: 'numeric', month: 'short', year: 'numeric' }).format(d);
   return `${day} ${time}`;
 }
 
@@ -316,7 +326,7 @@ export function fmtDay(ts: number): string {
   const y = new Date(now);
   y.setDate(now.getDate() - 1);
   if (d.toDateString() === y.toDateString()) return 'Dün';
-  return d.toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' });
+  return dtf('wdm', { weekday: 'long', day: 'numeric', month: 'long' }).format(d);
 }
 
 export function ago(ts: number): string {

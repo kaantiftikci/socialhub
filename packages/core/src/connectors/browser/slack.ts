@@ -1,7 +1,7 @@
 import type { Page } from 'playwright';
 import type { Attachment, Reaction } from '../../model.js';
 import type { SendOptions } from '../base.js';
-import { apiOf, needsPage, type Msg, type Strategy, type Thread } from './bridge.js';
+import { apiOf, needsPage, RATE_RE, type Msg, type Strategy, type Thread } from './bridge.js';
 
 /**
  * Slack (tarayıcı oturumu): Slack'e bir kez giriş yapılır; web istemcisinin
@@ -291,6 +291,13 @@ function slackReactions(list: J[] | undefined): Reaction[] | undefined {
 }
 /** Yanıtları çekilen iş parçacıkları: üst ts → latest_reply (değişmediyse yeniden istenmez) */
 const threadsSeen = new Map<string, { latest: string; newest: string }>();
+/** Çağrı başına en çok bu kadar iş parçacığının yanıtı, dizi başına en çok REPLY_PAGES sayfa (xoxp yolundaki tur başına ≤5 gibi;
+ *  eskiden sınırsızdı → iş parçacığı yoğun çalışma alanında dakikada 50+ istek, Slack "ratelimited") */
+const REPLIES_PER_CALL = 3;
+const REPLY_PAGES = 2;
+/** Yanıtları bütçe yüzünden sonraya kalan kanallar → son döndürülen lastTs (threads() bunu 1 ms artırır: köprü sohbeti yine "değişmiş" sayar) */
+const pendingReplies = new Set<string>();
+const lastThreadTs = new Map<string, number>();
 
 async function toMsg(page: Page, m: J): Promise<Msg | undefined> {
   if (m.subtype && SKIP_SUBTYPES.has(String(m.subtype))) return undefined;
@@ -393,7 +400,11 @@ export const slackStrategy: Strategy = {
       }
       // Okunmamış: DM/grup DM'de her mesaj sayılır (mention_count); kanalda mention yoksa has_unreads → 1
       const unread = Number(c.mention_count ?? 0) || (c.has_unreads ? (kind === 'channel' ? 1 : Number(c.unread_count ?? 1)) : 0);
-      out.push({ id, name: name || id, kind, lastTs: Math.floor(Number(c.latest ?? 0) * 1000), preview: '', unread, avatarUrl: avatar, handle, participants });
+      let lastTs = Math.floor(Number(c.latest ?? 0) * 1000);
+      // yanıtları sonraya kalan kanal: zaman 1 ms ileri (köprü "değişti" sayıp messages()'ı yeniden çağırsın; sıra neredeyse hiç kaymaz)
+      if (pendingReplies.has(id)) lastTs = Math.max(lastTs, (lastThreadTs.get(id) ?? 0) + 1);
+      lastThreadTs.set(id, lastTs);
+      out.push({ id, name: name || id, kind, lastTs, preview: '', unread, avatarUrl: avatar, handle, participants });
     };
     for (const c of counts.ims ?? []) await push(c, 'direct');
     for (const c of counts.mpims ?? []) await push(c, 'group');
@@ -415,18 +426,22 @@ export const slackStrategy: Strategy = {
       if (msg) msgs.push(msg);
     }
     // İş parçacığı yanıtları history'de görünmez: reply_count'lu üst mesajların yanıtları (yeni yanıt geldiyse) ayrıca çekilir
-    for (const m of (r.messages ?? []) as J[]) {
-      if (!m.reply_count || !m.ts) continue;
+    // yanıtı değişmiş diziler, en yeni yanıtlı önce; çağrı başına bütçe, kalanlar sonraki turlara (pendingReplies)
+    const due = ((r.messages ?? []) as J[])
+      .filter((m) => m.reply_count && m.ts && threadsSeen.get(`${threadId}/${m.ts}`)?.latest !== String(m.latest_reply ?? m.reply_count))
+      .sort((a, b) => Number(b.latest_reply ?? b.ts) - Number(a.latest_reply ?? a.ts));
+    let left = due.length > REPLIES_PER_CALL;
+    for (const m of due.slice(0, REPLIES_PER_CALL)) {
       const key = `${threadId}/${m.ts}`;
       const latest = String(m.latest_reply ?? m.reply_count);
       const prev = threadsSeen.get(key);
-      if (prev?.latest === latest) continue;
       try {
         // conversations.replies eskiden yeniye döner: sabit limitle uzun dizilerde yeni yanıtlar hiç gelmiyordu.
-        // Son alınan yanıttan sonrası (oldest) istenir ve imleçle sayfalanır (en çok 5 × 200).
+        // Son alınan yanıttan sonrası (oldest) istenir ve imleçle sayfalanır (çağrı başına en çok REPLY_PAGES × 200; kalan sonraki turda).
         let newest = prev?.newest ?? '';
         let cursor = '';
-        for (let page_ = 0; page_ < 5; page_++) {
+        let more = false;
+        for (let page_ = 0; page_ < REPLY_PAGES; page_++) {
           const rep = await slack(page, 'conversations.replies', {
             channel: threadId,
             ts: String(m.ts),
@@ -441,13 +456,21 @@ export const slackStrategy: Strategy = {
             if (msg) msgs.push({ ...msg, threadId: String(m.ts) });
           }
           cursor = String(rep.response_metadata?.next_cursor ?? '');
-          if (!cursor || !rep.has_more) break;
+          more = !!cursor && !!rep.has_more;
+          if (!more) break;
         }
-        threadsSeen.set(key, { latest, newest });
-      } catch {
-        /* yanıtlar alınamadı; sonraki yoklamada yeniden denenir */
+        // sayfalar bitmediyse dizi "görüldü" sayılmaz: sonraki çağrı `newest`ten devam eder
+        threadsSeen.set(key, { latest: more ? '' : latest, newest });
+        if (more) left = true;
+      } catch (e) {
+        // hız sınırı köprüye gitsin (üstel geri çekilme; sohbet sonra yeniden denenir). Diğer hatada (dizi silinmiş vb.) bu
+        // latest_reply atlanır: her turda yeniden denenip sohbeti sürekli "değişmiş" tutmasın; yeni yanıt gelince yine denenir
+        if (RATE_RE.test((e as Error).message)) throw e;
+        threadsSeen.set(key, { latest, newest: prev?.newest ?? '' });
       }
     }
+    if (left) pendingReplies.add(threadId);
+    else if (!before) pendingReplies.delete(threadId);
     return msgs.sort((a, b) => a.ts - b.ts);
   },
 
@@ -565,6 +588,8 @@ export function _resetSlackState(): void {
   chans.clear();
   lastRead.clear();
   threadsSeen.clear();
+  pendingReplies.clear();
+  lastThreadTs.clear();
   meId = '';
   listLoadedAt = 0;
   learned.base = '';

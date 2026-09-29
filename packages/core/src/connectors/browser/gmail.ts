@@ -2,6 +2,7 @@ import { cleanMailHtml } from '../mail-html.js';
 import type { Page } from 'playwright';
 import { hashId, needsPage, type Msg, type Strategy, type Thread } from './bridge.js';
 import { bus } from '../../bus.js';
+import { folderDue, mailState } from './outlook.js';
 import type { Attachment } from '../../model.js';
 
 /**
@@ -77,7 +78,6 @@ export function parseDownloadUrl(d: string): Attachment | undefined {
   return { kind, name: name || undefined, mime: mime || undefined, url: kind === 'image' ? url : undefined, link: url };
 }
 
-let meEmail = '';
 
 async function readMe(page: Page): Promise<{ email: string; name: string }> {
   return page.evaluate(() => {
@@ -140,8 +140,6 @@ async function readPager(page: Page): Promise<{ from: number; to: number; total:
   return parseGmailPager(text.split(' | ')[0]);
 }
 
-/** İlk sayfanın (1–N) satır sayısı: sayfalama adımı. Kullanıcı ayarına göre 25/50/100. */
-let pageSize = 0;
 const OLDER_BTN = '[role="button"][aria-label="Daha eski"], [role="button"][aria-label="Older"]';
 const NEWER_BTN = '[role="button"][aria-label="Daha yeni"], [role="button"][aria-label="Newer"]';
 
@@ -195,7 +193,8 @@ async function ensureInbox(page: Page, firstPage = true): Promise<boolean> {
   }
   if (!ok) return false;
   const pager = await readPager(page);
-  if (pager?.from === 1) pageSize = pager.to - pager.from + 1 || pageSize;
+  // İlk sayfanın (1–N) satır sayısı: sayfalama adımı (kullanıcı ayarına göre 25/50/100; hesap başına)
+  if (pager?.from === 1) mailState(page).pageSize = pager.to - pager.from + 1 || mailState(page).pageSize;
   if (firstPage && pager && pager.from > 1) {
     // "Daha yeni" ile başa dön (hash değişimi Gmail'de sayfayı sıfırlamıyor)
     for (let i = 0; i < 60; i++) {
@@ -256,7 +255,6 @@ function readInboxRows(page: Page): Promise<GmailRawRow[]> {
 }
 
 /** Ham satır → sohbet (gönderen ben isem "Ben") */
-let folderTick = 0;
 export function gmailRowToThread(r: GmailRawRow, me: string): Thread {
   const others = r.email && r.email !== me ? { name: r.name || r.email, email: r.email } : { name: r.name || 'Ben', email: r.email };
   return {
@@ -321,8 +319,8 @@ export const gmail: Strategy = {
     // üst çubuk (hesap düğmesi) satırlarla birlikte yüklenir; hemen okumak boş e-posta verir → fromMe hiç doğru olmaz
     await ensureInbox(page);
     const { email, name } = await readMe(page).catch(() => ({ email: '', name: '' }));
-    meEmail = email.toLowerCase();
-    return { id: meEmail, label: email || name || 'Gmail' };
+    mailState(page).me = email.toLowerCase();
+    return { id: mailState(page).me, label: email || name || 'Gmail' };
   },
 
   async threads(page): Promise<Thread[]> {
@@ -333,11 +331,11 @@ export const gmail: Strategy = {
       bus.log('warn', `Gmail: gelen kutusu satırları bulunamadı (sayfa: ${page.url()}). Görünmez modda engellendiyse kanala sağ tık → Yeniden bağlan ile pencereyi aç.`);
       return [];
     }
-    if (!meEmail) await this.me(page, {});
-    const out = (await readInboxRows(page)).map((r) => ({ ...gmailRowToThread(r, meEmail), meta: { folder: 'inbox' } }));
+    if (!mailState(page).me) await this.me(page, {});
+    const out = (await readInboxRows(page)).map((r) => ({ ...gmailRowToThread(r, mailState(page).me), meta: { folder: 'inbox' } }));
     const ids = new Set(out.map((t) => t.id));
     // Gönderilenler ve Spam: her 8. yoklamada (ilk yoklama dahil) #sent / #spam listeleri de okunur, sonra gelen kutusuna dönülür
-    if (folderTick++ % 8 === 0) {
+    if (folderDue(page)) {
       for (const [hash, folder, titleRe] of [['#sent', 'sent', /Gönderil|Sent/i], ['#spam', 'junk', /Spam|Gereksiz|İstenmeyen/i]] as const) {
         try {
           await page.evaluate((h) => {
@@ -352,7 +350,7 @@ export const gmail: Strategy = {
           for (const r of rows) {
             if (ids.has(r.id)) continue;
             ids.add(r.id);
-            out.push({ ...gmailRowToThread(r, meEmail), unread: 0, meta: { folder } });
+            out.push({ ...gmailRowToThread(r, mailState(page).me), unread: 0, meta: { folder } });
           }
         } catch (e) {
           bus.log('warn', `Gmail: ${folder} klasörü okunamadı: ${(e as Error).message.split('\n')[0].slice(0, 120)}`);
@@ -376,23 +374,24 @@ export const gmail: Strategy = {
     const target = pageIndex + 1;
     let pager = await readPager(page);
     const onList = page.url().startsWith(BASE) && isInboxListUrl(page.url()) && !!pager;
-    let cur = onList && pager && pageSize ? gmailPageOf(pager.from, pageSize) : 0;
+    const st = mailState(page);
+    let cur = onList && pager && st.pageSize ? gmailPageOf(pager.from, st.pageSize) : 0;
     if (!onList || cur < 1 || cur > target) {
       if (!(await ensureInbox(page, true))) return [];
       pager = await readPager(page);
-      cur = pager && pageSize ? gmailPageOf(pager.from, pageSize) : 1;
+      cur = pager && st.pageSize ? gmailPageOf(pager.from, st.pageSize) : 1;
     }
-    if (!meEmail) await this.me(page, {});
+    if (!mailState(page).me) await this.me(page, {});
     for (let guard = 0; cur < target && guard < 200; guard++) {
       const from = pager?.from ?? 0;
       if (!(await clickPager(page, OLDER_BTN))) return []; // devre dışı: daha eski sayfa yok
       pager = await waitPager(page, (p) => p.from > from, 10_000);
       if (!pager || pager.from <= from) return [];
-      cur = pageSize ? gmailPageOf(pager.from, pageSize) : cur + 1;
+      cur = st.pageSize ? gmailPageOf(pager.from, st.pageSize) : cur + 1;
     }
     await page.waitForSelector('tr.zA', { state: 'visible', timeout: 10_000 }).catch(() => undefined);
     await page.waitForTimeout(500);
-    return (await readInboxRows(page)).map((r) => gmailRowToThread(r, meEmail));
+    return (await readInboxRows(page)).map((r) => gmailRowToThread(r, mailState(page).me));
   },
 
   async messages(page, _cookies, threadId, limit, before): Promise<Msg[]> {
@@ -404,7 +403,7 @@ export const gmail: Strategy = {
       }, threadId)
       .catch(() => false);
     if (!(await openThread(page, threadId))) return [];
-    if (!meEmail) meEmail = (await readMe(page).catch(() => ({ email: '' }))).email.toLowerCase();
+    if (!mailState(page).me) mailState(page).me = (await readMe(page).catch(() => ({ email: '' }))).email.toLowerCase();
     const rows = await page.evaluate(() => {
       const out: Array<{ id: string; name: string; email: string; time: string; text: string; html: string; atts: string[] }> = [];
       const all = Array.from(document.querySelectorAll<HTMLElement>('div.adn'));
@@ -436,7 +435,7 @@ export const gmail: Strategy = {
     const msgs: Msg[] = rows
       .filter((r) => r.text || r.atts.length)
       .map((r, i) => {
-        const fromMe = !!meEmail && r.email === meEmail;
+        const fromMe = !!mailState(page).me && r.email === mailState(page).me;
         const attachments = r.atts.map(parseDownloadUrl).filter((a): a is Attachment => !!a);
         return {
           id: r.id || hashId(threadId + '|' + r.email + '|' + r.time + '|' + r.text.slice(0, 80)),

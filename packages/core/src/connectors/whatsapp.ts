@@ -38,6 +38,21 @@ const AVATAR_TTL = 3 * 86_400_000;
 const AVATAR_BUDGET = 300;
 /** Alınamayan grup bilgisi (ayrılınan grup vb.) bu süre yeniden sorulmaz */
 const GROUP_FAIL_TTL = 86_400_000;
+/** Depoda bulunamayan alındı hedefi bu süre yeniden aranmaz (tepki/protokol mesajlarının alındı yağmuru) */
+const RECEIPT_MISS_TTL = 10 * 60_000;
+/** Okuma alındısından sonra kalan okunmamışı sayarken bakılan son mesaj sayısı */
+const READ_SELF_WINDOW = 500;
+/** Yazılmayı bekleyen medya kaydı bu sayıyı aşınca geçmiş yazımı yavaşlar (bellek sınırı) */
+const MEDIA_PENDING_MAX = 2000;
+
+/** Grubun uygulanan bilgisinin imzası (ad, adresleme biçimi, üyeler ve yöneticilik): değişmediyse yeniden yazılmaz */
+export function groupSig(g: Pick<GroupMetadata, 'subject' | 'addressingMode' | 'participants'>): string {
+  const parts = (g.participants ?? [])
+    .map((p) => `${p.id}|${p.phoneNumber ?? ''}|${p.lid ?? ''}|${p.admin ?? ''}`)
+    .sort()
+    .join(',');
+  return `${g.subject ?? ''}\u0000${g.addressingMode ?? ''}\u0000${parts}`;
+}
 
 // Baileys CJS olarak yayınlanıyor; ESM'den yüklenince default export iç içe gelebilir.
 const B = Baileys as unknown as Record<string, unknown>;
@@ -199,8 +214,17 @@ export class WhatsAppConnector extends BaseConnector {
     this.histQueue.push({ msgs: [...msgs], onDone });
     if (!this.histPumping) {
       this.histPumping = true;
-      setImmediate(() => this.pumpHistory());
+      this.nextPump();
     }
+  }
+
+  /**
+   * Sıradaki geçmiş dilimi. Medya kayıtları yazımın çok gerisinde kalırsa (bekleyen > MEDIA_PENDING_MAX; her biri küçük önizlemeli
+   * tam JSON) dilimler seyrekleşir: dosya yazımı yetişsin, bekleyen JSON yığını yüzlerce MB'a çıkmasın. Sıra ve içerik değişmez.
+   */
+  private nextPump(): void {
+    if (this.mediaPending.size > MEDIA_PENDING_MAX) setTimeout(() => this.pumpHistory(), 50);
+    else setImmediate(() => this.pumpHistory());
   }
 
   /**
@@ -240,7 +264,7 @@ export class WhatsAppConnector extends BaseConnector {
     }
     for (const f of done) f();
     if (this.histQueue.length) {
-      setImmediate(() => this.pumpHistory());
+      this.nextPump();
       return;
     }
     this.histPumping = false;
@@ -399,12 +423,18 @@ export class WhatsAppConnector extends BaseConnector {
   }
 
   async start(_opts: StartOptions = {}): Promise<void> {
-    // önceki sürümlerin yazdığı ikiz tek seferlik medya yer tutucuları (bir kez; ucuz sorgu)
-    try {
-      const dropped = this.store.dropTwins(VIEW_ONCE_TEXT);
-      if (dropped.length) bus.log('info', `WhatsApp: ${dropped.length} ikiz tek seferlik medya kaydı birleştirildi`);
-    } catch {
-      /* yok say */
+    // Önceki sürümlerin yazdığı ikiz tek seferlik medya yer tutucuları: hesap başına BİR KEZ (meta bayrağı). Eskiden her start'ta
+    // (açılış + her yeniden bağlanma) tüm messages tablosunu eşzamanlı tarıyordu. Yeni ikizler upsertPlaceholder/findTwin ile,
+    // eski kaydın yerinde çevrilmesinden doğanlar rewriteViewOnce'ta engellenir.
+    const twinFlag = `wa_twins_v1:${this.account.id}`;
+    if (!this.store.flag(twinFlag)) {
+      try {
+        const dropped = this.sweepTwins();
+        if (dropped) bus.log('info', `WhatsApp: ${dropped} ikiz tek seferlik medya kaydı birleştirildi`);
+        this.store.setFlag(twinFlag);
+      } catch {
+        /* yok say; sonraki açılışta yeniden denenir */
+      }
     }
     // eski sürümlerin normal fotoğraf gibi yazdığı tek seferlik medya (hesap başına bir kez, arka planda)
     void this.repairViewOnce().catch((e) => bus.log('warn', `WhatsApp: tek seferlik medya onarımı yapılamadı: ${(e as Error).message}`));
@@ -721,18 +751,22 @@ export class WhatsAppConnector extends BaseConnector {
       for (const g of gs) if (g.id && g.subject) this.applyGroup(g.id, g.subject, undefined);
     });
     // contacts.update: gelen her mesajın profil adı (notify) ve profil fotoğrafı değişimi (imgUrl 'changed'/'removed')
+    // Baileys pushName taşıyan HER gelen mesaj için contacts.update {notify} yayınlar: ad değişmediyse tam ad yenilemesi (tüm
+    // sohbetler + grup üyeleri) kurulmaz (etkin hesapta 1,5 sn'de bir çalışıyordu)
     sock.ev.on('contacts.update', (cs) => {
+      let dirty = false;
       for (const c of cs) {
         if (c.id && c.imgUrl !== undefined && c.id.includes('@')) {
+          dirty = true;
           const jid = this.canon(jidNormalizedUser(c.id));
           this.avatarCache.delete(jid);
           this.avatarAt.delete(jid);
           // yalnız listede sohbeti olan kişi için yeniden sor (kuyruk sıralı ve bütçeli)
           if (this.store.getChat(chatIdOf(this.account.id, jid))) this.enqueueAvatars([jid], true);
         }
-        this.learnContact(c);
+        if (this.learnContact(c)) dirty = true;
       }
-      this.scheduleRefresh();
+      if (dirty) this.scheduleRefresh();
     });
 
     sock.ev.on('chats.upsert', (cs) => {
@@ -806,7 +840,7 @@ export class WhatsAppConnector extends BaseConnector {
         const mid = `${chatIdOf(this.account.id, cj)}#${u.key.id}`;
         // alındı mesajın kaydedildiğinden farklı sohbet kimliğiyle (LID ↔ numara) gelebiliyor: bulunamazsa mesaj kimliğiyle ara
         // (eskiden atlanıyordu → o sohbette mesajlar tek tikte kalıyordu, başkasında çift)
-        const stored = this.store.getMessage(mid) ?? this.store.findMessageByRemote(this.account.id, u.key.id) ?? this.twinMessage(u.key.id);
+        const stored = this.store.getMessage(mid) ?? this.receiptFallback(u.key.id);
         if (!stored) continue; // bilmediğimiz mesaj için boş kayıt açma
         const next = map[st] ?? 'sent';
         // gönderim hatası yalnızca henüz iletilmemiş kendi mesajımızı "başarısız" yapar
@@ -822,7 +856,7 @@ export class WhatsAppConnector extends BaseConnector {
         const RANK: Record<string, number> = { pending: 0, sent: 1, delivered: 2, read: 3 };
         if ((RANK[next] ?? 0) < (RANK[stored.status] ?? 0)) continue;
         // Karşı tarafın mesajı "okundu" olduysa bunu yalnızca biz yapmış olabiliriz (telefondaki 'read-self' alındısı) → sayaç sıfır
-        if (next === 'read' && !stored.fromMe) this.clearUnread(cj);
+        if (next === 'read' && !stored.fromMe) this.readSelfUpTo(stored);
         if (stored.status === next) continue;
         this.store.updateStatus(stored.id, next);
         const chat = this.store.getChat(stored.chatId);
@@ -837,11 +871,11 @@ export class WhatsAppConnector extends BaseConnector {
       for (const r of receipts) {
         if (!r.key.remoteJid || !r.key.id || !isChatJid(r.key.remoteJid) || !r.receipt.userJid) continue;
         const cj = this.canon(r.key.remoteJid);
-        const stored = this.store.getMessage(`${chatIdOf(this.account.id, cj)}#${r.key.id}`) ?? this.store.findMessageByRemote(this.account.id, r.key.id) ?? this.twinMessage(r.key.id);
+        const stored = this.store.getMessage(`${chatIdOf(this.account.id, cj)}#${r.key.id}`) ?? this.receiptFallback(r.key.id);
         if (!stored) continue;
         if (me.has(jidNormalizedUser(r.receipt.userJid))) {
           // telefonda benim okumam (read-self)
-          if (r.receipt.readTimestamp && !stored.fromMe) this.clearUnread(cj);
+          if (r.receipt.readTimestamp && !stored.fromMe) this.readSelfUpTo(stored);
           continue;
         }
         // karşı tarafın alındısı (gruplarda bu olayla gelir): benim mesajım iletildi / görüldü. Grupta "görüldü" herkes okuyunca olur;
@@ -907,6 +941,28 @@ export class WhatsAppConnector extends BaseConnector {
     this.store.markRead(chat.id);
     const after = this.store.getChat(chat.id);
     if (after) bus.emit({ type: 'chat.upsert', chat: after });
+  }
+
+  /**
+   * Telefondaki okuma alındısı (read-self) YALNIZ okunan mesaja kadarını okundu yapar. Uykudan uyanınca Baileys birikimi tek demette
+   * verir ve eski alındı, aynı demetteki yeni mesajlardan SONRA işlenir: eskiden sohbetin tüm okunmamışı sıfırlanıyordu. Okunan
+   * mesajdan yeni gelen mesaj yoksa eski davranış (clearUnread); varsa sayaç ondan sonraki gelen mesajların sayısına iner (asla artmaz),
+   * bekleyen artışlar (pendingUnread/liveBumped) korunur. Sohbet kimliği mesajın kayıtlı olduğu sohbetten (LID ↔ numara).
+   */
+  private readSelfUpTo(stored: Message): void {
+    const chat = this.store.getChat(stored.chatId);
+    if (!chat || stored.ts >= chat.lastMessageAt) {
+      this.clearUnread(chat?.remoteId ?? stored.chatId.slice(this.account.id.length + 1));
+      return;
+    }
+    if (chat.unread === 0) return;
+    const recent = this.store.listMessages(chat.id, READ_SELF_WINDOW);
+    const after = recent.filter((m) => !m.fromMe && m.ts > stored.ts).length;
+    // pencere tümüyle okunan mesajdan yeniyse sayı bilinemez: dokunma
+    if (recent.length === READ_SELF_WINDOW && recent[0].ts > stored.ts) return;
+    if (after >= chat.unread) return;
+    const saved = this.store.upsertChat({ ...chat, unread: after });
+    bus.emit({ type: 'chat.upsert', chat: saved });
   }
 
   private queueUnreadDelta(jid: string, n: number): void {
@@ -1493,12 +1549,19 @@ export class WhatsAppConnector extends BaseConnector {
     try {
       const all = await sock.groupFetchAllParticipating();
       let n = 0;
+      let same = 0;
       for (const g of Object.values(all)) {
+        const prev = this.groupMetaCache.get(g.id);
         this.groupMetaCache.set(g.id, g);
-        this.applyGroup(g.id, g.subject, g.participants, g.addressingMode);
         n++;
+        // bu bağlantıda uygulanmış ve değişmemiş grup yeniden yazılıp arayüze basılmaz (her 'open'da iki çağrı: hemen + 20 sn)
+        if (prev && groupSig(prev) === groupSig(g) && this.store.hasChat(chatIdOf(this.account.id, g.id))) {
+          same++;
+          continue;
+        }
+        this.applyGroup(g.id, g.subject, g.participants, g.addressingMode);
       }
-      bus.log('info', `WhatsApp: ${n} grup adı/üyesi alındı${n ? ' (örn. ' + Object.values(all)[0]?.subject + ')' : ''}`);
+      bus.log('info', `WhatsApp: ${n} grup adı/üyesi alındı${same ? ` (${same} değişmemiş)` : n ? ' (örn. ' + Object.values(all)[0]?.subject + ')' : ''}`);
     } catch (e) {
       bus.log('warn', `WhatsApp grup bilgileri alınamadı: ${(e as Error).message}`);
     }
@@ -1662,8 +1725,8 @@ export class WhatsAppConnector extends BaseConnector {
   }
 
   /** lid ↔ telefon numarası eşlemesi kaydet */
-  private link(lid: string, pn: string): void {
-    if (!lid || !pn || lid === pn) return;
+  private link(lid: string, pn: string): boolean {
+    if (!lid || !pn || lid === pn) return false;
     const fresh = this.alias.get(lid) !== pn;
     this.alias.set(lid, pn);
     this.alias.set(pn, lid);
@@ -1687,6 +1750,7 @@ export class WhatsAppConnector extends BaseConnector {
         if (merged) bus.emit({ type: 'chat.upsert', chat: merged });
       }
     }
+    return fresh;
   }
 
   /** Sohbet kimliği olarak telefon JID'sini tercih et (lid biliniyorsa çevir) */
@@ -1716,12 +1780,13 @@ export class WhatsAppConnector extends BaseConnector {
    * kayıtlı ad yoksa kullanılır. Eskiden her gelen mesajın contacts.update{notify} olayı rehber adını ezip sohbeti profil adıyla
    * yeniden adlandırıyordu.
    */
-  learnContact(c: Partial<Pick<Contact, 'id' | 'lid' | 'phoneNumber' | 'name' | 'notify' | 'verifiedName'>>): void {
+  /** Ad ya da lid↔numara eşlemesi değiştiyse true (değişmeyen profil adı olayı ad yenilemesi kurmasın) */
+  learnContact(c: Partial<Pick<Contact, 'id' | 'lid' | 'phoneNumber' | 'name' | 'notify' | 'verifiedName'>>): boolean {
     const id = c.id ? jidNormalizedUser(c.id) : '';
-    if (!id) return; // profil fotoğrafı olaylarında id bazen jid değil, özet (hash) olabiliyor
+    if (!id) return false; // profil fotoğrafı olaylarında id bazen jid değil, özet (hash) olabiliyor
     const lid = c.lid ? jidNormalizedUser(c.lid) : id.endsWith('@lid') ? id : undefined;
     const pn = c.phoneNumber ? jidNormalizedUser(c.phoneNumber) : id.endsWith('@s.whatsapp.net') ? id : undefined;
-    if (lid && pn) this.link(lid, pn);
+    const linked = !!(lid && pn) && this.link(lid, pn);
     const keys = [...new Set([id, lid, pn, this.alias.get(id)].filter((x): x is string => !!x))];
     const saved = c.name?.trim();
     const profile = (c.notify ?? c.verifiedName ?? '').trim();
@@ -1743,6 +1808,7 @@ export class WhatsAppConnector extends BaseConnector {
       for (const k of keys) setName(k, profile);
     }
     if (changed) this.scheduleSaveNames();
+    return changed || linked;
   }
 
   /**
@@ -1825,7 +1891,12 @@ export class WhatsAppConnector extends BaseConnector {
     this.mediaWriting = true;
     try {
       while (this.mediaPending.size) {
-        const batch = [...this.mediaPending.entries()].slice(0, 16);
+        // haritayı kopyalamadan ilk 16 (eskiden her partide tüm harita diziye kopyalanıyordu: O(n²))
+        const batch: Array<[string, string]> = [];
+        for (const e of this.mediaPending) {
+          batch.push(e);
+          if (batch.length === 16) break;
+        }
         await Promise.all(
           batch.map(async ([file, json]) => {
             try {
@@ -1875,13 +1946,30 @@ export class WhatsAppConnector extends BaseConnector {
     this.reuploadWaiters.shift()?.();
   }
 
+  /** İndirilmiş medya; erişim zamanı tazelenir (önbellek budaması son erişime göre çalışsın) */
+  private readCached(file: string): { body: Buffer; type: string } {
+    const now = new Date();
+    void fs.promises.utimes(file, now, now).catch(() => undefined);
+    return { body: fs.readFileSync(file), type: fs.readFileSync(file + '.type', 'utf8') };
+  }
+
   async fetchMedia(u: string): Promise<{ body: Buffer; type: string } | undefined> {
     const m = u.match(/^(wa|wa-thumb):(.+)\/([^/]+)$/);
     if (!m) throw new Error('geçersiz WhatsApp medya adresi');
     const [, kind, jid, id] = m;
     const idx = path.join(this.mediaIndexDir(), this.mediaKey(jid, id) + '.json');
     const pending = this.mediaPending.get(idx);
-    if (!pending && !fs.existsSync(idx)) throw new Error('medya kaydı yok (mesaj eski olabilir)');
+    const dir = path.join(sessionDir(this.account.id), 'media');
+    const file = path.join(dir, this.mediaKey(jid, id));
+    if (!pending && !fs.existsSync(idx)) {
+      // Kayıt yoksa (eski sürümün önbellek budaması media-index'i silmiş olabilir) daha önce indirilmiş dosya yine gösterilir.
+      // Tek seferlik medyanın önbellek dosyası forgetMedia ile kaydıyla birlikte silindiği için burada kalmış olamaz.
+      // Güvence: depoda tek seferlik yer tutucusu olarak duran mesajın (silinememiş) dosyası asla verilmez.
+      const cur = this.store.getMessage(`${chatIdOf(this.account.id, jid)}#${id}`) ?? this.store.findMessageByRemote(this.account.id, id);
+      if (cur?.text === VIEW_ONCE_TEXT) throw new Error('tek seferlik medya yalnız telefonda açılır');
+      if (kind === 'wa' && fs.existsSync(file) && fs.existsSync(file + '.type')) return this.readCached(file);
+      throw new Error('medya kaydı yok (mesaj eski olabilir)');
+    }
     const msg = JSON.parse(pending ?? fs.readFileSync(idx, 'utf8'), BufferJSON.reviver) as WAMessage;
     // tek seferlik medya asla indirilmez / gösterilmez (yalnız telefonda bir kez açılır)
     if (isViewOnce(msg.message)) {
@@ -1896,10 +1984,8 @@ export class WhatsAppConnector extends BaseConnector {
       if (!th) throw new Error('önizleme yok');
       return { body: Buffer.from(th), type: 'image/jpeg' };
     }
-    const dir = path.join(sessionDir(this.account.id), 'media');
     fs.mkdirSync(dir, { recursive: true });
-    const file = path.join(dir, this.mediaKey(jid, id));
-    if (fs.existsSync(file) && fs.existsSync(file + '.type')) return { body: fs.readFileSync(file), type: fs.readFileSync(file + '.type', 'utf8') };
+    if (fs.existsSync(file) && fs.existsSync(file + '.type')) return this.readCached(file);
     const sock = this.sock;
     if (!sock) throw new Error('WhatsApp bağlı değil');
     const download = () => downloadMediaMessage(msg, 'buffer', {}, { logger: pino({ level: 'silent' }), reuploadRequest: sock.updateMediaMessage });
@@ -2141,8 +2227,19 @@ export class WhatsAppConnector extends BaseConnector {
     this.upsertPlaceholder(input, { live });
   }
 
-  /** Depodaki mesajı tek seferlik yer tutucusuna çevir (metin + ekler), arayüze yayınla; zaman/gönderen/durum korunur */
-  private rewriteViewOnce(jid: string, id: string): boolean {
+  /** İkiz tek seferlik yer tutucuları birleştir (depo tarar), silinenleri arayüze bildir; silinen sayısını döndürür */
+  private sweepTwins(): number {
+    const dropped = this.store.dropTwins(VIEW_ONCE_TEXT);
+    for (const mid of dropped) bus.emit({ type: 'message.delete', chatId: mid.slice(0, mid.lastIndexOf('#')), messageId: mid });
+    return dropped.length;
+  }
+
+  /**
+   * Depodaki mesajı tek seferlik yer tutucusuna çevir (metin + ekler), arayüze yayınla; zaman/gönderen/durum korunur.
+   * sweep: çevrilen kayıt aynı gönderimin başka kimlikli yer tutucusuyla ikiz olduysa hemen birleştir (findTwin'i atlayan yol;
+   * dropTwins artık hesap başına bir kez çalıştığı için başka türlü temizlenmezdi). Toplu onarım sonda bir kez süpürür.
+   */
+  private rewriteViewOnce(jid: string, id: string, sweep = true): boolean {
     const cid = chatIdOf(this.account.id, jid);
     const cur = this.store.getMessage(`${cid}#${id}`);
     if (!cur) return false;
@@ -2154,6 +2251,7 @@ export class WhatsAppConnector extends BaseConnector {
     // canlı olmayan güncellemede taban yalnız sohbeti yayınlar: açık sohbetteki balon da değişsin
     const chat = this.store.getChatLite(cid);
     if (stored && chat) bus.emit({ type: 'message.upsert', message: stored, chat });
+    if (sweep && this.store.findTwin(cid, id, cur.fromMe, cur.senderId, VIEW_ONCE_TEXT, cur.ts)) this.sweepTwins();
     return true;
   }
 
@@ -2206,14 +2304,14 @@ export class WhatsAppConnector extends BaseConnector {
           const jid = base.slice(0, sep);
           const id = base.slice(sep + 2);
           this.forgetMedia(jid, id);
-          if (this.rewriteViewOnce(jid, id)) fixed++;
+          if (this.rewriteViewOnce(jid, id, false)) fixed++;
         }),
       );
       await new Promise((r) => setImmediate(r));
     }
     if (fixed) {
       bus.log('info', `WhatsApp: ${fixed} tek seferlik medya normal fotoğraf/video gibi görünüyordu; "tek seferlik" uyarısına çevrildi, medyası silindi`);
-      for (const mid of this.store.dropTwins(VIEW_ONCE_TEXT)) bus.emit({ type: 'message.delete', chatId: mid.slice(0, mid.lastIndexOf('#')), messageId: mid });
+      this.sweepTwins();
     }
     this.store.setFlag(flag);
     return fixed;
@@ -2247,6 +2345,34 @@ export class WhatsAppConnector extends BaseConnector {
    * Telefondan (fromMe) gelenlerin sürekli çözülememesi telefon↔cihaz oturumunun bozulduğunu gösterir (aynı kimlikle iki
    * çekirdek çalışınca olur); tek kalıcı çare cihazı Bağlı cihazlar'dan kaldırıp yeniden eşleştirmek.
    */
+  /**
+   * Alındının kanonik sohbette bulunamayan mesajı: başka sohbet kimliğinde (LID ↔ numara) ya da ikizinde ara. Depoya hiç yazılmayan
+   * mesajların (tepki, anket oyu, protokol mesajı: büyük grupta üye başına ayrı alındı) aramaları tekrarlanmasın diye bulunamayan
+   * kimlik 10 dk hatırlanır (≤2000); kimlik sonradan yazılırsa upsertMessage kaydı siler.
+   */
+  private receiptMiss = new Map<string, number>();
+  private receiptFallback(remoteId: string): Message | undefined {
+    const at = this.receiptMiss.get(remoteId);
+    if (at !== undefined && Date.now() - at < RECEIPT_MISS_TTL) return undefined;
+    const found = this.store.findMessageByRemote(this.account.id, remoteId) ?? this.twinMessage(remoteId);
+    if (found) {
+      this.receiptMiss.delete(remoteId);
+      return found;
+    }
+    this.receiptMiss.delete(remoteId); // yeniden ekle: Map sırası = en eski önce
+    this.receiptMiss.set(remoteId, Date.now());
+    if (this.receiptMiss.size > 2000) this.receiptMiss.delete(this.receiptMiss.keys().next().value!);
+    return undefined;
+  }
+
+  protected override upsertMessage(
+    input: Omit<Message, 'id' | 'chatId' | 'hasHtml'> & { remoteChatId: string; html?: string },
+    opts: { live?: boolean; bump?: boolean } = {},
+  ): Message | undefined {
+    this.receiptMiss.delete(input.remoteId);
+    return super.upsertMessage(input, opts);
+  }
+
   /** Atlanan ikiz yer tutucu kimliği → tutulan mesajın kimliği (alındılar hangisine gelirse gelsin tek balona işlensin) */
   private twins = new Map<string, string>();
   private twinMessage(remoteId: string) {
@@ -2261,6 +2387,7 @@ export class WhatsAppConnector extends BaseConnector {
     const twin = this.store.findTwin(chatId, input.remoteId, !!input.fromMe, input.senderId, input.text, input.ts);
     if (!twin) return this.upsertMessage(input, opts);
     this.twins.set(input.remoteId, twin.id);
+    this.receiptMiss.delete(input.remoteId);
     if (this.twins.size > 500) this.twins.delete(this.twins.keys().next().value!);
     return undefined;
   }

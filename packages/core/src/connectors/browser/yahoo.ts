@@ -1,7 +1,7 @@
 import type { Locator, Page } from 'playwright';
 import { hashId, type Msg, type Strategy, type Thread } from './bridge.js';
 import { bus } from '../../bus.js';
-import { fillListTimes, parseMailDate, persistSessionCookies } from './outlook.js';
+import { fillListTimes, mailState, parseMailDate, persistSessionCookies } from './outlook.js';
 import { cleanMailHtml } from '../mail-html.js';
 
 /**
@@ -18,7 +18,6 @@ const HOME = 'https://mail.yahoo.com/d/folders/1';
 const YAHOO_COOKIE_DOMAINS = /(^|\.)(yahoo\.com|yahoo\.net|login\.yahoo\.com)$/;
 const ROW_SEL = '[data-test-id="message-list-item"], ul[role="list"] li[role="listitem"] a[href*="/messages/"], [role="list"] [role="listitem"]';
 
-let meEmail = '';
 /** Liste satırının zamanı (ileti görünümünde zaman okunamazsa yedek; "şimdi" yazılınca sıra bozuluyordu) */
 const threadTs = new Map<string, number>();
 /** Ekran okuyucu etiketleri (görünmez): gönderen/konu yerine okunmasın */
@@ -131,7 +130,7 @@ async function readThread(page: Page, threadId: string, limit: number, restore: 
   const good = rows.filter((r) => r.text.length > 0);
   return good
     .map((r, i) => {
-      const fromMe = !!meEmail && r.from.toLowerCase() === meEmail;
+      const fromMe = !!mailState(page).me && r.from.toLowerCase() === mailState(page).me;
       return {
         id: hashId(threadId + '|' + r.from + '|' + r.text.slice(0, 120)),
         text: r.text.replace(/[ \t\u00a0]+$/gm, '').replace(/\n{3,}/g, '\n\n').slice(0, 20_000),
@@ -219,8 +218,8 @@ export const yahoo: Strategy = {
         return (el?.textContent ?? document.body.innerText).match(/[\w.+-]+@(yahoo|ymail|rocketmail)\.[a-z.]+/i)?.[0] ?? '';
       })
       .catch(() => '');
-    meEmail = email.toLowerCase();
-    return { id: meEmail || 'yahoo', label: email || 'Yahoo Mail' };
+    mailState(page).me = email.toLowerCase();
+    return { id: mailState(page).me || 'yahoo', label: email || 'Yahoo Mail' };
   },
 
   async threads(page): Promise<Thread[]> {
@@ -231,7 +230,7 @@ export const yahoo: Strategy = {
       return [];
     }
     await persistSessionCookies(page.context(), YAHOO_COOKIE_DOMAINS).catch(() => 0);
-    if (!meEmail) await this.me(page, {});
+    if (!mailState(page).me) await this.me(page, {});
     const rows = await readRows(page);
     const times = fillListTimes(rows.map((r) => parseMailDate(r.time)));
     return rows.map((row, i) => ({

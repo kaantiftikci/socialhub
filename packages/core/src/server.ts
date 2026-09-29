@@ -25,9 +25,9 @@ import { ALL_PLATFORMS } from './model.js';
 import { MEDIA_HOSTS, PLATFORM_MEDIA_HOSTS, MEDIA_MAX } from './media-hosts.js';
 import { fetchPreview } from './link-preview.js';
 import { checkSend, persistSendGuard, SendBlocked } from './send-guard.js';
-import { EventBatcher } from './ws-batch.js';
+import { EventBatcher, type WsBatch } from './ws-batch.js';
 import { fullDiskAccess, messagesAutomation, PRIVACY_PANES, tccStatus } from './permissions.js';
-import type { Platform } from './model.js';
+import type { Chat, CoreEvent, Platform } from './model.js';
 
 /**
  * Yerel API: yalnızca 127.0.0.1'e bağlanır. Arayüz (ve ileride MCP/otomasyonlar) bunu kullanır.
@@ -185,9 +185,31 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   };
   // Bekleyen QR kodları: arayüz sonradan açılsa da eşleşme ekranı boş kalmasın
   const pendingQr = new Map<string, string>();
+  // WS kesintisinde olaylar atılır (geri oynatma yok): yeniden bağlanan arayüz sohbet listesini kendisi çeker, ama eşitleme
+  // ilerlemesi ve bekleyen giriş istemi (2FA parolası vb.) listede yok → son halleri tutulur, bağlanınca bir demetle gönderilir
+  // (yoksa %70'te kopan eşitlemenin 100'ü kaybolup "N kanal eşitleniyor" sonsuza dek kalıyordu; everSynced yüzünden bir daha gelmez)
+  const lastSync = new Map<string, Extract<CoreEvent, { type: 'account.sync' }>>();
+  const pendingPrompt = new Map<string, Extract<CoreEvent, { type: 'account.prompt' }>>();
+  // Kaldırılan hesaplar: connector arka planda durdurulurken yaydığı durum/QR/ilerleme olayları arayüzde hesabı "hayalet" olarak
+  // geri getirmesin. store.isRemoving küçük hesapta account.removed'dan ÖNCE boşalıyor (silme eşzamanlı bitiyor); kimlikler rastgele,
+  // yeniden kullanılmaz → kalıcı küme güvenli.
+  const goneAccounts = new Set<string>();
+  const isGone = (accountId: string) => goneAccounts.has(accountId) || store.isRemoving(accountId);
   bus.on((ev) => {
-    if (ev.type === 'account.qr') pendingQr.set(ev.accountId, ev.qrDataUrl);
+    if (ev.type === 'account.removed') {
+      goneAccounts.add(ev.accountId);
+      pendingQr.delete(ev.accountId);
+      lastSync.delete(ev.accountId);
+      pendingPrompt.delete(ev.accountId);
+    }
+    if (ev.type === 'account.qr' && !isGone(ev.accountId)) pendingQr.set(ev.accountId, ev.qrDataUrl);
     if (ev.type === 'account.status' && ev.account.status !== 'pairing') pendingQr.delete(ev.account.id);
+    if (ev.type === 'account.sync' && !isGone(ev.accountId)) {
+      if (ev.progress <= 0 || ev.progress >= 100) lastSync.delete(ev.accountId);
+      else lastSync.set(ev.accountId, ev);
+    }
+    if (ev.type === 'account.prompt' && !isGone(ev.accountId)) pendingPrompt.set(ev.accountId, ev);
+    if (ev.type === 'account.status' && ['connected', 'disconnected', 'error'].includes(ev.account.status)) pendingPrompt.delete(ev.account.id);
     // sohbet silindi: bekleyen zamanlanmış gönderimleri de at
     if (ev.type === 'chat.delete' && scheduled.list(ev.chatId).length) {
       scheduled.removeChat(ev.chatId);
@@ -294,17 +316,30 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     const before = Number(url.searchParams.get('before'));
     return store.listMessages(dec(p.id), limit, Number.isFinite(before) && before > 0 ? before : undefined);
   });
+  /** Sohbet başına son watch() zamanı (/read) */
+  const watchedAt = new Map<string, number>();
+  const WATCH_EVERY_MS = 60_000;
   route('POST', '/api/chats/:id/read', (_r, _s, p) => {
     const id = dec(p.id);
-    const before = store.getChat(id);
+    const before = store.getChatLite(id);
+    if (!before) return { ok: true };
+    // sohbet açık: yazıyor/çevrimiçi aboneliği (WhatsApp presence vb.). Arayüz açık sohbetteki HER gelen mesaj olayında /read
+    // çağırıyor (geçmiş yüklemesinde saniyede onlarca) → abonelik sohbet başına en çok dakikada bir (WhatsApp Web de yalnız
+    // sohbet açılınca abone olur; art arda presenceSubscribe otomasyon deseni)
+    const now = Date.now();
+    if (now - (watchedAt.get(id) ?? 0) >= WATCH_EVERY_MS) {
+      if (watchedAt.size > 500) watchedAt.clear();
+      watchedAt.set(id, now);
+      void registry.get(before.accountId)?.watch?.(before.remoteId).catch(() => undefined);
+    }
+    // okunmamış yoksa ve okuma noktası zaten güncelse değişecek bir şey yok: yazma/yeniden okuma/yayın yapılmaz
+    if (before.unread <= 0 && (before.readUpto ?? 0) >= before.lastMessageAt) return { ok: true };
     store.markRead(id);
-    // sohbet açık: yazıyor/çevrimiçi aboneliği (WhatsApp presence vb.)
-    { const c0 = store.getChat(id); if (c0) void registry.get(c0.accountId)?.watch?.(c0.remoteId).catch(() => undefined); }
     const chat = store.getChat(id);
     if (chat) {
       bus.emit({ type: 'chat.upsert', chat });
-      // platformda da okundu işaretle (yalnızca gerçekten okunmamış vardıysa; arka planda)
-      if (before && before.unread > 0) void registry.get(chat.accountId)?.markRead?.(chat.remoteId).catch((e) => bus.log('warn', `${chat.platform}: okundu işaretlenemedi: ${(e as Error).message}`));
+      // platformda da okundu işaretle (arka planda)
+      if (before.unread > 0) void registry.get(chat.accountId)?.markRead?.(chat.remoteId).catch((e) => bus.log('warn', `${chat.platform}: okundu işaretlenemedi: ${(e as Error).message}`));
     }
     return { ok: true };
   });
@@ -334,13 +369,19 @@ export function createServer(store: Store, registry: Registry, port: number): ht
       throw e;
     }
   };
-  // Dosya gönderme: JSON {name, mime, data(base64), caption} → ~/.mivelo/outbox/<zaman>-<ad> → connector.sendMedia
-  route('POST', '/api/chats/:id/send-file', async (_r, _s, p, body) => {
+  // Dosya gönderme → ~/.mivelo/outbox/<zaman>-<ad> → connector.sendMedia. İki biçim:
+  //  - ham gövde (Content-Type: application/octet-stream; ad/mime/açıklama/voice sorgu dizesinde): dosyaya akıtılır, olay döngüsü kilitlenmez
+  //  - eski JSON {name, mime, data(base64), caption, voice}: 45 MB'ta base64 çözme + yazma ~0,5 sn eşzamanlı kilit (geriye uyum için duruyor)
+  route('POST', '/api/chats/:id/send-file', async (req, _s, p, body) => {
     const id = dec(p.id);
+    const raw = body === RAW_BODY;
+    const q = new URL(req.url ?? '/', 'http://x').searchParams;
+    const b: { name?: string; mime?: string; data?: string; caption?: string; voice?: boolean } = raw
+      ? { name: q.get('name') ?? undefined, mime: q.get('mime') ?? undefined, caption: q.get('caption') ?? undefined, voice: q.get('voice') === '1' || q.get('voice') === 'true' }
+      : (body as { name?: string; mime?: string; data?: string; caption?: string; voice?: boolean });
     const chat = store.getChat(id);
     if (!chat) throw new HttpError(404, 'Sohbet yok');
-    const b = body as { name?: string; mime?: string; data?: string; caption?: string; voice?: boolean };
-    if (!b.name || !b.data) throw new HttpError(400, 'name ve data gerekli');
+    if (!b.name || (!raw && !b.data)) throw new HttpError(400, 'name ve data gerekli');
     const c = registry.get(chat.accountId);
     if (!c) throw new HttpError(409, 'Hesap bağlı değil');
     if (!c.sendMedia) throw new HttpError(400, 'Bu platformda dosya gönderme desteklenmiyor');
@@ -349,10 +390,16 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     fs.mkdirSync(dir, { recursive: true });
     const safe = String(b.name).replace(/[^\w.\-çğıöşüÇĞİÖŞÜ ]+/g, '_').slice(0, 120) || 'dosya';
     const file = path.join(dir, `${Date.now()}-${safe}`);
-    const buf = Buffer.from(String(b.data), 'base64');
-    fs.writeFileSync(file, buf);
+    let size: number;
+    if (raw) {
+      size = await streamBodyToFile(req, file, SEND_FILE_MAX);
+    } else {
+      const buf = Buffer.from(String(b.data), 'base64');
+      size = buf.length;
+      await fs.promises.writeFile(file, buf);
+    }
     try {
-      return await c.sendMedia(chat.remoteId, { path: file, name: safe, mime: String(b.mime || 'application/octet-stream'), size: buf.length, voice: b.voice === true }, b.caption ? String(b.caption) : undefined);
+      return await c.sendMedia(chat.remoteId, { path: file, name: safe, mime: String(b.mime || 'application/octet-stream'), size, voice: b.voice === true }, b.caption ? String(b.caption) : undefined);
     } finally {
       // connector'lar dosyayı gönderim sırasında okur/kopyalar: hemen sil (kimlik belgesi vb. diskte kalmasın)
       setTimeout(() => {
@@ -526,6 +573,16 @@ export function createServer(store: Store, registry: Registry, port: number): ht
       throw new HttpError(502, `Geçmiş yüklenemedi: ${(e as Error).message.split('\n')[0].slice(0, 160)}`);
     }
   });
+  // Üslup profili sohbetten bağımsız (platform + tüm kendi mesajlarım): 10 dk önbellek — her "Taslak yaz/Özetle"de iki tam
+  // myTexts taraması yapılmasın
+  const styleCache = new Map<string, { at: number; style: ReturnType<typeof analyzeStyle> }>();
+  const styleFor = (platform: Platform) => {
+    const hit = styleCache.get(platform);
+    if (hit && Date.now() - hit.at < 10 * 60_000) return hit.style;
+    const style = analyzeStyle([...store.myTexts(platform, 250), ...store.myTexts(undefined, 250)]);
+    styleCache.set(platform, { at: Date.now(), style });
+    return style;
+  };
   route('POST', '/api/chats/:id/draft', async (_r, _s, p, body) => {
     const id = dec(p.id);
     const chat = store.getChat(id);
@@ -533,8 +590,14 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     const t = (body as { tone?: unknown }).tone;
     if (t !== undefined && t !== null && !isAiTone(t)) throw new HttpError(400, 'Geçersiz ton');
     const tone = isAiTone(t) ? t : undefined;
-    const style = analyzeStyle([...store.myTexts(chat.platform, 250), ...store.myTexts(undefined, 250)]);
+    // anahtar yokken üslup sorguları (büyük depoda saniyeler) boşuna çalışmasın
+    if (!aiEnabled()) throw new HttpError(503, 'AI taslak kapalı: ANTHROPIC_API_KEY tanımlı değil');
+    const style = styleFor(chat.platform);
+    // üslup sorguları eşzamanlı (better-sqlite3) ve büyük depoda yüzlerce ms: aralarda olay döngüsüne nefes aldır
+    // (Odak'ta aynı anda 3 taslak isteği tek parça saniyelerce kilitlemesin)
+    await yieldLoop();
     const pairs = store.styleSamples(id, chat.platform, 12);
+    await yieldLoop();
     const result = await draftReply({ chat, messages: store.listMessages(id, 30), pairs, style, tone }).catch((e: unknown) => {
       // model hatası (geçersiz anahtar, sınır, yoğunluk) arayüze anlamlı dönsün; genel 500 değil
       if (e instanceof AiError) throw new HttpError(e.status, e.message);
@@ -820,7 +883,9 @@ export function createServer(store: Store, registry: Registry, port: number): ht
         const m = r.pattern.exec(url.pathname);
         if (!m) continue;
         const params = Object.fromEntries(r.keys.map((k, i) => [k, m[i + 1]]));
-        const body = req.method === 'POST' ? await readJson(req) : undefined;
+        // send-file ham gövdesi (octet-stream) okunmaz: işleyici doğrudan dosyaya akıtır
+        const rawBody = req.method === 'POST' && r.pattern.source.includes('send-file') && /^application\/octet-stream/i.test(String(req.headers['content-type'] ?? ''));
+        const body = rawBody ? RAW_BODY : req.method === 'POST' ? await readJson(req) : undefined;
         const out = await r.handler(req, res, params, body);
         res.writeHead(200, { 'content-type': 'application/json' });
         return void res.end(JSON.stringify(out ?? null));
@@ -861,6 +926,9 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     if (!isLoopback(req.socket.remoteAddress)) lanClients.add(client);
     // Yeni bağlanan arayüze bekleyen QR'ları hemen gönder
     for (const [accountId, qrDataUrl] of pendingQr) client.send(JSON.stringify({ type: 'account.qr', accountId, qrDataUrl }));
+    // kesintide kaçmış olabilecek süren eşitleme ilerlemeleri ve bekleyen giriş istemleri (olağan demet biçiminde; eski arayüz de açar)
+    const replay: CoreEvent[] = [...lastSync.values(), ...pendingPrompt.values()];
+    if (replay.length) client.send(JSON.stringify({ type: 'batch', chats: [], deletes: [], events: replay }));
   });
   const sendAll = (payload: string) => {
     for (const client of wss.clients) {
@@ -881,8 +949,23 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     batchTimer = undefined;
     const b = batcher.take();
     if (!b || !wss.clients.size) return;
-    // mesaj olayları sohbeti katılımcısız (hafif) taşır: demetteki her sohbetin tam hali burada bir kez okunur
-    b.chats = b.chats.map((c) => store.getChat(c.id) ?? c).filter((c) => !store.isRemoving(c.accountId));
+    // mesaj olayları sohbeti katılımcısız (hafif, getChatLite) taşır: yalnız onların tam hali burada bir kez okunur.
+    // chat.upsert zaten tam hali (getChat) taşır → yeniden okunmaz (5000 sohbetlik geçmiş paketinde her birini yeniden okumak
+    // ana döngüyü yüzlerce ms kilitliyordu)
+    const fresh = new Map<string, Chat>();
+    const resolve = (c: Chat): Chat => {
+      let f = fresh.get(c.id);
+      if (!f) {
+        f = isLite(c) ? (store.getChat(c.id) ?? c) : c;
+        fresh.set(c.id, f);
+      }
+      return f;
+    };
+    b.chats = b.chats.map(resolve).filter((c) => !isGone(c.accountId));
+    // messages.read sonrasına eklenen sohbetin (ws-batch take) de aynı taze hali
+    b.events = b.events
+      .filter((e) => e.type !== 'chat.upsert' || !isGone(e.chat.accountId))
+      .map((e): WsBatch['events'][number] => (e.type === 'chat.upsert' ? { type: 'chat.upsert', chat: resolve(e.chat) } : e));
     sendAll(JSON.stringify(b));
   };
   const unsub = bus.on((ev) => {
@@ -890,8 +973,10 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     // giriş ekranı kareleri büyük ve sürekli: demetlenmez, hemen gider
     if (ev.type === 'login.frame') return sendAll(JSON.stringify(ev));
     // kaldırılmakta olan hesabın (connector arka planda durdurulurken) sohbet/mesaj/durum olayları arayüze gitmesin
-    const accId = ev.type === 'chat.upsert' || ev.type === 'message.upsert' ? ev.chat.accountId : ev.type === 'account.status' ? ev.account.id : undefined;
-    if (accId && store.isRemoving(accId)) return;
+    // (account.removed kendisi geçer: arayüz hesabı listeden düşürsün)
+    const accId =
+      ev.type === 'chat.upsert' || ev.type === 'message.upsert' ? ev.chat.accountId : ev.type === 'account.status' ? ev.account.id : ev.type !== 'account.removed' && 'accountId' in ev ? ev.accountId : undefined;
+    if (accId && isGone(accId)) return;
     batcher.push(ev);
     batchTimer ??= setTimeout(flushBatch, 40);
   });
@@ -963,6 +1048,67 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   server.on('close', () => closeLan());
   return server;
 }
+
+/**
+ * Sohbet nesnesi katılımcı bilgisi taşımıyor mu (getChatLite ya da katılımcısız kısmi hal): arayüze gitmeden önce tam hali okunmalı.
+ * getChat'in döndürdüğü tam halde katılımcılar tembel getter'dır (çözülmeden anlaşılır). Katılımcısı hiç olmayan birebir sohbet de
+ * burada "hafif" sayılır; yeniden okuması ucuz (katılımcı satırı yok).
+ */
+export function isLite(c: Chat): boolean {
+  const d = Object.getOwnPropertyDescriptor(c, 'participants');
+  return !d || (!d.get && d.value === undefined);
+}
+
+/** send-file ham gövde işareti (yönlendirici gövdeyi okumadan işleyiciye verir) */
+const RAW_BODY = Symbol('raw-body');
+/** send-file en büyük gövde (JSON yolundaki base64 sınırıyla aynı büyüklük) */
+const SEND_FILE_MAX = 80_000_000;
+
+/**
+ * İstek gövdesini baytları sayarak dosyaya akıt; sınır aşılınca 413 (kısmi dosya silinir). Yarıda kesilen yüklemede de dosya kalmaz.
+ */
+export async function streamBodyToFile(req: http.IncomingMessage, file: string, max: number): Promise<number> {
+  let size = 0;
+  const out = fs.createWriteStream(file, { mode: 0o600 });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      let failed = false;
+      // hata/kesintide dosya tanıtıcısı KAPANDIKTAN sonra reddet: açık dosya Windows'ta silinemiyor (EBUSY) → kısmi dosya kalıyordu
+      const fail = (e: Error) => {
+        if (failed) return;
+        failed = true;
+        req.unpipe(out);
+        if (out.closed) reject(e);
+        else {
+          out.once('close', () => reject(e));
+          out.destroy();
+        }
+      };
+      req.on('data', (chunk: Buffer) => {
+        size += chunk.length;
+        if (size > max) {
+          req.pause(); // bağlantıyı koparmak yerine 413 yanıtı yazılabilsin
+          fail(new HttpError(413, 'İstek gövdesi çok büyük'));
+        }
+      });
+      req.on('aborted', () => fail(new Error('Yükleme yarıda kesildi')));
+      req.on('error', fail);
+      out.on('error', fail);
+      // 'close': veri yazıldı VE tanıtıcı kapandı (connector dosyayı hemen okuyor/kopyalıyor)
+      out.on('close', () => {
+        if (!failed) resolve();
+      });
+      req.pipe(out);
+    });
+  } catch (e) {
+    await fs.promises.rm(file, { force: true });
+    throw e;
+  }
+  return size;
+}
+
+/** Olay döngüsüne bir tur ver (uzun eşzamanlı işleri parçalamak için) */
+const yieldLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 function readJson(req: http.IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {

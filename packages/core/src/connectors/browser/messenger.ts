@@ -359,10 +359,13 @@ function msgKey(threadId: string, ts: number | string, sender: string, text: str
 
 /** Son görülen önizleme: değişmediyse lastTs=0 döner (depodaki zaman korunur), değiştiyse "şimdi". */
 const lastPreview = new Map<string, string>();
+/** Önizlemenin son değiştiği an: sonraki turlarda da aynı değer döner → ertelenen/okunamayan sohbet köprüde "değişmiş" kalır
+ *  (eskiden bir tur sonra 0 dönüyordu → mesajları hiç çekilmiyordu) */
+const changedAt = new Map<string, number>();
 /** threads()/moreThreads ile depoya yazılmış sohbetler (moreThreads yalnızca yenilerini döndürür) */
 const listed = new Set<string>();
 
-interface SidebarRow {
+export interface SidebarRow {
   id: string;
   name: string;
   preview: string;
@@ -404,11 +407,12 @@ async function readSidebarRows(page: Page): Promise<SidebarRow[]> {
 }
 
 /** Ham satır → sohbet; önizleme değiştiyse "şimdi", ilk görüşte/değişmediyse 0 (depodaki zaman kalır) */
-function rowToThread(r: SidebarRow): Thread {
+export function rowToThread(r: SidebarRow): Thread {
   const prev = lastPreview.get(r.id);
   lastPreview.set(r.id, r.preview);
-  // ilk görüşte 0 → mesajlar çekilince gerçek zaman yazılır; sonraki yoklamada önizleme değiştiyse yeni mesaj (şimdi)
-  const lastTs = prev !== undefined && prev !== r.preview ? Date.now() : 0;
+  // ilk görüşte 0 → mesajlar çekilince gerçek zaman yazılır; sonraki yoklamada önizleme değiştiyse yeni mesaj (şimdi), o an saklanır
+  if (prev !== undefined && prev !== r.preview) changedAt.set(r.id, Date.now());
+  const lastTs = changedAt.get(r.id) ?? 0;
   return { id: r.id, name: r.name, kind: 'direct' as const, lastTs, preview: r.preview, unread: r.unread ? 1 : 0, avatarUrl: r.avatarUrl };
 }
 

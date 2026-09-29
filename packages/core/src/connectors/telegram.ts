@@ -14,6 +14,7 @@ import type { Reaction, ReplyRef } from '../model.js';
 import { bus } from '../bus.js';
 import { FFMPEG_HINT } from '../platform.js';
 import { sessionDir, TELEGRAM_API_ID, TELEGRAM_API_HASH } from '../config.js';
+import { MEDIA_MAX } from '../media-hosts.js';
 
 /** Telegram cihaz listesinde görünen sürüm (paket sürümü) */
 const MIVELO_VERSION = '0.1.0';
@@ -27,6 +28,11 @@ import { installMessageBehaviour } from 'teleproto/tl/custom/message.js';
 installMessageBehaviour();
 
 const execFileP = promisify(execFile);
+
+/** Boşluk doldurma: istek başına mesaj ve sohbet başına en çok sayfa (≤500 mesaj; fazlası günlüğe yazılır) */
+const GAP_PAGE = 100;
+const GAP_PAGES = 5;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 type Pending = { resolve: (v: string) => void };
 
@@ -43,6 +49,10 @@ export class TelegramConnector extends BaseConnector {
   private polling = false;
   /** stop() çağrıldı: sürmekte olan start() zamanlayıcı kurmadan çıksın */
   private stopped = false;
+  /** Sohbete son canlı mesajın geldiği an: tarama anlık görüntüsü bundan eskiyse okunmamış sayacı ezilmez */
+  private liveAt = new Map<string, number>();
+  /** Aynı medya için süren indirme (iki tıklama/iki istek aynı dosyayı iki kez indirmesin) */
+  private mediaInflight = new Map<string, Promise<{ body: Buffer; type: string } | undefined>>();
 
   private get sessionFile(): string {
     return path.join(sessionDir(this.account.id), 'session.txt');
@@ -168,32 +178,95 @@ export class TelegramConnector extends BaseConnector {
       }
       if (Date.now() - this.lastDialogScan < 10 * 60_000) return;
       this.lastDialogScan = Date.now();
+      // anlık görüntü zamanı: bundan sonra canlı mesaj gelen sohbetin sayacı eski görüntüyle ezilmez
+      const scanAt = Date.now();
       const dialogs = await client.getDialogs({ limit: 25 });
       for (const d of dialogs) {
         if (!d.id || !d.entity || !d.message) continue;
         const rid = String(d.id);
         this.entities.set(rid, d.entity);
         const chat = this.store.getChat(`${this.account.id}/${rid}`);
-        if (!this.hasMessage(rid, String(d.message.id))) {
+        // Hizmet mesajı (arama, sabitleme, katılma) ingest'te yazılmaz: son öğesi o olan diyalog her taramada boşuna çekiliyordu
+        if (d.message instanceof Api.Message && !this.hasMessage(rid, String(d.message.id))) {
           const name = chat?.name || d.title || d.name || rid;
-          const msgs = await client.getMessages(d.entity, { limit: 20 });
-          for (const m of [...msgs].reverse()) {
-            if (this.hasMessage(rid, String(m.id))) continue;
-            let senderName: string | undefined;
-            if (!m.out && !d.isUser) senderName = entityName((m as { sender?: unknown }).sender) || undefined;
-            this.ingest(m, rid, name, true, senderName);
+          const kind = dialogKind(d);
+          const since = chat ? this.maxStoredId(rid) : 0;
+          if (since > 0) {
+            // depoda son bilinen mesajdan sonrası sayfa sayfa (kapalıyken/kopukken kaçan her şey); bildirim yalnız en yeni birkaçına
+            await this.fillAfter(client, d.entity, rid, name, since, { liveTail: 3, kind, isUser: d.isUser });
+          } else {
+            const msgs = await client.getMessages(d.entity, { limit: 20 });
+            for (const m of [...msgs].reverse()) {
+              if (this.hasMessage(rid, String(m.id))) continue;
+              let senderName: string | undefined;
+              if (!m.out && !d.isUser) senderName = entityName((m as { sender?: unknown }).sender) || undefined;
+              this.ingest(m, rid, name, true, senderName, kind);
+            }
           }
         }
         this.applyReadOutbox(d);
-        // Sayaç kaçan mesajlar yazıldıktan SONRA platformunkine eşitlenir: önce yazılınca canlı ingest aynı mesajları bir kez daha sayıyordu
+        // Sayaç kaçan mesajlar yazıldıktan SONRA platformunkine eşitlenir: önce yazılınca canlı ingest aynı mesajları bir kez daha sayıyordu.
+        // Tarama başladıktan sonra canlı mesaj geldiyse dokunulmaz (anlık görüntü o mesajı saymıyor; sonraki tarama eşitler).
         const cur = this.store.getChat(`${this.account.id}/${rid}`);
-        if (cur && (d.unreadCount ?? 0) !== cur.unread) this.upsertChat({ remoteId: rid, name: cur.name, unread: d.unreadCount ?? 0 });
+        if (cur && (this.liveAt.get(rid) ?? 0) < scanAt && (d.unreadCount ?? 0) !== cur.unread) this.upsertChat({ remoteId: rid, name: cur.name, unread: d.unreadCount ?? 0 });
       }
     } catch (e) {
       bus.log('warn', `Telegram yoklama: ${(e as Error).message}`);
     } finally {
       this.polling = false;
     }
+  }
+
+  /** Depodaki en büyük sayısal mesaj kimliği (son 10 mesajdan; Telegram kimlikleri sohbet içinde zamanla artar); yoksa 0 */
+  private maxStoredId(rid: string): number {
+    let max = 0;
+    for (const m of this.store.listMessages(`${this.account.id}/${rid}`, 10)) if (/^\d+$/.test(m.remoteId)) max = Math.max(max, Number(m.remoteId));
+    return max;
+  }
+
+  /**
+   * Boşluk doldurma: minId'den (depodaki son bilinen) sonraki mesajlar en yeniden geriye sayfa sayfa çekilir ve ESKİDEN YENİYE
+   * yazılır (aynı saniyedekiler doğru sırada). Mivelo kapalıyken biriken mesajlar eskiden yalnız son 30'la sınırlıydı; aradakiler
+   * kalıcı olarak eksik kalıyordu (ne yoklama ne "daha eski" oraya ulaşıyor). liveTail: en yeni N mesaj canlı sayılır (bildirim).
+   * Dönen: boşluğun tamamı alındı mı (GAP_PAGES×GAP_PAGE'i aşan kısım günlüğe yazılır).
+   */
+  private async fillAfter(
+    client: TelegramClient,
+    entity: Entity | Api.TypeInputPeer,
+    rid: string,
+    name: string,
+    minId: number,
+    opts: { liveTail?: number; kind?: ChatKind; isUser?: boolean } = {},
+  ): Promise<boolean> {
+    const all: Api.Message[] = [];
+    let offsetId = 0;
+    let complete = false;
+    for (let page = 0; page < GAP_PAGES; page++) {
+      if (page) {
+        await sleep(300 + Math.random() * 200);
+        if (this.stopped || this.client !== client) return false;
+      }
+      const msgs = await client.getMessages(entity, { minId, limit: GAP_PAGE, ...(offsetId ? { offsetId } : {}) });
+      all.push(...msgs);
+      if (msgs.length < GAP_PAGE) {
+        complete = true;
+        break;
+      }
+      offsetId = Math.min(...msgs.map((m) => m.id));
+      if (offsetId <= minId + 1) {
+        complete = true;
+        break;
+      }
+    }
+    all.sort((a, b) => a.id - b.id);
+    const tail = opts.liveTail ?? 0;
+    all.forEach((m, i) => {
+      if (this.hasMessage(rid, String(m.id))) return; // zaten var (canlı sayılıp ikinci kez bildirim çalmasın)
+      const senderName = !m.out && !opts.isUser ? entityName((m as { sender?: unknown }).sender) || undefined : undefined;
+      this.ingest(m, rid, name, i >= all.length - tail, senderName, opts.kind);
+    });
+    if (!complete) bus.log('warn', `Telegram: ${rid} sohbetinde ${GAP_PAGES * GAP_PAGE}+ kaçan mesaj var; en yeni ${all.length} alındı`);
+    return complete;
   }
 
   async stop(): Promise<void> {
@@ -330,8 +403,9 @@ export class TelegramConnector extends BaseConnector {
     if (!this.client) return;
     const entity = await this.entityOf(remoteChatId);
     const chat = this.ensureChat(remoteChatId, remoteChatId);
-    const msgs = await this.client.getMessages(entity, before ? { limit, offsetDate: Math.floor(before / 1000) } : { limit });
-    for (const m of msgs) this.ingest(m, remoteChatId, chat.name, false);
+    const msgs = await this.client.getMessages(entity, before ? { limit, ...historyOffset(this.store.listMessages(chat.id, 50, before + 1), before) } : { limit });
+    // eskiden yeniye yaz: aynı saniyedeki mesajlar (albüm, toplu iletme) listede ters sırada görünmesin
+    for (const m of [...msgs].reverse()) this.ingest(m, remoteChatId, chat.name, false);
   }
 
   /**
@@ -340,19 +414,31 @@ export class TelegramConnector extends BaseConnector {
    * Sesli mesajlar (ogg/opus) ffmpeg varsa mp3'e çevrilir (WebKit ogg oynatamaz).
    */
   async fetchMedia(u: string): Promise<{ body: Buffer; type: string } | undefined> {
+    // aynı adres için süren indirme paylaşılır (video öğesinin ardışık istekleri, çift tıklama)
+    const running = this.mediaInflight.get(u);
+    if (running) return running;
+    const p = this.fetchMediaOnce(u).finally(() => this.mediaInflight.delete(u));
+    this.mediaInflight.set(u, p);
+    return p;
+  }
+
+  private async fetchMediaOnce(u: string): Promise<{ body: Buffer; type: string } | undefined> {
+    // Dosya G/Ç'si eşzamansız: büyük video/belgede eşzamanlı okuma/yazma olay döngüsünü saniyelerce donduruyordu
+    const fsp = fs.promises;
     // "tg-avatar:<sohbet>": profil fotoğrafı (küçük boy), 1 gün önbellek
     const av = u.match(/^tg-avatar:(-?\d+)$/);
     if (av) {
       const dir = path.join(sessionDir(this.account.id), 'media');
-      fs.mkdirSync(dir, { recursive: true });
+      await fsp.mkdir(dir, { recursive: true });
       const file = path.join(dir, `${av[1]}_avatar`);
-      if (fs.existsSync(file) && Date.now() - fs.statSync(file).mtimeMs < 86400e3) return { body: fs.readFileSync(file), type: 'image/jpeg' };
+      const st = await fsp.stat(file).catch(() => undefined);
+      if (st && Date.now() - st.mtimeMs < 86400e3) return { body: await fsp.readFile(file), type: 'image/jpeg' };
       if (!this.client) throw new Error('Telegram bağlı değil');
       const entity = await this.entityOf(av[1]);
       const res = await this.client.downloadProfilePhoto(entity, { isBig: false });
-      const body = Buffer.isBuffer(res) ? res : typeof res === 'string' ? fs.readFileSync(res) : undefined;
+      const body = Buffer.isBuffer(res) ? res : typeof res === 'string' ? await fsp.readFile(res) : undefined;
       if (!body || !body.length) return undefined;
-      fs.writeFileSync(file, body);
+      await writeAtomic(file, body);
       return { body, type: 'image/jpeg' };
     }
     const m = u.match(/^(tg|tg-thumb):(-?\d+)\/(\d+)$/);
@@ -361,9 +447,19 @@ export class TelegramConnector extends BaseConnector {
     const msgId = Number(idStr);
     const thumb = kind === 'tg-thumb';
     const dir = path.join(sessionDir(this.account.id), 'media');
-    fs.mkdirSync(dir, { recursive: true });
+    await fsp.mkdir(dir, { recursive: true });
     const file = path.join(dir, `${rid}_${msgId}${thumb ? '_thumb' : ''}`);
-    if (fs.existsSync(file) && fs.existsSync(file + '.type')) return { body: fs.readFileSync(file), type: fs.readFileSync(file + '.type', 'utf8') };
+    const cached = await fsp.stat(file).catch(() => undefined);
+    if (cached && cached.size > MEDIA_MAX) {
+      // eski sürümün önbelleğe aldığı sunulamayacak büyüklükte dosya: her istekte baştan okunup 413 veriyordu
+      await fsp.rm(file, { force: true });
+      await fsp.rm(file + '.type', { force: true });
+      throw tooLarge();
+    }
+    if (cached) {
+      const type = await fsp.readFile(file + '.type', 'utf8').catch(() => undefined);
+      if (type) return { body: await fsp.readFile(file), type };
+    }
     if (!this.client) throw new Error('Telegram bağlı değil');
     const entity = await this.entityOf(rid);
     const [msg] = await this.client.getMessages(entity, { ids: [msgId] });
@@ -379,9 +475,11 @@ export class TelegramConnector extends BaseConnector {
       type = 'image/jpeg';
     } else if (msg.media instanceof Api.MessageMediaPhoto) type = 'image/jpeg';
     else if (msg.media instanceof Api.MessageMediaDocument && msg.media.document instanceof Api.Document) type = msg.media.document.mimeType || type;
+    // Boyut sınırı İNDİRMEDEN önce: 1,5 GB'lık belge eskiden önce belleğe iniyor, diske yazılıyor, sonra sunucu 413 veriyordu
+    if (!thumb && msg.media instanceof Api.MessageMediaDocument && msg.media.document instanceof Api.Document && Number(msg.media.document.size.toString()) > MEDIA_MAX) throw tooLarge();
     const out = await this.client.downloadMedia(msg, params);
     if (!out) throw new Error('medya indirilemedi');
-    let body = Buffer.isBuffer(out) ? out : fs.readFileSync(out);
+    let body = Buffer.isBuffer(out) ? out : await fsp.readFile(out);
     if (type === 'audio/ogg' || type === 'audio/opus') {
       const mp3 = await transcodeToMp3(body).catch(() => undefined);
       if (mp3) {
@@ -389,8 +487,8 @@ export class TelegramConnector extends BaseConnector {
         type = 'audio/mpeg';
       }
     }
-    fs.writeFileSync(file, body);
-    fs.writeFileSync(file + '.type', type);
+    await writeAtomic(file, body);
+    await writeAtomic(file + '.type', Buffer.from(type));
     return { body, type };
   }
 
@@ -409,9 +507,7 @@ export class TelegramConnector extends BaseConnector {
       if (m && chat) {
         bus.emit({ type: 'message.upsert', message: m, chat });
         // karşı taraf mesajıma yeni tepki verdi: önizleme "❤️ Ayşe mesajına tepki verdi" (mesaj gelmiş gibi görünmesin)
-        const had = new Set(before.map((r) => `${r.senderId}|${r.emoji}`));
-        const fresh = m.fromMe ? (m.reactions ?? []).find((r) => !r.fromMe && !had.has(`${r.senderId}|${r.emoji}`)) : undefined;
-        if (fresh) this.reactionPreview(rid, `${fresh.emoji} ${(fresh.senderName || chat.name || 'Biri').split(/\s+/)[0]} mesajına tepki verdi`);
+        this.previewFreshReaction(rid, chat.name, before, m);
       }
       return;
     }
@@ -469,6 +565,8 @@ export class TelegramConnector extends BaseConnector {
     // Ana liste (folder 0) + arşiv (folder 1) ayrı ayrı; arşiv ana listenin limitine takılmasın
     const dialogs: Dialog[] = [];
     const seen = new Set<string>();
+    // anlık görüntü zamanı: bundan sonra canlı mesaj gelen sohbetin sayacı/önizlemesi eski görüntüyle ezilmez
+    const scanAt = Date.now();
     for (const params of [{ limit: 200, folder: 0 }, { limit: 100, archived: true }]) {
       try {
         for (const d of await client.getDialogs(params)) {
@@ -482,28 +580,36 @@ export class TelegramConnector extends BaseConnector {
         bus.log('warn', `Telegram sohbet listesi alınamadı (${'archived' in params ? 'arşiv' : 'ana liste'}): ${(e as Error).message}`);
       }
     }
+    // Mivelo kapalıyken mesaj birikmiş sohbetler: rid → depodaki son bilinen kimlik (bundan sonrası çekilecek)
+    const gaps = new Map<string, number>();
     for (const d of dialogs) {
       const rid = String(d.id);
       this.entities.set(rid, d.entity!);
-      const kind: ChatKind = d.isUser ? 'direct' : d.isChannel && !d.isGroup ? 'channel' : 'group';
+      const kind = dialogKind(d);
       const name = d.title || d.name || rid;
       const last = d.message;
       const archived = !!(d.archived || d.folderId === 1);
       const existing = this.store.getChat(`${this.account.id}/${rid}`);
-      const photo = (d.entity as { photo?: unknown }).photo;
-      const hasPhoto = !!photo && !(photo instanceof Api.UserProfilePhotoEmpty) && !(photo instanceof Api.ChatPhotoEmpty);
+      // tarama başladıktan sonra canlı mesaj geldi: sayaç/önizleme/zaman canlı akışta doğru, eski görüntüyle ezme
+      const liveSince = !!existing && (this.liveAt.get(rid) ?? 0) >= scanAt;
       this.upsertChat({
         remoteId: rid,
         name,
         kind,
-        avatarUrl: hasPhoto ? `/api/media/${encodeURIComponent(this.account.id)}?u=${encodeURIComponent(`tg-avatar:${rid}`)}` : undefined,
-        unread: d.unreadCount ?? 0,
-        lastMessageAt: last?.date ? last.date * 1000 : undefined,
-        lastPreview: last ? previewOf(last) : undefined,
+        avatarUrl: this.avatarOf(rid, d.entity),
+        unread: liveSince ? undefined : d.unreadCount ?? 0,
+        lastMessageAt: liveSince ? undefined : last?.date ? last.date * 1000 : undefined,
+        lastPreview: liveSince ? undefined : last ? previewOf(last) : undefined,
         // archived:false da açıkça yazılır ki arşivden çıkarılan sohbet ana listeye dönsün (meta COALESCE ile korunur)
         meta: { ...(existing?.meta ?? {}), archived },
       });
-      if (last) this.ingest(last, rid, name, false);
+      // boşluk: son mesaj yazılmadan ÖNCE ölçülür (yazılınca depodaki en büyük kimlik o olur, delik görünmez olurdu).
+      // Kanal/süpergrupta kimlikler sohbete özel ve ardışık: yalnız bir sonraki kimlikse boşluk yok.
+      // Son öğe hizmet mesajıysa (katılma, sabitleme; depoya yazılmaz) boşluk yalnız kanal/süpergrupta kimlik farkından anlaşılır:
+      // eskiden hiç bakılmıyordu → son öğesi "X katıldı" olan grupta kapalıyken gelen mesajlar eksik kalıyordu.
+      const since = existing && last ? this.maxStoredId(rid) : 0;
+      if (since > 0 && last!.id > since && (rid.startsWith('-100') ? last!.id > since + 1 : last instanceof Api.Message)) gaps.set(rid, since);
+      if (last) this.ingest(last, rid, name, false, undefined, kind);
     }
     // Önce okunmamış sohbetler, sonra en yeniler: ilk 25 sohbetin son 30 mesajı (5'li paralel; flood-wait gelirse seri devam).
     // Eskiden yalnız en yeni 15 → listede okunmamış görünen daha eski sohbetler açılınca boş kalıyordu.
@@ -511,8 +617,16 @@ export class TelegramConnector extends BaseConnector {
     const top = [...active.filter((d) => (d.unreadCount ?? 0) > 0), ...active.filter((d) => !(d.unreadCount ?? 0))].slice(0, 25);
     const recent = async (d: Dialog): Promise<void> => {
       const rid = String(d.id);
+      const name = d.title || d.name || rid;
+      const since = gaps.get(rid);
+      if (since) {
+        gaps.delete(rid);
+        await this.fillAfter(client, d.entity!, rid, name, since, { kind: dialogKind(d), isUser: d.isUser });
+        return;
+      }
       const msgs = await client.getMessages(d.entity, { limit: 30 });
-      for (const m of msgs) this.ingest(m, rid, d.title || d.name || rid, false);
+      // eskiden yeniye: aynı saniyedeki mesajlar (albüm, toplu iletme) listede ters sırada görünmesin
+      for (const m of [...msgs].reverse()) this.ingest(m, rid, name, false, undefined, dialogKind(d));
     };
     let serial = false;
     for (let i = 0; i < top.length; i += 5) {
@@ -532,6 +646,40 @@ export class TelegramConnector extends BaseConnector {
     for (const d of dialogs) this.applyReadOutbox(d);
     const archivedCount = dialogs.filter((d) => d.archived || d.folderId === 1).length;
     bus.log('info', `Telegram geçmişi: ${dialogs.length} sohbet (${archivedCount} arşivde)`);
+    // İlk 25'in dışında kalıp kapalıyken mesaj birikmiş sohbetler: arka planda seri (açılışı bekletmez)
+    const rest = dialogs.filter((d) => gaps.has(String(d.id)));
+    if (rest.length) void this.drainGaps(client, rest, gaps);
+  }
+
+  /** Boşluk kuyruğu: sohbet başına bir kez, aralarında 300-500 ms; FLOOD_WAIT ya da durdurmada kalan bırakılır (sonraki açılış yeniden dener) */
+  private async drainGaps(client: TelegramClient, list: Dialog[], gaps: Map<string, number>): Promise<void> {
+    let done = 0;
+    for (const d of list) {
+      if (this.stopped || this.client !== client) return;
+      const rid = String(d.id);
+      const since = gaps.get(rid);
+      if (!since) continue;
+      try {
+        await this.fillAfter(client, d.entity!, rid, d.title || d.name || rid, since, { kind: dialogKind(d), isUser: d.isUser });
+        done++;
+      } catch (e) {
+        const err = e as { seconds?: number; message?: string };
+        if (err.seconds || /FLOOD/i.test(err.message ?? '')) {
+          bus.log('warn', `Telegram kaçan mesaj doldurma durdu (hız sınırı${err.seconds ? `, ${err.seconds} sn` : ''}); ${list.length - done} sohbet kaldı`);
+          return;
+        }
+        bus.log('warn', `Telegram kaçan mesajlar alınamadı (${rid}): ${err.message ?? e}`);
+      }
+      await sleep(300 + Math.random() * 200);
+    }
+    if (done) bus.log('info', `Telegram: ${done} sohbette kapalıyken gelen mesajlar tamamlandı`);
+  }
+
+  /** Profil/grup fotoğrafı varsa medya vekili adresi */
+  private avatarOf(rid: string, entity: unknown): string | undefined {
+    const photo = (entity as { photo?: unknown } | undefined)?.photo;
+    const hasPhoto = !!photo && !(photo instanceof Api.UserProfilePhotoEmpty) && !(photo instanceof Api.ChatPhotoEmpty);
+    return hasPhoto ? `/api/media/${encodeURIComponent(this.account.id)}?u=${encodeURIComponent(`tg-avatar:${rid}`)}` : undefined;
   }
 
   /** Diyalogdaki "karşı taraf şu mesaja kadar okudu" (readOutboxMaxId) → o id'ye kadarki mesajlarım görüldü */
@@ -554,15 +702,22 @@ export class TelegramConnector extends BaseConnector {
     const m = ev.message;
     const rid = m.chatId ? String(m.chatId) : undefined;
     if (!rid) return;
+    this.liveAt.set(rid, Date.now());
     let name = this.store.getChat(`${this.account.id}/${rid}`)?.name;
+    let kind: ChatKind | undefined;
     if (!name) {
+      // Depoda olmayan sohbet (yeni grup/kanal, ilk 200'ün dışındaki eski grup): tür ve fotoğraf varlıktan; eskiden hep 'direct'
+      // açılıyordu (grup bildirim ayarı atlanıyor, önizlemede gönderen öneki yok, "Bekleyen"e düşüyordu)
+      let chat: unknown;
       try {
-        const chat = await m.getChat();
-        name = entityName(chat) || rid;
-        if (chat) this.entities.set(rid, chat as Entity);
+        chat = await m.getChat();
       } catch {
-        name = rid;
+        /* yok say */
       }
+      name = entityName(chat) || rid;
+      if (chat) this.entities.set(rid, chat as Entity);
+      kind = ev.isPrivate ? 'direct' : tgEntityKind(chat) ?? (m.isChannel && !m.isGroup ? 'channel' : 'group');
+      if (!this.store.hasChat(`${this.account.id}/${rid}`)) this.upsertChat({ remoteId: rid, name, kind, avatarUrl: chat ? this.avatarOf(rid, chat) : undefined });
     }
     let senderName = name;
     if (!m.out && !ev.isPrivate) {
@@ -572,7 +727,7 @@ export class TelegramConnector extends BaseConnector {
         /* yok say */
       }
     }
-    this.ingest(m, rid, name, true, senderName);
+    this.ingest(m, rid, name, true, senderName, kind);
     // Başka cihazdan gönderdiğim mesaj sohbeti Telegram'da okundu sayar; sayaç burada da sıfırlansın
     if (m.out) {
       const chat = this.store.getChat(`${this.account.id}/${rid}`);
@@ -587,8 +742,24 @@ export class TelegramConnector extends BaseConnector {
     if (!rid || !(m instanceof Api.Message)) return;
     const stored = this.store.getMessage(`${this.account.id}/${rid}#${m.id}`);
     if (!stored || stored.deleted) return; // bilmediğimiz eski mesaj için kayıt açma
-    const chat = this.store.getChat(`${this.account.id}/${rid}`);
+    const cid = `${this.account.id}/${rid}`;
+    const chat = this.store.getChat(cid);
     this.ingest(m, rid, chat?.name ?? rid, false, stored.senderName);
+    // var olan mesajın canlı olmayan güncellemesinde upsertMessage yalnız chat.upsert yayınlar → açık sohbetteki balon (metin,
+    // "düzenlendi", tepki) eski kalıyordu. Birebir/küçük grupta tepkiler de bu olayla (editHide) gelir.
+    const msg = this.store.getMessage(`${cid}#${m.id}`);
+    const c = this.store.getChat(cid);
+    if (!msg || !c) return;
+    bus.emit({ type: 'message.upsert', message: msg, chat: c }); // live yok: bildirim/sayaç yok
+    this.previewFreshReaction(rid, c.name, stored.reactions ?? [], msg);
+  }
+
+  /** Mesajıma karşı taraftan YENİ tepki geldiyse sohbet önizlemesi "❤️ Ayşe mesajına tepki verdi" (mesaj gelmiş gibi görünmesin) */
+  private previewFreshReaction(rid: string, chatName: string, before: Reaction[], m: { fromMe?: boolean; reactions?: Reaction[] }): void {
+    if (!m.fromMe) return;
+    const had = new Set(before.map((r) => `${r.senderId}|${r.emoji}`));
+    const fresh = (m.reactions ?? []).find((r) => !r.fromMe && !had.has(`${r.senderId}|${r.emoji}`));
+    if (fresh) this.reactionPreview(rid, `${fresh.emoji} ${(fresh.senderName || chatName || 'Biri').split(/\s+/)[0]} mesajına tepki verdi`);
   }
 
   /**
@@ -598,24 +769,44 @@ export class TelegramConnector extends BaseConnector {
   private onDeleted(ev: DeletedMessageEvent): void {
     const u = ev.originalUpdate;
     const channel = u instanceof Api.UpdateDeleteChannelMessages ? getPeerId(new Api.PeerChannel({ channelId: u.channelId })) : undefined;
-    for (const id of ev.deletedIds ?? []) {
+    const ids = ev.deletedIds ?? [];
+    if (!ids.length) return;
+    // toplu silme (geçmişi temizle, otomatik silme) yüzlerce/binlerce kimlik getirir: tek işlemde yazılır
+    this.store.transaction(() => {
       if (channel) {
-        this.applyEdited(String(channel), String(id), null);
-        continue;
+        for (const id of ids) this.applyEdited(String(channel), String(id), null);
+        return;
       }
-      const m = this.store.findMessageByRemote(this.account.id, String(id));
-      const chat = m ? this.store.getChat(m.chatId) : undefined;
-      if (!m || !chat || chat.remoteId.startsWith('-100')) continue;
-      this.applyEdited(chat.remoteId, m.remoteId, null);
-    }
+      // Kanal dışı: süpergrup/kanal kimlikleri de 1'den başladığından kimlik araması aynı sayıdaki süpergrup mesajını
+      // bulabiliyordu (LIMIT 1) → birebirdeki gerçek eşleşme hiç denenmiyor, silinen mesaj kalıyordu. Çakışmada kanal dışı
+      // sohbetler (hesap başına bir kez listelenir) doğrudan birincil anahtarla denenir.
+      let direct: string[] | undefined;
+      for (const raw of ids) {
+        const id = String(raw);
+        const m = this.store.findMessageByRemote(this.account.id, id);
+        if (!m) continue; // hiçbir sohbette yok (dizinli arama)
+        const remote = m.chatId.slice(this.account.id.length + 1);
+        if (!remote.startsWith('-100')) {
+          this.applyEdited(remote, m.remoteId, null);
+          continue;
+        }
+        direct ??= this.store.listChatsOf(this.account.id).map((c) => c.remoteId).filter((r) => !r.startsWith('-100'));
+        for (const r of direct) {
+          if (!this.hasMessage(r, id)) continue;
+          this.applyEdited(r, id, null);
+          break; // kanal dışı kimlikler hesap genelinde tekil: tek sohbette olabilir
+        }
+      }
+    });
   }
 
-  private ingest(m: Api.Message, remoteChatId: string, chatName: string, live: boolean, senderName?: string): void {
+  /** kind: sohbet depoda yoksa açılacak tür (varsa değişmez) */
+  private ingest(m: Api.Message, remoteChatId: string, chatName: string, live: boolean, senderName?: string, kind?: ChatKind): void {
     if (!(m instanceof Api.Message)) return; // MessageService (katılma, başlık değişimi vb.) atlanır
     const text = m.message ?? '';
     const attachments = m.media ? this.attachmentsOf(m.media, remoteChatId, m.id) : undefined;
     if (!text && !attachments?.length) return;
-    const chat = this.ensureChat(remoteChatId, chatName);
+    const chat = this.ensureChat(remoteChatId, chatName, kind);
     // Gruplarda gönderen: getMessages/getDialogs sonucundaki varlıklar mesaja bağlanır (m.sender). Eskiden geçmiş mesajlarda
     // gönderen adı olarak grup adı yazılıyordu. Kanal gönderileri kanal adıyla, birebir sohbetler karşı tarafın adıyla kalır.
     if (!senderName && !m.out && chat.kind === 'group') senderName = entityName((m as { sender?: unknown }).sender) || undefined;
@@ -694,6 +885,36 @@ export class TelegramConnector extends BaseConnector {
   }
 }
 
+/** Kullanıcı → birebir, yayın kanalı → kanal, süpergrup (megagroup: Channel, broadcast yok) ve küçük grup → grup; bilinmiyorsa undefined */
+export function tgEntityKind(e: unknown): ChatKind | undefined {
+  if (e instanceof Api.User) return 'direct';
+  if (e instanceof Api.Channel) return e.broadcast ? 'channel' : 'group';
+  if (e instanceof Api.Chat || e instanceof Api.ChatForbidden || e instanceof Api.ChannelForbidden) return e instanceof Api.ChannelForbidden && e.broadcast ? 'channel' : 'group';
+  return undefined;
+}
+
+/** Diyalogun sohbet türü (backfill, yoklama ve boşluk doldurmada aynı kural) */
+function dialogKind(d: Dialog): ChatKind {
+  return d.isUser ? 'direct' : d.isChannel && !d.isGroup ? 'channel' : 'group';
+}
+
+/**
+ * "Daha eski" sayfalaması. before = arayüzde yüklü en eski mesajın zamanı; stored = depoda ts ≤ before olan son mesajlar.
+ * O saniyedeki en küçük kimlikten geriye istenir (offsetId dışlayıcı; kimlikler sohbet içinde tekdüze → aynı saniyedeki eski
+ * parçalar da gelir). Eskiden offsetDate = before sn'si dışlayıcıydı: sayfa sınırı albümün/toplu iletmenin ortasına düşünce
+ * aynı saniyedeki kalan parçalar hiçbir yoldan gelmiyordu. Kimlik yoksa o saniyeyi de kapsayan offsetDate.
+ */
+export function historyOffset(stored: Array<{ remoteId: string; ts: number }>, before: number): { offsetId: number } | { offsetDate: number } {
+  const sec = Math.floor(before / 1000);
+  let min = 0;
+  for (const m of stored) {
+    if (Math.floor(m.ts / 1000) !== sec || m.ts > before || !/^\d+$/.test(m.remoteId)) continue;
+    const id = Number(m.remoteId);
+    if (id > 0 && (!min || id < min)) min = id;
+  }
+  return min ? { offsetId: min } : { offsetDate: sec + 1 };
+}
+
 /**
  * Gönderilecek dosya → GramJS sendFile parametreleri. Görsel/video/ses MIME'ları doğal medya olarak gider (GramJS türü
  * uzantıdan çıkarır; ses için DocumentAttributeAudio kendisi ekler), diğerleri forceDocument ile belge. Boş altyazı verilmez.
@@ -762,6 +983,23 @@ function previewOf(m: Api.Message): string {
   if (media instanceof Api.MessageMediaGeo || media instanceof Api.MessageMediaGeoLive || media instanceof Api.MessageMediaVenue) return '📍 Konum';
   if (media instanceof Api.MessageMediaPoll) return '📊 Anket';
   return '';
+}
+
+/** Sunulamayacak büyüklükte medya (sunucu MEDIA_MAX) */
+function tooLarge(): Error {
+  return Object.assign(new Error('Medya çok büyük (413)'), { output: { statusCode: 413 } });
+}
+
+/** Önbellek dosyası: geçici dosyaya yaz + yeniden adlandır (yarım yazılmış dosya önbellekten sunulmasın) */
+async function writeAtomic(file: string, body: Buffer): Promise<void> {
+  const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  try {
+    await fs.promises.writeFile(tmp, body);
+    await fs.promises.rename(tmp, file);
+  } catch (e) {
+    await fs.promises.rm(tmp, { force: true });
+    throw e;
+  }
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {

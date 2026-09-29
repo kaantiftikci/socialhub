@@ -96,6 +96,18 @@ export async function withAuthWindow<T>(url: string, done: Promise<T>): Promise<
 const MS_TOKEN = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
 const MS_DEVICE = 'https://login.microsoftonline.com/common/oauth2/v2.0/devicecode';
 
+/** Artan UID listesi → IMAP dizi kümesi ("1:3,7,9:10") */
+export function uidRanges(uids: number[]): string {
+  const out: string[] = [];
+  for (let i = 0; i < uids.length; ) {
+    let j = i;
+    while (j + 1 < uids.length && uids[j + 1] === uids[j]! + 1) j++;
+    out.push(i === j ? String(uids[i]) : `${uids[i]}:${uids[j]}`);
+    i = j + 1;
+  }
+  return out.join(',');
+}
+
 const cleanSubject = (s: string | undefined) => (s ?? '').replace(/^\s*((re|fw|fwd|ynt|ilt)\s*:\s*)+/i, '').trim() || '(konu yok)';
 const addrs = (a: AddressObject | AddressObject[] | undefined): Array<{ address: string; name: string }> => {
   const list = Array.isArray(a) ? a : a ? [a] : [];
@@ -114,6 +126,12 @@ export class MailConnector extends BaseConnector {
   private threadIdOk = true;
   /** Dizi → gelen kutusundaki okunmamış UID'ler (Mivelo'da okununca sunucuda da \\Seen) */
   private unseen = new Map<string, Set<number>>();
+  /** Gönderilenler/Gereksiz kutularının UID imleci (v = kutunun UIDVALIDITY'si): sonraki turlar yalnız yeni iletileri indirir */
+  private folderCur: Partial<Record<'sent' | 'junk', { v: string; last: number }>> = {};
+  /** İlk turda arka plana bırakılan birikimin son UID'si: bu UID'ye dek alınanlar canlı sayılmaz (bildirim/sayaç şişmesin) */
+  private backlogTo = 0;
+  /** withInbox'un geçici (IDLE dışı) istemcisi: stop() onu da kapatır, eski örneğin FETCH'i yenisiyle paralel sürmesin */
+  private tmpClient?: ImapFlow;
   private stateFile: string;
   /** INBOX UIDVALIDITY: değişirse (kutu yeniden oluşturuldu/taşındı) UID imleçleri geçersiz → baştan eşitle */
   private uidValidity = '';
@@ -127,11 +145,22 @@ export class MailConnector extends BaseConnector {
     this.cfg = { ...PRESETS[account.platform], ...cfg };
     this.stateFile = path.join(sessionDir(account.id), 'mail-state.json');
     try {
-      const st = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) as { lastUid?: number; oldestUid?: number; uidValidity?: string; threads?: Record<string, string> };
+      const st = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) as {
+        lastUid?: number;
+        oldestUid?: number;
+        uidValidity?: string;
+        threads?: Record<string, string>;
+        unseen?: Record<string, number[]>;
+        folders?: MailConnector['folderCur'];
+      };
       this.lastUid = st.lastUid ?? 0;
       this.uidValidity = st.uidValidity ?? '';
       this.oldestUid = st.oldestUid ?? 0;
+      // eski sürümün yanlış kaydı: hiç e-posta alınmamış (lastUid 0) kutuda "başa ulaşıldı" (1) yazılıyordu → eski e-postalar kalıcı erişilemezdi
+      if (this.lastUid === 0 && this.oldestUid === 1) this.oldestUid = 0;
       for (const [k, v] of Object.entries(st.threads ?? {})) this.threadOf.set(k, v);
+      for (const [k, v] of Object.entries(st.unseen ?? {})) if (Array.isArray(v) && v.length) this.unseen.set(k, new Set(v));
+      this.folderCur = st.folders ?? {};
     } catch {
       /* ilk çalıştırma */
     }
@@ -145,7 +174,10 @@ export class MailConnector extends BaseConnector {
       i++;
     }
     void i;
-    fs.writeFileSync(this.stateFile, JSON.stringify({ lastUid: this.lastUid, oldestUid: this.oldestUid, uidValidity: this.uidValidity, threads }));
+    // okunmamış UID'ler de kalıcı: yeniden başlatmadan sonra Mivelo'da okunan dizi sunucuda da \\Seen olabilsin (dizi başına ≤50, ≤2000 dizi)
+    const unseen: Record<string, number[]> = {};
+    for (const [k, v] of [...this.unseen.entries()].slice(-2000)) if (v.size) unseen[k] = [...v].slice(-50);
+    fs.writeFileSync(this.stateFile, JSON.stringify({ lastUid: this.lastUid, oldestUid: this.oldestUid, uidValidity: this.uidValidity, threads, unseen, folders: this.folderCur }));
   }
 
   private saveCfg(): void {
@@ -192,6 +224,12 @@ export class MailConnector extends BaseConnector {
     if (this.timer) clearTimeout(this.timer);
     if (this.idleRetry) clearTimeout(this.idleRetry);
     if (this.idleDebounce) clearTimeout(this.idleDebounce);
+    const t = this.tmpClient;
+    this.tmpClient = undefined;
+    if (t) {
+      await t.logout().catch(() => undefined);
+      t.close();
+    }
     const c = this.idleClient;
     this.idleClient = undefined;
     this.idleUp = false;
@@ -251,6 +289,11 @@ export class MailConnector extends BaseConnector {
       const c = client;
       c.on('exists', (d: { count?: number; prevCount?: number }) => {
         if ((d.count ?? 0) <= (d.prevCount ?? 0)) return; // silme/taşıma
+        if (this.idleDebounce) clearTimeout(this.idleDebounce);
+        this.idleDebounce = setTimeout(() => void this.poll(false), 1000);
+      });
+      // başka cihazda okundu/okunmadı (\\Seen) → kısa yoklama: okunmamış sayacı eşitlensin (bkz. syncSeen)
+      c.on('flags', () => {
         if (this.idleDebounce) clearTimeout(this.idleDebounce);
         this.idleDebounce = setTimeout(() => void this.poll(false), 1000);
       });
@@ -419,7 +462,8 @@ export class MailConnector extends BaseConnector {
     }
     // Belirteç istemci kurulmadan ÖNCE tazelenir: ImapFlow auth nesnesini kurulurken alır (sonra tazelenen belirteci görmez)
     if (this.cfg.accessToken) await this.ensureOAuth();
-    const client = new ImapFlow({ host: this.cfg.host!, port: this.cfg.port!, secure: this.cfg.secure ?? true, auth: this.auth(), logger: false });
+    const client = this.createImapClient();
+    this.tmpClient = client;
     try {
       await client.connect();
       const lock = await client.getMailboxLock('INBOX');
@@ -429,9 +473,15 @@ export class MailConnector extends BaseConnector {
         lock.release();
       }
     } finally {
+      if (this.tmpClient === client) this.tmpClient = undefined;
       await client.logout().catch(() => undefined);
       client.close();
     }
+  }
+
+  /** Kısa ömürlü IMAP oturumu (yoklama/klasörler; testler ezer) */
+  protected createImapClient(): ImapFlow {
+    return new ImapFlow({ host: this.cfg.host!, port: this.cfg.port!, secure: this.cfg.secure ?? true, auth: this.auth(), logger: false });
   }
 
   /** Verilen UID'leri indirip sohbet/mesaj olarak yaz; (işlenen e-posta, yeni açılan sohbet) sayısını döner */
@@ -453,9 +503,11 @@ export class MailConnector extends BaseConnector {
       }
     };
     for await (const msg of it(this)) {
+      if (this.stopping) break; // durdurulan örneğin FETCH'i yeni örnekle paralel sürmesin
       try {
         if (!msg.source) continue;
-        const parsed: ParsedMail = await simpleParser(msg.source);
+        // textAsHtml (linkify) hiç kullanılmıyor: büyük düz metinli bültende olay döngüsünü 50-90 ms kilitliyordu
+        const parsed: ParsedMail = await simpleParser(msg.source, { skipTextToHtml: true });
         if (this.ingest(parsed, msg.uid, msg.flags?.has('\\Seen') ?? false, (msg as { threadId?: string }).threadId, live, folder ?? 'inbox')) chats++;
         mails++;
       } catch (e) {
@@ -471,6 +523,9 @@ export class MailConnector extends BaseConnector {
   /** Yoklama sürerken gelen IDLE bildirimi: tur bitince bir kez daha (yeni e-posta 5 dk'lık yedeğe kalmasın) */
   private pollAgain = false;
 
+  /** Bir FETCH'te indirilen en çok e-posta: her dilimden sonra imleç kaydedilir (kopmada kaldığı yerden sürer) */
+  static CHUNK = 100;
+
   private async poll(first: boolean): Promise<void> {
     if (this.stopping) return;
     if (this.polling) {
@@ -478,38 +533,76 @@ export class MailConnector extends BaseConnector {
       return;
     }
     this.polling = true;
+    let folders = false;
     try {
       await this.withInbox(async (client) => {
         const v = String((client as { mailbox?: { uidValidity?: bigint | number } | false }).mailbox ? ((client as { mailbox: { uidValidity?: bigint | number } }).mailbox.uidValidity ?? '') : '');
+        let reset = false;
         if (v && this.uidValidity && v !== this.uidValidity) {
           bus.log('warn', `${this.account.platform}: gelen kutusunun UIDVALIDITY değeri değişti; UID imleçleri sıfırlanıp son 30 gün yeniden eşitleniyor`);
           this.lastUid = 0;
           this.oldestUid = 0;
+          this.backlogTo = 0;
+          this.unseen.clear(); // eski UID'ler artık BAŞKA iletileri gösterir: markRead onları \\Seen yapmasın
+          reset = true;
         }
         if (v) this.uidValidity = v;
+        const fresh = this.lastUid === 0;
         let uids: number[];
-        if (this.lastUid > 0) uids = (await client.search({ uid: `${this.lastUid + 1}:*` }, { uid: true })) || [];
+        if (!fresh) uids = (await client.search({ uid: `${this.lastUid + 1}:*` }, { uid: true })) || [];
         else {
           const since = new Date(Date.now() - 30 * 86_400_000);
           uids = ((await client.search({ since }, { uid: true })) || []).slice(-150);
         }
         uids = uids.filter((u) => u > this.lastUid);
-        const { mails } = await this.fetchUids(client, uids, !first);
-        if (mails) bus.log('info', `${this.account.platform}: ${mails} e-posta alındı`);
-        // HTML gövde eski sürümlerde saklanmıyordu: son e-postaları bir kez yeniden oku (özgün biçim görünsün)
+        // HTML gövde eski sürümlerde saklanmıyordu: son e-postaları bir kez yeniden oku. Yeni hesap (ya da UIDVALIDITY
+        // sıfırlaması) ilk eşitlemesini zaten HTML'le yapar → işaret hemen yazılır (aynı 150 e-posta iki kez inmesin)
         const mark = path.join(sessionDir(this.account.id), 'html-v1');
-        if (first && !fs.existsSync(mark)) {
-          const recent = ((await client.search({ since: new Date(Date.now() - 30 * 86_400_000) }, { uid: true })) || []).slice(-150);
-          await this.fetchUids(client, recent, false).catch((e) => bus.log('warn', `${this.account.platform}: HTML yenileme: ${(e as Error).message}`));
-          fs.writeFileSync(mark, '');
+        const htmlDue = !fs.existsSync(mark);
+        if (htmlDue && (fresh || reset)) fs.writeFileSync(mark, '');
+        let mails = 0;
+        for (let i = 0; i < uids.length; i += MailConnector.CHUNK) {
+          if (this.stopping) break;
+          // ilk tur sınırsız birikimde (lastUid+1:*) yalnız ilk dilimi bekler: hesap hemen 'connected' olur, kalan birikim arka
+          // planda (canlı sayılmadan) iner. Yeni hesabın penceresi zaten ≤150 → tamamı ilk turda
+          if (first && i > 0 && !fresh) {
+            this.backlogTo = Math.max(this.backlogTo, uids[uids.length - 1]!);
+            this.pollAgain = true;
+            break;
+          }
+          const part = uids.slice(i, i + MailConnector.CHUNK);
+          const old = part.filter((u) => u <= this.backlogTo);
+          const rest = part.filter((u) => u > this.backlogTo);
+          try {
+            if (old.length) mails += (await this.fetchUids(client, old, false)).mails;
+            if (rest.length) mails += (await this.fetchUids(client, rest, !first)).mails;
+          } finally {
+            this.saveState(); // yarıda kopsa da işlenenler yeniden inmesin
+          }
+        }
+        if (this.backlogTo && this.lastUid >= this.backlogTo) this.backlogTo = 0;
+        if (mails) bus.log('info', `${this.account.platform}: ${mails} e-posta alındı`);
+        if (!first && !this.stopping) {
+          // eski hesabın tek seferlik HTML yenilemesi 'connected' SONRASI (ilk turu uzatmasın)
+          if (htmlDue && !fresh && !reset) {
+            const recent = ((await client.search({ since: new Date(Date.now() - 30 * 86_400_000) }, { uid: true })) || []).slice(-150);
+            await this.fetchUids(client, recent, false).catch((e) => bus.log('warn', `${this.account.platform}: HTML yenileme: ${(e as Error).message}`));
+            fs.writeFileSync(mark, '');
+          }
+          await this.syncSeen(client).catch((e) => bus.log('warn', `${this.account.platform}: okundu eşitlemesi: ${(e as Error).message}`));
         }
         this.saveState();
       });
-      // Gönderilenler / Gereksiz: her 8. yoklamada (ilk dahil) özel kullanım bayraklı kutulardan son 40 e-posta
-      if (this.folderTick++ % 8 === 0) await this.pollFolders().catch((e) => bus.log('warn', `${this.account.platform} klasörler: ${(e as Error).message}`));
+      // Gönderilenler / Gereksiz: her 8. yoklamada (ilk turdan hemen sonraki arka plan turu dahil). İlk tur beklemez.
+      if (first) this.pollAgain = true;
+      else if (this.folderTick++ % 8 === 0) folders = true;
+      if (folders) await this.pollFolders().catch((e) => bus.log('warn', `${this.account.platform} klasörler: ${(e as Error).message}`));
     } catch (e) {
       bus.log('warn', `${this.account.platform} IMAP: ${(e as Error).message}`);
-      if (first) throw e;
+      if (first) {
+        this.pollAgain = false; // açılış başarısız: arka plan turu hata durumundaki örnekte sürmesin
+        throw e;
+      }
       this.classify(e);
     } finally {
       this.polling = false;
@@ -518,6 +611,38 @@ export class MailConnector extends BaseConnector {
         setTimeout(() => void this.poll(false), 500).unref?.();
       }
     }
+  }
+
+  /**
+   * Başka cihazda okunan e-postalar: izlenen okunmamış UID'lerden sunucuda artık \\Seen olanlar kümeden düşer; dizinin
+   * hepsi okunduysa sohbet Mivelo'da da okundu olur (yoklama yalnız yeni UID'leri çektiği için bayrak değişimi hiç görülmüyordu).
+   */
+  private async syncSeen(client: ImapFlow): Promise<void> {
+    // komut satırı sınırlı: en yeni 2000 UID, ardışıklar aralık (a:b) olarak
+    const tracked = [...new Set([...this.unseen.values()].flatMap((x) => [...x]))].sort((a, b) => a - b).slice(-2000);
+    if (!tracked.length) return;
+    const checked = new Set(tracked);
+    // bazı sunucular komut satırını ~8 KB'ta keser: 500'lük dilimler
+    const open = new Set<number>();
+    for (let i = 0; i < tracked.length; i += 500)
+      for (const u of ((await client.search({ uid: uidRanges(tracked.slice(i, i + 500)), seen: false }, { uid: true })) || []) as number[]) open.add(u);
+    let changed = false;
+    for (const [thread, set] of [...this.unseen.entries()]) {
+      for (const u of [...set])
+        if (checked.has(u) && !open.has(u)) {
+          set.delete(u);
+          changed = true;
+        }
+      if (set.size) continue;
+      this.unseen.delete(thread);
+      const cid = `${this.account.id}/${thread}`;
+      const chat = this.store.getChat(cid);
+      if (!chat || !chat.unread) continue;
+      this.store.markRead(cid);
+      const upd = this.store.getChat(cid);
+      if (upd) bus.emit({ type: 'chat.upsert', chat: upd });
+    }
+    if (changed) this.saveState();
   }
 
   /**
@@ -536,7 +661,15 @@ export class MailConnector extends BaseConnector {
         if (!this.oldestUid) {
           const since = new Date(Date.now() - 30 * 86_400_000);
           const firstPage = ((await client.search({ since }, { uid: true })) || []).slice(-150);
-          this.oldestUid = firstPage.length ? Math.min(...firstPage) : this.lastUid + 1;
+          if (firstPage.length) this.oldestUid = Math.min(...firstPage);
+          else if (this.lastUid > 0) this.oldestUid = this.lastUid + 1;
+          else {
+            // son 30 günde hiç e-posta yok (az kullanılan kutu): kutudaki her şeyden büyük UID'den geriye git.
+            // Eskiden lastUid + 1 = 1 yazılıyordu → "başa ulaşıldı" sanılıp eski e-postalar kalıcı erişilemiyordu
+            const next = Number((client as { mailbox?: { uidNext?: number | bigint } | false }).mailbox ? ((client as { mailbox: { uidNext?: number | bigint } }).mailbox.uidNext ?? 0) : 0);
+            if (next > 1) this.oldestUid = next;
+            else return 0; // gerçekten boş kutu: 1 YAZMA, sonra yeniden denensin
+          }
         }
         if (this.oldestUid <= 1) {
           this.oldestUid = 1;
@@ -560,32 +693,67 @@ export class MailConnector extends BaseConnector {
   }
 
   private folderTick = 0;
-  /** \\Sent ve \\Junk kutuları (imapflow specialUse); yoksa adla (Sent, Gönderilmiş, Junk, Spam) */
+  /**
+   * \\Sent ve \\Junk kutuları (imapflow specialUse); yoksa adla (Sent, Gönderilmiş, Junk, Spam). Kutu başına UID imleci:
+   * ilk tur (ya da kutunun UIDVALIDITY'si değişince) son 30 günün son 40 e-postası, sonra yalnız yenileri. IDLE bağlantısı
+   * açıksa aynı oturum kullanılır (yeni giriş yok), sonra INBOX yeniden seçilir (IDLE gelen kutusunu izlemeyi sürdürsün).
+   */
   private async pollFolders(): Promise<void> {
     if (this.stopping) return;
-    if (this.cfg.accessToken) await this.ensureOAuth(); // istemciden önce (bkz. withInbox)
-    const client = new ImapFlow({ host: this.cfg.host!, port: this.cfg.port!, secure: this.cfg.secure ?? true, auth: this.auth(), logger: false });
+    const idle = this.idleClient;
+    const shared = !!(idle && this.idleUp && idle.usable);
+    let client: ImapFlow;
+    if (shared) client = idle!;
+    else {
+      if (this.cfg.accessToken) await this.ensureOAuth(); // istemciden önce (bkz. withInbox)
+      client = this.createImapClient();
+    }
+    // ortak oturumda kutu değişirken gelen kutusu IDLE'da değil ('exists' gelmez): dönüşte uidNext büyüdüyse bir tur daha
+    type Mb = { path?: string; uidNext?: number | bigint } | false | undefined;
+    const inboxNext = (): number => {
+      const mb = (client as { mailbox?: Mb }).mailbox;
+      return mb && mb.path === 'INBOX' ? Number(mb.uidNext ?? 0) : 0;
+    };
+    const nextBefore = shared ? inboxNext() : 0;
     try {
-      await client.connect();
+      if (!shared) await client.connect();
       const boxes = await client.list();
       const pick = (use: string, re: RegExp) => boxes.find((b) => (b as { specialUse?: string }).specialUse === use) ?? boxes.find((b) => re.test(b.path));
-      const targets: Array<[MailFolder, string | undefined]> = [
+      const targets: Array<['sent' | 'junk', string | undefined]> = [
         ['sent', pick('\\Sent', /^(\[Gmail\]\/)?(Sent( Items| Mail)?|Gönderilmiş(ler| Öğeler)?|Gönderilenler)$/i)?.path],
         ['junk', pick('\\Junk', /^(\[Gmail\]\/)?(Junk( E-?mail)?|Spam|Gereksiz|İstenmeyen)$/i)?.path],
       ];
       for (const [folder, path] of targets) {
-        if (!path) continue;
+        if (!path || this.stopping) continue;
         const lock = await client.getMailboxLock(path);
         try {
-          const uids = ((await client.search({ since: new Date(Date.now() - 30 * 86_400_000) }, { uid: true })) || []).slice(-40);
+          const mb = (client as { mailbox?: { uidValidity?: bigint | number } | false }).mailbox;
+          const v = String(mb ? (mb.uidValidity ?? '') : '');
+          const cur = this.folderCur[folder];
+          let uids: number[];
+          if (cur && v && cur.v === v) {
+            // sunucu "N:*" isteğinde son UID'yi her zaman döndürür → süz
+            // uzun kesintiden sonra binlerce e-posta inmesin: en yeni 100 (imleç yine en büyüğe ilerler)
+            uids = (((await client.search({ uid: `${cur.last + 1}:*` }, { uid: true })) || []) as number[]).filter((u) => u > cur.last).slice(-100);
+          } else uids = ((await client.search({ since: new Date(Date.now() - 30 * 86_400_000) }, { uid: true })) || []).slice(-40);
           await this.fetchUids(client, uids, false, folder);
+          if (v && !this.stopping) {
+            this.folderCur[folder] = { v, last: Math.max(cur && cur.v === v ? cur.last : 0, ...uids) };
+            this.saveState();
+          }
         } finally {
           lock.release();
         }
       }
     } finally {
-      await client.logout().catch(() => undefined);
-      client.close();
+      if (shared) {
+        const l = await client.getMailboxLock('INBOX').catch(() => undefined);
+        if (l && nextBefore && inboxNext() > nextBefore) this.pollAgain = true;
+        l?.release();
+      } else {
+        await client.logout().catch(() => undefined);
+        client.close();
+      }
     }
   }
 
@@ -639,14 +807,22 @@ export class MailConnector extends BaseConnector {
     // gövdeye gömülü görseller (cid:) → yerel medya adresi; yalnız gövdede kullanılanlar ek listesine girmez
     const rawHtml = typeof m.html === 'string' ? m.html : '';
     const cidUrl = new Map<string, string>();
+    let mediaDir = '';
     for (const [i, a] of (m.attachments ?? []).entries()) {
       // UID yalnız kendi kutusunda tekil: Gönderilmiş/Gereksiz'in UID 5'i gelen kutusunun UID 5'inin ekini ezmesin
       // (gelen kutusu anahtarı eskisiyle aynı kalır; kayıtlı bağlantılar bozulmaz)
       const key = createHash('sha1').update(`${folder === 'inbox' ? '' : folder + '/'}${uid}/${i}/${a.filename ?? ''}`).digest('hex');
-      const dir = path.join(sessionDir(this.account.id), 'media');
-      fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, key), a.content);
-      fs.writeFileSync(path.join(dir, key + '.type'), a.contentType || 'application/octet-stream');
+      if (!mediaDir) fs.mkdirSync((mediaDir = path.join(sessionDir(this.account.id), 'media')), { recursive: true });
+      // aynı ek (klasör yeniden okuması, HTML yenilemesi) yeniden yazılmasın: büyük ekte olay döngüsünü kilitliyordu
+      const file = path.join(mediaDir, key);
+      let same = false;
+      try {
+        same = fs.statSync(file).size === a.content.length;
+      } catch {
+        /* yok */
+      }
+      if (!same) fs.writeFileSync(file, a.content);
+      if (!fs.existsSync(file + '.type')) fs.writeFileSync(file + '.type', a.contentType || 'application/octet-stream');
       const url = `/api/media/${encodeURIComponent(this.account.id)}?u=${encodeURIComponent('mail:' + key)}`;
       const kind: Attachment['kind'] = a.contentType?.startsWith('image/') ? 'image' : a.contentType?.startsWith('video/') ? 'video' : a.contentType?.startsWith('audio/') ? 'audio' : 'file';
       const cid = a.cid ? a.cid.replace(/^<|>$/g, '') : '';
@@ -668,7 +844,8 @@ export class MailConnector extends BaseConnector {
         attachments: attachments.length ? attachments : undefined,
         html,
       },
-      { live },
+      // canlı turda da yalnız okunmamış yeni e-posta sayılır (telefonda okunmuş olan \\Seen ile gelir → +1 değil)
+      { live, bump: live && unreadDelta === 1 },
     );
     return !existing;
   }
@@ -725,9 +902,15 @@ export class MailConnector extends BaseConnector {
     await this.withInbox(async (client) => {
       let uids = [...(this.unseen.get(remoteChatId) ?? [])];
       if (!uids.length && remoteChatId.startsWith('gm:')) uids = ((await client.search({ threadId: remoteChatId.slice(3), seen: false }, { uid: true })) || []) as number[];
-      if (!uids.length) return;
-      await client.messageFlagsAdd(uids, ['\\Seen'], { uid: true });
-      this.unseen.delete(remoteChatId);
+      else if (!uids.length) {
+        // UID bilinmiyor (eski sürüm/yeniden başlatma): dizinin son gelen iletileri Message-ID ile aranır
+        const chat = this.store.getChat(`${this.account.id}/${remoteChatId}`);
+        const ids = chat ? this.store.listMessages(chat.id, 50).filter((m) => !m.fromMe && m.remoteId.startsWith('<')).slice(-20).map((m) => m.remoteId) : [];
+        for (const id of ids) uids.push(...(((await client.search({ header: { 'message-id': id }, seen: false }, { uid: true })) || []) as number[]));
+      }
+      // SILENT: sunucu bayrakları geri yollamasın (IDLE oturumunda 'flags' olayı → gereksiz yoklama)
+      if (uids.length) await client.messageFlagsAdd(uids, ['\\Seen'], { uid: true, silent: true });
+      if (this.unseen.delete(remoteChatId)) this.saveState();
     });
   }
 
