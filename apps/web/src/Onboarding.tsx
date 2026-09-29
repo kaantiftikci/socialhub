@@ -353,6 +353,13 @@ export function SplashMark({ size = 96, animate = true }: { size?: number; anima
 export function Splash({ mode, ready = true, onDone }: { mode: 'full' | 'quick'; ready?: boolean; onDone: () => void }) {
   const [minDone, setMinDone] = useState(false);
   const [out, setOut] = useState(false);
+  // iki kare bekle: uygulama altta ilk çizimini bitirsin, animasyon akan karelerle başlasın
+  const [go, setGo] = useState(false);
+  useEffect(() => {
+    let r2 = 0;
+    const r1 = requestAnimationFrame(() => (r2 = requestAnimationFrame(() => setGo(true))));
+    return () => (cancelAnimationFrame(r1), cancelAnimationFrame(r2));
+  }, []);
   const done = useRef(onDone);
   done.current = onDone;
   const reduce = typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -369,7 +376,7 @@ export function Splash({ mode, ready = true, onDone }: { mode: 'full' | 'quick';
     return () => window.clearTimeout(t);
   }, [minDone, ready, mode, reduce]);
   return (
-    <div className={`splash ${mode} ${out ? 'out' : ''}`} role="presentation" data-testid="splash">
+    <div className={`splash ${mode} ${go ? 'go' : ''} ${out ? 'out' : ''}`} role="presentation" data-testid="splash">
       <div className="sp-stage">
         <span className="sp-ring" />
         <SplashMark size={mode === 'full' ? 104 : 84} />

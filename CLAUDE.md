@@ -208,7 +208,7 @@ Dil: arayüz ve yorumlar Türkçe.
   (`permissions.ts fullDiskAccess`: chat.db/TCC.db/Safari açılabiliyor mu, EPERM = yok; "Çık ve Yeniden Aç" sonrası kurulum kaldığı yerden sürer),
   Mesajlar otomasyonu `POST /api/permissions/messages` (osascript, -1743 = red), Takvim isteğe bağlı (calendars probe); "Hepsine izin ver" FDA'yı en sona
   koyar) → **uzun açılış animasyonu** (`Splash` full ≈3,8 sn, quick ≈1,8 sn — 29.09 Kaan: 2,8 kısa, 5,5 çok uzun; logo + "mivelo" dışında alt yazı/çubuk YOK: kare büyür, kıvrım çizilir, lime nokta, "mivelo", ilerleme çubuğu; App ALTTA hemen çizilir,
-  katman büyüyüp saydamlaşır) → uygulama; sonraki açılışlarda kısa (≈1,8 sn); `prefers-reduced-motion` uyar. Demoda da girişten sonra uzun animasyon.
+  katman büyüyüp saydamlaşır) → uygulama; sonraki açılışlarda kısa (≈1,8 sn); `prefers-reduced-motion` uyar. Akıcılık (29.09, Kaan: "logo donuk donuk"): animasyonlar YALNIZ transform/opacity (kare ölçeği svg kökünde, gölge `.sp-stage::before` ayrı katmanda — eski `drop-shadow` filtresi ve yazıdaki blur her karede yeniden çiziliyordu), `.go` iki rAF sonra (uygulama altta ilk çizimini yaparken animasyon duraklı bekler). Demoda da girişten sonra uzun animasyon.
   **Kurulum ekranı yeniden (29.09, Kaan: "izin verdim ama vermemiş gibi görünüyor", "amatörce, AI olduğu belli")**: iki bölmeli `.setup2` (solda mor
   marka paneli: logo, "Kurulum", başlık, 2 güvence maddesi; sağda "İzinler" + "N / M açık" + ilerleme çubuğu + tek çerçeveli liste, eşit satırlar,
   kısa açıklamalar; sağda durum: "✓ Açık" / "Bekleniyor" / "Ayarları aç" (reddedilen) / "İzin ver"; YALNIZ sıradaki adım dolu düğme; altta
