@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DEMO_MODE, PORT, ensureDirs, DATA_DIR } from './config.js';
 import { getDbKey } from './dbkey.js';
+import { startStallWatch } from './stall-watch.js';
 import { LICENSE_REQUIRED, licensed, onLicenseChange, startLicenseChecks, whenLicensed } from './license.js';
 
 // libsignal (WhatsApp şifre kütüphanesi) çözülemeyen eski/yinelenen paketleri doğrudan console.error ile basar;
@@ -89,6 +90,8 @@ async function main(): Promise<void> {
 
   // Tanı: olay döngüsü 1,5 sn'den uzun kilitlenirse (eşzamanlı ağır iş) süresi ve kilitten hemen önceki son günlük satırı yazılır —
   // masaüstünde "Çekirdek başlatılıyor"da kalmanın kaynağı core.log'dan okunabilsin (29.09: dinliyor ama yanıt vermiyordu)
+  // döngü hiç dönmezse yukarıdaki ölçer de çalışamaz: ayrı iş parçacığındaki bekçi yığını core.log'a yazar (stall-watch.ts)
+  startStallWatch();
   let lastTick = Date.now();
   setInterval(() => {
     const now = Date.now();

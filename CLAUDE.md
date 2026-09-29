@@ -610,6 +610,11 @@ Dil: arayüz ve yorumlar Türkçe.
   (ilk açılışta macOS gömülü node/yerel modülleri tararken — Intel paketi M1'de Rosetta ile daha da yavaş — dinlemeye başlamadan öldürüp
   yeniden başlatıyordu). (4) Anahtar Zinciri `security` çağrılarına zaman aşımı (dbkey 30/15 sn, secrets 8 sn); okunamayan anahtarda henüz
   şifreli DB yoksa 0600 dosya anahtarıyla devam (ilk açılış takılmaz). Gerçek Mac'te doğrulanmadı; sürerse `~/.mivelo/desktop.log` + `core.log` sonu.
+  (5) Kalıcı kilit bekçisi `stall-watch.ts` (29.09, Kaan'ın core.log'unda "kilitlendi" hiç yoktu ama "Açılış sırası" 10+ kez = bekçi çekirdeği
+  yeniden başlatıyor; index.ts gecikme ölçeri ana döngüde olduğu için döngü hiç dönmezse yazamıyordu): ayrı Worker, ortak sayaç 250 ms; 5/20/60 sn
+  artmazsa `inspector.Session.connectToMainThread` + Debugger.pause → o an çalışan JS yığını (işlev dosya:satır, içerik yok) + son günlük satırı
+  DOĞRUDAN stderr'e (core.log) "Olay döngüsü N sn'dir yanıt vermiyor — yığın: …"; yerel kodda (SQLite/execSync) "yerel kodda bekliyor", yığın dönünce;
+  çözülünce "yeniden yanıt veriyor (N sn kilitliydi)". Kapatmak `MIVELO_STALL_WATCH=0`. Kaan'dan: `grep -E "yanıt vermiyor|kilitliydi" ~/.mivelo/core.log`.
 
 ## Sunucu/arayüz sözleşmesi
 - CORS: localhost/127.0.0.1/tauri.localhost/tauri://localhost ve WKWebView'ın `null` kaynağı (paketli uygulama!).
