@@ -7,6 +7,7 @@ Dil: arayüz ve yorumlar Türkçe.
 
 ## Kaan'ın çalışma tercihleri
 - Onay sorma, ilerle; belirsizlikte en makul yorumu seç ve ne yaptığını söyle.
+- **Yanıtlar KISA ve Türkçe** (Kaan, 29.09): yapılanı uzun uzun anlatma; birkaç satır özet yeter.
 - Yeni npm bağımlılığı eklersen **açıkça** "npm install gerekli" de.
 - Ekran görüntüsü/log gelirse kök nedeni bul, yama yapma; birden fazla sorunu tek turda topluca çöz.
 - **Her değişiklik otomatik yayında**: doğrulamadan sonra commit + main'e push ET (sormadan). Demo: push → `deploy-demo.yml`
