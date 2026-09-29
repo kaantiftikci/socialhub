@@ -139,7 +139,9 @@ Dil: arayüz ve yorumlar Türkçe.
   takvim, kanallar/gizlilik) iOS uyarlaması; `node design/appstore/render.mjs` → `out/` 1290×2796 PNG (git dışı). Ayrıntı README.
 - **Masaüstü paketleri (DMG + EXE, gerçek kullanım yolu — demo sunucusu değil; ban/gizlilik: kullanıcının kendi IP'si ve cihazı)**:
   `.github/workflows/build-desktop.yml` (eski build-windows.yml'in yerine): YALNIZ elle (Actions → Run workflow) ya da v* etiketi — main'e itme
-  sürüm YAYINLAMAZ (Kaan: küçük değişiklikler birikip Kaan "yeni sürüm yayınla" deyince çıkar; o zaman Claude `v0.1.N` etiketi iter ya da iş akışını tetikler). Sürüm 0.1.<run> (etikette
+  sürüm YAYINLAMAZ. **Sürümü Claude otomatik çıkarır (Kaan, 29.09: "sen otomatik yap sürüm işlerini")**: uygulamayı (core/web/desktop) etkileyen
+  doğrulanmış her iş turunun sonunda, main'e ittikten sonra GitHub MCP `actions_run_trigger run_workflow build-desktop.yml ref main` (etiket
+  itmek bu ortamda proxy 403 veriyor; sürüm numarası 0.1.<run>) ve sonucu kontrol eder (başarısızsa kök nedeni düzeltip yeniden). Sürüm 0.1.<run> (etikette
   etiketinki), `--config {"version"}` ile. Matris: mac-arm64 (macos-14), mac-intel (macos-14 + x64 Node/Rosetta + x86_64-apple-darwin), windows-x64 (NSIS).
   DMG'den gizli `.VolumeIcon.icns` + `.fseventsd` CI'da silinir (Finder'da gizli dosyalar açıkken ikinci "amblem" görünüyordu; UDRW → sil → UDZO).
   Mac simgesi `icons/icon.icns` Apple şablonunda (1024 tuval, ortada 824 squircle + gölge; `apps/desktop/scripts/mac-icon.py` → `icon-macos.png`
