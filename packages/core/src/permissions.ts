@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
+import Database from 'better-sqlite3';
 
 /**
  * İlk açılış kurulumu (arayüz Onboarding) için macOS izin denetimleri. Değer yazdırılmaz, yalnız "var/yok".
@@ -25,6 +26,53 @@ export function fullDiskAccess(): boolean | null {
     }
   }
   return false;
+}
+
+export type TccState = 'granted' | 'denied' | 'unknown';
+export interface TccStatus {
+  microphone: TccState;
+  messages: TccState;
+  calendar: TccState;
+}
+
+/**
+ * macOS'un kendi izin kaydı (kullanıcı TCC.db; okumak için Tam Disk Erişimi gerekir). Arayüzün "izin verdim ama verilmemiş gibi
+ * görünüyor" sorunu: getUserMedia/deneme bildirimi/osascript sonucunu tahmin etmek yerine sistemin kaydı okunur. İstemci Mivelo
+ * paketidir (kimlik `app.kavsak.desktop`; çekirdek/osascript alt süreçleri de sorumlu uygulama olarak ona yazılır) ya da paket içi yol.
+ * auth_value: 0 reddedildi, 2 izin verildi, 3 sınırlı; kayıt yoksa henüz sorulmadı. FDA yoksa null (arayüz kendi bildiğiyle yetinir).
+ * Yalnız servis/durum okunur; başka uygulamaların kayıtları döndürülmez.
+ */
+export function tccStatus(bundleIds = ['app.kavsak.desktop']): TccStatus | null {
+  if (process.platform !== 'darwin') return null;
+  const file = path.join(os.homedir(), 'Library/Application Support/com.apple.TCC/TCC.db');
+  let db: Database.Database | undefined;
+  try {
+    db = new Database(file, { readonly: true, fileMustExist: true });
+    const marks = bundleIds.map(() => '?').join(',');
+    const rows = db
+      .prepare(`SELECT service, auth_value AS v, indirect_object_identifier AS target FROM access WHERE client IN (${marks}) OR client LIKE '%/Mivelo.app/%'`)
+      .all(...bundleIds) as Array<{ service: string; v: number; target: string | null }>;
+    return tccFromRows(rows);
+  } catch {
+    return null; // FDA yok ya da şema farklı
+  } finally {
+    db?.close();
+  }
+}
+
+/** TCC satırlarından durum (test edilebilir saf işlev). Aynı izne birden çok satır varsa izin verilen kazanır. */
+export function tccFromRows(rows: Array<{ service: string; v: number; target?: string | null }>): TccStatus {
+  const pick = (match: (r: { service: string; target?: string | null }) => boolean): TccState => {
+    const hits = rows.filter(match);
+    if (hits.some((r) => r.v === 2 || r.v === 3)) return 'granted';
+    if (hits.some((r) => r.v === 0)) return 'denied';
+    return 'unknown';
+  };
+  return {
+    microphone: pick((r) => r.service === 'kTCCServiceMicrophone'),
+    messages: pick((r) => r.service === 'kTCCServiceAppleEvents' && r.target === 'com.apple.MobileSMS'),
+    calendar: pick((r) => r.service === 'kTCCServiceCalendar' || (r.service === 'kTCCServiceAppleEvents' && r.target === 'com.apple.iCal')),
+  };
 }
 
 /**

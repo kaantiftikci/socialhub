@@ -97,7 +97,8 @@ const liveApi = {
   calendars: (probe = false) => call<DeviceCalendars>('GET', `/calendars${probe ? '?probe=1' : ''}`),
   calendarPermission: () => call<{ ok: boolean }>('POST', '/calendars/permission'),
   // ilk açılış kurulumu (Onboarding): izin durumu, Sistem Ayarları bölmesi, Mesajlar otomasyon istemi (macOS)
-  permissions: () => call<{ os: string; fullDisk: boolean | null }>('GET', '/permissions'),
+  permissions: () =>
+    call<{ os: string; fullDisk: boolean | null; tcc?: { microphone: 'granted' | 'denied' | 'unknown'; messages: 'granted' | 'denied' | 'unknown'; calendar: 'granted' | 'denied' | 'unknown' } | null }>('GET', '/permissions'),
   openPermissionPane: (pane: 'fulldisk' | 'automation' | 'microphone' | 'notifications') => call<{ ok: boolean }>('POST', '/permissions/open', { pane }),
   messagesPermission: () => call<{ result: 'granted' | 'denied' | 'error' }>('POST', '/permissions/messages'),
   style: (platform?: string) => call<{ lines: string[] }>('GET', `/style${platform ? `?platform=${enc(platform)}` : ''}`),

@@ -21,7 +21,10 @@ export function setupDone(): boolean {
 }
 
 type PermKey = 'notifications' | 'microphone' | 'fulldisk' | 'messages' | 'calendar';
-type PermState = 'idle' | 'asking' | 'granted' | 'denied' | 'requested';
+/** Kalıcı (localStorage) yanıt: yalnız canlı denetimin bilemediği durumlarda kullanılır */
+type Stored = 'granted' | 'denied' | 'requested';
+/** Ekranda gösterilen durum */
+type PermState = 'granted' | 'denied' | 'idle' | 'asking';
 
 interface Row {
   key: PermKey;
@@ -34,30 +37,65 @@ interface Row {
 }
 
 const ROWS: Row[] = [
-  { key: 'notifications', icon: 'bell', title: 'Bildirimler', desc: 'Yeni mesaj gelince sistem bildirimi ve ses. Çıkan pencerede "İzin Ver"e bas.' },
-  { key: 'microphone', icon: 'mic', title: 'Mikrofon', desc: 'Sohbetlerden sesli mesaj kaydedip göndermek için.' },
-  { key: 'fulldisk', icon: 'lock', title: 'Tam Disk Erişimi', desc: "iMessage mesajlarını ve rehberindeki adları okumak için. Sistem Ayarları'nda listeden Mivelo'yu aç.", mac: true },
-  { key: 'messages', icon: 'send', title: 'Mesajlar ile gönderme', desc: "iMessage yanıtlarını Mac'teki Mesajlar uygulaması üzerinden göndermek için.", mac: true },
-  { key: 'calendar', icon: 'calendar', title: 'Takvim', desc: "Mesajdaki randevuyu Mac'in Takvim uygulamasına eklemek için.", mac: true, optional: true },
+  { key: 'notifications', icon: 'bell', title: 'Bildirimler', desc: 'Yeni mesajlarda uyarı ve ses' },
+  { key: 'fulldisk', icon: 'lock', title: 'Tam Disk Erişimi', desc: 'iMessage mesajları ve rehberdeki adlar', mac: true },
+  { key: 'messages', icon: 'send', title: 'Mesajlar', desc: 'iMessage yanıtlarını gönderme', mac: true },
+  { key: 'microphone', icon: 'mic', title: 'Mikrofon', desc: 'Sesli mesaj kaydı' },
+  { key: 'calendar', icon: 'calendar', title: 'Takvim', desc: 'Randevuları Takvim’e ekleme', mac: true, optional: true },
 ];
 
-function loadStates(): Partial<Record<PermKey, PermState>> {
+function loadStored(): Partial<Record<PermKey, Stored>> {
   try {
-    return JSON.parse(localStorage.getItem(STATE_KEY) || '{}') as Partial<Record<PermKey, PermState>>;
+    const raw = JSON.parse(localStorage.getItem(STATE_KEY) || '{}') as Record<string, string>;
+    const out: Partial<Record<PermKey, Stored>> = {};
+    for (const [k, v] of Object.entries(raw)) if (v === 'granted' || v === 'denied' || v === 'requested') out[k as PermKey] = v;
+    return out;
   } catch {
     return {};
   }
 }
 
-/** İzin satırlarının durumu + isteme işlemleri (kurulum ekranı ve Ayarlar → İzinler ortak) */
+type Tcc = 'granted' | 'denied' | 'unknown';
+interface Live {
+  notifications?: boolean | null;
+  fullDisk?: boolean | null;
+  tcc?: { microphone: Tcc; messages: Tcc; calendar: Tcc } | null;
+  micQuery?: PermissionState | null;
+}
+
+async function readLive(): Promise<Live> {
+  const live: Live = {};
+  try {
+    const n = await import('@tauri-apps/plugin-notification');
+    live.notifications = await n.isPermissionGranted();
+  } catch {
+    live.notifications = 'Notification' in window ? Notification.permission === 'granted' : null;
+  }
+  const p = await api.permissions().catch(() => undefined);
+  live.fullDisk = p?.fullDisk ?? null;
+  live.tcc = p?.tcc ?? null;
+  try {
+    live.micQuery = (await navigator.permissions?.query({ name: 'microphone' as PermissionName }))?.state ?? null;
+  } catch {
+    live.micQuery = null; // WebKit sorgulamayı desteklemeyebilir
+  }
+  return live;
+}
+
+/**
+ * İzin durumları + isteme işlemleri (kurulum ekranı ve Ayarlar → İzinler ortak).
+ * 29.09 (Kaan: "izin vermeme rağmen vermemiş gibi görünüyor"): eskiden durum yalnız istek anındaki tahminden geliyordu (deneme
+ * bildirimi → "İstendi", getUserMedia hatası → "Reddedildi"). Artık her 2 sn'de ve pencere öne gelince GERÇEK kaynak okunur:
+ * bildirim eklentisi, macOS izin kaydı (TCC.db; Tam Disk Erişimi varsa mikrofon/Mesajlar/Takvim), FDA denemesi; kayıtlı yanıt yalnız yedek.
+ */
 function usePermissions() {
   const rows = ROWS.filter((r) => !r.mac || isMac);
-  const [st, setSt] = useState<Partial<Record<PermKey, PermState>>>(loadStates);
+  const [stored, setStored] = useState<Partial<Record<PermKey, Stored>>>(loadStored);
+  const [asking, setAsking] = useState<Partial<Record<PermKey, boolean>>>({});
+  const [live, setLive] = useState<Live>({});
   const [busyAll, setBusyAll] = useState(false);
-  const stRef = useRef(st);
-  stRef.current = st;
-  const set = (k: PermKey, v: PermState) =>
-    setSt((prev) => {
+  const store = (k: PermKey, v: Stored) =>
+    setStored((prev) => {
       const next = { ...prev, [k]: v };
       try {
         localStorage.setItem(STATE_KEY, JSON.stringify(next));
@@ -67,131 +105,160 @@ function usePermissions() {
       return next;
     });
 
-  // Tam Disk Erişimi Sistem Ayarları'nda verilir: açılışta ve bölme açıkken 1,5 sn'de bir denetlenir (macOS "Çık ve Yeniden Aç"
-  // derse uygulama yeniden açılınca kurulum kaldığı yerden sürer)
+  const refresh = async () => setLive(await readLive());
   useEffect(() => {
-    if (!isMac) return;
     let alive = true;
-    const check = () =>
-      api
-        .permissions()
-        .then((p) => {
-          if (!alive) return;
-          if (p.fullDisk === true && stRef.current.fulldisk !== 'granted') set('fulldisk', 'granted');
-          // Ayarlar'dan sonradan kaldırıldıysa
-          else if (p.fullDisk === false && stRef.current.fulldisk === 'granted') set('fulldisk', 'idle');
-        })
-        .catch(() => undefined);
-    check();
-    const t = window.setInterval(() => {
-      if (stRef.current.fulldisk !== 'granted') check();
-    }, 1500);
+    const tick = () => void readLive().then((l) => alive && setLive(l));
+    tick();
+    const t = window.setInterval(tick, 2000);
+    window.addEventListener('focus', tick);
     return () => {
       alive = false;
       window.clearInterval(t);
+      window.removeEventListener('focus', tick);
     };
   }, []);
 
+  const state = (k: PermKey): PermState => {
+    if (asking[k]) {
+      // Sistem Ayarları'nda verilen izin gelince bekleme kendiliğinden biter
+      if (k === 'fulldisk' && live.fullDisk) return 'granted';
+      return 'asking';
+    }
+    const s = stored[k];
+    if (k === 'notifications') {
+      if (live.notifications === true) return 'granted';
+      return s === 'denied' || s === 'requested' ? 'denied' : 'idle';
+    }
+    if (k === 'fulldisk') return live.fullDisk ? 'granted' : s === 'requested' || s === 'denied' ? 'denied' : 'idle';
+    const t = live.tcc?.[k];
+    if (t === 'granted') return 'granted';
+    if (t === 'denied') return 'denied';
+    if (k === 'microphone') {
+      if (live.micQuery === 'granted') return 'granted';
+      if (live.micQuery === 'denied') return 'denied';
+    }
+    return s === 'granted' ? 'granted' : s === 'denied' ? 'denied' : 'idle';
+  };
+
   const ask = async (k: PermKey): Promise<void> => {
-    set(k, 'asking');
+    setAsking((a) => ({ ...a, [k]: true }));
     try {
       if (k === 'notifications') {
-        // macOS izni ilk bildirimde sorar: karşılama bildirimi o pencereyi şimdi çıkarır
-        await desktopNotify('Mivelo', 'Bildirimler açık — yeni mesajlar burada görünecek', true);
-        set(k, 'requested');
+        let res: string = 'default';
+        try {
+          const n = await import('@tauri-apps/plugin-notification');
+          res = (await n.isPermissionGranted()) ? 'granted' : await n.requestPermission();
+        } catch {
+          if ('Notification' in window) res = await Notification.requestPermission();
+        }
+        if (res === 'granted') {
+          store(k, 'granted');
+          await desktopNotify('Mivelo', 'Bildirimler açık. Yeni mesajlar burada görünecek.', true);
+        } else store(k, res === 'denied' ? 'denied' : 'requested');
       } else if (k === 'microphone') {
-        const s = await navigator.mediaDevices.getUserMedia({ audio: true });
-        s.getTracks().forEach((t) => t.stop());
-        set(k, 'granted');
+        try {
+          const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+          s.getTracks().forEach((t) => t.stop());
+          store(k, 'granted');
+        } catch {
+          store(k, 'denied');
+        }
       } else if (k === 'fulldisk') {
+        store(k, 'requested');
         await api.openPermissionPane('fulldisk');
-        const p = await api.permissions().catch(() => undefined);
-        if (p?.fullDisk) set(k, 'granted');
+        // kullanıcı Sistem Ayarları'nda anahtarı açana dek "Bekleniyor" (2 sn'lik denetim görür); 3 dk sonra bırak
+        await new Promise<void>((resolve) => {
+          const t0 = Date.now();
+          const iv = window.setInterval(async () => {
+            const p = await api.permissions().catch(() => undefined);
+            if (p?.fullDisk || Date.now() - t0 > 180_000) {
+              window.clearInterval(iv);
+              resolve();
+            }
+          }, 1500);
+        });
       } else if (k === 'messages') {
         const r = await api.messagesPermission();
-        set(k, r.result === 'granted' ? 'granted' : r.result === 'denied' ? 'denied' : 'requested');
+        store(k, r.result === 'granted' ? 'granted' : 'denied');
       } else if (k === 'calendar') {
         const r = await api.calendars(true);
-        set(k, r.denied ? 'denied' : 'granted');
+        store(k, r.denied ? 'denied' : 'granted');
       }
     } catch {
-      set(k, k === 'fulldisk' ? 'asking' : 'denied');
+      if (k !== 'fulldisk') store(k, 'denied');
+    } finally {
+      setAsking((a) => ({ ...a, [k]: false }));
+      void refresh();
     }
+  };
+
+  /** Reddedilmiş izin yalnız Sistem Ayarları'ndan açılır (macOS ikinci kez sormaz) */
+  const openSettings = (k: PermKey) => {
+    if (!isMac) return void ask(k);
+    const pane = k === 'notifications' ? 'notifications' : k === 'microphone' ? 'microphone' : k === 'fulldisk' ? 'fulldisk' : 'automation';
+    void api.openPermissionPane(pane).catch(() => undefined);
   };
 
   const askAll = async () => {
     setBusyAll(true);
     // Sistem Ayarları'nı açan adım en sonda: öncekilerin pencereleri ekrandayken ayarlar öne gelmesin
-    for (const r of rows.filter((x) => x.key !== 'fulldisk')) if (stRef.current[r.key] !== 'granted') await ask(r.key);
-    if (rows.some((r) => r.key === 'fulldisk') && stRef.current.fulldisk !== 'granted') await ask('fulldisk');
+    for (const r of rows.filter((x) => x.key !== 'fulldisk' && !x.optional)) if (state(r.key) === 'idle') await ask(r.key);
+    if (rows.some((r) => r.key === 'fulldisk') && state('fulldisk') === 'idle') await ask('fulldisk');
     setBusyAll(false);
   };
-  // her satır yanıtlandıysa (verildi / istendi / reddedildi) "Hepsine izin ver" gizlenir, düğme "Mivelo'yu aç" olur
-  const allDone = rows.every((r) => r.optional || (st[r.key] && st[r.key] !== 'idle' && st[r.key] !== 'asking'));
-  return { rows, st, ask, askAll, busyAll, allDone };
+  const required = rows.filter((r) => !r.optional);
+  const granted = required.filter((r) => state(r.key) === 'granted').length;
+  const pending = required.filter((r) => state(r.key) === 'idle').length;
+  return { rows, state, ask, askAll, openSettings, busyAll, granted, total: required.length, pending };
 }
 
-/** İzin satırları (durum rozeti ya da "İzin ver" düğmesi; reddedilende Sistem Ayarları bağlantısı) */
-function PermRows({ p, again }: { p: ReturnType<typeof usePermissions>; again?: boolean }) {
-  const { rows, st, ask, busyAll } = p;
-  const label = (k: PermKey): { text: string; cls: string } => {
-    const s = st[k];
-    if (s === 'granted') return { text: 'Verildi', cls: 'ok' };
-    if (s === 'requested') return { text: 'İstendi', cls: 'ok' };
-    if (s === 'denied') return { text: 'Reddedildi', cls: 'bad' };
-    if (s === 'asking') return { text: k === 'fulldisk' ? 'Ayarlarda bekleniyor…' : 'Bekleniyor…', cls: 'wait' };
-    return { text: '', cls: '' };
-  };
+/** İzin satırları: simge, ad + kısa açıklama, sağda durum ya da tek eylem */
+function PermRows({ p }: { p: ReturnType<typeof usePermissions> }) {
+  const { rows, state, ask, openSettings, busyAll } = p;
+  // yalnız sıradaki adım dolu düğme; ötekiler çerçeveli (dikkat tek yerde toplansın)
+  const next = rows.find((r) => !r.optional && state(r.key) === 'idle')?.key ?? rows.find((r) => state(r.key) === 'idle')?.key;
   return (
-    <div className="perm-list">
+    <div className="perm-list" role="list">
       {rows.map((r) => {
-        const l = label(r.key);
-        const done = st[r.key] === 'granted';
-        // Ayarlar'da: verilmemiş (reddedilmiş / istenmiş) izin yeniden istenebilir
-        const retry = again && !done && st[r.key] !== 'asking';
+        const s = state(r.key);
         return (
-          <div key={r.key} className={`perm-row ${done ? 'done' : ''}`}>
+          <div key={r.key} role="listitem" className={`perm-row is-${s}`}>
             <span className="perm-ic">
-              <Icon name={done ? 'check' : r.icon} size={17} sw={2.2} />
+              <Icon name={r.icon} size={16} sw={2} />
             </span>
             <span className="perm-body">
               <b>
                 {r.title}
-                {r.optional && <em> · isteğe bağlı</em>}
+                {r.optional && <em>İsteğe bağlı</em>}
               </b>
-              <span>{r.desc}</span>
-              {r.key === 'fulldisk' && st.fulldisk === 'asking' && (
-                <span className="perm-hint">
-                  Listede Mivelo'nun anahtarını aç (listede yoksa + ile Uygulamalar'dan Mivelo'yu ekle). macOS "Çık ve Yeniden Aç" derse kabul et;
-                  kurulum kaldığı yerden sürer.
+              <span>
+                {s === 'asking' && r.key === 'fulldisk'
+                  ? 'Sistem Ayarları’nda Mivelo’yu açıp buraya dön'
+                  : s === 'denied'
+                    ? 'Kapalı · Sistem Ayarları’ndan açılabilir'
+                    : r.desc}
+              </span>
+            </span>
+            <span className="perm-act">
+              {s === 'granted' ? (
+                <span className="perm-on">
+                  <Icon name="check" size={13} sw={2.6} /> Açık
                 </span>
-              )}
-              {st[r.key] === 'denied' && r.key !== 'notifications' && isMac && (
-                <span className="perm-hint">
-                  Sonradan açmak için{' '}
-                  <a
-                    href="#ayarlar"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      void api.openPermissionPane(r.key === 'microphone' ? 'microphone' : r.key === 'fulldisk' ? 'fulldisk' : 'automation').catch(() => undefined);
-                    }}
-                  >
-                    Sistem Ayarları'nı aç
-                  </a>
-                  .
+              ) : s === 'asking' ? (
+                <span className="perm-wait">
+                  <span className="spin" /> Bekleniyor
                 </span>
+              ) : s === 'denied' ? (
+                <button className="btn sm b perm-btn" type="button" onClick={() => openSettings(r.key)} disabled={busyAll}>
+                  Ayarları aç
+                </button>
+              ) : (
+                <button className={`btn sm b perm-btn ${r.key === next ? 'primary-soft' : ''}`} type="button" onClick={() => void ask(r.key)} disabled={busyAll}>
+                  {r.key === 'fulldisk' ? 'Ayarları aç' : 'İzin ver'}
+                </button>
               )}
             </span>
-            {l.text && !retry ? (
-              <span className={`perm-st ${l.cls}`}>{l.text}</span>
-            ) : (
-              <span className="perm-act">
-                {l.text && <span className={`perm-st ${l.cls}`}>{l.text}</span>}
-                <button className="btn sm soft b" type="button" onClick={() => void ask(r.key)} disabled={busyAll}>
-                  {r.key === 'fulldisk' ? 'Ayarları aç' : l.text ? 'Yeniden iste' : 'İzin ver'}
-                </button>
-              </span>
-            )}
           </div>
         );
       })}
@@ -199,12 +266,12 @@ function PermRows({ p, again }: { p: ReturnType<typeof usePermissions>; again?: 
   );
 }
 
-/** Ayarlar → İzinler (masaüstü): kurulumdaki satırların aynısı, verilmeyenler yeniden istenebilir */
+/** Ayarlar → İzinler (masaüstü): kurulumdaki satırların aynısı; durumlar canlı */
 export function PermissionSettings() {
   const p = usePermissions();
   return (
     <>
-      <PermRows p={p} again />
+      <PermRows p={p} />
       <p className="set-note">Bir izni kapatmak için Sistem Ayarları → Gizlilik ve Güvenlik (Windows: Ayarlar → Gizlilik) bölümünü kullan.</p>
     </>
   );
@@ -220,25 +287,48 @@ export function SetupScreen({ onDone }: { onDone: () => void }) {
     }
     onDone();
   };
+  const allOn = p.granted === p.total;
   return (
     <div className="auth-screen setup-screen">
-      <div className="auth-card setup-card">
-        <div className="setup-hero" aria-hidden="true">
-          <SplashMark size={56} animate />
-        </div>
-        <h1>Mivelo'yu hazırlayalım</h1>
-        <p>İzinleri şimdi bir kez ver; sonra seni rahatsız etmeyelim. İstemediğini atlayabilirsin, sonradan Ayarlar → İzinler'den açılır.</p>
-        <PermRows p={p} />
-        <div className="setup-actions">
-          {!p.allDone && (
-            <button className="btn soft b" type="button" onClick={() => void p.askAll()} disabled={p.busyAll}>
-              {p.busyAll ? 'İzinler isteniyor…' : 'Hepsine izin ver'}
+      <div className="setup2">
+        <aside className="s2-side">
+          <SplashMark size={44} animate />
+          <div className="s2-eyebrow">Kurulum</div>
+          <h1>Mivelo’yu {isMac ? 'Mac’ine' : 'bilgisayarına'} hazırla</h1>
+          <p>Birkaç izinle mesajların anında gelir, bildirimler çalışır.</p>
+          <ul className="s2-points">
+            <li>
+              <Icon name="shield" size={15} sw={2} /> Mesajların bu cihazdan çıkmaz
+            </li>
+            <li>
+              <Icon name="sliders" size={15} sw={2} /> İzinleri istediğin an Ayarlar’dan değiştirebilirsin
+            </li>
+          </ul>
+        </aside>
+        <section className="s2-main">
+          <header className="s2-head">
+            <h2>İzinler</h2>
+            <span className="s2-count">
+              {p.granted} / {p.total} açık
+            </span>
+          </header>
+          <div className="s2-bar" aria-hidden="true">
+            <i style={{ width: `${Math.round((p.granted / Math.max(1, p.total)) * 100)}%` }} />
+          </div>
+          <PermRows p={p} />
+          <footer className="s2-foot">
+            {p.pending > 1 ? (
+              <button className="btn b s2-all" type="button" onClick={() => void p.askAll()} disabled={p.busyAll}>
+                {p.busyAll ? 'İsteniyor…' : 'Tümüne izin ver'}
+              </button>
+            ) : (
+              <span />
+            )}
+            <button className="btn primary b s2-go" type="button" onClick={finish} disabled={p.busyAll}>
+              {allOn ? 'Devam et' : 'Şimdilik geç'}
             </button>
-          )}
-          <button className="btn primary b" type="button" onClick={finish} disabled={p.busyAll}>
-            {p.allDone ? 'Mivelo’yu aç' : 'Şimdilik atla ve aç'}
-          </button>
-        </div>
+          </footer>
+        </section>
       </div>
     </div>
   );
@@ -257,7 +347,7 @@ export function SplashMark({ size = 96, animate = true }: { size?: number; anima
 
 /**
  * Açılış animasyonu: ortada logo (kare → kıvrım → nokta), altında "mivelo"; sonra katman yumuşakça büyüyüp saydamlaşırken
- * alttaki uygulama görünür. full: lisans etkinleşince / kurulumdan sonra (≈2,8 sn); quick: sonraki açılışlarda (≈1 sn).
+ * alttaki uygulama görünür. full: lisans etkinleşince / kurulumdan sonra (≈5,5 sn); quick: sonraki açılışlarda (≈2,6 sn).
  * ready=false iken (lisans durumu daha gelmedi) en kısa süre dolsa da kapanmaz.
  */
 export function Splash({ mode, ready = true, onDone }: { mode: 'full' | 'quick'; ready?: boolean; onDone: () => void }) {
@@ -267,7 +357,8 @@ export function Splash({ mode, ready = true, onDone }: { mode: 'full' | 'quick';
   done.current = onDone;
   const reduce = typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   useEffect(() => {
-    const hold = reduce ? (mode === 'full' ? 900 : 250) : mode === 'full' ? 2150 : 620;
+    // 29.09 (Kaan: birkaç saniye daha uzun olsun): full ≈5,5 sn (eski 2,8), quick ≈2,6 sn (eski ≈1)
+    const hold = reduce ? (mode === 'full' ? 1200 : 400) : mode === 'full' ? 4800 : 2200;
     const t = window.setTimeout(() => setMinDone(true), hold);
     return () => window.clearTimeout(t);
   }, [mode, reduce]);
@@ -284,7 +375,7 @@ export function Splash({ mode, ready = true, onDone }: { mode: 'full' | 'quick';
         <SplashMark size={mode === 'full' ? 104 : 84} />
       </div>
       <div className="sp-word">mivelo</div>
-      {mode === 'full' && <div className="sp-sub">Tüm mesajların hazırlanıyor</div>}
+      <div className="sp-sub">{mode === 'full' ? 'Tüm mesajların hazırlanıyor' : 'Mesajların yükleniyor'}</div>
     </div>
   );
 }

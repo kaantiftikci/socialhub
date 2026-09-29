@@ -700,7 +700,7 @@ export const staticApi = {
     setTimeout(() => emit({ type: 'events.update' }), 0);
     return { ok: true };
   },
-  permissions: async () => ({ os: 'demo', fullDisk: true as boolean | null }),
+  permissions: async () => ({ os: 'demo', fullDisk: true as boolean | null, tcc: null }),
   openPermissionPane: async (_pane: 'fulldisk' | 'automation' | 'microphone' | 'notifications') => ({ ok: true }),
   messagesPermission: async () => ({ result: 'granted' as 'granted' | 'denied' | 'error' }),
   calendars: async (probe = false): Promise<DeviceCalendars> => ({ supported: true, app: 'Takvim', calendars: probe ? ['Kişisel', 'İş', 'Aile'] : undefined }),

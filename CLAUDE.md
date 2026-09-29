@@ -204,8 +204,16 @@ Dil: arayüz ve yorumlar Türkçe.
   macOS izin penceresini şimdi çıkarır, Mikrofon = getUserMedia, Mac: Tam Disk Erişimi = Sistem Ayarları bölmesi + 1,5 sn'de bir `GET /api/permissions`
   (`permissions.ts fullDiskAccess`: chat.db/TCC.db/Safari açılabiliyor mu, EPERM = yok; "Çık ve Yeniden Aç" sonrası kurulum kaldığı yerden sürer),
   Mesajlar otomasyonu `POST /api/permissions/messages` (osascript, -1743 = red), Takvim isteğe bağlı (calendars probe); "Hepsine izin ver" FDA'yı en sona
-  koyar) → **uzun açılış animasyonu** (`Splash` full ≈2,8 sn: kare büyür, kıvrım çizilir, lime nokta, "mivelo", ilerleme çubuğu; App ALTTA hemen çizilir,
-  katman büyüyüp saydamlaşır) → uygulama; sonraki açılışlarda kısa (≈1 sn); `prefers-reduced-motion` uyar. Demoda da girişten sonra uzun animasyon.
+  koyar) → **uzun açılış animasyonu** (`Splash` full ≈5,5 sn — 29.09 Kaan "birkaç saniye daha uzun", eskisi 2,8; quick ≈2,6 sn + "Mesajların yükleniyor" çubuğu: kare büyür, kıvrım çizilir, lime nokta, "mivelo", ilerleme çubuğu; App ALTTA hemen çizilir,
+  katman büyüyüp saydamlaşır) → uygulama; sonraki açılışlarda kısa (≈2,6 sn); `prefers-reduced-motion` uyar. Demoda da girişten sonra uzun animasyon.
+  **Kurulum ekranı yeniden (29.09, Kaan: "izin verdim ama vermemiş gibi görünüyor", "amatörce, AI olduğu belli")**: iki bölmeli `.setup2` (solda mor
+  marka paneli: logo, "Kurulum", başlık, 2 güvence maddesi; sağda "İzinler" + "N / M açık" + ilerleme çubuğu + tek çerçeveli liste, eşit satırlar,
+  kısa açıklamalar; sağda durum: "✓ Açık" / "Bekleniyor" / "Ayarları aç" (reddedilen) / "İzin ver"; YALNIZ sıradaki adım dolu düğme; altta
+  "Tümüne izin ver" (≥2 bekleyen) + "Devam et"/"Şimdilik geç"). Durum TAHMİN DEĞİL, 2 sn'de bir + odakta canlı: bildirim eklentisi
+  `isPermissionGranted` (istek `requestPermission`, eski deneme bildirimi → "İstendi" kaldırıldı), FDA denemesi, macOS izin kaydı
+  (`permissions.ts tccStatus`: kullanıcı TCC.db salt okunur, FDA gerekir; istemci `app.kavsak.desktop` ya da `/Mivelo.app/` yolu; mikrofon,
+  Apple Events → com.apple.MobileSMS / com.apple.iCal; `/api/permissions` `tcc`), mikrofon için ayrıca permissions.query; localStorage yanıtı
+  yalnız yedek. Test: permissions-tcc.test.ts. PermissionBanner da tcc'yi kullanır.
   iMessage açılışta FDA bölmesini artık kendiliğinden AÇMAZ (yalnız interactive start). Ayarlar → İzinler (Tauri) aynı satırlar + "Yeniden iste".
   `Entitlements.plist` (tauri.conf macOS.entitlements; hardened runtime'da audio-input/apple-events/addressbook/calendars yoksa macOS izni SORMADAN
   reddeder → sesli mesaj kaydı çalışmıyordu). Gerçek Mac'te DENENMEDİ (Playwright + sahte Tauri iç API'siyle sınandı).

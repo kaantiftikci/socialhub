@@ -26,7 +26,7 @@ import { MEDIA_HOSTS, PLATFORM_MEDIA_HOSTS, MEDIA_MAX } from './media-hosts.js';
 import { fetchPreview } from './link-preview.js';
 import { checkSend, persistSendGuard, SendBlocked } from './send-guard.js';
 import { EventBatcher } from './ws-batch.js';
-import { fullDiskAccess, messagesAutomation, PRIVACY_PANES } from './permissions.js';
+import { fullDiskAccess, messagesAutomation, PRIVACY_PANES, tccStatus } from './permissions.js';
 import type { Platform } from './model.js';
 
 /**
@@ -650,7 +650,9 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   // İlk açılış kurulumu (arayüz Onboarding): izin durumları ve ilgili Sistem Ayarları bölmeleri
   route('GET', '/api/permissions', (req) => {
     localOnly(req);
-    return { os: process.platform, fullDisk: fullDiskAccess() };
+    const fullDisk = fullDiskAccess();
+    // FDA varsa macOS'un kendi izin kaydı: mikrofon / Mesajlar / Takvim gerçek durumu (tahmin değil)
+    return { os: process.platform, fullDisk, tcc: fullDisk ? tccStatus() : null };
   });
   route('POST', '/api/permissions/open', (req, _s, _p, body) => {
     localOnly(req);

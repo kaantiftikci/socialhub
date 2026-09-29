@@ -37,23 +37,28 @@ async function notificationsGranted(): Promise<boolean | null> {
 async function missingPermissions(hasIMessage: boolean): Promise<Missing[]> {
   const out: Missing[] = [];
   if ((await notificationsGranted()) === false) out.push('notifications');
-  if (isMac && hasIMessage) {
-    const p = await api.permissions().catch(() => undefined);
-    if (p?.fullDisk === false) out.push('fulldisk');
-  }
-  try {
-    const q = await navigator.permissions?.query({ name: 'microphone' as PermissionName });
-    if (q?.state === 'denied') out.push('microphone');
-  } catch {
-    /* WebKit sorgulamayı desteklemeyebilir */
-  }
-  if (isMac && hasIMessage) {
+  const p = isMac ? await api.permissions().catch(() => undefined) : undefined;
+  if (isMac && hasIMessage && p?.fullDisk === false) out.push('fulldisk');
+  // mikrofon / Mesajlar: macOS izin kaydı (TCC, Tam Disk Erişimi varsa) asıl kaynak; yoksa tarayıcı sorgusu / kurulumdaki yanıt
+  let micDenied = p?.tcc?.microphone === 'denied';
+  if (!p?.tcc) {
     try {
-      const st = JSON.parse(localStorage.getItem('mivelo.setupPerms') || '{}') as Record<string, string>;
-      if (st.messages === 'denied') out.push('messages');
+      micDenied = (await navigator.permissions?.query({ name: 'microphone' as PermissionName }))?.state === 'denied';
     } catch {
-      /* yok */
+      /* WebKit sorgulamayı desteklemeyebilir */
     }
+  }
+  if (micDenied) out.push('microphone');
+  if (isMac && hasIMessage) {
+    let msgDenied = p?.tcc?.messages === 'denied';
+    if (!p?.tcc) {
+      try {
+        msgDenied = (JSON.parse(localStorage.getItem('mivelo.setupPerms') || '{}') as Record<string, string>).messages === 'denied';
+      } catch {
+        /* yok */
+      }
+    }
+    if (msgDenied) out.push('messages');
   }
   return out;
 }
