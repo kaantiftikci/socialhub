@@ -46,6 +46,12 @@ Dil: arayüz ve yorumlar Türkçe.
 - **Trendyol sipariş API v2** (v1 `/orders` 15 Ekim 2026'da kapanıyor): `GATEWAYS[0].ordersV2` = `/integration/order/sellers/{id}/v2/orders`
   önce denenir; 404/410/556 → bir kez `noOrdersV2`, v1 (günlükte uyarı). v2 yalnız son 1 ay + 10.000 kayıt → ilk eşitleme 2×2 hafta (v1'de 6).
   Geçmiş için `orders/stream` (nextCursor, 3 ay) var — kullanılmadı. Test: trendyol.test.ts.
+- **Masaüstü duman testi** (`.github/workflows/desktop-smoke.yml`, 29.09): build-desktop bitince (workflow_run) ya da elle (`run_id`) GitHub'ın
+  Apple Silicon Mac'inde (macos-14) GERÇEK DMG kurulur, karantina kaldırılır, (1) uygulama açılır + 60 sn çekirdek ölçülür (`scripts/smoke/probe.mjs`:
+  health/accounts/chats, ilk dinleme, en uzun yanıt, >3 sn sayısı) + `screencapture`, (2) paketin KENDİ node'u/modülleriyle `scripts/smoke/seed.mjs`
+  (şifreli DB, ~250 bin yer tutucu mesaj, Instagram/iMessage/Telegram hesapları + `removing:` bayraklı 100 bin mesajlık hesap) ve çekirdek 120 sn ölçülür.
+  Sonuç iş günlüğünde + `smoke-logs` çıktısında (Claude `get_job_logs` ile okur). Gerçek kullanıcı verisi/TCC/Anahtar Zinciri penceresi taklit EDİLMEZ.
+  Linux ölçümü (29.09): 250 bin mesaj, en uzun yanıt 0,48 sn, 100 bin mesaj silme 5 sn.
 - `node scripts/verify-strategy.mjs <slack|instagram|linkedin|x|messenger>` — canlı oturumun profil KOPYASIYLA (uygulamaya dokunmadan)
   threads/messages/before doğrulaması. Önce `npm run build -w packages/core`.
 

@@ -1,0 +1,82 @@
+# Masaüstü duman testi: sürüm derlemesi bitince GERÇEK macOS DMG'si (Apple Silicon, M1 ile aynı mimari) GitHub'ın Mac makinesinde
+# kurulur ve açılır; çekirdeğin dinlemeye başlama/yanıt süreleri ölçülür, günlükler ve ekran görüntüsü toplanır. Ayrıca paketin
+# KENDİ node'u ve modülleriyle büyük, şifreli, yarıda kalmış hesap kaldırmalı bir veri klasöründe çekirdek açılır (Kaan'ın
+# "Çekirdek başlatılıyor"da kalma durumu). Depo herkese açık: makine ücretsiz. Sonuçlar iş günlüğünde ve "smoke-logs" çıktısında.
+name: desktop-smoke
+on:
+  workflow_run:
+    workflows: [build-desktop]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: build-desktop çalıştırma kimliği (boşsa son başarılı)
+        required: false
+permissions:
+  actions: read
+  contents: read
+jobs:
+  mac:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: macos-14
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Hangi derleme
+        id: run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          id="${{ github.event.workflow_run.id || inputs.run_id }}"
+          if [ -z "$id" ]; then id=$(gh run list -R "$GITHUB_REPOSITORY" -w build-desktop -s success -L 1 --json databaseId -q '.[0].databaseId'); fi
+          echo "id=$id" >> "$GITHUB_OUTPUT"; echo "derleme: $id"
+      - uses: actions/download-artifact@v4
+        with:
+          name: mivelo-mac-arm64
+          path: dmg
+          run-id: ${{ steps.run.outputs.id }}
+          github-token: ${{ github.token }}
+      - name: DMG'yi kur (kullanıcı gibi) + karantinayı kaldır ("Yine de Aç")
+        run: |
+          set -e
+          mp="$RUNNER_TEMP/m"; mkdir -p "$mp"
+          hdiutil attach dmg/*.dmg -nobrowse -mountpoint "$mp"
+          cp -R "$mp/Mivelo.app" /Applications/
+          hdiutil detach "$mp"
+          xattr -dr com.apple.quarantine /Applications/Mivelo.app || true
+          C=/Applications/Mivelo.app/Contents/Resources/core
+          file "$C/bin/node"; "$C/bin/node" -v
+          sysctl -n hw.ncpu; vm_stat | head -3
+      - name: 1) Uygulamayı aç (boş veri, lisans ekranı) ve çekirdeği ölç
+        run: |
+          open -a /Applications/Mivelo.app
+          node scripts/smoke/probe.mjs 60 "uygulama (boş veri)" | tee probe-app.txt
+          screencapture -x shot-app.png || true
+          osascript -e 'quit app "Mivelo"' || true; sleep 5; pkill -f "Mivelo.app" || true; sleep 2
+      - name: 2) Büyük şifreli veri + yarım kalmış hesap kaldırma — paketin kendi node'uyla çekirdek
+        env:
+          MIVELO_DATA_DIR: ${{ runner.temp }}/heavy
+          KAVSAK_DB_KEY: 7f3c9a1e5b2d4c6f8a0e1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f1a3c5e7b9d0f2a
+        run: |
+          C=/Applications/Mivelo.app/Contents/Resources/core
+          NODE_PATH="$C/node_modules" "$C/bin/node" scripts/smoke/seed.mjs "$C/dist" 250000
+          ls -la "$MIVELO_DATA_DIR"
+          "$C/bin/node" "$C/dist/index.js" > core-heavy.log 2>&1 &
+          echo $! > core.pid
+          node scripts/smoke/probe.mjs 120 "çekirdek (250 bin mesaj + kaldırma)" | tee probe-heavy.txt
+          kill "$(cat core.pid)" || true; sleep 3
+          echo "--- core-heavy.log (uyarılar + son satırlar) ---"
+          grep -E "kilitlendi|Yavaş istek|silindi|hata|error" core-heavy.log | head -40 || true
+          tail -30 core-heavy.log
+      - name: Günlükler
+        if: always()
+        run: |
+          mkdir -p smoke; cp probe-*.txt core-heavy.log shot-*.png smoke/ 2>/dev/null || true
+          cp ~/.mivelo/desktop.log ~/.mivelo/core.log smoke/ 2>/dev/null || true
+          echo "--- desktop.log ---"; tail -30 ~/.mivelo/desktop.log 2>/dev/null || true
+          echo "--- core.log (uygulama) ---"; tail -30 ~/.mivelo/core.log 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-logs
+          path: smoke/
