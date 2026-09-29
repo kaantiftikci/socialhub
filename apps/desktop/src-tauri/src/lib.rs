@@ -60,8 +60,10 @@ struct CoreProcess(Mutex<CoreState>);
 /// Uygulama kapanıyor: bekçi artık çekirdek başlatmaz
 static EXITING: AtomicBool = AtomicBool::new(false);
 
-/// Açılışta çekirdeğe dinlemeye başlaması için tanınan süre (Anahtar Zinciri penceresi, DPAPI/PowerShell, büyük DB göçü…)
-const STARTUP_GRACE: Duration = Duration::from_secs(60);
+/// Açılışta çekirdeğe dinlemeye başlaması için tanınan süre (Anahtar Zinciri penceresi, DPAPI/PowerShell, büyük DB göçü…).
+/// İlk açılışta macOS gömülü node'u ve yerel modülleri tararken 60 sn yetmeyebiliyordu: bekçi çekirdeği dinlemeye başlamadan
+/// öldürüp yeniden başlatıyor, arayüz "Çekirdek başlatılıyor"da kalıyordu (29.09, M1) → 150 sn.
+const STARTUP_GRACE: Duration = Duration::from_secs(150);
 /// Bu kadar süre ayakta kalan çekirdek "kararlı" sayılır, çöküş sayacı sıfırlanır
 const STABLE_AFTER: Duration = Duration::from_secs(120);
 /// Yeniden başlatma beklemesi: 10 sn, 20, 40 … en çok 5 dk

@@ -28,7 +28,7 @@ export function getSecret(name: string): string | null {
   const n = safeName(name);
   if (IS_MAC) {
     try {
-      const out = execFileSync('security', ['find-generic-password', '-s', `mivelo-${n}`, '-a', os.userInfo().username, '-w'], { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+      const out = execFileSync('security', ['find-generic-password', '-s', `mivelo-${n}`, '-a', os.userInfo().username, '-w'], { stdio: ['ignore', 'pipe', 'ignore'], timeout: 8_000 }).toString().trim();
       return out || null;
     } catch {
       /* yok ya da izin verilmedi → dosya yedeğine bak */
@@ -60,7 +60,7 @@ export function setSecret(name: string, value: string | null): void {
   fs.rmSync(file, { force: true });
   if (IS_MAC) {
     try {
-      execFileSync('security', ['delete-generic-password', '-s', `mivelo-${n}`, '-a', os.userInfo().username], { stdio: 'ignore' });
+      execFileSync('security', ['delete-generic-password', '-s', `mivelo-${n}`, '-a', os.userInfo().username], { stdio: 'ignore', timeout: 8_000 });
     } catch {
       /* zaten yok */
     }
@@ -69,7 +69,7 @@ export function setSecret(name: string, value: string | null): void {
   if (value === null) return;
   if (IS_MAC) {
     try {
-      execFileSync('security', ['add-generic-password', '-s', `mivelo-${n}`, '-a', os.userInfo().username, '-w', value, '-T', '/usr/bin/security', '-U'], { stdio: 'ignore' });
+      execFileSync('security', ['add-generic-password', '-s', `mivelo-${n}`, '-a', os.userInfo().username, '-w', value, '-T', '/usr/bin/security', '-U'], { stdio: 'ignore', timeout: 8_000 });
       return;
     } catch {
       /* dosya yedeğine düş */

@@ -596,6 +596,14 @@ Dil: arayüz ve yorumlar Türkçe.
   Trackpad: hareket başlayınca tekerlek olayları PENCEREDEN dinlenir (`wheelFeed`; balon imlecin altından kayınca olaylar kesilip hareket sıfırlanıyordu),
   180 ms sessizlik = bırakıldı, tetikten sonra 450 ms atalet yok sayılır. `prefers-reduced-motion` uyar.
 
+- **Masaüstü "Çekirdek başlatılıyor"da takılma (29.09, Kaan: M1, 0.1.9, ilk açılış, dakikalarca %27)**: (1) arayüz Tauri belirtecini
+  (`core_token`) yalnız 15 sn bekleyip BOŞ belirteci kalıcı önbelleğe alıyordu → çekirdek geç kalkınca her istek 403 "Yetkisiz kaynak";
+  şimdi `coreToken()` işlevi + `refreshCoreToken()` (api.ts 403'te bir kez yeniden okur, WS her açılışta tazeler). (2) açılış döngüsü her
+  denemede ≤12 sn (asılı istek dondurmasın), toplam 120 sn, 20 sn sonra "ilk açılışta 1-2 dk sürebilir". (3) bekçi `STARTUP_GRACE` 60 → 150 sn
+  (ilk açılışta macOS gömülü node/yerel modülleri tararken — Intel paketi M1'de Rosetta ile daha da yavaş — dinlemeye başlamadan öldürüp
+  yeniden başlatıyordu). (4) Anahtar Zinciri `security` çağrılarına zaman aşımı (dbkey 30/15 sn, secrets 8 sn); okunamayan anahtarda henüz
+  şifreli DB yoksa 0600 dosya anahtarıyla devam (ilk açılış takılmaz). Gerçek Mac'te doğrulanmadı; sürerse `~/.mivelo/desktop.log` + `core.log` sonu.
+
 ## Sunucu/arayüz sözleşmesi
 - CORS: localhost/127.0.0.1/tauri.localhost/tauri://localhost ve WKWebView'ın `null` kaynağı (paketli uygulama!).
 - keepAliveTimeout 120 s (WebKit "Load failed" önlemi); arayüz `api.ts` ağ hatasında bir kez yeniden dener; açılışta 45 s

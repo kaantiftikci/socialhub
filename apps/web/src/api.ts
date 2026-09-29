@@ -1,12 +1,12 @@
 import type { Account, CalEvent, LoginInput, CalendarDraft, Chat, ChatFlags, CoreEvent, CoreOs, DraftResult, LinkPreview, Message, Platform } from './types';
-import { API_BASE, REMOTE_CORE, coreToken } from './desktop';
+import { API_BASE, REMOTE_CORE, coreToken, refreshCoreToken } from './desktop';
 import { STATIC_DEMO } from './profile';
 import { connectStaticEvents, staticApi } from './static-demo';
 
 const BASE = API_BASE + '/api';
 
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const token = await coreToken;
+async function call<T>(method: string, path: string, body?: unknown, retried = false): Promise<T> {
+  const token = await coreToken();
   const init: RequestInit = {
     method,
     headers: { 'x-mivelo-client': '1', ...(body ? { 'content-type': 'application/json' } : {}), ...(token ? { 'x-kavsak-token': token } : {}) },
@@ -25,6 +25,11 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
     }
   }
   const data = (await res.json().catch(() => ({}))) as T & { error?: string };
+  // belirteç eksik/eski (ilk açılışta çekirdek belirteci geç yazdı ya da çekirdek yeniden kuruldu): yeniden oku, bir kez daha dene
+  if (res.status === 403 && !retried && data.error === 'Yetkisiz kaynak') {
+    const fresh = await refreshCoreToken();
+    if (fresh && fresh !== token) return call<T>(method, path, body, true);
+  }
   if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
   return data;
 }
@@ -171,7 +176,8 @@ export function connectEvents(onEvent: (ev: CoreEvent) => void, onState?: (open:
   let closed = false;
   let timer: number | undefined;
   const open = async () => {
-    const token = await coreToken;
+    // WS 403'ü ayırt edemez: bağlantı her açılışta belirteci tazeler (ilk açılışta boş kalmış olabilir)
+    const token = (await coreToken()) || (await refreshCoreToken());
     if (closed) return;
     const base = API_BASE ? API_BASE.replace(/^http/, 'ws') + '/ws' : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
     const url = token ? `${base}?token=${encodeURIComponent(token)}` : base;

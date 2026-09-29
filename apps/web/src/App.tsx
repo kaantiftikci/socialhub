@@ -335,9 +335,11 @@ export default function App() {
     (async () => {
       const t0 = Date.now();
       let lastErr = '';
-      while (!cancelled && Date.now() - t0 < 45_000) {
+      // ilk açılışta (macOS'un gömülü node'u taraması, veritabanı/Anahtar Zinciri kurulumu) çekirdek 1-2 dk sürebilir; asılı kalan
+      // istek döngüyü dondurmasın diye her deneme en çok 12 sn
+      while (!cancelled && Date.now() - t0 < 120_000) {
         try {
-          await refresh();
+          await Promise.race([refresh(), new Promise((_, rej) => setTimeout(() => rej(new Error('Çekirdek yanıt vermiyor (12 sn)')), 12_000))]);
           setBooting(false);
           return;
         } catch (e) {
@@ -1164,7 +1166,7 @@ export default function App() {
 
       {booting && (
         <div className="booting" role="status">
-          <span className="spin" /> Çekirdek başlatılıyor…
+          <span className="spin" /> Çekirdek başlatılıyor…{Date.now() - bootSince > 20_000 ? ' İlk açılışta 1-2 dakika sürebilir.' : ''}
         </div>
       )}
       <div className="surface">

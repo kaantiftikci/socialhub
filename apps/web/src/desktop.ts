@@ -66,7 +66,14 @@ export function mediaUrl(u?: string): string | undefined {
   return tokenValue && u.startsWith('/api/') ? `${full}${full.includes('?') ? '&' : '?'}token=${encodeURIComponent(tokenValue)}` : full;
 }
 
-export const coreToken: Promise<string> = (async () => {
+/**
+ * Çekirdeğin yerel API belirteci. Masaüstünde (Tauri) belirteç dosyasını çekirdek yazar; ilk açılışta (yeni kullanıcı, macOS'un
+ * ilk çalıştırmada gömülü node'u ve yerel modülleri taraması, veritabanı/Anahtar Zinciri kurulumu) bu 15 sn'yi aşabiliyor.
+ * Eskiden 15 sn sonra boş belirteç KALICI önbelleğe alınıyordu → tüm istekler "Yetkisiz kaynak" → arayüz dakikalarca
+ * "Çekirdek başlatılıyor"da kalıyordu (Kaan, 29.09, M1). Şimdi: belirteç gelene dek beklenir; boşsa ve istek 403 alırsa
+ * `refreshCoreToken()` yeniden okur.
+ */
+async function readToken(waitMs: number): Promise<string> {
   if (!isTauri) {
     // Telefondan erişim: bağlantı ?token=… ile gelir; sakla ve adresten temizle
     try {
@@ -84,17 +91,36 @@ export const coreToken: Promise<string> = (async () => {
   }
   try {
     const { invoke } = await import('@tauri-apps/api/core');
-    for (let i = 0; i < 30; i++) {
+    const t0 = Date.now();
+    for (;;) {
       const t = await invoke<string>('core_token').catch(() => '');
-      if (t) return t;
+      if (t || Date.now() - t0 >= waitMs) return t;
       await new Promise((r) => setTimeout(r, 500));
     }
   } catch {
-    /* tarayıcıda */
+    return '';
   }
-  return '';
-})();
-void coreToken.then((t) => (tokenValue = t));
+}
+let tokenPromise: Promise<string> = readToken(15_000);
+tokenPromise.then((t) => (tokenValue = t));
+/** Güncel belirteç (istekler her seferinde bunu bekler; ilk açılışta en çok 15 sn) */
+export function coreToken(): Promise<string> {
+  return tokenPromise;
+}
+/** Belirteç boş kaldıysa ya da çekirdek yeniden kurulduysa (403) yeniden oku; aynı anda tek okuma */
+let refreshing: Promise<string> | null = null;
+export function refreshCoreToken(): Promise<string> {
+  if (!isTauri) return tokenPromise;
+  refreshing ??= readToken(2_000).then((t) => {
+    refreshing = null;
+    if (t) {
+      tokenValue = t;
+      tokenPromise = Promise.resolve(t);
+    }
+    return t;
+  });
+  return refreshing;
+}
 
 export async function setBadge(count: number): Promise<void> {
   if (!isTauri) return;

@@ -24,7 +24,8 @@ type SecretResult = string | 'missing' | 'denied' | 'none';
 function fromKeychain(): SecretResult {
   if (!IS_MAC) return 'none';
   try {
-    const out = execFileSync('security', ['find-generic-password', '-s', SERVICE, '-a', os.userInfo().username, '-w'], { stdio: ['ignore', 'pipe', 'ignore'] })
+    // zaman aşımı: Anahtar Zinciri izin penceresi arkada kalırsa çekirdek sonsuza dek donmasın (arayüz "Çekirdek başlatılıyor"da kalıyordu)
+    const out = execFileSync('security', ['find-generic-password', '-s', SERVICE, '-a', os.userInfo().username, '-w'], { stdio: ['ignore', 'pipe', 'ignore'], timeout: 30_000 })
       .toString()
       .trim();
     return /^[0-9a-f]{64}$/i.test(out) ? out : 'denied';
@@ -42,7 +43,7 @@ function fromKeychain(): SecretResult {
 function toKeychain(key: string): boolean {
   if (!IS_MAC) return false;
   try {
-    execFileSync('security', ['add-generic-password', '-s', SERVICE, '-a', os.userInfo().username, '-w', key, '-T', '/usr/bin/security'], { stdio: 'ignore' });
+    execFileSync('security', ['add-generic-password', '-s', SERVICE, '-a', os.userInfo().username, '-w', key, '-T', '/usr/bin/security'], { stdio: 'ignore', timeout: 15_000 });
     return true;
   } catch {
     return false;
@@ -133,6 +134,13 @@ export function getDbKey(dbPath = DB_PATH): string {
   // Anahtar okunamadıysa ve şifreli veritabanı varsa yeni anahtar ÜRETME: veri kalıcı olarak kaybolur
   if (kc === 'denied' && IS_WINDOWS) {
     throw new Error(`Veritabanı anahtarı çözülemedi (${DPAPI_FILE}; DPAPI yalnızca anahtarı oluşturan Windows kullanıcısında çalışır). Anahtar yedeğin varsa KAVSAK_DB_KEY ile ver.`);
+  }
+  // Anahtar Zinciri okunamadı ama henüz şifreli veritabanı yok (ilk açılış / yeni kullanıcı): kayıp veri yok → 0600 dosya anahtarıyla devam
+  if (kc === 'denied' && !encryptedDbExists(dbPath)) {
+    const key = randomBytes(32).toString('hex');
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(KEY_FILE, key, { mode: 0o600 });
+    return key;
   }
   if (kc === 'denied') {
     throw new Error('Veritabanı anahtarı Anahtar Zinciri\'nden okunamadı (izin verilmedi). Mivelo\'yu yeniden başlatıp Anahtar Zinciri penceresinde "Her Zaman İzin Ver"i seçin.');
