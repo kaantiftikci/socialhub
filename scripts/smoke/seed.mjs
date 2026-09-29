@@ -2,6 +2,7 @@
 // açılışta başlayan hesaplar (Instagram tarayıcı kanalı, iMessage, Telegram) ve yarıda kalmış büyük bir hesap kaldırma.
 // Kullanım: MIVELO_DATA_DIR=… KAVSAK_DB_KEY=<64 hex> node scripts/smoke/seed.mjs <core/dist klasörü> [mesaj sayısı]
 // Yalnız yer tutucu veri üretir (gerçek ad/numara yok).
+import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -9,6 +10,7 @@ const dist = path.resolve(process.argv[2] ?? 'packages/core/dist');
 const total = Number(process.argv[3] ?? 200_000);
 const { Store } = await import(pathToFileURL(path.join(dist, 'store.js')).href);
 const { DB_PATH } = await import(pathToFileURL(path.join(dist, 'config.js')).href);
+fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 const store = new Store(DB_PATH, process.env.KAVSAK_DB_KEY);
 
 const accounts = [
