@@ -357,7 +357,7 @@ export class Registry {
     this.connectors.delete(id);
     const purge = this.store.purgeAccount(id);
     bus.emit({ type: 'account.removed', accountId: id });
-    void this.serial(id, async () => {
+    const job = this.serial(id, async () => {
       if (c) {
         await withTimeout(c.logout?.() ?? Promise.resolve(), 15_000).catch((e) => bus.log('warn', `${id} platform çıkışı yapılamadı: ${(e as Error).message}`));
         await withTimeout(c.stop(), 15_000).catch(() => undefined);
@@ -366,7 +366,21 @@ export class Registry {
       await fs.promises.rm(sessionDir(id), { recursive: true, force: true }).catch(() => undefined);
       bus.log('info', `Hesap kaldırıldı: ${id}`);
     });
+    this.removals.set(id, job);
+    void job.finally(() => this.removals.get(id) === job && this.removals.delete(id));
     return Promise.resolve();
+  }
+  private removals = new Map<string, Promise<void>>();
+
+  /**
+   * "Tüm verileri sil" (Ayarlar → Hesap): her hesap platformdan çıkarılır (WhatsApp bağlı cihazlar, Telegram oturumu…),
+   * durdurulur, mesajları ve oturum klasörü silinir; hepsi bitince döner.
+   */
+  async removeAll(): Promise<number> {
+    const ids = [...new Set([...this.store.listAccounts().map((a) => a.id), ...this.connectors.keys()])];
+    for (const id of ids) await this.remove(id).catch(() => undefined);
+    await Promise.all(ids.map((id) => this.removals.get(id)?.catch(() => undefined)));
+    return ids.length;
   }
 
   /** Çekirdek kaldırma sürerken kapandıysa: açılışta kalan veriyi sil */

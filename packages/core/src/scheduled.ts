@@ -66,6 +66,12 @@ export class ScheduledQueue {
     return this.items.length !== n;
   }
 
+  /** Tüm verileri sil */
+  clear(): void {
+    this.items = [];
+    this.save();
+  }
+
   /** Sohbet silinince bekleyenleri de at */
   removeChat(chatId: string): void {
     const n = this.items.length;

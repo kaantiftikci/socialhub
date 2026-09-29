@@ -17,7 +17,7 @@ import { SettingsModal } from './Settings';
 import { SearchPalette } from './SearchPalette';
 import { CalendarView, ymd } from './CalendarView';
 import { MOD_KEY, isTauri, notify as desktopNotify, requestWebNotify, onDesktopEvent, playPing, setBadge, windowFocused, coreInfo, playNotifySound, platformNotifyOn, soundsEnabled, bannersEnabled, groupsNotify, unlockAudio } from './desktop';
-import { PROFILE_NAME, STATIC_DEMO, setFallbackProfileName } from './profile';
+import { DEMO_OFFLINE, PROFILE_NAME, PROFILE_PHOTO, STATIC_DEMO, applyProfile, setFallbackProfileName } from './profile';
 
 export type View = 'inbox' | 'focus' | 'calendar' | 'archived' | 'muted' | 'hidden';
 const FLAG_VIEWS: Array<{ view: View; flag: 'archived' | 'muted' | 'hidden'; label: string; icon: string; empty: string }> = [
@@ -286,6 +286,13 @@ export default function App() {
   const connectP = useClosing(connectOpen || null);
 
   const [, tick] = useState(0);
+  // Ayarlar → Profil (ad, fotoğraf): açılışta yüklenir, kaydedilince 'mivelo-profile' ile yeniden çizilir
+  useEffect(() => {
+    const on = () => tick((x) => x + 1);
+    window.addEventListener('mivelo-profile', on);
+    if (!DEMO_OFFLINE) void api.profile().then(applyProfile).catch(() => undefined);
+    return () => window.removeEventListener('mivelo-profile', on);
+  }, []);
   const selectedRef = useRef<string | null>(null);
   selectedRef.current = selected;
   /** Ekranda gerçekten açık sohbet: Takvim/Odak görünümünde seçim korunur ama sohbet görünmez (okundu/bildirim için) */
@@ -1260,7 +1267,7 @@ export default function App() {
           </div>
         )}
         <div className="me">
-          <Avatar name={PROFILE_NAME || 'Mivelo'} size={32} />
+          <Avatar name={PROFILE_NAME || 'Mivelo'} size={32} url={PROFILE_PHOTO} />
           <span style={{ flexGrow: 1, minWidth: 0 }}>
             <span className="n">{PROFILE_NAME || 'Mivelo'}</span>
             <span className="s">{accounts.length} uygulama{STATIC_DEMO ? '' : ' · Pro'}</span>

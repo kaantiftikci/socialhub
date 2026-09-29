@@ -1,17 +1,18 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { api } from './api';
 import { PLATFORMS, type Account } from './types';
-import { Chip, Icon, PasswordInput } from './ui';
+import { Avatar, Chip, Icon, PasswordInput } from './ui';
 import { SOUNDS, getPlatformSound, getPlatformTone, getPlatformVolume, getVolume, groupsNotify, bannersEnabled, soundsEnabled, playNotifySound, playPing, setBannersEnabled, setGroupsNotify, setPlatformSound, setPlatformTone, setPlatformVolume, setSoundsEnabled, setVolume, webNotifyPermission, requestWebNotify, testNotify } from './desktop';
 import { setAiPrefs, useAiPrefs } from './ai-prefs';
-import { DEMO_OFFLINE, PROFILE_NAME, STATIC_DEMO } from './profile';
+import { DEMO_OFFLINE, PROFILE_NAME, STATIC_DEMO, applyProfile } from './profile';
+import { wipeUserLocalData } from './demo-isolation';
 import { leaveDemoPanel } from './demo-session';
 import { isTauri } from './desktop';
 import { signOut } from './LicenseGate';
 import { PermissionSettings } from './Onboarding';
-import type { LicenseStatus } from './api';
+import type { LicenseStatus, Profile } from './api';
 
-type Tab = 'notify' | 'apps' | 'ai' | 'phone' | 'perms' | 'account' | 'logout';
+type Tab = 'profile' | 'notify' | 'apps' | 'ai' | 'phone' | 'perms' | 'account' | 'logout' | 'reset';
 type Lan = { enabled: boolean; urls: string[]; qr?: string } | null;
 
 /** Açma/kapama anahtarı (checkbox yerine; tüm ayarlarda aynı görünüm) */
@@ -85,6 +86,7 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
   // aynı platformdan birden çok hesap olabilir; ses ayarları platform başına → tek satır
   const platforms = [...new Map(accounts.map((a) => [a.platform, a])).values()];
   const TABS: Array<[Tab, string, string]> = [
+    ...(!DEMO_OFFLINE ? ([['profile', 'Profil', 'user']] as Array<[Tab, string, string]>) : []),
     ['notify', 'Bildirimler', 'bell'],
     ['apps', 'Uygulama sesleri', 'volume'],
     ['ai', 'AI özellikleri', 'sparkle'],
@@ -92,9 +94,9 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
     // masaüstü: ilk kurulumdaki izinler (verilmeyenler buradan yeniden istenir)
     ...(isTauri ? ([['perms', 'İzinler', 'shield']] as Array<[Tab, string, string]>) : []),
     // yerel / masaüstü: profil + lisans (web demoda hesap = demo oturumu, çıkış doğrudan menüde)
-    ...(!STATIC_DEMO ? ([['account', 'Hesap', 'user']] as Array<[Tab, string, string]>) : []),
+    ...(!STATIC_DEMO ? ([['account', 'Hesap ve veriler', 'shield']] as Array<[Tab, string, string]>) : []),
   ];
-  const heading = tab === 'logout' ? 'Çıkış yap' : TABS.find(([k]) => k === tab)?.[1];
+  const heading = tab === 'logout' ? 'Çıkış yap' : tab === 'reset' ? 'Tüm verileri sil' : TABS.find(([k]) => k === tab)?.[1];
 
   return (
     <div className={`overlay set-ov ${closing ? 'closing' : ''}`} onClick={onClose}>
@@ -255,7 +257,11 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
 
           {tab === 'perms' && <PermissionSettings />}
 
-          {(tab === 'account' || tab === 'logout') && <AccountPane logout={tab === 'logout'} onLogout={() => setTab('logout')} onCancel={() => setTab('account')} notify={notify} />}
+          {tab === 'profile' && <ProfilePane notify={notify} />}
+
+          {(tab === 'account' || tab === 'logout' || tab === 'reset') && (
+            <AccountPane mode={tab === 'logout' ? 'logout' : tab === 'reset' ? 'reset' : 'view'} onLogout={() => setTab('logout')} onReset={() => setTab('reset')} onCancel={() => setTab('account')} notify={notify} />
+          )}
 
           {tab === 'phone' && (
             <>
@@ -353,7 +359,8 @@ function licenseLeft(exp?: string | null): string {
  * Ayarlar → Hesap (yerel / masaüstü): profil adı (lisans sahibi ya da bilgisayardaki ad), lisans anahtarı (maskeli) ve süresi,
  * sürüm; altta kırmızı "Çıkış yap". logout=true: çıkışın ne yapacağını anlatan onay (Tauri'de confirm() çalışmaz).
  */
-function AccountPane({ logout, onLogout, onCancel, notify }: { logout: boolean; onLogout: () => void; onCancel: () => void; notify: (t: string, err?: boolean) => void }) {
+function AccountPane({ mode, onLogout, onReset, onCancel, notify }: { mode: 'view' | 'logout' | 'reset'; onLogout: () => void; onReset: () => void; onCancel: () => void; notify: (t: string, err?: boolean) => void }) {
+  const logout = mode === 'logout';
   const [lic, setLic] = useState<LicenseStatus | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -367,6 +374,59 @@ function AccountPane({ logout, onLogout, onCancel, notify }: { logout: boolean; 
       notify((e as Error).message, true);
     });
   };
+  const doReset = () => {
+    setBusy(true);
+    api
+      .resetAll()
+      .then(() => {
+        // arayüzün bu bilgisayardaki kullanıcı kayıtları da (gezinme, taslaklar, zamanlanmış…) gider; cihaz izinleri ve tema kalır
+        let setup: string | null = null;
+        let perms: string | null = null;
+        try {
+          setup = localStorage.getItem('mivelo.setup');
+          perms = localStorage.getItem('mivelo.setupPerms');
+        } catch {
+          /* depo kapalı */
+        }
+        wipeUserLocalData();
+        try {
+          if (setup) localStorage.setItem('mivelo.setup', setup);
+          if (perms) localStorage.setItem('mivelo.setupPerms', perms);
+        } catch {
+          /* depo kapalı */
+        }
+        location.reload();
+      })
+      .catch((e) => {
+        setBusy(false);
+        notify((e as Error).message, true);
+      });
+  };
+  if (mode === 'reset')
+    return (
+      <div className="set-logout-card">
+        <span className="ic">
+          <Icon name="trash" size={20} sw={2} />
+        </span>
+        <b>Tüm veriler silinsin mi?</b>
+        <p>Bu işlem geri alınamaz. Mivelo önce her uygulamadan çıkış yapar (WhatsApp bağlı cihazlardan, Telegram oturumlardan düşer), sonra bu bilgisayardaki şunları siler:</p>
+        <ul className="set-reset-list">
+          <li>Bağlı uygulamalar ve oturumları</li>
+          <li>Tüm mesajlar, sohbetler, ekler ve arama dizini</li>
+          <li>Takvim etkinlikleri, takip hatırlatıcıları ve zamanlanmış mesajlar</li>
+          <li>Profil bilgilerin, AI anahtarın ve ayarlar</li>
+        </ul>
+        <p>Lisansın bu bilgisayarda kalır; uygulamaları yeniden bağlayarak baştan başlayabilirsin.</p>
+        <div className="row">
+          <button type="button" className="btn ghost b b2" onClick={onCancel} disabled={busy}>
+            Vazgeç
+          </button>
+          <button type="button" className="btn danger-solid b" onClick={doReset} disabled={busy}>
+            <Icon name="trash" size={14} sw={2} /> {busy ? 'Çıkış yapılıyor ve siliniyor…' : 'Evet, hepsini sil'}
+          </button>
+        </div>
+      </div>
+    );
   if (logout)
     return (
       <div className="set-logout-card">
@@ -392,11 +452,13 @@ function AccountPane({ logout, onLogout, onCancel, notify }: { logout: boolean; 
   return (
     <>
       <div className="set-group">
-        <Row title="Ad" hint={lic?.owner?.name ? 'Lisans kaydındaki ad' : 'Bu bilgisayardaki kullanıcı adı'}>
-          <span className="set-val">{PROFILE_NAME || '—'}</span>
-        </Row>
+        {lic?.owner?.name && (
+          <Row title="Lisans sahibi" hint="Lisans kaydındaki ad (profil adını Profil bölümünden değiştirebilirsin)">
+            <span className="set-val">{lic.owner.name}</span>
+          </Row>
+        )}
         {lic?.owner?.email && (
-          <Row title="E-posta" hint="Lisansın gönderildiği adres">
+          <Row title="Lisans e-postası" hint="Lisansın gönderildiği adres">
             <span className="set-val">{lic.owner.email}</span>
           </Row>
         )}
@@ -416,7 +478,141 @@ function AccountPane({ logout, onLogout, onCancel, notify }: { logout: boolean; 
           </button>
         </Row>
       </div>
+      <div className="set-group">
+        <Row title="Tüm verileri sil" hint="Her uygulamadan çıkış yapar; mesajlar, oturumlar, profil ve ayarlar bu bilgisayardan silinir">
+          <button type="button" className="btn danger-solid xs b" onClick={onReset}>
+            Verileri sil
+          </button>
+        </Row>
+      </div>
       <p className="set-note">Mesajların ve oturumların yalnız bu bilgisayarda saklanır; Mivelo sunucularına gitmez.</p>
+    </>
+  );
+}
+
+/** Seçilen görseli ortadan kare kırpıp 256 px JPEG'e küçült (profile.json küçük kalsın) */
+function squarePhoto(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const side = Math.min(img.naturalWidth, img.naturalHeight);
+      const c = document.createElement('canvas');
+      c.width = c.height = 256;
+      const ctx = c.getContext('2d');
+      if (!ctx || !side) return reject(new Error('Görsel okunamadı'));
+      ctx.drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, 256, 256);
+      URL.revokeObjectURL(url);
+      resolve(c.toDataURL('image/jpeg', 0.86));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Bu dosya görsel olarak açılamadı'));
+    };
+    img.src = url;
+  });
+}
+
+const PROFILE_FIELDS: Array<[keyof Profile, string, string, string, string]> = [
+  ['name', 'Ad soyad', 'Uygulamada görünen adın', 'Adın ve soyadın', 'name'],
+  ['username', 'Kullanıcı adı', 'Harf, rakam, nokta, alt çizgi', 'kullaniciadi', 'username'],
+  ['email', 'E-posta', 'İletişim adresin', 'ornek@example.com', 'email'],
+  ['phone', 'Telefon', 'Ülke koduyla', '+90 5xx xxx xx xx', 'tel'],
+];
+
+/**
+ * Ayarlar → Profil (29.09, Kaan: profil fotoğrafı, ad, kullanıcı adı, e-posta, telefon). Yalnız bu bilgisayarda (çekirdek
+ * ~/.mivelo/profile.json; web demoda tarayıcı); ad ve fotoğraf kenar çubuğunda ve Odak'ta görünür. Lisans e-postası değişmez.
+ */
+function ProfilePane({ notify }: { notify: (t: string, err?: boolean) => void }) {
+  const [saved, setSaved] = useState<Profile | null>(null);
+  const [form, setForm] = useState<Profile>({});
+  const [busy, setBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    api
+      .profile()
+      .then((p) => (setSaved(p), setForm(p)))
+      .catch(() => (setSaved({}), setForm({})));
+  }, []);
+  const dirty = !!saved && (['name', 'username', 'email', 'phone', 'photo'] as const).some((k) => (form[k] ?? '') !== (saved[k] ?? ''));
+  const set = (k: keyof Profile, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const pick = async (f?: File) => {
+    if (!f) return;
+    try {
+      set('photo', await squarePhoto(f));
+    } catch (e) {
+      notify((e as Error).message, true);
+    }
+  };
+  const save = () => {
+    setBusy(true);
+    api
+      .saveProfile(form)
+      .then((p) => {
+        setSaved(p);
+        setForm(p);
+        applyProfile(p);
+        notify('Profil kaydedildi');
+      })
+      .catch((e) => notify((e as Error).message, true))
+      .finally(() => setBusy(false));
+  };
+  const shownName = form.name?.trim() || PROFILE_NAME || 'Mivelo';
+  return (
+    <>
+      <div className="set-group set-profile">
+        <div className="set-profile-head">
+          <Avatar name={shownName} size={64} url={form.photo || undefined} />
+          <div className="who">
+            <b>{shownName}</b>
+            <em>{form.username ? `@${form.username.replace(/^@/, '')}` : 'Kullanıcı adı yok'}</em>
+          </div>
+          <div className="pacts">
+            <button type="button" className="btn ghost xs b b2" onClick={() => fileRef.current?.click()}>
+              <Icon name="image" size={13} /> {form.photo ? 'Değiştir' : 'Fotoğraf yükle'}
+            </button>
+            {form.photo && (
+              <button type="button" className="btn ghost xs b b2" onClick={() => set('photo', '')}>
+                Kaldır
+              </button>
+            )}
+          </div>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/heic"
+            hidden
+            onChange={(e) => {
+              void pick(e.target.files?.[0]);
+              e.target.value = '';
+            }}
+          />
+        </div>
+        {PROFILE_FIELDS.map(([k, title, hint, ph, type]) => (
+          <Row key={k} title={title} hint={hint}>
+            <input
+              className="set-inp"
+              type={type === 'username' || type === 'name' ? 'text' : type}
+              value={form[k] ?? ''}
+              placeholder={ph}
+              autoComplete={type === 'username' ? 'username' : type === 'tel' ? 'tel' : type}
+              maxLength={type === 'email' ? 120 : type === 'name' ? 60 : 30}
+              onChange={(e) => set(k, e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && dirty && !busy && save()}
+            />
+          </Row>
+        ))}
+      </div>
+      <div className="set-actions">
+        <button type="button" className="btn ghost b b2" disabled={!dirty || busy} onClick={() => saved && setForm(saved)}>
+          Vazgeç
+        </button>
+        <button type="button" className="btn primary b" disabled={!dirty || busy} onClick={save}>
+          {busy ? 'Kaydediliyor…' : 'Kaydet'}
+        </button>
+      </div>
+      <p className="set-note">Profil bilgilerin yalnız bu bilgisayarda saklanır; bağlı uygulamalardaki profillerini ve lisans e-postanı değiştirmez.</p>
     </>
   );
 }

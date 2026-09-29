@@ -1701,3 +1701,23 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .set-logout-card p { margin: 0; font-size: 13px; line-height: 1.55; color: var(--text2); }
 .set-logout-card .row { display: flex; gap: 8px; align-self: flex-end; margin-top: 6px; }
 .set-logout-card .btn { height: 38px; padding: 0 16px; }
+
+/* Ayarlar → Profil */
+.set-profile-head { display: flex; align-items: center; gap: 14px; padding: 16px; }
+.set-profile-head .avatar { flex: none; }
+.set-profile-head .who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.set-profile-head .who b { font-size: 15px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.set-profile-head .who em { font-style: normal; font-size: 12.5px; color: var(--text3); }
+.set-profile-head .pacts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.set-profile-head + .set-row { border-top: 1px solid var(--line2); }
+.set-inp { width: 240px; max-width: 46vw; height: 34px; border-radius: 10px; border: 1px solid var(--line); padding: 0 11px; font: inherit; font-size: 13px; background: var(--field); color: var(--text); outline: none; }
+.set-inp:focus { border-color: var(--v); box-shadow: 0 0 0 3px rgba(108,71,255,.15); }
+.set-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.set-reset-list { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.6; color: var(--text2); }
+@media (max-width: 640px) {
+  .set-profile-head { flex-wrap: wrap; }
+  .set-profile-head .pacts { width: 100%; justify-content: flex-start; padding-left: 70px; }
+  .set-profile .set-row { flex-direction: column; align-items: stretch; gap: 8px; }
+  .set-profile .set-ctl { width: 100%; }
+  .set-inp { width: 100%; max-width: none; font-size: 16px; }
+}

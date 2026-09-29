@@ -7,15 +7,35 @@ export const DEMO_OFFLINE = import.meta.env.VITE_DEMO_OFFLINE === '1';
  * o yoksa işletim sistemindeki tam ad (/api/health `user`). Eskiden yerelde sabit "Kaan" yazıyordu → her kurulumda aynı ad.
  */
 export let PROFILE_NAME = '';
+/** Ayarlar → Profil fotoğrafı (data: adresi) */
+export let PROFILE_PHOTO: string | undefined;
 let nameFromLicense = false;
+/** Kullanıcının Ayarlar → Profil'de yazdığı ad: lisans/işletim sistemi adının önüne geçer */
+let customName = '';
+let baseName = '';
 
 export function setProfileName(name: string, fromLicense = false): void {
-  PROFILE_NAME = name;
+  baseName = name;
   if (fromLicense) nameFromLicense = true;
+  PROFILE_NAME = customName || baseName;
 }
 /** İşletim sistemi adı: lisans sahibi bilinmiyorsa kullanılır */
 export function setFallbackProfileName(name: string | undefined): void {
-  if (!nameFromLicense && name && !STATIC_DEMO) PROFILE_NAME = name;
+  if (!nameFromLicense && name && !STATIC_DEMO) {
+    baseName = name;
+    PROFILE_NAME = customName || baseName;
+  }
+}
+/** Ayarlar → Profil (çekirdekteki profile.json) uygulanır; arayüz 'mivelo-profile' olayıyla yeniden çizilir */
+export function applyProfile(p: { name?: string; photo?: string } | null | undefined): void {
+  customName = p?.name?.trim() ?? '';
+  PROFILE_PHOTO = p?.photo || undefined;
+  PROFILE_NAME = customName || baseName;
+  try {
+    window.dispatchEvent(new Event('mivelo-profile'));
+  } catch {
+    /* pencere yok (test) */
+  }
 }
 /** Selamlamada ilk ad ("Günaydın, Kaan.") */
 export function profileFirstName(): string {

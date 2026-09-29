@@ -416,6 +416,13 @@ Dil: arayüz ve yorumlar Türkçe.
   önizleme. WhatsApp/Telegram canlı tepkide de aynı önizleme. Test: reaction-preview.test.ts.
 - **Listede tik (29.09)**: `Chat.lastStatus` (store alt sorgusu) → son mesaj benimse satırda balondaki tik (`statusIcon`; e-posta/pazaryeri ve
   tepki önizlemesinde yok); alındı gelince connector sohbeti de yayınlar (`outgoingRead`, Telegram `emitRead`; arayüz `messages.read`'de yerelde).
+- **Ayarlar → Profil + Tüm verileri sil (29.09, Kaan)**: Profil sekmesi (fotoğraf 256 px kare JPEG'e kırpılır, ad soyad, kullanıcı adı, e-posta, telefon)
+  → çekirdek `profile.ts` `~/.mivelo/profile.json` 0600 (`GET/POST /api/profile`, doğrulama `validateProfile`; demoda localStorage `mivelo.profile`);
+  ad lisans/OS adının önüne geçer (`applyProfile`, 'mivelo-profile' olayı), foto kenar çubuğu + Odak avatarında. Lisans e-postası değişmez.
+  "Hesap ve veriler" → "Tüm verileri sil" (onay kartı) → `POST /api/reset {confirm:'SIL'}`: `registry.removeAll` (her kanalda platform çıkışı:
+  WhatsApp bağlı cihazlar, Telegram oturumu; bitene dek bekler) + `store.wipeAll` (+FTS rebuild, VACUUM) + zamanlanmış/gönderim sayaçları/AI anahtarı/
+  settings/profile/sessions/outbox/calendar silinir; lisans, db anahtarı, token, günlükler kalır. Arayüz localStorage kullanıcı kayıtlarını siler
+  (kurulum izinleri + tema kalır) ve yeniden yüklenir. Uygulamayı çöpe atmak ~/.mivelo'yu SİLMEZ (macOS normali). Test: profile-reset.test.ts.
 - **Eşitleme yüzdesi tek kaynak (29.09)**: `ui.tsx syncPercent(sync[id], account.detail)` — durum metnindeki gerçek "%N" (WhatsApp geçmişi, tarayıcı bileşeni) varsa o, yoksa `account.sync` ilerlemesi; üst "N kanal eşitleniyor", kanal satırı ve Bağlan kartı aynısını kullanır; üst çubuk turdaki TÜM kanalların ortalaması (biten 100 sayılır, geri gitmez; `overallSync`) (eskiden üst çubuk yalnız genel ilerlemeyi, satır WhatsApp'ın yüzdesini gösteriyordu).
 - Sistem mesajı baş emojileri (🔒 🚫 ⏳ 🗑 ⚠; `SYSTEM_LEAD`) balonda da ikon (`bubbleText`). Kendi (mor) balonumda seçim beyaz zemin
   (`.grp.me .bub ::selection`). SyncBar yüzdesi çubukla aynı hizada, dolan ucun üstünde.

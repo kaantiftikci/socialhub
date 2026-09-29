@@ -474,6 +474,21 @@ function demoIcs(ev: CalendarDraft): string {
 
 export const staticApi = {
   license: async () => ({ required: false, valid: true }),
+  // demoda profil yalnız bu tarayıcıda; tüm verileri silme masaüstüne özgü
+  profile: async (): Promise<import('./api').Profile> => {
+    try {
+      return JSON.parse(localStorage.getItem('mivelo.profile') || '{}') as import('./api').Profile;
+    } catch {
+      return {};
+    }
+  },
+  saveProfile: async (p: import('./api').Profile) => {
+    localStorage.setItem('mivelo.profile', JSON.stringify(p));
+    return p;
+  },
+  resetAll: async (): Promise<{ ok: boolean; accounts: number }> => {
+    throw new Error('Demoda kullanılamaz');
+  },
   activateLicense: async (_key: string) => ({ required: false, valid: true }),
   releaseLicense: async () => ({ required: false, valid: true }),
   activity: async (_active: boolean) => undefined,

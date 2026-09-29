@@ -37,6 +37,15 @@ async function call<T>(method: string, path: string, body?: unknown, retried = f
 const enc = encodeURIComponent;
 
 /** Paketli uygulamanın lisans durumu (çekirdek license.ts) */
+/** Mivelo profili (yalnız bu bilgisayarda, ~/.mivelo/profile.json) */
+export interface Profile {
+  name?: string;
+  username?: string;
+  email?: string;
+  phone?: string;
+  photo?: string;
+}
+
 export interface LicenseStatus {
   required: boolean;
   valid: boolean;
@@ -53,6 +62,10 @@ const liveApi = {
   license: (check = false) => call<LicenseStatus>('GET', check ? '/license?check=1' : '/license'),
   activateLicense: (key: string) => call<LicenseStatus>('POST', '/license', { key }),
   releaseLicense: () => call<LicenseStatus>('DELETE', '/license'),
+  profile: () => call<Profile>('GET', '/profile'),
+  saveProfile: (p: Profile) => call<Profile>('POST', '/profile', p),
+  /** Tüm verileri sil: her kanaldan çıkış + mesaj/oturum/ayar silme (lisans kalır) */
+  resetAll: () => call<{ ok: boolean; accounts: number }>('POST', '/reset', { confirm: 'SIL' }),
   activity: (active: boolean) => call('POST', '/activity', { active }).catch(() => undefined),
   accounts: () => call<Account[]>('GET', '/accounts'),
   addAccount: (platform: Platform, token?: string) => call<Account>('POST', '/accounts', { platform, token }),

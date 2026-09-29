@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
 import { PLATFORMS, type Chat, type DraftResult } from './types';
 import { Avatar, Chip, Icon, IconText, ago, agoLong, stripLeadIcon } from './ui';
-import { PROFILE_NAME, profileFirstName } from './profile';
+import { PROFILE_NAME, PROFILE_PHOTO, profileFirstName } from './profile';
 import { useAiPrefs } from './ai-prefs';
 
 /**
@@ -149,7 +149,7 @@ export function Focus({
         </button>
         <span style={{ flexGrow: 1 }} />
         <span style={{ fontSize: 13, color: 'var(--text3)' }}>{dateStr}</span>
-        <Avatar name={PROFILE_NAME || 'Mivelo'} size={34} />
+        <Avatar name={PROFILE_NAME || 'Mivelo'} size={34} url={PROFILE_PHOTO} />
       </div>
 
       <div className="focus-hero">

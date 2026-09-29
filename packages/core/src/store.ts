@@ -377,6 +377,21 @@ export class Store {
     }
   }
 
+  /** "Tüm verileri sil": hesaplar kaldırıldıktan sonra kalan her şey (etkinlikler, meta, sahipsiz sohbet/mesaj) */
+  wipeAll(): void {
+    this.db.transaction(() => {
+      for (const t of ['messages', 'chat_participants', 'chats', 'accounts', 'events', 'meta']) this.db.prepare(`DELETE FROM ${t}`).run();
+      this.db.exec("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')");
+    })();
+    this.purged.clear();
+    // silinen içerik dosyanın boş sayfalarında kalmasın
+    try {
+      this.db.exec('VACUUM');
+    } catch {
+      /* meşgul: sonraki açılışta boş sayfalar yeniden kullanılır */
+    }
+  }
+
   deleteAccount(id: string): void {
     this.db.transaction(() => {
       this.stmt('DELETE FROM messages WHERE chat_id IN (SELECT id FROM chats WHERE account_id = ?)').run(id);

@@ -24,7 +24,8 @@ import { activateLicense, checkLicenseSoon, LicenseError, licenseStatus, release
 import { ALL_PLATFORMS } from './model.js';
 import { MEDIA_HOSTS, PLATFORM_MEDIA_HOSTS, MEDIA_MAX } from './media-hosts.js';
 import { fetchPreview } from './link-preview.js';
-import { checkSend, persistSendGuard, SendBlocked } from './send-guard.js';
+import { checkSend, persistSendGuard, resetSendGuard, SendBlocked } from './send-guard.js';
+import { PROFILE_FILE, ProfileError, readProfile, saveProfile } from './profile.js';
 import { EventBatcher, type WsBatch } from './ws-batch.js';
 import { fullDiskAccess, messagesAutomation, PRIVACY_PANES, tccStatus } from './permissions.js';
 import type { Chat, CoreEvent, Platform } from './model.js';
@@ -253,6 +254,50 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     localOnly(r);
     await releaseLicense();
     return licenseStatus();
+  });
+
+  // Mivelo profili (Ayarlar → Profil): yalnız bu bilgisayarda
+  route('GET', '/api/profile', () => readProfile());
+  route('POST', '/api/profile', (r, _s, _p, body) => {
+    localOnly(r);
+    try {
+      return saveProfile(body);
+    } catch (e) {
+      if (e instanceof ProfileError) throw new HttpError(400, e.message);
+      throw e;
+    }
+  });
+  /**
+   * Tüm verileri sil (Ayarlar → Hesap): önce her kanaldan platform çıkışı (WhatsApp bağlı cihazlardan düşer, Telegram oturumu
+   * kapanır…), sonra mesajlar, sohbetler, oturumlar, etkinlikler, zamanlanmış gönderimler, profil, AI anahtarı ve ayarlar.
+   * Lisans (cihaz hakkı), veritabanı anahtarı, yerel API belirteci ve günlükler kalır.
+   */
+  let resetting = false;
+  route('POST', '/api/reset', async (r, _s, _p, body) => {
+    localOnly(r);
+    if ((body as { confirm?: string }).confirm !== 'SIL') throw new HttpError(400, 'Onay eksik');
+    if (resetting) throw new HttpError(409, 'Silme sürüyor');
+    resetting = true;
+    try {
+      bus.log('info', 'Tüm veriler siliniyor (kullanıcı isteği)');
+      const n = await registry.removeAll();
+      scheduled.clear();
+      store.wipeAll();
+      resetSendGuard();
+      setAiKey(null);
+      if (lanEnabled) {
+        lanEnabled = false;
+        closeLan();
+      }
+      for (const f of [SETTINGS_FILE, PROFILE_FILE(), path.join(DATA_DIR, 'send-guard.json')]) fs.rmSync(f, { force: true });
+      for (const d of ['sessions', 'outbox', 'calendar']) await fs.promises.rm(path.join(DATA_DIR, d), { recursive: true, force: true }).catch(() => undefined);
+      bus.log('info', `Tüm veriler silindi (${n} hesap)`);
+      bus.emit({ type: 'scheduled.update' });
+      bus.emit({ type: 'events.update' });
+      return { ok: true, accounts: n };
+    } finally {
+      resetting = false;
+    }
   });
 
   route('GET', '/api/accounts', () => registry.list().map((a) => ({ ...a, qrDataUrl: pendingQr.get(a.id) })));
