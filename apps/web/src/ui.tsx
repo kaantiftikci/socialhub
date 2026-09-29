@@ -404,12 +404,11 @@ export function Resizer({ pane, sign = 1 }: { pane: Pane; sign?: 1 | -1 }) {
  */
 /**
  * Hesabın eşitleme yüzdesi — üst çubuk, kanal satırı ve Bağlan penceresi AYNI değeri gösterir (29.09, Kaan: üstteki "1 kanal
- * eşitleniyor" ile WhatsApp satırı farklı ilerliyordu). Connector durum metninde gerçek yüzde bildiriyorsa (WhatsApp geçmişi
- * "… %N", tarayıcı bileşeni indirme) o esas; yoksa genel eşitleme ilerlemesi.
+ * eşitleniyor" ile WhatsApp satırı farklı ilerliyordu). Tek kaynak çekirdeğin `account.sync` ilerlemesi (geri gitmez); WhatsApp
+ * telefonun aşama yüzdelerini buna kendisi çevirir. Durum metnindeki "%N" artık çubuğa karıştırılmaz (aşama başında sıfırlanıyordu).
  */
-export function syncPercent(entry: { progress: number } | undefined, detail?: string): number {
-  const m = /%(\d+)/.exec(detail ?? '');
-  return m ? Number(m[1]) : (entry?.progress ?? 0);
+export function syncPercent(entry: { progress: number } | undefined): number {
+  return entry?.progress ?? 0;
 }
 
 export function SyncBar({ progress, since, compact = false }: { progress: number; since: number; compact?: boolean }) {

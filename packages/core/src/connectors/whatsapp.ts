@@ -649,7 +649,11 @@ export class WhatsAppConnector extends BaseConnector {
       // sohbetler ve son mesajlar INITIAL_BOOTSTRAP/RECENT ile zaten gelmiş olur)
       if (!onDemand && typeof progress === 'number' && this.account.status === 'connected') {
         const full = syncType === WAProto.HistorySync.HistorySyncType.FULL;
-        this.setHistoryDetail(progress >= 100 ? undefined : `${full ? 'eski mesajlar arka planda alınıyor' : 'sohbetler alınıyor'} %${progress} — telefonda WhatsApp açık kalsın`);
+        // Tek, geri gitmeyen eşitleme yüzdesi (29.09, Kaan: WhatsApp satırı ile üstteki çubuk farklı ilerliyordu): telefonun yüzdesi her
+        // aşamada (son sohbetler → eski mesajlar) sıfırdan başlar; ikisi tek ölçeğe dizilir: sohbetler %60-85, eski mesajlar %85-99, bitince 100.
+        // Durum metnindeki aşama yüzdesi yalnız çubuk kapandıktan sonra (ilk eşitleme bitmiş, eski mesajlar hâlâ geliyorsa) yazılır.
+        if (!this.synced) this.syncProgress(full && progress >= 100 ? 100 : Math.round(full ? 85 + progress * 0.14 : 60 + progress * 0.25), full ? 'eski mesajlar alınıyor' : 'sohbetler alınıyor');
+        this.setHistoryDetail(progress >= 100 ? undefined : `${full ? 'eski mesajlar arka planda alınıyor' : 'sohbetler alınıyor'}${this.synced ? ` %${progress}` : ''} — telefonda WhatsApp açık kalsın`);
       }
       bus.log('info', `WhatsApp geçmiş paketi: ${chats?.length ?? 0} sohbet, ${messages?.length ?? 0} mesaj (tür ${onDemand ? 'istek üzerine' : String(syncType)}, %${progress ?? '?'}; kuyrukta ${this.histQueue.reduce((n, j) => n + j.msgs.length, 0)} mesaj)`);
       let named = 0;

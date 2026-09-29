@@ -776,7 +776,7 @@ export function ConnectModal({
                         {sync[acc[0].id] ? (sync[acc[0].id].label ?? 'Eşitleniyor') : statusText(acc[0])}
                         {acc.length > 1 && <span style={{ color: 'var(--text3)' }}>· {acc.length} hesap</span>}
                       </span>
-                      {sync[acc[0].id] && <SyncBar progress={syncPercent(sync[acc[0].id], acc[0].detail)} since={sync[acc[0].id].since} />}
+                      {sync[acc[0].id] && <SyncBar progress={syncPercent(sync[acc[0].id])} since={sync[acc[0].id].since} />}
                     </span>
                   ) : (
                     <span className="st">

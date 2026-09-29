@@ -244,7 +244,7 @@ export default function App() {
    */
   const overallSync = (): number => {
     const r = syncRound.current;
-    for (const [id, v] of Object.entries(sync)) r.pct.set(id, syncPercent(v, accounts.find((x) => x.id === id)?.detail));
+    for (const [id, v] of Object.entries(sync)) r.pct.set(id, syncPercent(v));
     for (const id of r.pct.keys()) if (!(id in sync)) r.pct.set(id, 100);
     const vals = [...r.pct.values()];
     r.shown = Math.max(r.shown, vals.reduce((a, b) => a + b, 0) / Math.max(1, vals.length));
@@ -1173,7 +1173,7 @@ export default function App() {
           ) : (
             <span className={`dot ${a.autoRetry && a.status !== 'connected' ? 'connecting' : a.status}`} style={{ marginLeft: 8 }} />
           )}
-          {sync[a.id] && <SyncBar compact progress={syncPercent(sync[a.id], a.detail)} since={sync[a.id].since} />}
+          {sync[a.id] && <SyncBar compact progress={syncPercent(sync[a.id])} since={sync[a.id].since} />}
         </button>
         );
   };

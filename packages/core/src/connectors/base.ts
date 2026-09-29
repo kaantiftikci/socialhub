@@ -126,6 +126,10 @@ export abstract class BaseConnector implements Connector {
    * yeniden deneniyor") yine görünür.
    */
   private everSynced = false;
+  /** İlk eşitleme bitti mi (sonraki geçmiş paketleri çubuğu yeniden açmasın) */
+  protected get synced(): boolean {
+    return this.everSynced;
+  }
   /** Bağlanma/eşitleme ilerlemesi (0-100). Connector kilometre taşlarını bildirir; bağlandıktan sonra 6 sn sohbet gelmezse 100 sayılır. */
   protected syncProgress(progress: number, label?: string): void {
     if (this.syncDone && progress < 100) this.syncDone = false;
