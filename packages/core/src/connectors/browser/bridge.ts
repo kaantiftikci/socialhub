@@ -9,6 +9,7 @@ import { bus } from '../../bus.js';
 import { sessionDir } from '../../config.js';
 import { killProcessesMatching } from '../../platform.js';
 import { ensureChromium } from '../../browser-install.js';
+import { browserSlots } from '../../boot-plan.js';
 import { mediaHostAllowed, MEDIA_MAX } from '../../media-hosts.js';
 import { isUiActive, onUiActive } from '../../activity.js';
 import type { Account, Attachment, Chat, ChatKind, Participant, Reaction } from '../../model.js';
@@ -252,8 +253,9 @@ export interface BridgeOptions {
   backfillMs?: number;
 }
 
-/** Açılış yuvaları: etkileşimsiz tarayıcı açılışları sırayla (en çok 2'si birlikte); yuva en geç 45 sn sonra kendiliğinden boşalır */
-const BOOT_SLOTS = 2;
+/** Açılış yuvaları: etkileşimsiz tarayıcı açılışları sırayla (BOOT_SLOTS kadarı birlikte, spawn sırasıyla = boot-plan puanı); yuva en geç 45 sn sonra boşalır */
+// makineye göre (boot-plan.ts browserSlots: çekirdek/3 ve boş bellek/700 MB, 1–4); açılışta bir kez hesaplanır
+const BOOT_SLOTS = browserSlots();
 let bootBusy = 0;
 const bootWaiters: Array<() => void> = [];
 function acquireBootSlot(cancelled: () => boolean): Promise<() => void> {
@@ -432,10 +434,17 @@ export class BrowserConnector extends BaseConnector {
   async start(opts: StartOptions = {}): Promise<void> {
     if (opts.interactive !== false) return this.startInner(opts);
     const release = await acquireBootSlot(() => this.stopping);
+    const t0 = Date.now();
     try {
       if (!this.stopping) await this.startInner(opts);
     } finally {
       release();
+      // ölçülen açılış süresi: sonraki açılışta sıra buna göre (kısa + önemli önce); yalnız bağlandıysa, üstel ortalama
+      if (this.account.status === 'connected') {
+        const prev = Number(this.store.meta(`boot_ms:${this.account.id}`)) || 0;
+        const ms = Date.now() - t0;
+        this.store.setFlag(`boot_ms:${this.account.id}`, String(Math.round(prev ? prev * 0.6 + ms * 0.4 : ms)));
+      }
     }
   }
 

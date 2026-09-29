@@ -12,6 +12,8 @@ export interface Account {
   qrDataUrl?: string;
   /** Bağlı ama kullanıcı eylemi bekliyor (şifreli sohbet PIN'i vb.) */
   attention?: string;
+  /** çekirdek geçici sorunda arka planda yeniden deniyor: uyarı gösterilmez */
+  autoRetry?: boolean;
 }
 
 export interface Chat {

@@ -750,7 +750,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     }
     if(act==='copy'){ (navigator.clipboard?navigator.clipboard.writeText(em.join(', ')):Promise.reject()).then(function(){ toast(em.length+' e-posta kopyalandı'); }).catch(function(){ prompt('E-postalar',em.join(', ')); }); return; }
     if(act==='delete'){
-      if(b.dataset.armed!=='1'){ b.dataset.armed='1'; b.textContent='Emin misin? Tekrar bas'; setTimeout(function(){ b.dataset.armed=''; b.textContent='Sil'; },3500); return; }
+      if(b.dataset.armed!=='1'){ b.dataset.armed='1'; b.textContent='Emin misin? Anahtarları da silinir'; setTimeout(function(){ b.dataset.armed=''; b.textContent='Sil'; },3500); return; }
       b.dataset.armed=''; b.textContent='Sil';
       api('wl_delete',{emails:em}).then(function(d){ WL=WL.filter(function(e){ return em.indexOf(e.email)<0; }); SEL={}; renderList(); toast(d.deleted+' kayıt silindi'); loaded.genel=false; }).catch(function(x){ toast(x.message,true); }); return;
     }
@@ -917,7 +917,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   $('#ppDel').addEventListener('click',function(){
     var b=this, em=Object.keys(PP_SEL).filter(function(k){ return PP_SEL[k]; }); if(!em.length) return;
     if(b.dataset.armed!=='1'){ b.dataset.armed='1'; b.textContent='Emin misin? Tekrar bas'; setTimeout(function(){ if(b.dataset.armed==='1') renderPeople(); },3500); return; }
-    api('member_delete',{emails:em}).then(function(d){ PP_SEL={}; toast(d.deleted+' üye silindi'); loadPeople(); }).catch(function(x){ toast(x.message,true); });
+    api('member_delete',{emails:em}).then(function(d){ PP_SEL={}; toast(d.deleted+' üye silindi'+(d.keys?' · '+d.keys+' lisans anahtarı da silindi':'')); loadPeople(); if(d.keys) loadLicKeys(); }).catch(function(x){ toast(x.message,true); });
   });
   $('#ppSend').addEventListener('click',function(){
     var b=this, em=Object.keys(PP_SEL).filter(function(k){ return PP_SEL[k]&&!PP.some(function(p){ return p.email===k&&p.dupOf; }); });

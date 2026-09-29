@@ -88,7 +88,7 @@ Dil: arayüz ve yorumlar Türkçe.
   ilk kaydolan), ötekiler dupOf → `license_issue` onları ve aynı istekte adı tekrarlayanı ATLAR (`skipped`), arayüzde soluk "Aynı ad" satırı.
   **Admin → Üyeler** (ayrı sayfa `#p-uye`, Lisanslar'dan taşındı; `members` ucu = members.json'dakiler, `member_delete`): ad, e-posta, kaynak (İndirme
   sayfası / Eski demo üyesi), kayıt zamanı, indirme sayısı + son dosya, anahtar durumu; filtre Tümü/Anahtarsız/Gönderilen/Hatalı/Aynı ad; seç → cihaz +
-  süre (vars. 30 gün) → anahtar gönder, Sil (iki tık). Bekleme listesindekilere anahtar: Bekleme listesi toplu çubuğu "Anahtar gönder" (2 cihaz, 30 gün).
+  süre (vars. 30 gün) → anahtar gönder, Sil (iki tık; üyenin e-postası/gönderildiği adres eşleşen lisans anahtarları da silinir → uygulama sonraki denetimde kilitlenir). Bekleme listesindekilere anahtar: Bekleme listesi toplu çubuğu "Anahtar gönder" (2 cihaz, 30 gün).
   Lisanslar sayfasında yalnız e-posta taslağı + anahtar üretme + anahtar listesi. Oluştur formunda "Kime / not" ya da "E-posta"ya tıklayınca kayıtlı kişiler
   (`lic_people`: üyeler + bekleme listesi + demo üyeleri, dupOf hariç) açılır liste `#licPick`: yazarak ad/e-postada arama (Türkçe karakter/büyük-küçük
   harf duyarsız, çok kelime), ↑/↓/Enter/Esc, seçince ad → not, e-posta → e-posta; etkin anahtarı olan "Anahtarı var" rozeti + uyarı. `lib-members.php`
@@ -245,7 +245,21 @@ Dil: arayüz ve yorumlar Türkçe.
   açılınca durum hemen 'pairing' (`launchLogin`), köprü saniyede bir açık sayfa kalmış mı bakar (`watchLoginWindow`, iki ardışık boş denetim;
   macOS'ta son pencere kapanınca bağlam açık kalıp 'close' gelmiyor) → `loginCancelled` ("Bağlı değil"); giriş algılanınca ya da PIN adımında
   (oturum var) bekçi durur. Tarayıcı kanallarında 'connecting'de eşitleme çubuğu BAŞLAMAZ (`syncOnConnecting=false`; çubuk oturum doğrulanınca %45).
-  Açılışta etkileşimsiz tarayıcı kanalları en çok 2'si birlikte kalkar (`acquireBootSlot`, yuva ≤45 sn); kullanıcının "Bağlan"ı sıraya girmez.
+  Açılışta etkileşimsiz tarayıcı kanalları sıraya girer (`acquireBootSlot`, yuva ≤45 sn); kullanıcının "Bağlan"ı sıraya girmez.
+- **Açılış planı (29.09, `boot-plan.ts`)**: hafif kanallar (WhatsApp/Telegram/iMessage/IMAP/pazaryeri) hemen birlikte; tarayıcı kanalları
+  (`isBrowserAccount`, registry) ağırlıklı en kısa iş önce: puan = (1+okunmamış/10)·(0,3+yakınlık)/beklenen süre; süre = hesabın ölçülen
+  açılış süresi (`meta boot_ms:<hesap>`, üstel ortalama, bridge.start yazar) ya da `BROWSER_DEFAULT_MS`. Aynı anda açılan tarayıcı sayısı
+  makineden `browserSlots` (çekirdek/3 ve boş bellek/700 MB'ın küçüğü, 1–4). Günlükte "Açılış sırası …". Test: boot-plan.test.ts.
+- **Kendiliğinden iyileşme (29.09, Kaan: ufacık bağlantı sorununda uyarı çıkmasın, önce arka planda denesin)**: registry `onStatusForHeal`:
+  geçici düşüş (error/detaylı disconnected; ağ, zaman aşımı, tarayıcı çöktü; tarayıcı kanalında "Giriş gerekli/Oturum düştü" pairing) →
+  penceresiz yeniden başlatma 15 sn / 45 sn / 2 dk (±%20); bu sürede `Account.autoRetry` → arayüz uyarı göstermez (`accountIssue` null,
+  nokta 'connecting', Bağlan kartında "Yeniden bağlanılıyor…"). Üçü de tutmazsa uyarı. Denenmeyenler (`transient` hard): şifre/anahtar
+  reddi, 401-406, eksik bilgi, kısıtlama, başka yerde açıldı, captcha/güvenlik doğrulaması, kullanıcı iptali, QR/PIN eşleşmesi. Kullanıcı
+  Yeniden bağlan/iptal/kaldır ya da stopAll zamanlayıcıyı temizler; bağlanınca sayaç sıfırlanır. Test: auto-heal.test.ts.
+- **TikTok sağlamlaştırma (29.09, Kaan: girişten sonra mesaj gelmedi; gerçek DOM görülmedi)**: satır/mesaj seçicilerine bileşen sınıf adı
+  yedekleri (DivItemWrapper/ChatListItem/ConversationItem, DivChatItemWrapper/MessageItemWrapper…), yalnız en dıştaki eşleşme sayılır;
+  `TikTok tanı` artık tüm data-e2e adları + sohbetle ilgili sınıf parçası sayıları + başlık/gövde uzunluğu/giriş düğmesi (içerik yok);
+  sohbet açılıp mesaj okunamazsa bir kez daha tanı. Kaan'dan `TikTok tanı` satırı (ya da `verify-strategy.mjs tiktok` çıktısı) gelince ayarlanacak.
 - **Kaldır hızlı (29.09)**: `registry.remove` hesabı HEMEN gizler (`store.purgeAccount`: `removing` kümesi → listAccounts/getAccount/listChats/
   arama/WS olayları görmez; `purged` hesabın geri dirilmesini engeller) + `account.removed`, yanıt döner; platform çıkışı + durdurma + 2000'lik
   mesaj silme dilimleri + oturum klasörü arka planda (hesap kilidinde). Çekirdek yarıda kapanırsa `meta removing:<id>` → bootAll başlatmaz,

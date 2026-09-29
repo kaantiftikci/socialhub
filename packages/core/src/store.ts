@@ -244,6 +244,17 @@ export class Store {
     return !!this.stmt('SELECT 1 FROM meta WHERE key = ?').get(key);
   }
 
+  /** meta tablosundaki değer (yoksa undefined) */
+  meta(key: string): string | undefined {
+    return (this.stmt('SELECT value FROM meta WHERE key = ?').get(key) as { value?: string } | undefined)?.value;
+  }
+
+  /** Hesap başına okunmamış toplamı ve son etkinlik (açılış sırası için) */
+  accountActivity(): Map<string, { unread: number; lastAt: number }> {
+    const rows = this.stmt('SELECT account_id AS id, SUM(unread) AS unread, MAX(last_message_at) AS lastAt FROM chats GROUP BY account_id').all() as Array<{ id: string; unread: number | null; lastAt: number | null }>;
+    return new Map(rows.map((r) => [r.id, { unread: r.unread ?? 0, lastAt: r.lastAt ?? 0 }]));
+  }
+
   setFlag(key: string, value = '1'): void {
     this.stmt('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
   }

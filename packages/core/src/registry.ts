@@ -33,6 +33,7 @@ import { N11Connector } from './connectors/n11.js';
 import { PttAvmConnector } from './connectors/pttavm.js';
 import { AmazonConnector } from './connectors/amazon.js';
 import { MAIL_PLATFORMS } from './model.js';
+import { bootOrder, browserSlots, type BootInfo } from './boot-plan.js';
 
 /** Hesap ↔ connector eşlemesi. Açılışta kayıtlı hesapları kaldırır, yenilerini oluşturur. */
 /** Asılı kalan stop()/logout() HTTP isteğini sonsuza dek bekletmesin */
@@ -56,11 +57,88 @@ export class Registry {
     return run;
   }
 
+  /**
+   * Kendiliğinden iyileşme (29.09, Kaan: "ufacık bağlantı sorununda uyarı çıkmasın; Yeniden bağlan deyince giriş yapmadan bağlanıyor —
+   * önce arka planda birkaç kez dene"). Geçici görünen düşüşte (ağ/zaman aşımı/tarayıcı çöktü/açılışta oturum geç göründü) hesap
+   * penceresiz (etkileşimsiz) yeniden başlatılır: 15 sn, 45 sn, 2 dk (±%20). Bu sürede `autoRetry` → arayüz uyarı göstermez. Üç deneme
+   * de tutmazsa uyarı çıkar. Şifre reddi, kısıtlama, captcha/güvenlik doğrulaması, QR/PIN bekleyen eşleşme, kullanıcı iptali denenmez
+   * (tekrarlı deneme hesabı kilitleyebilir ya da kullanıcı eylemi gerekir).
+   */
+  private heal = new Map<string, { tries: number; timer?: NodeJS.Timeout; conn?: Connector }>();
+  private halted = false;
+  private static HEAL_DELAYS = [15_000, 45_000, 120_000];
+
+  private transient(a: Account): boolean {
+    const d = (a.detail ?? '').replace(/\s+/g, ' ');
+    const hard =
+      /reddedildi|şifre|parola|kimlik doğrulama|yetkisiz|unauthori[sz]ed|invalid|authenticationfailed|login failed|auth(entication)? failed|\b40[1-6]\b|api anahtar|girilmedi|yalnızca macos|bulunamadı|tam disk|playwright paketi|kısıtlan|başka bir yerde|giriş yapılmadı|iptal|doğrulanamadı|captcha|güvenlik doğrulaması|lisans/i;
+    if (a.status === 'error') return !hard.test(d);
+    if (a.status === 'disconnected') return !!d && !hard.test(d);
+    // açılışta ya da yoklamada "giriş gerekli / oturum düştü" (sayfa geç çizildi, ağ koptu): yalnız tarayıcı kanallarında, penceresiz yeniden denetim
+    if (a.status === 'pairing') return /giriş gerekli|oturum düştü/i.test(d) && this.connectors.get(a.id) instanceof BrowserConnector;
+    return false;
+  }
+
+  private onStatusForHeal(a: Account): void {
+    const h = this.heal.get(a.id);
+    if (a.status === 'connected') {
+      if (h) {
+        clearTimeout(h.timer);
+        this.heal.delete(a.id);
+      }
+      return;
+    }
+    if (a.status === 'connecting') {
+      if (h) a.autoRetry = true; // deneme sürüyor
+      return;
+    }
+    const c = this.connectors.get(a.id);
+    if (this.halted || !c || this.store.isRemoving(a.id) || !this.transient(a)) {
+      if (h && !h.timer) this.heal.delete(a.id);
+      return;
+    }
+    const st = h ?? { tries: 0 };
+    if (st.timer) {
+      a.autoRetry = true;
+      return;
+    }
+    if (st.tries >= Registry.HEAL_DELAYS.length) {
+      // denemeler bitti: uyarı çıksın (sonraki başarılı bağlanmada sayaç sıfırlanır)
+      return;
+    }
+    const delay = Registry.HEAL_DELAYS[st.tries] * (0.8 + Math.random() * 0.4);
+    st.tries++;
+    st.conn = c;
+    st.timer = setTimeout(() => void this.healNow(a.id, st), delay);
+    st.timer.unref?.();
+    this.heal.set(a.id, st);
+    a.autoRetry = true; // bu olay (arayüze giden kopya) uyarısız gösterilsin
+    bus.log('info', `${a.platform}: geçici sorun (${(a.detail ?? a.status).slice(0, 80)}); ${Math.round(delay / 1000)} sn sonra arka planda yeniden denenecek (${st.tries}/${Registry.HEAL_DELAYS.length})`);
+  }
+
+  private healNow(id: string, st: { tries: number; timer?: NodeJS.Timeout; conn?: Connector }): Promise<void> {
+    return this.serial(id, async () => {
+      st.timer = undefined;
+      const a = this.store.getAccount(id);
+      const c = this.connectors.get(id);
+      // bu arada kullanıcı yeniden bağladı / kaldırdı / düzeldi: dokunma
+      if (!a || this.halted || c !== st.conn || a.status === 'connected' || a.status === 'connecting') return;
+      if (!this.transient(a)) return;
+      this.connectors.delete(id);
+      if (c) await withTimeout(c.stop(), 15_000).catch(() => undefined);
+      const last = st.tries >= Registry.HEAL_DELAYS.length;
+      await this.spawn(a, false);
+      // son deneme de düşerse onStatusForHeal yeni zamanlayıcı kurmaz → uyarı görünür; kurulmuşsa bir sonraki denemeyi bekler
+      if (last) bus.log('info', `${a.platform}: son otomatik yeniden deneme başlatıldı`);
+    }).catch((e) => bus.log('warn', `${id} otomatik yeniden deneme: ${(e as Error).message}`));
+  }
+
   /** Bu oturumda "Bağlan" ile açılmış ve henüz hiç bağlanmamış hesaplar: giriş iptal edilince tamamen kaldırılır */
   private fresh = new Set<string>();
 
   constructor(private store: Store) {
     bus.on((ev) => {
+      if (ev.type === 'account.status') this.onStatusForHeal(ev.account);
       // tarayıcı girişli e-posta hesabı bağlanınca önceki denemelerden kalan boş kopyaları temizle
       if (ev.type === 'account.status' && ev.account.status === 'connected') {
         this.fresh.delete(ev.account.id);
@@ -76,6 +154,7 @@ export class Registry {
    * kaldırılır ('removed' + account.removed olayı), var olan hesabın bağlanma denemesi durdurulur ('stopped'). Bağlıysa dokunulmaz.
    */
   cancelLogin(id: string): Promise<'removed' | 'stopped' | 'none'> {
+    this.stopHeal(id);
     return this.serial(id, async () => {
       const a = this.store.getAccount(id);
       if (!a || a.status === 'connected') return 'none';
@@ -111,10 +190,11 @@ export class Registry {
   }
 
   list(): Account[] {
-    // attention kalıcı değil: çalışan connector'dan eklenir
+    // attention kalıcı değil: çalışan connector'dan eklenir; autoRetry arka plan denemesi sürerken
     return this.store.listAccounts().map((a) => {
       const att = (this.connectors.get(a.id) as { attention?: string } | undefined)?.attention;
-      return att ? { ...a, attention: att } : a;
+      const retry = a.status !== 'connected' && !!this.heal.get(a.id)?.timer;
+      return att || retry ? { ...a, ...(att ? { attention: att } : {}), ...(retry ? { autoRetry: true } : {}) } : a;
     });
   }
 
@@ -123,12 +203,26 @@ export class Registry {
   }
 
   async bootAll(): Promise<void> {
+    this.halted = false;
     // yarıda kalmış kaldırmalar: bu hesaplar başlatılmaz, verisi silinir
     const purging = new Set(this.store.pendingPurges());
     if (purging.size) this.resumePurges();
-    for (const a of this.store.listAccounts()) {
-      if (purging.has(a.id)) continue;
-      if (a.platform === 'demo') continue;
+    // sıra: hafif kanallar hemen, tarayıcı kanalları puana göre (boot-plan.ts); köprü açılış yuvaları bu sırayla dolar
+    const act = this.store.accountActivity();
+    const infos: BootInfo[] = this.store
+      .listAccounts()
+      .filter((a) => !purging.has(a.id) && a.platform !== 'demo')
+      .map((a) => ({
+        account: a,
+        browser: isBrowserAccount(a),
+        unread: act.get(a.id)?.unread ?? 0,
+        lastAt: act.get(a.id)?.lastAt ?? 0,
+        estMs: Number(this.store.meta(`boot_ms:${a.id}`)) || undefined,
+      }));
+    const order = bootOrder(infos);
+    const heavy = order.filter((b) => b.browser);
+    if (heavy.length) bus.log('info', `Açılış sırası (tarayıcı kanalları, aynı anda ${browserSlots()}): ${heavy.map((b) => `${b.account.platform}${b.unread ? `(${b.unread} okunmamış)` : ''}`).join(' → ')}`);
+    for (const { account: a } of order) {
       try {
         await this.spawn(a, false);
       } catch (e) {
@@ -217,6 +311,7 @@ export class Registry {
   remove(id: string): Promise<void> {
     if (!this.store.getAccount(id) && !this.connectors.has(id)) return Promise.reject(new Error('Hesap yok'));
     this.fresh.delete(id);
+    this.stopHeal(id);
     const c = this.connectors.get(id);
     this.connectors.delete(id);
     const purge = this.store.purgeAccount(id);
@@ -252,7 +347,14 @@ export class Registry {
     return this.serial(id, () => this.restartNow(id, opts));
   }
 
+  private stopHeal(id: string): void {
+    const h = this.heal.get(id);
+    if (h) clearTimeout(h.timer);
+    this.heal.delete(id);
+  }
+
   private async restartNow(id: string, opts: { external?: boolean } = {}): Promise<void> {
+    this.stopHeal(id);
     const a = this.store.getAccount(id);
     if (!a) throw new Error('Hesap yok');
     const c = this.connectors.get(id);
@@ -436,8 +538,32 @@ export class Registry {
   }
 
   async stopAll(): Promise<void> {
+    this.halted = true;
+    for (const id of [...this.heal.keys()]) this.stopHeal(id);
     // tek bir asılı stop() kapanışı sonsuza dek bekletmesin
     await Promise.all([...this.connectors.values()].map((c) => withTimeout(c.stop(), 10_000).catch(() => undefined)));
+  }
+}
+
+/** Hesap tarayıcı köprüsüyle mi çalışacak (spawn'daki seçimle aynı: token dosyası yoksa tarayıcı yolu) */
+function isBrowserAccount(a: Account): boolean {
+  const hasToken = readToken(a.id) !== undefined;
+  switch (a.platform) {
+    case 'linkedin':
+    case 'instagram':
+    case 'x':
+    case 'messenger':
+    case 'tiktok':
+      return true;
+    case 'slack':
+    case 'gmail':
+    case 'outlook':
+    case 'icloud':
+    case 'yahoo':
+    case 'yandex':
+      return !hasToken;
+    default:
+      return false;
   }
 }
 

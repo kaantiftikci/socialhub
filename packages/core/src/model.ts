@@ -19,6 +19,8 @@ export interface Account {
   createdAt: number;
   /** Bağlı ama kullanıcı eylemi bekleyen durum (ör. "şifreli sohbetler için PIN gerekli"); kalıcı değil, connector'dan gelir */
   attention?: string;
+  /** Geçici bağlantı sorunu: çekirdek arka planda kendiliğinden yeniden deniyor (arayüz uyarı göstermez); denemeler bitince kalkar */
+  autoRetry?: boolean;
 }
 
 export type ChatKind = 'direct' | 'group' | 'channel';

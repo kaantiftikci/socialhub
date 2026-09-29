@@ -1007,7 +1007,18 @@ if ($a === 'member_delete' && $method === 'POST') {
         $members = array_values(array_filter($members, fn ($x) => !isset($emails[strtolower((string) ($x['email'] ?? ''))])));
         return $before - count($members);
     });
-    out(['ok' => true, 'deleted' => $n]);
+    // üyenin lisans anahtarları da silinir (e-posta ya da gönderildiği adres eşleşen): masaüstü uygulaması sonraki denetimde
+    // (≤30 dk, öne gelince hemen) "geçersiz" alıp kilitlenir. Yalnız üyesi silinen adresler; bekleme listesine dokunulmaz.
+    $keys = with_json('licenses.json', ['keys' => []], function (array &$d) use ($emails) {
+        $b = count($d['keys']);
+        $d['keys'] = array_values(array_filter($d['keys'], function ($k) use ($emails) {
+            $e = strtolower(trim((string) ($k['email'] ?? '')));
+            $t = strtolower(trim((string) ($k['sentTo'] ?? '')));
+            return !(($e !== '' && isset($emails[$e])) || ($t !== '' && isset($emails[$t])));
+        }));
+        return $b - count($d['keys']);
+    });
+    out(['ok' => true, 'deleted' => $n, 'keys' => $keys]);
 }
 
 /** Anahtarı e-postayla gönder; sonucu anahtar kaydına yaz, başarıda bekleme listesinde "Davet edildi" */

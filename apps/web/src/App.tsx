@@ -1046,7 +1046,7 @@ export default function App() {
               <Icon name="alert" size={14} sw={2.2} />
             </span>
           ) : (
-            <span className={`dot ${a.status}`} style={{ marginLeft: 8 }} />
+            <span className={`dot ${a.autoRetry && a.status !== 'connected' ? 'connecting' : a.status}`} style={{ marginLeft: 8 }} />
           )}
           {sync[a.id] && <SyncBar compact progress={/%\d+/.test(a.detail ?? '') ? Number((a.detail ?? '').match(/%(\d+)/)?.[1] ?? 0) : sync[a.id].progress} since={sync[a.id].since} />}
         </button>
@@ -1832,6 +1832,8 @@ function accountIssue(a: Account): { title: string; how: string; label: string; 
   const name = PLATFORMS[a.platform].name;
   const browser = PLATFORMS[a.platform].mode === 'browser';
   const detail = (a.detail ?? '').replace(/\s+/g, ' ').trim();
+  // geçici kopma: çekirdek arka planda kendiliğinden yeniden deniyor (registry heal) — denemeler bitmeden uyarı yok
+  if (a.autoRetry && a.status !== 'connected') return null;
   // Şifre/anahtar reddedildiyse "Yeniden bağlan" aynı bilgiyle tekrar dener ve sessizce yine düşer → bilgileri güncelleme formunu aç
   // Yahoo: uygulama şifresi reddedildi (Yahoo birçok hesapta kapattı) → tarayıcı girişi. Aynı şifreyle yeniden deneme yok (kilitlenme riski)
   // Yandex: aynı — uygulama şifresi yerine normal şifreyle tarayıcı girişi

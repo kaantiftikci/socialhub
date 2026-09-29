@@ -847,6 +847,7 @@ const STATUS_RANK: Record<Account['status'], number> = { connected: 0, connectin
 const QR_CANCEL = new Set<Platform>(['whatsapp', 'telegram']);
 
 function statusText(a: Account): string {
+  if (a.autoRetry && a.status !== 'connected') return 'Yeniden bağlanılıyor…';
   return { connected: 'Bağlı', connecting: 'Bağlanıyor…', pairing: 'Eşleşme bekleniyor', disconnected: 'Bağlı değil', error: 'Hata' }[a.status];
 }
 

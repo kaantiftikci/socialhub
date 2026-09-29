@@ -21,8 +21,12 @@ import type { Attachment } from '../../model.js';
  * - Doğrulama (kaydırmalı captcha) çıkarsa yoklama durur ('captcha' → köprü 'pairing'); Yeniden bağlan görünür pencerede tamamlatır.
  */
 const HOME = 'https://www.tiktok.com/messages';
-const LIST_ITEM = '[data-e2e="chat-list-item"]';
-const MSG_ITEM = '[data-e2e="chat-item"]';
+// data-e2e önce; TikTok zaman zaman test özniteliklerini kaldırıyor → bileşen sınıf adı parçaları yedek (css-<hash>-DivItemWrapper…).
+// İç içe eşleşmeler (satırın içindeki alt parça) `outer()` ile elenir: yalnız en dıştaki satır sayılır.
+const LIST_ITEM =
+  '[data-e2e="chat-list-item"], [data-e2e="conversation-item"], [class*="DivItemWrapper"][class*="Chat"], [class*="ChatListItem"], [class*="ConversationItem"], [class*="ConversationListItem"]';
+const MSG_ITEM =
+  '[data-e2e="chat-item"], [data-e2e="message-item"], [class*="DivChatItemWrapper"], [class*="ChatItemWrapper"], [class*="MessageItemWrapper"], [class*="DivMessageContainer"]';
 const TIME_SEP = '[data-e2e="chat-time"], [class*="TimeContainer"], [class*="DivTimeWrapper"]';
 const INPUT = '[data-e2e="message-input-area"] [contenteditable="true"], [data-e2e="message-input-area"] textarea, [class*="DraftEditor-root"] [contenteditable="true"]';
 const SEND_BTN = '[data-e2e="message-send"]';
@@ -68,6 +72,7 @@ async function ensureInbox(page: Page, timeout = 20_000): Promise<boolean> {
 }
 
 let diagDone = false;
+let msgDiagDone = false;
 let listWarned = false;
 /** Bir kez: seçici sayıları ve sohbetle ilgili data-e2e adları (içerik yazılmaz) → seçiciler gerçek sayfaya göre ayarlanır */
 async function diagnose(page: Page): Promise<void> {
@@ -80,7 +85,19 @@ async function diagnose(page: Page): Promise<void> {
         const e2e = Array.from(new Set(Array.from(document.querySelectorAll('[data-e2e]')).map((e) => e.getAttribute('data-e2e') ?? '')))
           .filter((k) => /chat|message|inbox|dm|conversation|msg/i.test(k))
           .slice(0, 40);
-        return { path: location.pathname, list: n(list), items: n(item), input: n(input), e2e };
+        // bileşen adları (css-<hash>-DivChatBox → DivChatBox): sohbetle ilgili sınıf parçaları ve sayıları — metin/içerik YOK
+        const parts = new Map<string, number>();
+        for (const e of Array.from(document.querySelectorAll('[class]')).slice(0, 6000)) {
+          for (const c of (e.getAttribute('class') ?? '').split(/\s+/)) {
+            const m = c.match(/^(?:css|tiktok)-[\w]+-(\w+)$/);
+            const k = m ? m[1] : '';
+            if (k && /chat|message|conversation|inbox|msg|item|list|nick|extract|time|unread/i.test(k)) parts.set(k, (parts.get(k) ?? 0) + 1);
+          }
+        }
+        const cls = [...parts].sort((a, b) => b[1] - a[1]).slice(0, 40).map(([k, v]) => `${k}:${v}`);
+        const allE2e = Array.from(new Set(Array.from(document.querySelectorAll('[data-e2e]')).map((e) => e.getAttribute('data-e2e') ?? ''))).slice(0, 60);
+        const login = !!document.querySelector('[data-e2e="top-login-button"], [data-e2e*="login"]');
+        return { path: location.pathname, title: document.title.slice(0, 60), bodyLen: document.body?.innerText.length ?? 0, login, list: n(list), items: n(item), input: n(input), e2e, allE2e, cls };
       },
       { list: LIST_ITEM, item: MSG_ITEM, input: INPUT },
     )
@@ -93,7 +110,8 @@ function readList(page: Page): Promise<ListRow[]> {
     const txt = (el: Element | null | undefined) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
     const TIME_RE = /^(\d{1,2}[:.]\d{2}|\d{1,2}[./-]\d{1,2}([./-]\d{2,4})?|dün|yesterday|pzt|sal|çar|per|cum|cmt|paz|mon|tue|wed|thu|fri|sat|sun|\d+\s*(dk|sa|g|gün|hf|m|min|h|d|w)\b.*)$/i;
     const out: ListRow[] = [];
-    for (const it of Array.from(document.querySelectorAll(sel))) {
+    const all = Array.from(document.querySelectorAll(sel));
+    for (const it of all.filter((e) => !e.parentElement?.closest(sel))) {
       const leaves = Array.from(it.querySelectorAll('p, span, div, strong'))
         .filter((e) => !e.children.length)
         .map((e) => txt(e))
@@ -219,7 +237,7 @@ async function openThread(page: Page, id: string): Promise<void> {
   const head = await readHeader(page);
   const already = head.name && head.name === rows[idx].name && (await page.locator(INPUT).count().catch(() => 0)) > 0;
   if (!already) {
-    await page.evaluate(({ sel, i }) => (document.querySelectorAll(sel)[i] as HTMLElement | undefined)?.click(), { sel: LIST_ITEM, i: idx });
+    await page.evaluate(({ sel, i }) => (Array.from(document.querySelectorAll(sel)).filter((e) => !e.parentElement?.closest(sel))[i] as HTMLElement | undefined)?.click(), { sel: LIST_ITEM, i: idx });
     await waitForMessages(page, 12_000);
   }
   const h = await readHeader(page);
@@ -286,6 +304,7 @@ function readItems(page: Page, mine: string): Promise<RawItem[]> {
       const mainRect = main.getBoundingClientRect();
       const out: RawItem[] = [];
       for (const el of Array.from(document.querySelectorAll(`${item}, ${sep}`))) {
+        if (el.matches(item) && el.parentElement?.closest(item)) continue; // satırın içindeki parça
         if (!el.matches(item)) {
           if (el.closest(item)) continue; // mesajın içindeki saat
           const t = txt(el);
@@ -426,7 +445,15 @@ export const tiktok: Strategy = {
     await openThread(page, threadId);
     if (before) await loadOlder(page, 3);
     const head = await readHeader(page);
-    const msgs = toMessages(threadId, head.name, await readItems(page, myHandle));
+    const items = await readItems(page, myHandle);
+    // sohbet açıldı ama mesaj satırı bulunamadı: sayfa düzenini (içeriksiz) bir kez günlüğe yaz
+    if (!items.some((i) => i.sep === undefined) && !msgDiagDone) {
+      msgDiagDone = true;
+      diagDone = false;
+      bus.log('warn', 'TikTok: sohbet açıldı ama mesajlar okunamadı; sayfa düzeni tanısı:');
+      await diagnose(page);
+    }
+    const msgs = toMessages(threadId, head.name, items);
     const out = before ? msgs.filter((m) => m.ts < before) : msgs;
     return out.slice(-limit);
   },
