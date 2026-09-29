@@ -140,6 +140,11 @@ export class MailConnector extends BaseConnector {
   /** Kimlik reddedildi: otomatik deneme yok (tekrarlı başarısız giriş "Too many login failures" kilidine götürür) */
   private authFailed = false;
 
+  /** Registry kendiliğinden iyileşmede okur: sağlayıcının istediği bekleme (ms) — yeni oturum bundan önce açılmasın */
+  get retryAfterMs(): number {
+    return Math.max(0, this.pauseUntil - Date.now());
+  }
+
   constructor(account: BaseConnector['account'], store: BaseConnector['store'], cfg: MailConfig) {
     super(account, store);
     this.cfg = { ...PRESETS[account.platform], ...cfg };
@@ -330,8 +335,16 @@ export class MailConnector extends BaseConnector {
    * ETHROTTLE → throttleReset kadar bekle; [ALERT]/[LIMIT]/çok fazla eşzamanlı bağlantı → 15 dk bekle.
    */
   private classify(e: unknown): void {
-    const err = e as { authenticationFailed?: boolean; code?: string; throttleReset?: number; message?: string; response?: string; responseText?: string };
-    const text = `${err.message ?? ''} ${err.response ?? ''} ${err.responseText ?? ''}`;
+    const err = e as { authenticationFailed?: boolean; code?: string; throttleReset?: number; message?: string; response?: string; responseText?: string; reason?: string };
+    // reason: karşılama/BYE ile kapanan bağlantıda sunucu metni ("* BYE Too many simultaneous connections") yalnız burada
+    const text = `${err.message ?? ''} ${err.response ?? ''} ${err.responseText ?? ''} ${err.reason ?? ''}`;
+    // Sınır kalıbı kimlik denetiminden ÖNCE: imapflow LOGIN'e gelen her NO'da authenticationFailed koyar → Gmail'in
+    // "NO [ALERT] Too many simultaneous connections" yanıtı yanlış şifre sanılıyordu. Yalın [ALERT] burada sayılmaz
+    // (Gmail yanlış şifre/web girişi uyarılarında da [ALERT] kullanıyor); o, kimlik denetiminden sonra.
+    if (/\[LIMIT\]|Too many simultaneous|too many connections|bandwidth limits/i.test(text)) {
+      this.limitPause();
+      return;
+    }
     if (err.authenticationFailed || /AUTHENTICATIONFAILED|Invalid credentials|Web login required|LOGIN failed|Authentication failed|incorrect (username|password)/i.test(text)) {
       this.authFailed = true;
       if (this.timer) clearTimeout(this.timer);
@@ -340,10 +353,12 @@ export class MailConnector extends BaseConnector {
       return;
     }
     if (err.code === 'ETHROTTLE') this.pauseUntil = Date.now() + Math.max(err.throttleReset ?? 60_000, 30_000);
-    else if (/\[ALERT\]|\[LIMIT\]|Too many simultaneous|too many connections|bandwidth limits/i.test(text)) {
-      this.pauseUntil = Date.now() + 15 * 60_000;
-      bus.log('warn', `${this.account.platform}: sağlayıcı sınırı bildirdi, 15 dk bekleniyor`);
-    }
+    else if (/\[ALERT\]/i.test(text)) this.limitPause();
+  }
+
+  private limitPause(): void {
+    this.pauseUntil = Date.now() + 15 * 60_000;
+    bus.log('warn', `${this.account.platform}: sağlayıcı sınırı bildirdi, 15 dk bekleniyor`);
   }
 
   private retryIdle(): void {

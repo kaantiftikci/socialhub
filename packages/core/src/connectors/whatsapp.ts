@@ -243,7 +243,11 @@ export class WhatsAppConnector extends BaseConnector {
       this.store.transaction(() => {
         while (this.histQueue.length && Date.now() - t0 < 25) {
           const job = this.histQueue[0];
-          for (const m of job.msgs.splice(0, 150)) {
+          // Süre her mesajda denetlenir (eskiden 150'lik parça sonrası: büyük sohbette mesaj başı maliyet artınca dilim
+          // yüzlerce ms'ye çıkıyordu). Kalan mesajlar kuyrukta bekler; en az bir mesaj yazılır (ilerleme garantisi).
+          let n = 0;
+          while (n < job.msgs.length && (n === 0 || Date.now() - t0 < 25)) {
+            const m = job.msgs[n++];
             try {
               this.ingest(m, false);
             } catch (e) {
@@ -253,6 +257,7 @@ export class WhatsAppConnector extends BaseConnector {
               }
             }
           }
+          job.msgs.splice(0, n);
           if (!job.msgs.length) {
             this.histQueue.shift();
             if (job.onDone) done.push(job.onDone);
