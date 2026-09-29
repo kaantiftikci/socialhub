@@ -28,6 +28,7 @@ const PATHS: Record<string, ReactNode> = {
   moon: (<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" />),
   monitor: (<><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></>),
   bell: (<><path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z" /><path d="M10 21h4" /></>),
+  belloff: (<><path d="M8.6 5.2A6 6 0 0 1 18 11v4" /><path d="M6 11v5l-1.5 2H17" /><path d="M10 21h4" /><path d="M3 3l18 18" /></>),
   archive: (<><rect x="3" y="4" width="18" height="5" rx="1.5" /><path d="M5 9v9.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V9M10 13h4" /></>),
   plus: <path d="M12 5v14M5 12h14" />,
   download: (<><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5" /><path d="M5 19h14" /></>),

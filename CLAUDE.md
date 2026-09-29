@@ -555,6 +555,12 @@ Dil: arayüz ve yorumlar Türkçe.
   kimlik alanları "Gelişmiş" arkasında; kart yöntem metinleri kısa (`types.ts` method).
 - Bağlan: "resmi değil" etiketi kullanıcı isteğiyle KALDIRILDI (yalnız Sosyal Medya altındaki açıklama). Kart durumu en iyi durumdaki hesaptan
   (`STATUS_RANK`, bağlı önde; birden çoksa "· N hesap"), alt satırda bağlı hesabın adresi/@kullanıcı adı (`accountLabel`; genel adsa yöntem metni).
+- **İzin uyarısı** (`PermissionBanner.tsx`, 29.09, Kaan: Claude'un "Notifications are turned off" kartı gibi): yalnız Tauri + kurulumdan sonra, sağ üstte
+  tek kart `.perm-card` (üstü çizili zil `belloff` / kilit / mikrofon / gönder simgesi, metin, "Sistem Ayarları’nı aç", ✕). Öncelik bildirim (plugin
+  `isPermissionGranted` false) → Tam Disk Erişimi (iMessage hesabı varsa, `/api/permissions` fullDisk false) → mikrofon (permissions.query denied) →
+  Mesajlar otomasyonu (kurulumda denied). Düğme: bildirimde önce `requestPermission`, olmazsa `openPermissionPane` (Windows ms-settings:). ✕ o izni
+  3 gün gizler (`mivelo.permDismiss`); 4 sn sonra, odakta ve 30 sn'de bir yeniden denetlenir (izin verilince kaybolur).
+- Kenar çubuğu menüsü (`.nav-item`) 31 px + 1 px aralık (eski 36+2; Kaan: Claude'daki gibi daha sık).
 - Parola alanları `PasswordInput` (ui.tsx): sağdaki göze BASILI TUTUNCA görünür, bırakınca gizlenir (Bağlan formları, 2FA istemi, AI anahtarı, giriş).
 - **Mivelo içi giriş** (VARSAYILAN DEĞİL — Kaan isteğiyle kapatıldı, düğmeler tepki vermiyordu; yalnız `MIVELO_LOGIN_EMBED=1` ile; varsayılan ayrı `--app` penceresi; `bridge.launchLogin`): giriş sayfası GÖRÜNMEZ tarayıcıda açılır (görünürlük taklidi yok, 820×700, DPR 2),
   CDP `Page.startScreencast` kareleri `login.frame` olayıyla (JPEG base64) arayüze; `apps/web/src/LoginView.tsx` üst katmanda gösterir
@@ -615,6 +621,11 @@ Dil: arayüz ve yorumlar Türkçe.
   artmazsa `inspector.Session.connectToMainThread` + Debugger.pause → o an çalışan JS yığını (işlev dosya:satır, içerik yok) + son günlük satırı
   DOĞRUDAN stderr'e (core.log) "Olay döngüsü N sn'dir yanıt vermiyor — yığın: …"; yerel kodda (SQLite/execSync) "yerel kodda bekliyor", yığın dönünce;
   çözülünce "yeniden yanıt veriyor (N sn kilitliydi)". Kapatmak `MIVELO_STALL_WATCH=0`. Kaan'dan: `grep -E "yanıt vermiyor|kilitliydi" ~/.mivelo/core.log`.
+  (6) Arayüz açılışı (29.09, Kaan: %27'de uzun süre, sonra hesaplar çok yavaş geliyor): eskiden `refresh()` (accounts+chats+health) 12 sn yarışla
+  döngüdeydi → yavaşta vazgeçip YENİSİNİ gönderiyor, eskiler çekirdekte çalışmaya devam edip yığılıyordu; WS açılışı da ayrıca refresh çağırıyordu.
+  Şimdi önce yalnız `/api/health` (deneme ≤8 sn, toplam 150 sn), sonra `refresh` TEK istekle zaman aşımsız (ağ hatasında ≤4); `refresh` tek uçuş
+  (`refreshing` ref: açılış + WS aynı sözü paylaşır). `booting` 'core' | 'data' ("Sohbetler yükleniyor…", 1,5 sn'den uzunsa).
+  Ölçüm (Linux, 5222 sohbet/280 bin mesaj): listChats 0,25 sn + JSON 1,3 MB 26 ms; dropTwins 136 ms — sohbet listesi darboğaz değil.
 
 ## Sunucu/arayüz sözleşmesi
 - CORS: localhost/127.0.0.1/tauri.localhost/tauri://localhost ve WKWebView'ın `null` kaynağı (paketli uygulama!).

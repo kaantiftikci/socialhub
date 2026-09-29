@@ -1,6 +1,7 @@
 import { FeedbackButton } from './Feedback';
 import { LoginView, pushLoginEvent } from './LoginView';
 import { UpdateBanner } from './UpdateBanner';
+import { PermissionBanner } from './PermissionBanner';
 import { trPreview } from './reaction-text';
 import { clearOpening as clearOpeningFor, markOpening, useLoginOpening } from './login-opening';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -137,7 +138,7 @@ export default function App() {
   useEffect(() => {
     if (!isMobile) setNavOpen(false);
   }, [isMobile]);
-  const [booting, setBooting] = useState(false);
+  const [booting, setBooting] = useState<false | 'core' | 'data'>(false);
   const [bootSince] = useState(() => Date.now());
   // gece/gündüz düğmesi: görünen tema (sistem teması değişince de güncellenir)
   const [theme, setThemeState] = useState<'light' | 'dark'>(() => resolvedTheme());
@@ -294,7 +295,19 @@ export default function App() {
     api.restartAccount(a.id).catch((e) => (clearOpeningFor(a.id), notify(e.message, true)));
   };
 
-  const refresh = useCallback(async () => {
+  // tek uçuş: açılış döngüsü + WS yeniden bağlanması aynı anda istese de çekirdeğe tek /api/chats gider (eskiden yavaş açılışta
+  // 12 sn'de bir vazgeçilip yenisi gönderiliyor, eskiler çekirdekte çalışmaya devam edip yığılıyordu)
+  const refreshing = useRef<Promise<void> | null>(null);
+  const refresh = useCallback((): Promise<void> => {
+    if (refreshing.current) return refreshing.current;
+    const p = refreshNow().finally(() => {
+      refreshing.current = null;
+    });
+    refreshing.current = p;
+    return p;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const refreshNow = async () => {
     const [a, c, h] = await Promise.all([api.accounts(), api.chats(), api.health()]);
     setAccounts(a);
     setQr((q) => {
@@ -305,7 +318,7 @@ export default function App() {
     setFallbackProfileName(h.user);
     setChats(new Map(c.map((x) => [x.id, x])));
     setAi(h.ai);
-  }, []);
+  };
 
   // ---- olay akışı ----
   useEffect(() => {
@@ -337,15 +350,31 @@ export default function App() {
       let lastErr = '';
       // ilk açılışta (macOS'un gömülü node'u taraması, veritabanı/Anahtar Zinciri kurulumu) çekirdek 1-2 dk sürebilir; asılı kalan
       // istek döngüyü dondurmasın diye her deneme en çok 12 sn
-      while (!cancelled && Date.now() - t0 < 120_000) {
+      // 1) yalnız hafif sağlık isteğiyle çekirdeğin ayakta olduğunu bekle (her deneme ≤8 sn)
+      let alive = false;
+      while (!cancelled && Date.now() - t0 < 150_000) {
         try {
-          await Promise.race([refresh(), new Promise((_, rej) => setTimeout(() => rej(new Error('Çekirdek yanıt vermiyor (12 sn)')), 12_000))]);
+          await Promise.race([api.health(), new Promise((_, rej) => setTimeout(() => rej(new Error('Çekirdek yanıt vermiyor')), 8_000))]);
+          alive = true;
+          break;
+        } catch (e) {
+          lastErr = String((e as Error).message);
+          setBooting('core');
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+      }
+      // 2) çekirdek ayakta: sohbetleri TEK istekle yükle; yavaşsa beklenir, vazgeçilip yenisi gönderilmez (ağ hatasında birkaç kez)
+      for (let i = 0; alive && !cancelled && i < 4; i++) {
+        try {
+          if (i === 0) setBooting((b) => (b ? 'data' : b));
+          // hızlıysa yazı hiç görünmesin; 1,5 sn'yi geçerse "Sohbetler yükleniyor"
+          const slow = window.setTimeout(() => setBooting('data'), 1500);
+          await refresh().finally(() => clearTimeout(slow));
           setBooting(false);
           return;
         } catch (e) {
           lastErr = String((e as Error).message);
-          setBooting(true);
-          await new Promise((r) => setTimeout(r, 1000));
+          await new Promise((r) => setTimeout(r, 2000));
         }
       }
       if (cancelled) return;
@@ -1166,7 +1195,7 @@ export default function App() {
 
       {booting && (
         <div className="booting" role="status">
-          <span className="spin" /> Çekirdek başlatılıyor…{Date.now() - bootSince > 20_000 ? ' İlk açılışta 1-2 dakika sürebilir.' : ''}
+          <span className="spin" /> {booting === 'data' ? 'Sohbetler yükleniyor…' : `Çekirdek başlatılıyor…${Date.now() - bootSince > 20_000 ? ' İlk açılışta 1-2 dakika sürebilir.' : ''}`}
         </div>
       )}
       <div className="surface">
@@ -1186,7 +1215,7 @@ export default function App() {
               {(booting || Object.keys(sync).length > 0) && (
                 <div className="synctop">
                   <SyncBar progress={booting ? 5 : Math.min(...Object.values(sync).map((s) => s.progress))} since={booting ? bootSince : Math.min(...Object.values(sync).map((s) => s.since))} />
-                  <span className="synclbl">{booting ? 'Çekirdek başlatılıyor' : `${Object.keys(sync).length} kanal eşitleniyor`}</span>
+                  <span className="synclbl">{booting === 'data' ? 'Sohbetler yükleniyor' : booting ? 'Çekirdek başlatılıyor' : `${Object.keys(sync).length} kanal eşitleniyor`}</span>
                 </div>
               )}
               {isMobile && (
@@ -1492,6 +1521,7 @@ export default function App() {
 
       <LoginView accounts={accounts} />
       <UpdateBanner />
+      <PermissionBanner hasIMessage={accounts.some((a) => a.platform === 'imessage')} />
       <FeedbackButton />
 
       {settingsP.value && (
