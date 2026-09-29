@@ -347,7 +347,7 @@ export function SplashMark({ size = 96, animate = true }: { size?: number; anima
 
 /**
  * Açılış animasyonu: ortada logo (kare → kıvrım → nokta), altında "mivelo"; sonra katman yumuşakça büyüyüp saydamlaşırken
- * alttaki uygulama görünür. full: lisans etkinleşince / kurulumdan sonra (≈5,5 sn); quick: sonraki açılışlarda (≈2,6 sn).
+ * alttaki uygulama görünür. full: lisans etkinleşince / kurulumdan sonra (≈3,8 sn); quick: sonraki açılışlarda (≈1,8 sn). Alt yazı yok (Kaan).
  * ready=false iken (lisans durumu daha gelmedi) en kısa süre dolsa da kapanmaz.
  */
 export function Splash({ mode, ready = true, onDone }: { mode: 'full' | 'quick'; ready?: boolean; onDone: () => void }) {
@@ -357,8 +357,8 @@ export function Splash({ mode, ready = true, onDone }: { mode: 'full' | 'quick';
   done.current = onDone;
   const reduce = typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   useEffect(() => {
-    // 29.09 (Kaan: birkaç saniye daha uzun olsun): full ≈5,5 sn (eski 2,8), quick ≈2,6 sn (eski ≈1)
-    const hold = reduce ? (mode === 'full' ? 1200 : 400) : mode === 'full' ? 4800 : 2200;
+    // 29.09 (Kaan): önce 2,8 sn kısa, 5,5 sn uzun geldi → full ≈3,8 sn, quick ≈1,8 sn
+    const hold = reduce ? (mode === 'full' ? 1000 : 350) : mode === 'full' ? 3100 : 1400;
     const t = window.setTimeout(() => setMinDone(true), hold);
     return () => window.clearTimeout(t);
   }, [mode, reduce]);
@@ -375,7 +375,6 @@ export function Splash({ mode, ready = true, onDone }: { mode: 'full' | 'quick';
         <SplashMark size={mode === 'full' ? 104 : 84} />
       </div>
       <div className="sp-word">mivelo</div>
-      <div className="sp-sub">{mode === 'full' ? 'Tüm mesajların hazırlanıyor' : 'Mesajların yükleniyor'}</div>
     </div>
   );
 }
