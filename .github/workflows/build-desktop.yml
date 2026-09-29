@@ -67,6 +67,8 @@ jobs:
       - name: Çekirdek birim testleri
         run: npm test -w packages/core
         continue-on-error: true
+        # açık kalan bir ağ bağlantısı paketlemeyi sonsuza dek bekletmesin (0.1.7'de 15+ dk takıldı)
+        timeout-minutes: 8
       - name: Çekirdeği paketle (bundle-core + gömülü node)
         run: node scripts/bundle-core.mjs
         env:

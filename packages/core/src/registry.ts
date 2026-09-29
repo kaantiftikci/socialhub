@@ -542,6 +542,8 @@ export class Registry {
     for (const id of [...this.heal.keys()]) this.stopHeal(id);
     // tek bir asılı stop() kapanışı sonsuza dek bekletmesin
     await Promise.all([...this.connectors.values()].map((c) => withTimeout(c.stop(), 10_000).catch(() => undefined)));
+    // arka planda süren kaldırma/yeniden deneme işleri (kaldırılan hesabın connector'ını durdurma vb.) de bitsin: kapanışta açık bağlantı kalmasın
+    await withTimeout(Promise.all([...this.locks.values()]), 20_000).catch(() => undefined);
   }
 }
 

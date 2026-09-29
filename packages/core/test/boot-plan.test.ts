@@ -18,6 +18,7 @@ test('açılış sırası: hafifler önce; tarayıcılarda okunmamış + yakın 
 });
 
 test('aynı anda açılacak tarayıcı sayısı makineye göre 1–4', () => {
+  delete process.env.MIVELO_BOOT_SLOTS;
   const GB = 1024 ** 3;
   assert.equal(browserSlots(8, 4 * GB), 2);
   assert.equal(browserSlots(16, 16 * GB), 4);

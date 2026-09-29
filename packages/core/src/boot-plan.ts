@@ -50,6 +50,8 @@ export function bootOrder(list: BootInfo[], now = Date.now()): BootInfo[] {
 
 /** Aynı anda açılabilecek tarayıcı kanalı sayısı (makineye göre) */
 export function browserSlots(cpus = os.cpus().length, freeMem = os.freemem()): number {
+  const forced = Number(process.env.MIVELO_BOOT_SLOTS);
+  if (forced >= 1) return Math.min(8, Math.floor(forced));
   const byCpu = Math.floor(cpus / 3);
   const byMem = Math.floor(freeMem / (700 * 1024 * 1024));
   return Math.max(1, Math.min(4, byCpu, byMem));
