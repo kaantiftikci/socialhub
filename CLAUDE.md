@@ -291,7 +291,11 @@ Dil: arayüz ve yorumlar Türkçe.
   ("Business Suite | TikTok", gövde 1241 kr., hiç data-e2e/sohbet öğesi yok) — eskiden bu adres mesaj sayfası sayılmayıp her turda yeniden yükleniyordu.
   Şimdi `INBOX_RE` Business Suite'i kabul eder; liste gömülü çerçevedeyse (`inboxFrame`, tiktok alan adı + message/chat/im yolu) çerçeve adresi sayfada
   doğrudan açılır ve hatırlanır (`bizInbox`). Tanı artık çerçeveler (alan adı+yol, öğe sayıları), hash'siz sınıf sözcükleri, rol sayıları, iframe/gölge DOM/
-  düzenlenebilir alan sayısı da yazar. Sonraki tanı satırı gelince Business Suite seçicileri eklenecek.
+  düzenlenebilir alan sayısı da yazar. **Düzenden bağımsız yedek** (`tagLayout`, Kaan: "bireysel de kurumsal da otomatik çeksin"): bilinen
+  seçiciler boşsa yapı görünüşten tanınıp `data-mv` ile işaretlenir (list = sol yarıda profil görselli, 1-8 kısa yazılı, aynı sınıflı kardeş
+  satırlar; msg/sep = listenin sağındaki en büyük kaydırılan alanın satırları, yalnız tarih/saatten oluşan ortalı satır ayırıcı; input = sağ
+  alttaki düzenlenebilir alan); tüm seçiciler `[data-mv=…]`'yı da kapsar, tanı satırında `auto` sayıları. data-e2e'siz sahte Business Suite
+  sayfasında sohbet/mesaj/ben-o/zaman/gönderim sınandı; gerçek TikTok'ta DOĞRULANMADI.
 - **Kaldır hızlı (29.09)**: `registry.remove` hesabı HEMEN gizler (`store.purgeAccount`: `removing` kümesi → listAccounts/getAccount/listChats/
   arama/WS olayları görmez; `purged` hesabın geri dirilmesini engeller) + `account.removed`, yanıt döner; platform çıkışı + durdurma + 2000'lik
   mesaj silme dilimleri + oturum klasörü arka planda (hesap kilidinde). Çekirdek yarıda kapanırsa `meta removing:<id>` → bootAll başlatmaz,

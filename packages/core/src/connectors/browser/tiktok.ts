@@ -24,11 +24,11 @@ const HOME = 'https://www.tiktok.com/messages';
 // data-e2e önce; TikTok zaman zaman test özniteliklerini kaldırıyor → bileşen sınıf adı parçaları yedek (css-<hash>-DivItemWrapper…).
 // İç içe eşleşmeler (satırın içindeki alt parça) `outer()` ile elenir: yalnız en dıştaki satır sayılır.
 const LIST_ITEM =
-  '[data-e2e="chat-list-item"], [data-e2e="conversation-item"], [class*="DivItemWrapper"][class*="Chat"], [class*="ChatListItem"], [class*="ConversationItem"], [class*="ConversationListItem"]';
+  '[data-e2e="chat-list-item"], [data-e2e="conversation-item"], [class*="DivItemWrapper"][class*="Chat"], [class*="ChatListItem"], [class*="ConversationItem"], [class*="ConversationListItem"], [data-mv="list"]';
 const MSG_ITEM =
-  '[data-e2e="chat-item"], [data-e2e="message-item"], [class*="DivChatItemWrapper"], [class*="ChatItemWrapper"], [class*="MessageItemWrapper"], [class*="DivMessageContainer"]';
-const TIME_SEP = '[data-e2e="chat-time"], [class*="TimeContainer"], [class*="DivTimeWrapper"]';
-const INPUT = '[data-e2e="message-input-area"] [contenteditable="true"], [data-e2e="message-input-area"] textarea, [class*="DraftEditor-root"] [contenteditable="true"]';
+  '[data-e2e="chat-item"], [data-e2e="message-item"], [class*="DivChatItemWrapper"], [class*="ChatItemWrapper"], [class*="MessageItemWrapper"], [class*="DivMessageContainer"], [data-mv="msg"]';
+const TIME_SEP = '[data-e2e="chat-time"], [class*="TimeContainer"], [class*="DivTimeWrapper"], [data-mv="sep"]';
+const INPUT = '[data-e2e="message-input-area"] [contenteditable="true"], [data-e2e="message-input-area"] textarea, [class*="DraftEditor-root"] [contenteditable="true"], [data-mv="input"]';
 const SEND_BTN = '[data-e2e="message-send"]';
 const CAPTCHA = '#captcha_container, #captcha-verify-container-main-page, .captcha_verify_container, [class*="captcha_verify"], [id*="secsdk-captcha"]';
 
@@ -48,6 +48,114 @@ interface ListRow {
   time: string;
   unread: number;
   avatarUrl?: string;
+}
+
+/**
+ * Düzenden bağımsız yedek (29.09, Kaan: "bireysel de kurumsal da olsa mesajları otomatik çeksin"): TikTok'un sınıf adları/test
+ * öznitelikleri sayfadan sayfaya (normal /messages ↔ Business Suite) değişiyor. Bilinen seçiciler bir şey bulamazsa sayfa yapısı
+ * görünüşten tanınır ve öğeler `data-mv` ile işaretlenir; yukarıdaki seçiciler bu işaretleri de kapsar:
+ * - list: sol yarıda, alt alta dizili, profil görselli ve 1-6 kısa yazılı kardeş satırlar (en kalabalık küme)
+ * - msg/sep: listenin sağındaki en büyük kaydırılan alanın satırları (tek çocuklu sarmalayıcılar inilir); yalnız tarih/saatten
+ *   oluşan ortalanmış satır ayırıcı
+ * - input: sağ alt yarıdaki düzenlenebilir alan / textarea
+ * İçerik okunmaz, yalnız konum/yapı; sonuç sayıları tanı satırına girer.
+ */
+async function tagLayout(page: Page): Promise<{ list: number; msg: number; input: number } | undefined> {
+  return page
+    .evaluate(() => {
+      const W = innerWidth;
+      const H = innerHeight;
+      const known = (s: string) => document.querySelector(s) !== null;
+      const res = { list: 0, msg: 0, input: 0 };
+      const leaves = (el: Element) => {
+        const out: string[] = [];
+        for (const e of Array.from(el.querySelectorAll('*'))) {
+          if (e.children.length) continue;
+          const t = (e.textContent ?? '').trim();
+          if (t) out.push(t);
+          if (out.length > 12) break;
+        }
+        return out;
+      };
+      const visible = (r: DOMRect) => r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < H * 3;
+      const clean = (c: string) => c.split(/\s+/).filter((x) => x && !/active|selected|hover|focus|current|unread|read/i.test(x)).sort().join(' ');
+      // ---- sohbet listesi ----
+      if (!known('[data-e2e="chat-list-item"], [data-e2e="conversation-item"]')) {
+        for (const e of Array.from(document.querySelectorAll('[data-mv="list"]'))) e.removeAttribute('data-mv');
+        let best: Element[] = [];
+        for (const c of Array.from(document.querySelectorAll('div, ul, section, nav, [role="list"], [role="listbox"]')).slice(0, 8000)) {
+          if (c.children.length < 1 || c.children.length > 400) continue;
+          const groups = new Map<string, Element[]>();
+          for (const ch of Array.from(c.children)) {
+            const r = ch.getBoundingClientRect();
+            if (!visible(r) || r.height < 36 || r.height > 160 || r.width < 140 || r.left > W * 0.55) continue;
+            const img = Array.from(ch.querySelectorAll('img, [style*="background-image"]')).some((i) => {
+              const ir = i.getBoundingClientRect();
+              return ir.width >= 20 && ir.width <= 90 && Math.abs(ir.width - ir.height) < 8;
+            });
+            const lv = leaves(ch);
+            if (!img || lv.length < 1 || lv.length > 8 || lv.join('').length > 400) continue;
+            const k = `${ch.tagName}|${clean(ch.getAttribute('class') ?? '')}`;
+            groups.set(k, [...(groups.get(k) ?? []), ch]);
+          }
+          for (const g of groups.values()) {
+            // tek satır da olabilir (tek sohbet) ama o zaman en az iki yazı parçası şart
+            if (g.length > best.length && (g.length >= 2 || leaves(g[0]).length >= 2)) best = g;
+          }
+        }
+        for (const e of best) e.setAttribute('data-mv', 'list');
+        res.list = best.length;
+      }
+      // ---- mesaj alanı ----
+      if (!known('[data-e2e="chat-item"], [data-e2e="message-item"]')) {
+        for (const e of Array.from(document.querySelectorAll('[data-mv="msg"], [data-mv="sep"]'))) e.removeAttribute('data-mv');
+        const listRight = Math.max(0, ...Array.from(document.querySelectorAll('[data-mv="list"], [data-e2e="chat-list-item"]')).map((e) => e.getBoundingClientRect().right));
+        let area: Element | undefined;
+        let areaSize = 0;
+        for (const el of Array.from(document.querySelectorAll('div, section, main, [role="log"]')).slice(0, 8000)) {
+          const r = el.getBoundingClientRect();
+          if (!visible(r) || r.left < Math.max(listRight - 4, W * 0.25) || r.height < H * 0.3) continue;
+          const oy = getComputedStyle(el).overflowY;
+          if (!(oy === 'auto' || oy === 'scroll') && el.getAttribute('role') !== 'log') continue;
+          if (el.closest('[data-mv="list"]')) continue;
+          const size = r.width * r.height;
+          if (size > areaSize && (el.textContent ?? '').trim().length > 0) {
+            area = el;
+            areaSize = size;
+          }
+        }
+        if (area) {
+          let rows: Element = area;
+          while (rows.children.length === 1) rows = rows.children[0];
+          const TIME_ONLY = /^(bugün|dün|today|yesterday|pzt|sal|çar|per|cum|cmt|paz|mon|tue|wed|thu|fri|sat|sun|\d{1,2}[:./-]\d{1,2}|\d{1,2}\s+\S+\s*\d{0,4})[\s,\d:./-]*(öö|ös|am|pm)?$/i;
+          const ar = rows.getBoundingClientRect();
+          for (const ch of Array.from(rows.children)) {
+            const r = ch.getBoundingClientRect();
+            if (r.height === 0) continue;
+            const t = (ch.textContent ?? '').replace(/\s+/g, ' ').trim();
+            const hasMedia = !!ch.querySelector('img, video');
+            if (!t && !hasMedia) continue;
+            const centered = Math.abs(r.left + r.width / 2 - (ar.left + ar.width / 2)) < ar.width * 0.12;
+            ch.setAttribute('data-mv', t.length <= 40 && !hasMedia && TIME_ONLY.test(t) && centered ? 'sep' : 'msg');
+            res.msg++;
+          }
+        }
+      }
+      // ---- yazma alanı ----
+      if (!known('[data-e2e="message-input-area"]')) {
+        for (const e of Array.from(document.querySelectorAll('[data-mv="input"]'))) e.removeAttribute('data-mv');
+        const box = Array.from(document.querySelectorAll('[contenteditable="true"], textarea')).find((e) => {
+          const r = e.getBoundingClientRect();
+          return visible(r) && r.left > W * 0.25 && r.top > H * 0.45 && !(e as HTMLElement).closest('[role="search"], form[action*="search"]');
+        });
+        if (box) {
+          box.setAttribute('data-mv', 'input');
+          res.input = 1;
+        }
+      }
+      return res;
+    })
+    .catch(() => undefined);
 }
 
 /** Captcha / "çok fazla deneme" sayfası: köprünün sınıflandırıcısı bu metinlerle yoklamayı durdurur ya da bekletir */
@@ -101,6 +209,10 @@ async function ensureInbox(page: Page, timeout = 20_000): Promise<boolean> {
   let frameTried = false;
   while (Date.now() - t0 < timeout) {
     if (await page.locator(LIST_ITEM).count().catch(() => 0)) return true;
+    if (Date.now() - t0 > 1500) {
+      await tagLayout(page);
+      if (await page.locator(LIST_ITEM).count().catch(() => 0)) return true;
+    }
     await assertUsable(page);
     // boş gelen kutusu: yazı alanı ya da "mesaj yok" görünümü
     if (Date.now() - t0 > 6000 && (await page.locator('[data-e2e*="empty"], [class*="Empty"], [class*="NoMessage"]').count().catch(() => 0))) return true;
@@ -185,10 +297,12 @@ async function diagnose(page: Page): Promise<void> {
       .catch(() => undefined);
     frames.push({ where, ...(c ?? { err: true }) });
   }
-  if (d) bus.log('info', `TikTok tanı: ${JSON.stringify({ ...d, frames })}`);
+  const auto = await tagLayout(page);
+  if (d) bus.log('info', `TikTok tanı: ${JSON.stringify({ ...d, auto, frames })}`);
 }
 
-function readList(page: Page): Promise<ListRow[]> {
+async function readList(page: Page): Promise<ListRow[]> {
+  await tagLayout(page);
   return page.evaluate((sel) => {
     const txt = (el: Element | null | undefined) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
     const TIME_RE = /^(\d{1,2}[:.]\d{2}|\d{1,2}[./-]\d{1,2}([./-]\d{2,4})?|dün|yesterday|pzt|sal|çar|per|cum|cmt|paz|mon|tue|wed|thu|fri|sat|sun|\d+\s*(dk|sa|g|gün|hf|m|min|h|d|w)\b.*)$/i;
@@ -298,6 +412,7 @@ async function waitForMessages(page: Page, timeout: number): Promise<number> {
   const t0 = Date.now();
   let last = -1;
   while (Date.now() - t0 < timeout) {
+    await tagLayout(page);
     const n = await page.locator(MSG_ITEM).count().catch(() => 0);
     if (n > 0 && n === last) return n;
     if (n === 0 && Date.now() - t0 > 3000 && (await page.locator(INPUT).count().catch(() => 0))) return 0;
@@ -381,11 +496,13 @@ export interface RawItem {
   attachments?: Attachment[];
 }
 
-function readItems(page: Page, mine: string): Promise<RawItem[]> {
+async function readItems(page: Page, mine: string): Promise<RawItem[]> {
+  await tagLayout(page);
   return page.evaluate(
     ({ item, sep, mine }) => {
       const txt = (el: Element | null | undefined) => ((el as HTMLElement | null)?.innerText ?? el?.textContent ?? '').replace(/[ \t]+/g, ' ').trim();
-      const main = document.querySelector(item)?.closest('[class*="ChatMain"], [class*="ChatBox"], main') ?? document.body;
+      const first = document.querySelector(item);
+      const main = first?.closest('[class*="ChatMain"], [class*="ChatBox"], main') ?? (first?.getAttribute('data-mv') ? first.parentElement : null) ?? document.body;
       const mainRect = main.getBoundingClientRect();
       const out: RawItem[] = [];
       for (const el of Array.from(document.querySelectorAll(`${item}, ${sep}`))) {
@@ -552,6 +669,7 @@ export const tiktok: Strategy = {
 
   async send(page, _cookies, threadId, text) {
     await openThread(page, threadId);
+    await tagLayout(page);
     const box = page.locator(INPUT).first();
     await box.click({ timeout: 10_000 });
     const lines = text.split('\n');
