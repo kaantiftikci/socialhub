@@ -81,6 +81,8 @@ Dil: arayüz ve yorumlar Türkçe.
   bot tuzağı, IP başına 20/saat + günlük 2000). `gizlilik.html`, `kosullar.html`, `og.png`, `apple-touch-icon.png` de burada.
   Landing hero'su: görünüm sekmeleri yalnız sahnenin altındaki `#seg` ("Kendine göre ayarla"; sahnedeki yüzen kopya kaldırıldı); her sekme imleçle ufak bir görev
   oynatır (`TASKS` dizisi, kaplamalar 1440×900 kare koordinatlarında). Telefon/tablette de masaüstü penceresi gösterilir.
+  "21 uygulama" bölümü (`.dock` grupları Sosyal medya 9 · E-posta 5 · Pazaryerleri 7 — ePttAVM sarı "ePtt" SVG kutusu n11'den sonra): telefonda
+  simge boyu `min(32px, (100vw-104px)/9)` TÜM gruplarda aynı → 9'lu grup tek satır (eski 8 sütunlu ızgarada TikTok alta kayıyordu).
 - **Yönetim paneli** `mivelo.app/admin` (`apps/landing/admin/`: `index.html` tek sayfa + `api.php`): bekleme listesi (durum
   Bekliyor/Davet edildi/Katıldı/Spam, not, toplu işlem, CSV), trafik (`api/track.php` çerezsiz sayaç → `~/mivelo-data/stats/`),
   demo hesapları (demo `index.php` girişte `logins`/`lastLogin` yazar), görevler, şifre değiştirme, JSON yedek. Varsayılan şifre
