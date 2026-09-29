@@ -64,9 +64,11 @@ export class Registry {
    * de tutmazsa uyarı çıkar. Şifre reddi, kısıtlama, captcha/güvenlik doğrulaması, QR/PIN bekleyen eşleşme, kullanıcı iptali denenmez
    * (tekrarlı deneme hesabı kilitleyebilir ya da kullanıcı eylemi gerekir).
    */
-  private heal = new Map<string, { tries: number; timer?: NodeJS.Timeout; conn?: Connector; visible?: boolean }>();
+  private heal = new Map<string, { tries: number; timer?: NodeJS.Timeout; conn?: Connector; visible?: boolean; stable?: NodeJS.Timeout }>();
   private halted = false;
   private static HEAL_DELAYS = [15_000, 45_000, 120_000];
+  /** Sayaç ancak hesap bu kadar süre kesintisiz 'connected' kalırsa sıfırlanır (doğrulamadan 'connected' deyip hemen düşen açılış sonsuz döngü kurmasın) */
+  private static HEAL_STABLE_MS = 120_000;
 
   private transient(a: Account): boolean {
     const d = (a.detail ?? '').replace(/\s+/g, ' ');
@@ -83,10 +85,25 @@ export class Registry {
     const h = this.heal.get(a.id);
     if (a.status === 'connected') {
       if (h) {
+        // bekleyen deneme gereksiz; ama sayaç HEMEN silinmez: sayfasız açılış oturumu doğrulamadan 'connected' yayınlayıp ilk
+        // yoklamada yeniden düşebiliyor → sayaç her seferinde 1/3'e dönüp sonsuz Chromium döngüsü + hiç çıkmayan uyarı.
+        // Kesintisiz ≈2 dk bağlı kalırsa sıfırlanır; bu sürede düşerse kaldığı yerden devam eder.
         clearTimeout(h.timer);
-        this.heal.delete(a.id);
+        h.timer = undefined;
+        if (!h.stable) {
+          h.stable = setTimeout(() => {
+            h.stable = undefined;
+            if (this.heal.get(a.id) === h && this.store.getAccount(a.id)?.status === 'connected') this.heal.delete(a.id);
+          }, Registry.HEAL_STABLE_MS);
+          h.stable.unref?.();
+        }
       }
       return;
+    }
+    // bağlı kalma süresi kesildi: sayaç korunur
+    if (h?.stable) {
+      clearTimeout(h.stable);
+      h.stable = undefined;
     }
     if (a.status === 'connecting') {
       if (h) a.autoRetry = true; // deneme sürüyor
@@ -123,7 +140,7 @@ export class Registry {
     bus.log('info', `${a.platform}: ${st.visible ? 'sağlayıcı sınırı' : 'geçici sorun'} (${(a.detail ?? a.status).slice(0, 80)}); ${delay >= 120_000 ? `${Math.round(delay / 60_000)} dk` : `${Math.round(delay / 1000)} sn`} sonra arka planda yeniden denenecek (${st.tries}/${Registry.HEAL_DELAYS.length})`);
   }
 
-  private healNow(id: string, st: { tries: number; timer?: NodeJS.Timeout; conn?: Connector; visible?: boolean }): Promise<void> {
+  private healNow(id: string, st: { tries: number; timer?: NodeJS.Timeout; conn?: Connector; visible?: boolean; stable?: NodeJS.Timeout }): Promise<void> {
     return this.serial(id, async () => {
       st.timer = undefined;
       const a = this.store.getAccount(id);
@@ -373,7 +390,10 @@ export class Registry {
 
   private stopHeal(id: string): void {
     const h = this.heal.get(id);
-    if (h) clearTimeout(h.timer);
+    if (h) {
+      clearTimeout(h.timer);
+      clearTimeout(h.stable);
+    }
     this.heal.delete(id);
   }
 

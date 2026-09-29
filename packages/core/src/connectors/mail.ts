@@ -215,11 +215,13 @@ export class MailConnector extends BaseConnector {
     } catch (e) {
       // İlk girişteki hata da sınıflandırılsın: şifre reddi → "Giriş reddedildi…" (arayüz "Şifreyi güncelle" gösterir); imapflow'un
       // genel "Command failed" metnine sunucunun asıl açıklaması (responseText) eklenir — eskiden yalnız "Command failed" görünüyordu
-      const err = e as { message?: string; responseText?: string; authenticationFailed?: boolean };
+      const err = e as { message?: string; responseText?: string; reason?: string; authenticationFailed?: boolean };
       this.classify(e);
       if (this.authFailed) return;
       const msg = String(err.message ?? e).split('\n')[0];
-      const extra = err.responseText && !msg.includes(err.responseText) ? ` — ${err.responseText}` : '';
+      // BYE ile kapanan bağlantıda ("Unexpected close") sunucunun gerekçesi reason'da
+      const why = err.responseText || err.reason;
+      const extra = why && !msg.includes(why) ? ` — ${why}` : '';
       this.setStatus('error', `${msg}${extra}`.slice(0, 300));
     }
   }
@@ -304,6 +306,10 @@ export class MailConnector extends BaseConnector {
       });
       c.on('close', () => {
         if (this.idleClient !== c) return;
+        // kurulu IDLE oturumu sunucu BYE'ıyla kapandıysa ("Too many simultaneous connections") gerekçe sınıflandırılsın:
+        // yoksa 5 sn sonra yeniden bağlanıp sınırı zorluyordu
+        const bye = (c as unknown as { byeReason?: string }).byeReason;
+        if (bye) this.classify({ reason: bye });
         this.idleClient = undefined;
         this.idleUp = false;
         this.retryIdle();
@@ -335,13 +341,17 @@ export class MailConnector extends BaseConnector {
    * ETHROTTLE → throttleReset kadar bekle; [ALERT]/[LIMIT]/çok fazla eşzamanlı bağlantı → 15 dk bekle.
    */
   private classify(e: unknown): void {
-    const err = e as { authenticationFailed?: boolean; code?: string; throttleReset?: number; message?: string; response?: string; responseText?: string; reason?: string };
+    const err = e as { authenticationFailed?: boolean; code?: string; throttleReset?: number; message?: string; response?: unknown; responseText?: string; reason?: string; serverResponseCode?: string };
+    // imapflow çoğu komutta response'u metne çevirir; çevirmediği yollarda ayrıştırılmış nesne kalır ("[object Object]" olmasın)
+    const resp = typeof err.response === 'string' ? err.response : '';
+    const sec = (err.response as { attributes?: { section?: { value?: unknown }[] }[] } | undefined)?.attributes?.[0]?.section?.[0]?.value;
+    const rcode = String(err.serverResponseCode ?? (typeof sec === 'string' ? sec : '')).toUpperCase().trim();
     // reason: karşılama/BYE ile kapanan bağlantıda sunucu metni ("* BYE Too many simultaneous connections") yalnız burada
-    const text = `${err.message ?? ''} ${err.response ?? ''} ${err.responseText ?? ''} ${err.reason ?? ''}`;
+    const text = `${err.message ?? ''} ${resp} ${err.responseText ?? ''} ${err.reason ?? ''}`;
     // Sınır kalıbı kimlik denetiminden ÖNCE: imapflow LOGIN'e gelen her NO'da authenticationFailed koyar → Gmail'in
     // "NO [ALERT] Too many simultaneous connections" yanıtı yanlış şifre sanılıyordu. Yalın [ALERT] burada sayılmaz
     // (Gmail yanlış şifre/web girişi uyarılarında da [ALERT] kullanıyor); o, kimlik denetiminden sonra.
-    if (/\[LIMIT\]|Too many simultaneous|too many connections|bandwidth limits/i.test(text)) {
+    if (rcode === 'LIMIT' || /\[LIMIT\]|Too many simultaneous|too many connections|bandwidth limits/i.test(text)) {
       this.limitPause();
       return;
     }

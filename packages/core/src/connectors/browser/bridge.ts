@@ -10,7 +10,7 @@ import { bus } from '../../bus.js';
 import { sessionDir } from '../../config.js';
 import { killProcessesMatching } from '../../platform.js';
 import { ensureChromium } from '../../browser-install.js';
-import { browserSlots } from '../../boot-plan.js';
+import { bootSlots } from '../../boot-plan.js';
 import { mediaHostAllowed, MEDIA_MAX } from '../../media-hosts.js';
 import { isUiActive, onUiActive } from '../../activity.js';
 import type { Account, Attachment, Chat, ChatKind, Participant, Reaction } from '../../model.js';
@@ -255,8 +255,8 @@ export interface BridgeOptions {
 }
 
 /** Açılış yuvaları: etkileşimsiz tarayıcı açılışları sırayla (BOOT_SLOTS kadarı birlikte, spawn sırasıyla = boot-plan puanı); yuva en geç 45 sn sonra boşalır */
-// makineye göre (boot-plan.ts browserSlots: çekirdek/3 ve boş bellek/700 MB, 1–4); açılışta bir kez hesaplanır
-const BOOT_SLOTS = browserSlots();
+// makineye göre (boot-plan.ts bootSlots: çekirdek/3 ve boş bellek/700 MB, 1–4); süreç boyunca tek değer → "Açılış sırası … aynı anda N" günlüğüyle aynı
+const BOOT_SLOTS = bootSlots();
 let bootBusy = 0;
 const bootWaiters: Array<() => void> = [];
 function acquireBootSlot(cancelled: () => boolean): Promise<() => void> {
@@ -313,6 +313,12 @@ export class BrowserConnector extends BaseConnector {
    * bir daha 'changed' sayılmıyor, yeni mesaj hiç çekilmiyordu. Hata alan sohbet üstel bekler (30 sn·2^n ≤ 30 dk, ≤6 deneme).
    */
   private pendingFetch = new Map<string, { tries: number; next: number }>();
+  /**
+   * Yarım kalan boşluk doldurma: yoklama sohbetin yalnız en yeni 15-25 mesajını alır; arada (uyku, kapalıyken, hız sınırı
+   * beklemesi) daha fazlası geldiyse depodaki en yeni mesajla alınan en eskisi arasında boşluk kalır ve arayüzün "daha eski"si
+   * önce depoya baktığı için hiç dolmaz. threadId → {before: sıradaki sayfanın üst sınırı, floor: depodaki en yeni ts, turns}
+   */
+  private gapFill = new Map<string, { before: number; floor: number; turns: number }>();
   /** markRead birleştirme: aynı sohbet için kuyrukta bekleyen okundu işi varsa yenisi eklenmez */
   private pendingRead = new Set<string>();
   /** Bu oturumda Mivelo'dan yazılan sohbetler: kendi yeni mesajımız depoda "güncel" sanılıp eski mesajların alınması atlanmasın */
@@ -1452,9 +1458,13 @@ export class BrowserConnector extends BaseConnector {
           if (newest > 0 && newest >= t.lastTs - 1000) this.known.set(t.id, t.lastTs);
         }
         const pf = this.pendingFetch.get(t.id);
-        if (!this.known.has(t.id) || (this.known.get(t.id) ?? 0) < t.lastTs || (pf && Date.now() >= pf.next)) changed.push(t);
+        // yarım boşluk da 'değişti' sayılır; ama hata alan sohbetin üstel beklemesini (pendingFetch) atlamaz
+        const due = !pf || Date.now() >= pf.next;
+        if (!this.known.has(t.id) || (this.known.get(t.id) ?? 0) < t.lastTs || (pf && due) || (this.gapFill.has(t.id) && due)) changed.push(t);
       }
       for (const id of retryRead.slice(0, 3)) {
+        // okundu gezintisi (Instagram 7+ sn, Messenger ≤15 sn) arka arkaya koşmasın: bekleyen gönderim araya girsin
+        await this.runUrgent();
         try {
           const last = this.store.listMessages(chatId(this.account.id, id), 30).filter((m) => !m.fromMe).pop();
           if (this.strategy.markRead) await this.run((p, c) => this.strategy.markRead!(p, c, id, last?.remoteId));
@@ -1483,10 +1493,20 @@ export class BrowserConnector extends BaseConnector {
           batch.slice(i, i + width).map(async (t) => {
             tried.add(t.id);
             try {
-              const msgs = await withTimeout(this.strategy.messages(page, cookies, t.id, first ? 25 : 15), 60_000, 'mesajlar');
+              const limit = first ? 25 : 15;
+              const msgs = await withTimeout(this.strategy.messages(page, cookies, t.id, limit), 60_000, 'mesajlar');
               this.turnReacted.delete(t.id);
               this.turnIncoming.delete(t.id);
+              // boşluk denetimi ingest'ten ÖNCE (sonra hepsi "bilinen" olur)
+              const gap = this.gapFill.get(t.id) ?? this.detectGap(t.id, msgs, limit);
               for (const m of msgs) this.ingest(t.id, m, !first && !this.hasMessage(t.id, m.id));
+              if (gap) {
+                // önce kaydet (tur sayılmış olarak): fillGap hata verirse ilk sayfa zaten depoda → detectGap boşluğu bir daha
+                // göremezdi; kayıt sonraki turda sürsün, hata döngüsü de 4 turla sınırlı kalsın
+                if (gap.turns + 1 >= 4) this.gapFill.delete(t.id);
+                else this.gapFill.set(t.id, { ...gap, turns: gap.turns + 1 });
+                await this.fillGap(page, cookies, t.id, gap, () => !!fatalErr);
+              }
               this.known.set(t.id, t.lastTs);
               this.pendingFetch.delete(t.id);
               if (!first) this.settleReaction(t, prevUnread.get(t.id) ?? 0);
@@ -1539,6 +1559,7 @@ export class BrowserConnector extends BaseConnector {
         this.unschedule();
         this.polling = false;
         this.pendingFetch.clear();
+        this.gapFill.clear();
         // Sayfasız kanalın kayıtlı durumu artık geçersiz: iyileşme denemesi tarayıcı yolundan gerçek oturum denetimiyle açılsın
         // (yoksa sayfasız açılış oturumu doğrulamadan 'connected' yayınlıyor, iyileşme sayacı sıfırlanıp sonsuz döngü oluyordu)
         if (this.strategy.pageless) fs.rmSync(this.stateFile, { force: true });
@@ -1547,6 +1568,60 @@ export class BrowserConnector extends BaseConnector {
         return;
       }
     }
+  }
+
+  /** Strateji `before` (eski mesaj sayfası) parametresini alıyor mu (imzada 5. parametre) */
+  private get canPageBack(): boolean {
+    return this.strategy.messages.length >= 5;
+  }
+
+  /**
+   * Boşluk: sohbetin depoda mesajı var, gelen sayfa dolu (limit kadar), hiçbiri bilinmiyor ve en eskisi depodaki en yenisinden
+   * yeni → aradaki mesajlar alınmadı. Kendi gönderimim (depoda şimdiki zamanla) boşluk sanılmaz: en yeni depo ts'i onu kapsar.
+   */
+  private detectGap(threadId: string, msgs: Msg[], limit: number): { before: number; floor: number; turns: number } | undefined {
+    if (!this.canPageBack || msgs.length < limit) return undefined;
+    const floor = this.store.listMessages(chatId(this.account.id, threadId), 1)[0]?.ts ?? 0;
+    if (!floor) return undefined;
+    if (msgs.some((m) => this.hasMessage(threadId, m.id))) return undefined;
+    const tss = msgs.map((m) => m.ts).filter((x) => x > 0);
+    if (!tss.length) return undefined;
+    const oldest = Math.min(...tss);
+    return oldest > floor ? { before: oldest, floor, turns: 0 } : undefined;
+  }
+
+  /**
+   * Boşluğu `before` ile geriye sayfalayarak kapat: tur başına ≤5 sayfa, sayfalar arası 0,4–1,5 sn (ban önleme); her istekten
+   * önce bekleyen gönderim araya girer. Bilinen mesaja/depodaki en yeni zamana ya da boş sayfaya varınca biter; bitmezse
+   * kaldığı yer `gapFill`'de kalır ve sonraki turlarda sürer (en çok 4 tur). Hız sınırı/doğrulama hatası yukarıya (fatalErr) gider.
+   */
+  private async fillGap(page: Page, cookies: Record<string, string>, threadId: string, gap: { before: number; floor: number; turns: number }, stop: () => boolean): Promise<void> {
+    let before = gap.before;
+    let done = false;
+    let got = 0;
+    for (let i = 0; i < 5 && !done; i++) {
+      // paralel komşu sohbette hız sınırı/doğrulama çıktıysa daha fazla istek atma (kalan yer gapFill'de)
+      if (stop()) break;
+      await this.runUrgent();
+      await sleep(400 + Math.random() * 1100);
+      const page2 = await withTimeout(this.strategy.messages(page, cookies, threadId, 50, before), 60_000, 'boşluk mesajları');
+      const older = page2.filter((m) => !m.ts || m.ts < before);
+      if (!older.length) { done = true; break; }
+      let reached = false;
+      for (const m of older) {
+        if (this.hasMessage(threadId, m.id) || (m.ts > 0 && m.ts <= gap.floor)) reached = true;
+        // live=false: boşluktaki eski mesajlar tek tek bildirim/"yeni mesaj" sayılmasın (en yeni sayfa zaten canlı işlendi)
+        this.ingest(threadId, m, false);
+        got++;
+      }
+      const tss = older.map((m) => m.ts).filter((x) => x > 0);
+      const next = tss.length ? Math.min(...tss) : before;
+      if (reached || next >= before) done = true;
+      before = next;
+    }
+    if (got) bus.log('info', `${this.account.platform}: boşluk dolduruldu (${got} mesaj${done ? '' : ', sürüyor'})`);
+    if (done || gap.turns + 1 >= 4) this.gapFill.delete(threadId);
+    else this.gapFill.set(threadId, { before, floor: gap.floor, turns: gap.turns + 1 });
   }
 
   /**

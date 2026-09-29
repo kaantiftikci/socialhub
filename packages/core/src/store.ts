@@ -295,6 +295,11 @@ export class Store {
   }
 
   setFlag(key: string, value = '1'): void {
+    // kaldırılan hesabın arka planda durdurulan connector'ı (Slack imleci, boot_ms…) silinen '<önek>:<id>' anahtarını geri yazmasın
+    // (registry.remove purge'ü logout/stop'tan ÖNCE başlatıyor). 'removing:' bayrağı purgeAccount'un kendisi yazar → serbest.
+    if ((this.removing.size || this.purged.size) && !key.startsWith('removing:')) {
+      for (const id of [...this.removing, ...this.purged]) if (key.length > id.length + 1 && key.endsWith(`:${id}`)) return;
+    }
     this.stmt('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
   }
 
@@ -377,6 +382,12 @@ export class Store {
       this.stmt('DELETE FROM messages WHERE chat_id IN (SELECT id FROM chats WHERE account_id = ?)').run(id);
       this.stmt('DELETE FROM chats WHERE account_id = ?').run(id);
       this.stmt('DELETE FROM accounts WHERE id = ?').run(id);
+      // hesaba bağlı meta anahtarları ('<önek>:<id>': slack_last, boot_ms, wa_twins_v1, wa_viewonce_v1…) de gitsin;
+      // aynı kimlikle yeniden eklenen hesap eski bayrakları devralmasın. Yalnız TAM olarak ':'+id ile bitenler
+      // (LIKE yerine substr: kimlikteki %/_ joker sayılmasın). 'removing:' purgeAccount'ta ayrıca silinir → burada dokunulmaz.
+      this.stmt(
+        `DELETE FROM meta WHERE length(key) > length(@id) + 1 AND substr(key, -length(@id) - 1) = ':' || @id AND key <> 'removing:' || @id`,
+      ).run({ id });
     })();
   }
 

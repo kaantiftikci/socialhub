@@ -220,7 +220,19 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   // ---------- routes ----------
   route('GET', '/api/health', () => {
     const m = process.memoryUsage();
-    return { ok: true, ai: aiEnabled(), stats: store.stats(), os: process.platform, user: userDisplayName(), pid: process.pid, uptimeSec: Math.round(process.uptime()), memoryMb: { rss: Math.round(m.rss / 1048576), heapUsed: Math.round(m.heapUsed / 1048576), heapTotal: Math.round(m.heapTotal / 1048576), external: Math.round(m.external / 1048576) } };
+    return { ok: true, ai: aiEnabled(), stats: store.stats(), os: process.platform, user: userDisplayName(), pid: process.pid, appVersion: process.env.MIVELO_APP_VERSION ?? null, execPath: process.execPath, uptimeSec: Math.round(process.uptime()), memoryMb: { rss: Math.round(m.rss / 1048576), heapUsed: Math.round(m.heapUsed / 1048576), heapTotal: Math.round(m.heapTotal / 1048576), external: Math.round(m.external / 1048576) } };
+  });
+
+  /**
+   * Masaüstü kabuğunun nazik kapatma ucu (Windows'ta SIGTERM yok; kill ise WAL/connector kapanışını atlar).
+   * Yalnız bu makineden (vekilsiz loopback), Origin'siz (tarayıcı sayfası değil) ve ~/.mivelo/token belirteciyle.
+   * Yanıt önce yazılır, kapanış index.ts'teki SIGTERM işleyicisiyle başlar.
+   */
+  route('POST', '/api/shutdown', (r) => {
+    if (isRemote(r) || r.headers.origin || !tokenOk(r)) throw new HttpError(403, 'Yetkisiz');
+    bus.log('info', 'Kapatma isteği alındı (masaüstü kabuğu)');
+    setImmediate(() => process.emit('SIGTERM'));
+    return { ok: true };
   });
 
   route('GET', '/api/license', async (r) => {
@@ -817,7 +829,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     const url = new URL(req.url ?? '/', 'http://x');
     try {
       // Paketli uygulama lisanssızken yalnız sağlık ve lisans uçları açık (arayüz lisans ekranını gösterir)
-      if (url.pathname.startsWith('/api/') && url.pathname !== '/api/health' && url.pathname !== '/api/license' && !licenseStatus().valid) {
+      if (url.pathname.startsWith('/api/') && url.pathname !== '/api/health' && url.pathname !== '/api/license' && url.pathname !== '/api/shutdown' && !licenseStatus().valid) {
         res.writeHead(402, { 'content-type': 'application/json' });
         return void res.end(JSON.stringify({ error: 'Lisans gerekli', license: true }));
       }
@@ -846,8 +858,8 @@ export function createServer(store: Store, registry: Registry, port: number): ht
           const allow = (acc && PLATFORM_MEDIA_HOSTS[acc.platform]) ?? MEDIA_HOSTS;
           if (!allow.test(host)) throw new HttpError(403, `Bu sunucudan medya indirilmez: ${host}`);
         }
-        // Kalıcı hata (401/403/404/410: süresi dolmuş ya da yetkisiz medya) 30 dk hatırlanır: arayüz her çizimde yeniden
-        // istemesin — aynı platforma tekrarlanan yetkisiz istekler hem günlüğü doldurur hem otomasyon sinyalidir
+        // Kalıcı hata (401/403/404/410/413: süresi dolmuş ya da yetkisiz medya) 30 dk hatırlanır: arayüz her çizimde yeniden
+        // istemesin (413: Telegram'da dosya çok büyük) — aynı platforma tekrarlanan yetkisiz istekler hem günlüğü doldurur hem otomasyon sinyalidir
         const failKey = `${id}|${u}`;
         const failed = mediaFailures.get(failKey);
         if (failed && Date.now() - failed.at < 30 * 60_000) throw new HttpError(502, `Medya indirilemedi (${failed.code})`);
@@ -855,8 +867,8 @@ export function createServer(store: Store, registry: Registry, port: number): ht
         const m = await c.fetchMedia(u).catch((e: Error) => {
           const ee = e as { response?: { status?: number }; output?: { statusCode?: number } };
           // şifre çözülemeyen medya (anahtar/dosya bozuk; "unable to authenticate data") da kalıcı hata
-          const code = /unable to authenticate data/i.test(e.message) ? 422 : (ee.response?.status ?? ee.output?.statusCode ?? Number(/\b(401|403|404|410)\b/.exec(e.message)?.[1] ?? 0));
-          if ([401, 403, 404, 410, 422].includes(code)) {
+          const code = /unable to authenticate data/i.test(e.message) ? 422 : (ee.response?.status ?? ee.output?.statusCode ?? Number(/\b(401|403|404|410|413)\b/.exec(e.message)?.[1] ?? 0));
+          if ([401, 403, 404, 410, 413, 422].includes(code)) {
             if (mediaFailures.size > 2000) mediaFailures.clear();
             mediaFailures.set(failKey, { at: Date.now(), code });
           }

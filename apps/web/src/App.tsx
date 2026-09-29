@@ -234,6 +234,8 @@ export default function App() {
   const [qr, setQr] = useState<Record<string, string>>({});
   /** Bağlanma/eşitleme ilerlemesi: hesap → {progress 0-100, since} (0/100 → gizli) */
   const [sync, setSync] = useState<Record<string, { progress: number; since: number; label?: string }>>({});
+  // WS yeniden bağlanınca temizlenen eşitlemelerin başlangıç zamanları (replay ile dönene dek)
+  const syncSince = useRef(new Map<string, number>());
   /** Karşı taraf yazıyor: sohbet → {ad, düşme zamanı}; 6 sn'de kendiliğinden düşer */
   const [typing, setTyping] = useState<Record<string, { name?: string; until: number }>>({});
   useEffect(() => {
@@ -496,6 +498,7 @@ export default function App() {
         case 'account.sync':
           setSync((prev) => {
             if (ev.progress <= 0 || ev.progress >= 100) {
+              syncSince.current.delete(ev.accountId);
               if (!(ev.accountId in prev)) return prev;
               const next = { ...prev };
               delete next[ev.accountId];
@@ -504,7 +507,7 @@ export default function App() {
             const cur = prev[ev.accountId];
             const progress = Math.max(ev.progress, cur?.progress ?? 0);
             if (cur && cur.label === ev.label && cur.progress === progress) return prev; // değişiklik yok: yeniden çizim olmasın
-            return { ...prev, [ev.accountId]: { progress, since: cur?.since ?? Date.now(), label: ev.label } };
+            return { ...prev, [ev.accountId]: { progress, since: cur?.since ?? syncSince.current.get(ev.accountId) ?? Date.now(), label: ev.label } };
           });
           break;
         case 'chat.typing':
@@ -629,6 +632,12 @@ export default function App() {
     const stop = connectEvents(onEvent, (open) => {
       setOnline(open);
       if (!open) return;
+      // kopuklukta kaçan 'bitti' (progress 1) olayı yüzünden eşitleme çubuğu takılı kalmasın: süren eşitleme yeni olayla geri gelir
+      // başlangıç zamanı korunur (replay ile geri gelen eşitlemenin çubuğu zamanla ilerleyen payını kaybedip geri zıplamasın)
+      setSync((prev) => {
+        for (const [id, v] of Object.entries(prev)) syncSince.current.set(id, v.since);
+        return Object.keys(prev).length ? {} : prev;
+      });
       // çekirdek istemci yokken olayları atar: kopukluk sırasında yazılan mesajlar açık sohbette de görünsün, okundu sayılsın
       const sel = selectedRef.current;
       void refresh()

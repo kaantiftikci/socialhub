@@ -184,7 +184,7 @@ Dil: arayüz ve yorumlar Türkçe.
   cihazda DENENMEDİ; ffmpeg pakette yok (sesli mesaj ogg).
 - **Lisans (yalnız paketli DMG/EXE)**: kabuk (lib.rs) çekirdeği release'te `MIVELO_REQUIRE_LICENSE=1` + `MIVELO_APP_VERSION` ile başlatır (tauri dev,
   `npm run dev`, demo lisans istemez). Çekirdek `license.ts`: `~/.mivelo/license.json` {key, activation, device, lastOk, expiresAt} (0600); cihaz kimliği
-  sha256(hostname|kullanıcı|OS|mimari|MAC); lisanssızken kanallar başlamaz (`whenLicensed` → bootAll) ve /api 402 (yalnız /api/health + /api/license);
+  donanım kimliği (29.09: IOPlatformUUID/MachineGuid/machine-id, yedek hostname|kullanıcı; eski MAC'li kayıtlar hoşgörüyle); lisanssızken kanallar başlamaz (`whenLicensed` → bootAll) ve /api 402 (yalnız /api/health + /api/license);
   GET/POST/DELETE `/api/license` (`?check=1`: sunucuya sor, en çok dakikada bir); açılışta + 30 dk'da bir + arayüz öne gelince `check`: sunucu `invalid` derse (iptal/süre/cihaz kaldırıldı) kilit + registry.stopAll,
   ağ hatasında 14 gün çevrimdışı pay. Arayüz `LicenseGate.tsx` (main.tsx, yalnız Tauri): anahtar ekranı (MVL-XXXX-… biçimleme), 10 dk'da bir ve odakta
   yeniden sorar (?check=1 → iptal pencereye dönünce hemen kilitler). Sunucu `apps/landing/api/license.php` (mivelo.app/api/license.php; activate/check/release; `~/mivelo-data/licenses.json`, hatalı
@@ -637,6 +637,26 @@ Dil: arayüz ve yorumlar Türkçe.
   Şimdi önce yalnız `/api/health` (deneme ≤8 sn, toplam 150 sn), sonra `refresh` TEK istekle zaman aşımsız (ağ hatasında ≤4); `refresh` tek uçuş
   (`refreshing` ref: açılış + WS aynı sözü paylaşır). `booting` 'core' | 'data' ("Sohbetler yükleniyor…", 1,5 sn'den uzunsa).
   Ölçüm (Linux, 5222 sohbet/280 bin mesaj): listChats 0,25 sn + JSON 1,3 MB 26 ms; dropTwins 136 ms — sohbet listesi darboğaz değil.
+
+- **Kapsamlı performans/eşitleme denetimi (29.09, çok ajanlı)**: 12 alan × bulucu + her bulguya çekişmeli doğrulayıcı → 95 bulgu, 94 doğrulandı
+  (29 yüksek); 12 dosya-sahipliği grubunda düzeltildi + bağımsız inceleme; 2. tur gruplar arası işler. Testler 213 → 317. Öne çıkanlar:
+  lisans geçerli olunca `whenLicensed` uyanır (eskiden 14 gün çevrimdışı sonrası kanallar hiç başlamıyordu); cihaz kimliği donanım
+  (IOPlatformUUID/MachineGuid/machine-id, license.json `hw`; MAC'e bağlı değil); `media-prune.ts` media-index'i ve e-posta eklerini SİLMEZ, günde bir,
+  dinlemeden 5 dk sonra, eşzamansız; macOS `browserSlots` totalmem·0,35 (freemem hep ~0 → 1 yuva); bootAll sıradakileri 'connecting'
+  ("Açılış sırası bekleniyor"); heal sayacı ≈2 dk kararlı bağlantıdan sonra sıfırlanır, sağlayıcı `retryAfterMs` (IMAP 15 dk) uyulur;
+  store: findMessageByRemote/dropLocalDuplicates/dropTwins indeksli (O(n²) yok), FTS tetikleyicisi yalnız metin değişince, arama/AI sorguları
+  indeksli; isOwnEcho yalnız kendi mesajımı eler (gruplarda başkasının aynı metinli mesajı silinmiyordu); WS demetinde messages.read sırası,
+  yeniden bağlanınca tam eşitleme, kaldırılan hesap hayaleti; /read presenceSubscribe kısıtı; send-file akışla diske; `/api/shutdown`
+  (belirteçli) + health `appVersion/execPath` → kabuk nazik kapatır (Windows dahil), bekçi HTTP sağlık denetler, 7788'deki yabancı süreci
+  benimsemez; WhatsApp pompası süre bütçeli (25 ms), read-self yalnız okunan noktaya kadar, refreshNames/mediaPending/grup metadata ucuz,
+  fetchMedia önbelleği index'ten önce; iMessage poll tek işlemde, Son Silinenler yalnız değişince, syncUnread Mivelo okuma noktasına uyar,
+  zaman aşımında çift gönderim yok, düzenleme/geri alma canlı; Telegram pts kalıcı + açılışta boşluk telafisi, süpergrup kimlik çakışması,
+  grup yankısı; köprü: `known`/tepki durumu kalıcı, doğrulamasız 'connected' yok, boşluk algılama + geriye sayfalama (before ≤5 sayfa,
+  live=false), stop/launch yarışı, değişmeyen sohbet yeniden yazılmaz; IG/Messenger/TikTok/Slack/X strateji kayıpları; IMAP biriken
+  e-postalar 100'lük parçalarla + ilerleme kaydı, \Seen iki yönlü, [LIMIT]/BYE sınıflama; Slack xoxp imleç kalıcı + has_more; Trendyol/ePttAVM
+  telafi penceresi (son başarılı turdan beri), durum dosyası yalnız değişince; arayüz: balonlar memo, Intl biçimleyici önbelleği, markRead kısıtı,
+  refresh WS'den gelen tazeyi ezmez, "daha eski" aynı saniyedeki mesajı atlamaz, msgCache sınırlı.
+  Test dosyaları `test/<grup>-*.test.ts`. Denetim çıktısı yalnız oturumda (depoda yok).
 
 ## Sunucu/arayüz sözleşmesi
 - CORS: localhost/127.0.0.1/tauri.localhost/tauri://localhost ve WKWebView'ın `null` kaynağı (paketli uygulama!).

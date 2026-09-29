@@ -86,25 +86,70 @@ fn backoff(crashes: u32) -> Duration {
     Duration::from_secs(secs.min(300))
 }
 
-/// Süreci sonlandır ve topla (zombi kalmasın). Unix'te önce SIGTERM: çekirdeğin `shutdown`u (registry.stopAll)
-/// çalışabilsin; `grace` içinde çıkmazsa SIGKILL (`grace` sıfırsa beklemeden). Windows'ta konsolsuz node'a nazik kapatma
-/// iletilemez → doğrudan sonlandır (çekirdekte kimlikli bir kapanış ucu olmadan).
+/// Süreci sonlandır ve topla (zombi kalmasın). `grace` > 0 ise önce çekirdeğin belirteçli `POST /api/shutdown` ucuyla nazik
+/// kapatma (Windows'ta da çalışır: konsolsuz node'a sinyal iletilemez); ≤5 sn içinde çıkmazsa Unix'te SIGTERM (kapanış
+/// zaten sürüyorsa çekirdek ikinciyi yok sayar), toplam `grace` dolunca zorla sonlandır. `grace` sıfırsa (kilitli çekirdek)
+/// beklemeden öldür.
 fn stop_child(mut child: Child, grace: Duration) {
-    #[cfg(unix)]
-    {
-        let _ = Command::new("kill").args(["-TERM", &child.id().to_string()]).stdout(Stdio::null()).stderr(Stdio::null()).status();
-        let until = Instant::now() + grace;
-        while Instant::now() < until {
+    let until = Instant::now() + grace;
+    let wait_until = |child: &mut Child, t: Instant| -> bool {
+        while Instant::now() < t {
             if matches!(child.try_wait(), Ok(Some(_))) {
-                return;
+                return true;
             }
             std::thread::sleep(Duration::from_millis(100));
         }
+        false
+    };
+    let mut asked = false;
+    if !grace.is_zero() {
+        asked = core_request_shutdown(child.id());
+        if asked && wait_until(&mut child, (Instant::now() + Duration::from_secs(5)).min(until)) {
+            return;
+        }
+    }
+    #[cfg(unix)]
+    {
+        let _ = Command::new("kill").args(["-TERM", &child.id().to_string()]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+        if wait_until(&mut child, until) {
+            return;
+        }
     }
     #[cfg(not(unix))]
-    let _ = grace;
+    {
+        // uç kapanışı kabul ettiyse connector'lar kapanırken kalan payı bekle; kabul etmediyse beklemenin anlamı yok
+        if asked && wait_until(&mut child, until) {
+            return;
+        }
+    }
     let _ = child.kill();
     let _ = child.wait();
+}
+
+/// Çekirdekten nazik kapanış iste: önce /api/health pid'i bizim çocuğumuz mu (7788'i başka çekirdek — npm run dev — tutuyorsa
+/// ona dokunma), sonra belirteçli (~/.mivelo/token), Origin'siz ham HTTP/1.0 POST. Kabul edildiyse true.
+fn core_request_shutdown(pid: u32) -> bool {
+    let Some((200, body)) = core_get("/api/health", Duration::from_secs(2)) else { return false };
+    let hpid = serde_json::from_str::<serde_json::Value>(&body).ok().and_then(|v| v.get("pid")?.as_u64());
+    if hpid != Some(u64::from(pid)) {
+        return false;
+    }
+    let token = core_token();
+    if token.is_empty() {
+        return false;
+    }
+    let Some(addr) = format!("127.0.0.1:{CORE_PORT}").parse().ok() else { return false };
+    let Ok(mut s) = std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(400)) else { return false };
+    let _ = s.set_read_timeout(Some(Duration::from_secs(3)));
+    let _ = s.set_write_timeout(Some(Duration::from_secs(3)));
+    let req = format!("POST /api/shutdown HTTP/1.0\r\nHost: 127.0.0.1:{CORE_PORT}\r\nx-kavsak-token: {token}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+    if s.write_all(req.as_bytes()).is_err() {
+        return false;
+    }
+    let mut buf = Vec::new();
+    let _ = (&mut s).take(16 * 1024).read_to_end(&mut buf);
+    let text = String::from_utf8_lossy(&buf);
+    text.strip_prefix("HTTP/1.").and_then(|r| r.get(2..5)) == Some("200")
 }
 
 /// Çekirdek zaten dinliyorsa (npm run dev) tekrar başlatma. Yalnız "port açık mı": olay döngüsü kilitli çekirdeği de
@@ -653,15 +698,30 @@ fn evict_orphan_core(app: &AppHandle) -> bool {
         return false;
     }
     let Some(dir) = our_core_dir(app) else { return false };
-    let Some((pid, cmd)) = port_owner() else { return false };
+    // çekirdeğin kendi beyanı (/api/health pid/appVersion/execPath): lsof/PowerShell sonuç vermezse de kim olduğu bilinsin
+    let health = core_get("/api/health", Duration::from_secs(2))
+        .filter(|(st, _)| *st == 200)
+        .and_then(|(_, b)| serde_json::from_str::<serde_json::Value>(&b).ok());
+    let h_pid = health.as_ref().and_then(|v| v.get("pid")?.as_u64()).and_then(|p| u32::try_from(p).ok());
+    let h_ver = health.as_ref().and_then(|v| v.get("appVersion")?.as_str().map(str::to_string));
+    let h_exec = health.as_ref().and_then(|v| v.get("execPath")?.as_str().map(str::to_string)).unwrap_or_default();
+    let Some((pid, cmd)) = port_owner().or_else(|| h_pid.map(|p| (p, String::new()))) else { return false };
     if pid == std::process::id() {
         return false;
     }
     let dir = norm_path(&dir.to_string_lossy());
     let cmd_n = norm_path(&cmd);
-    let ours = (!dir.is_empty() && cmd_n.contains(&dir)) || (cfg!(target_os = "macos") && cmd.contains(".app/Contents/Resources/core/dist/index.js"));
+    let exec_n = norm_path(&h_exec);
+    let ours = (!dir.is_empty() && (cmd_n.contains(&dir) || (h_pid == Some(pid) && (exec_n.starts_with(&format!("{dir}/")) || exec_n.starts_with(&format!("{dir}\\"))))))
+        || (cfg!(target_os = "macos") && cmd.contains(".app/Contents/Resources/core/dist/index.js"));
     if !ours {
-        log(app, &format!("7788'de başka bir çekirdek çalışıyor (pid {pid}); benimsendi"));
+        let my_ver = app.package_info().version.to_string();
+        let note = match h_ver.as_deref() {
+            None => " (geliştirme çekirdeği ya da sürüm bildirmiyor)".to_string(),
+            Some(v) if v != my_ver => format!(" (sürüm {v}, uygulama {my_ver}: farklı)"),
+            Some(_) => String::new(),
+        };
+        log(app, &format!("7788'de başka bir çekirdek çalışıyor (pid {pid}){note}; benimsendi"));
         return false;
     }
     log(app, &format!("önceki oturumdan kalmış sahipsiz çekirdek (pid {pid}) kapatılıyor; kendi çekirdeğimiz başlatılacak"));
