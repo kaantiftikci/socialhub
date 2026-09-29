@@ -287,7 +287,11 @@ Dil: arayüz ve yorumlar Türkçe.
 - **TikTok sağlamlaştırma (29.09, Kaan: girişten sonra mesaj gelmedi; gerçek DOM görülmedi)**: satır/mesaj seçicilerine bileşen sınıf adı
   yedekleri (DivItemWrapper/ChatListItem/ConversationItem, DivChatItemWrapper/MessageItemWrapper…), yalnız en dıştaki eşleşme sayılır;
   `TikTok tanı` artık tüm data-e2e adları + sohbetle ilgili sınıf parçası sayıları + başlık/gövde uzunluğu/giriş düğmesi (içerik yok);
-  sohbet açılıp mesaj okunamazsa bir kez daha tanı. Kaan'dan `TikTok tanı` satırı (ya da `verify-strategy.mjs tiktok` çıktısı) gelince ayarlanacak.
+  sohbet açılıp mesaj okunamazsa bir kez daha tanı. Kaan'ın ilk tanısı (29.09, KİŞİSEL hesap): tiktok.com/messages → `/business-suite/messages`
+  ("Business Suite | TikTok", gövde 1241 kr., hiç data-e2e/sohbet öğesi yok) — eskiden bu adres mesaj sayfası sayılmayıp her turda yeniden yükleniyordu.
+  Şimdi `INBOX_RE` Business Suite'i kabul eder; liste gömülü çerçevedeyse (`inboxFrame`, tiktok alan adı + message/chat/im yolu) çerçeve adresi sayfada
+  doğrudan açılır ve hatırlanır (`bizInbox`). Tanı artık çerçeveler (alan adı+yol, öğe sayıları), hash'siz sınıf sözcükleri, rol sayıları, iframe/gölge DOM/
+  düzenlenebilir alan sayısı da yazar. Sonraki tanı satırı gelince Business Suite seçicileri eklenecek.
 - **Kaldır hızlı (29.09)**: `registry.remove` hesabı HEMEN gizler (`store.purgeAccount`: `removing` kümesi → listAccounts/getAccount/listChats/
   arama/WS olayları görmez; `purged` hesabın geri dirilmesini engeller) + `account.removed`, yanıt döner; platform çıkışı + durdurma + 2000'lik
   mesaj silme dilimleri + oturum klasörü arka planda (hesap kilidinde). Çekirdek yarıda kapanırsa `meta removing:<id>` → bootAll başlatmaz,

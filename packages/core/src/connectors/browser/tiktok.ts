@@ -59,16 +59,64 @@ async function assertUsable(page: Page): Promise<void> {
   if (tooMany) throw new Error('TikTok: 429 rate limit (çok fazla istek)');
 }
 
+/**
+ * Mesaj sayfası adresleri. TikTok web /messages'ı Business Suite'e yönlendirebiliyor — KİŞİSEL hesapta da (29.09, Kaan'ın tanısı:
+ * path /business-suite/messages, sayfada sohbet öğesi yok; hesap kişisel). Eskiden bu adres "mesaj sayfası değil" sayılıp her yoklamada yeniden
+ * yükleniyordu. Business Suite mesajları gömülü bir çerçevedeyse (`inboxFrame`) o çerçevenin adresi doğrudan açılır.
+ */
+const INBOX_RE = /tiktok\.com\/(messages|business-suite\/messages|business-suite\/.*(message|chat|inbox))/i;
+const FRAME_RE = /(message|chat|\/im\b|\/im\/|inbox|conversation)/i;
+let bizLogged = false;
+/** Business Suite'te bulunan mesaj çerçevesi adresi: sonraki turlarda doğrudan açılır (yönlendirme + çerçeve arama her turda olmasın) */
+let bizInbox: string | undefined;
+const pathOf = (u: string) => {
+  try {
+    const x = new URL(u);
+    return `${x.hostname}${x.pathname}`;
+  } catch {
+    return u;
+  }
+};
+
+/** Business Suite: mesajların gömülü çerçevesi varsa adresi (yalnız tiktok alan adları) */
+function inboxFrame(page: Page): string | undefined {
+  for (const f of page.frames()) {
+    if (f === page.mainFrame()) continue;
+    const u = f.url();
+    try {
+      const url = new URL(u);
+      if (/(^|\.)tiktok(v)?\.com$|(^|\.)tiktokcdn\.com$|(^|\.)tiktok-row\.net$/.test(url.hostname) && FRAME_RE.test(url.pathname)) return u;
+    } catch {
+      /* about:blank vb. */
+    }
+  }
+  return undefined;
+}
+
 /** Mesajlar sayfasını aç ve sohbet listesi (ya da boş gelen kutusu) görünene dek bekle */
 async function ensureInbox(page: Page, timeout = 20_000): Promise<boolean> {
-  if (!/tiktok\.com\/messages/.test(page.url())) await page.goto(HOME, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  const onInbox = INBOX_RE.test(page.url()) || (!!bizInbox && pathOf(page.url()) === pathOf(bizInbox));
+  if (!onInbox) await page.goto(bizInbox ?? HOME, { waitUntil: 'domcontentloaded', timeout: 30_000 });
   const t0 = Date.now();
+  let frameTried = false;
   while (Date.now() - t0 < timeout) {
     if (await page.locator(LIST_ITEM).count().catch(() => 0)) return true;
     await assertUsable(page);
     // boş gelen kutusu: yazı alanı ya da "mesaj yok" görünümü
     if (Date.now() - t0 > 6000 && (await page.locator('[data-e2e*="empty"], [class*="Empty"], [class*="NoMessage"]').count().catch(() => 0))) return true;
     if (/\/login/.test(page.url())) return false;
+    // Business Suite: liste gömülü çerçevedeyse o çerçeveyi sayfanın kendisinde aç (seçiciler çerçeveye ulaşmaz)
+    if (!frameTried && /business-suite/.test(page.url()) && Date.now() - t0 > 3000) {
+      const f = inboxFrame(page);
+      if (f) {
+        frameTried = true;
+        if (!bizLogged) bus.log('info', `TikTok: mesajlar Business Suite sayfasında; mesaj çerçevesi doğrudan açılıyor (${new URL(f).hostname}${new URL(f).pathname})`);
+        bizLogged = true;
+        bizInbox = f;
+        await page.goto(f, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
+        continue;
+      }
+    }
     await page.waitForTimeout(300);
   }
   return false;
@@ -100,12 +148,44 @@ async function diagnose(page: Page): Promise<void> {
         const cls = [...parts].sort((a, b) => b[1] - a[1]).slice(0, 40).map(([k, v]) => `${k}:${v}`);
         const allE2e = Array.from(new Set(Array.from(document.querySelectorAll('[data-e2e]')).map((e) => e.getAttribute('data-e2e') ?? ''))).slice(0, 60);
         const login = !!document.querySelector('[data-e2e="top-login-button"], [data-e2e*="login"]');
-        return { path: location.pathname, title: document.title.slice(0, 60), bodyLen: document.body?.innerText.length ?? 0, login, list: n(list), items: n(item), input: n(input), e2e, allE2e, cls };
+        // Business Suite / başka düzen: hash'siz sınıf sözcükleri (sohbetle ilgili), rol sayıları, çerçeve ve gölge DOM sayısı — içerik YOK
+        const words = new Map<string, number>();
+        for (const e of Array.from(document.querySelectorAll('[class]')).slice(0, 8000)) {
+          for (const c of (e.getAttribute('class') ?? '').split(/\s+/)) {
+            for (const w of c.split(/[-_]+/)) {
+              if (w.length > 2 && w.length < 40 && !/\d{2}/.test(w) && /chat|messag|conver|session|inbox|list|item|contact|unread|nick|avatar|input|editor|send/i.test(w)) words.set(w, (words.get(w) ?? 0) + 1);
+            }
+          }
+        }
+        const clsWords = [...words].sort((a, b) => b[1] - a[1]).slice(0, 40).map(([k, v]) => `${k}:${v}`);
+        const roles: Record<string, number> = {};
+        for (const r of ['list', 'listitem', 'listbox', 'option', 'textbox', 'grid', 'row', 'tab']) roles[r] = n(`[role="${r}"]`);
+        const shadow = Array.from(document.querySelectorAll('*')).slice(0, 8000).filter((e) => (e as HTMLElement).shadowRoot).length;
+        return { path: location.pathname, title: document.title.slice(0, 60), bodyLen: document.body?.innerText.length ?? 0, login, list: n(list), items: n(item), input: n(input), e2e, allE2e, cls, clsWords, roles, iframes: n('iframe'), shadow, editable: n('[contenteditable="true"], textarea') };
       },
       { list: LIST_ITEM, item: MSG_ITEM, input: INPUT },
     )
     .catch(() => undefined);
-  if (d) bus.log('info', `TikTok tanı: ${JSON.stringify(d)}`);
+  // çerçeveler: adres (alan adı + yol; sorgu dizesi YOK) ve her çerçevedeki sohbet öğesi sayıları
+  const frames: Array<Record<string, unknown>> = [];
+  for (const f of page.frames().slice(0, 12)) {
+    if (f === page.mainFrame()) continue;
+    let where = f.url().slice(0, 40);
+    try {
+      const u = new URL(f.url());
+      where = `${u.hostname}${u.pathname}`.slice(0, 100);
+    } catch {
+      /* about:blank */
+    }
+    const c = await f
+      .evaluate(
+        ({ list, item }) => ({ list: document.querySelectorAll(list).length, items: document.querySelectorAll(item).length, e2e: document.querySelectorAll('[data-e2e]').length, bodyLen: document.body?.innerText.length ?? 0 }),
+        { list: LIST_ITEM, item: MSG_ITEM },
+      )
+      .catch(() => undefined);
+    frames.push({ where, ...(c ?? { err: true }) });
+  }
+  if (d) bus.log('info', `TikTok tanı: ${JSON.stringify({ ...d, frames })}`);
 }
 
 function readList(page: Page): Promise<ListRow[]> {
