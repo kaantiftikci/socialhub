@@ -690,6 +690,9 @@ export class BrowserConnector extends BaseConnector {
         // boşta boşaltılan kanallarda service worker sekme kapansa da render sürecini (Outlook 470 MB) hayatta tutuyor: engelle
         serviceWorkers: this.strategy.unloadWhenIdle ? 'block' : 'allow',
         locale: 'tr-TR',
+        // Playwright'ın varsayılan --enable-automation bayrağı tarayıcıyı "otomasyonla yönetiliyor" diye işaretler (bilgi çubuğu +
+        // otomasyon sinyalleri). X bu yüzden her hesapta "Giriş erişimini geçici olarak kısıtladık" diyordu (29.09, Kaan, masaüstü).
+        ignoreDefaultArgs: ['--enable-automation'],
         // bellek: GPU/uzantı/arka plan ağ süreçleri kapalı, render süreci sınırı, JS yığın üst sınırı, geri-ileri önbelleği kapalı
         args: [
           '--disable-blink-features=AutomationControlled',
