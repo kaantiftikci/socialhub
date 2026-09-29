@@ -402,6 +402,16 @@ export function Resizer({ pane, sign = 1 }: { pane: Pane; sign?: 1 | -1 }) {
  * Bağlanma/eşitleme çubuğu: lime, düz dolan; yüzde etiketi çubuğun ucuyla birlikte ilerler.
  * Gerçek ilerleme (progress) kilometre taşlarıyla gelir; taşlar arasında zamanla yavaşça (en çok +22) "sürünür".
  */
+/**
+ * Hesabın eşitleme yüzdesi — üst çubuk, kanal satırı ve Bağlan penceresi AYNI değeri gösterir (29.09, Kaan: üstteki "1 kanal
+ * eşitleniyor" ile WhatsApp satırı farklı ilerliyordu). Connector durum metninde gerçek yüzde bildiriyorsa (WhatsApp geçmişi
+ * "… %N", tarayıcı bileşeni indirme) o esas; yoksa genel eşitleme ilerlemesi.
+ */
+export function syncPercent(entry: { progress: number } | undefined, detail?: string): number {
+  const m = /%(\d+)/.exec(detail ?? '');
+  return m ? Number(m[1]) : (entry?.progress ?? 0);
+}
+
 export function SyncBar({ progress, since, compact = false }: { progress: number; since: number; compact?: boolean }) {
   const [, tick] = useState(0);
   useEffect(() => {

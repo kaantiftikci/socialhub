@@ -416,6 +416,7 @@ Dil: arayüz ve yorumlar Türkçe.
   önizleme. WhatsApp/Telegram canlı tepkide de aynı önizleme. Test: reaction-preview.test.ts.
 - **Listede tik (29.09)**: `Chat.lastStatus` (store alt sorgusu) → son mesaj benimse satırda balondaki tik (`statusIcon`; e-posta/pazaryeri ve
   tepki önizlemesinde yok); alındı gelince connector sohbeti de yayınlar (`outgoingRead`, Telegram `emitRead`; arayüz `messages.read`'de yerelde).
+- **Eşitleme yüzdesi tek kaynak (29.09)**: `ui.tsx syncPercent(sync[id], account.detail)` — durum metnindeki gerçek "%N" (WhatsApp geçmişi, tarayıcı bileşeni) varsa o, yoksa `account.sync` ilerlemesi; üst "N kanal eşitleniyor", kanal satırı ve Bağlan kartı aynısını kullanır (eskiden üst çubuk yalnız genel ilerlemeyi, satır WhatsApp'ın yüzdesini gösteriyordu).
 - Sistem mesajı baş emojileri (🔒 🚫 ⏳ 🗑 ⚠; `SYSTEM_LEAD`) balonda da ikon (`bubbleText`). Kendi (mor) balonumda seçim beyaz zemin
   (`.grp.me .bub ::selection`). SyncBar yüzdesi çubukla aynı hizada, dolan ucun üstünde.
 - **Web bildirimleri**: tarayıcı izni yalnız kullanıcı tıklamasıyla istenebilir (açılışta istenen sessizce engelleniyordu → sağ üstte

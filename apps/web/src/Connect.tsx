@@ -4,7 +4,7 @@ import { api, USE_STATIC } from './api';
 import { DEMO_OFFLINE, STATIC_DEMO } from './profile';
 import { openDemoLoginWindow, staticApi } from './static-demo';
 import { MAC_ONLY, PLATFORMS, type Account, type CoreOs, type Platform } from './types';
-import { Chip, Icon, PasswordInput, SyncBar } from './ui';
+import { Chip, Icon, PasswordInput, SyncBar, syncPercent } from './ui';
 
 const ORDER: Platform[] = ['whatsapp', 'telegram', 'slack', 'imessage', 'linkedin', 'x', 'instagram', 'messenger', 'tiktok'];
 const MAIL_ORDER: Platform[] = ['gmail', 'outlook', 'yahoo', 'yandex', 'icloud', 'imap'];
@@ -776,7 +776,7 @@ export function ConnectModal({
                         {sync[acc[0].id] ? (sync[acc[0].id].label ?? 'Eşitleniyor') : statusText(acc[0])}
                         {acc.length > 1 && <span style={{ color: 'var(--text3)' }}>· {acc.length} hesap</span>}
                       </span>
-                      {sync[acc[0].id] && <SyncBar progress={sync[acc[0].id].progress} since={sync[acc[0].id].since} />}
+                      {sync[acc[0].id] && <SyncBar progress={syncPercent(sync[acc[0].id], acc[0].detail)} since={sync[acc[0].id].since} />}
                     </span>
                   ) : (
                     <span className="st">

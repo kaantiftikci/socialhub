@@ -8,7 +8,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { applyAccount, applyRead, mergeAccountsSnapshot, mergeChatsSnapshot, mergeFresh, newTouched, type Touched } from './sync-merge';
 import { api, connectEvents } from './api';
 import { PLATFORMS, ORDER_Q_PLATFORMS, isOrderPage, questionOrderRef, shopKind, shopPending, shopTabOf, type Account, type Chat, type ChatFlags, type CoreEvent, type Message, type Platform, type ShopTab, DEFAULT_TAGS } from './types';
-import { Avatar, Chip, Icon, IconText, stripLeadIcon, Logo, Resizer, SyncBar, Tag, ago, fmtTime, loadPaneSizes, useClosing } from './ui';
+import { Avatar, Chip, Icon, IconText, stripLeadIcon, Logo, Resizer, SyncBar, syncPercent, Tag, ago, fmtTime, loadPaneSizes, useClosing } from './ui';
 import { Conversation, REACT_TEXT, refreshScheduled, startScheduledSends, statusIcon } from './Conversation';
 import { ConnectModal } from './Connect';
 import { Focus } from './Focus';
@@ -1150,7 +1150,7 @@ export default function App() {
           ) : (
             <span className={`dot ${a.autoRetry && a.status !== 'connected' ? 'connecting' : a.status}`} style={{ marginLeft: 8 }} />
           )}
-          {sync[a.id] && <SyncBar compact progress={/%\d+/.test(a.detail ?? '') ? Number((a.detail ?? '').match(/%(\d+)/)?.[1] ?? 0) : sync[a.id].progress} since={sync[a.id].since} />}
+          {sync[a.id] && <SyncBar compact progress={syncPercent(sync[a.id], a.detail)} since={sync[a.id].since} />}
         </button>
         );
   };
@@ -1285,7 +1285,7 @@ export default function App() {
             <section className="list" aria-label="Sohbet listesi">
               {(booting || Object.keys(sync).length > 0) && (
                 <div className="synctop">
-                  <SyncBar progress={booting ? 5 : Math.min(...Object.values(sync).map((s) => s.progress))} since={booting ? bootSince : Math.min(...Object.values(sync).map((s) => s.since))} />
+                  <SyncBar progress={booting ? 5 : Math.min(...Object.entries(sync).map(([id, s]) => syncPercent(s, accounts.find((x) => x.id === id)?.detail)))} since={booting ? bootSince : Math.min(...Object.values(sync).map((s) => s.since))} />
                   <span className="synclbl">{booting === 'data' ? 'Sohbetler yükleniyor' : booting ? 'Çekirdek başlatılıyor' : `${Object.keys(sync).length} kanal eşitleniyor`}</span>
                 </div>
               )}
