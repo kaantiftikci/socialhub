@@ -47,3 +47,32 @@ test('geçici kopma: uyarısız arka planda yeniden denenir; kalıcı hata (şif
   await reg.stopAll();
   store.close();
 });
+
+test('deneme sayacı: eski connector durunca (ayrıntısız disconnected) sıfırlanmaz, üç denemeden sonra durur', async () => {
+  const store = new Store(path.join(tmp, 'h2.db'));
+  const reg = new Registry(store);
+  (Registry as unknown as { HEAL_DELAYS: number[] }).HEAL_DELAYS = [20, 20, 20];
+  const acc = { id: 'shopier:h2', platform: 'shopier' as const, label: 'shopier', status: 'disconnected' as const, createdAt: 1 };
+  store.upsertAccount(acc);
+  const fake = { account: acc, start: async () => undefined, stop: async () => undefined, sendText: async () => undefined };
+  (reg as unknown as { connectors: Map<string, unknown> }).connectors.set(acc.id, fake);
+  const fail = { ...acc, status: 'error' as const, detail: 'getaddrinfo ENOTFOUND api.shopier.com' };
+  let heals = 0;
+  // gerçek deneme gibi: önce eski connector durur (ayrıntısız disconnected), sonra yeni deneme yine geçici hatayla düşer
+  (reg as unknown as { healNow: (id: string, st: { timer?: NodeJS.Timeout }) => Promise<void> }).healNow = async (_id, st) => {
+    st.timer = undefined;
+    heals++;
+    bus.emit({ type: 'account.status', account: { ...acc, status: 'disconnected' } });
+    bus.emit({ type: 'account.status', account: { ...acc, status: 'connecting' } });
+    bus.emit({ type: 'account.status', account: { ...fail } });
+  };
+  let lastRetry: boolean | undefined = true;
+  const off = bus.on((ev) => ev.type === 'account.status' && ev.account.status === 'error' && (lastRetry = ev.account.autoRetry));
+  bus.emit({ type: 'account.status', account: { ...fail } });
+  await sleep(300);
+  assert.equal(heals, 3, 'tam üç deneme');
+  assert.equal(lastRetry, undefined, 'denemeler bitince uyarı görünür');
+  off();
+  await reg.stopAll();
+  store.close();
+});

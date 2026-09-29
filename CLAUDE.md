@@ -271,7 +271,8 @@ Dil: arayüz ve yorumlar Türkçe.
   penceresiz yeniden başlatma 15 sn / 45 sn / 2 dk (±%20); bu sürede `Account.autoRetry` → arayüz uyarı göstermez (`accountIssue` null,
   nokta 'connecting', Bağlan kartında "Yeniden bağlanılıyor…"). Üçü de tutmazsa uyarı. Denenmeyenler (`transient` hard): şifre/anahtar
   reddi, 401-406, eksik bilgi, kısıtlama, başka yerde açıldı, captcha/güvenlik doğrulaması, kullanıcı iptali, QR/PIN eşleşmesi. Kullanıcı
-  Yeniden bağlan/iptal/kaldır ya da stopAll zamanlayıcıyı temizler; bağlanınca sayaç sıfırlanır. Test: auto-heal.test.ts.
+  Yeniden bağlan/iptal/kaldır ya da stopAll zamanlayıcıyı temizler; bağlanınca sayaç sıfırlanır. Denemede eski connector'ın ayrıntısız
+  'disconnected'ı sayacı SİLMEZ (siliyordu → Mac duman testinde Instagram 15 sn'de bir sonsuz yeniden açıldı). Test: auto-heal.test.ts.
 - **TikTok sağlamlaştırma (29.09, Kaan: girişten sonra mesaj gelmedi; gerçek DOM görülmedi)**: satır/mesaj seçicilerine bileşen sınıf adı
   yedekleri (DivItemWrapper/ChatListItem/ConversationItem, DivChatItemWrapper/MessageItemWrapper…), yalnız en dıştaki eşleşme sayılır;
   `TikTok tanı` artık tüm data-e2e adları + sohbetle ilgili sınıf parçası sayıları + başlık/gövde uzunluğu/giriş düğmesi (içerik yok);

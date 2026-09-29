@@ -94,7 +94,9 @@ export class Registry {
     }
     const c = this.connectors.get(a.id);
     if (this.halted || !c || this.store.isRemoving(a.id) || !this.transient(a)) {
-      if (h && !h.timer) this.heal.delete(a.id);
+      // ayrıntısız 'disconnected' = deneme sırasında eski connector'ın durması; sayaç SİLİNMEZ (silinince her deneme 1/3 sayılıp
+      // sonsuz döngüye giriyordu — duman testinde Instagram 15 sn'de bir yeniden açılıyordu)
+      if (h && !h.timer && !(a.status === 'disconnected' && !a.detail)) this.heal.delete(a.id);
       return;
     }
     const st = h ?? { tries: 0 };
