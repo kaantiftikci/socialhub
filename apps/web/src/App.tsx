@@ -236,6 +236,22 @@ export default function App() {
   const [sync, setSync] = useState<Record<string, { progress: number; since: number; label?: string }>>({});
   // WS yeniden bağlanınca temizlenen eşitlemelerin başlangıç zamanları (replay ile dönene dek)
   const syncSince = useRef(new Map<string, number>());
+  // üst eşitleme çubuğu turu: bu turda eşitlenen her kanalın son yüzdesi (biten 100 sayılır) → ortalama, geri gitmez
+  const syncRound = useRef({ pct: new Map<string, number>(), shown: 0 });
+  /**
+   * Üst çubuk (29.09, Kaan: birden çok kanal eşitlenirken "en doğru şekilde ilerlesin"): turdaki TÜM kanalların ortalaması; biten
+   * kanal 100 sayılır (listeden çıkınca yüzde düşmez), değer asla geri gitmez. Eskiden en yavaş kanal gösteriliyordu → biri bitince sıçrıyordu.
+   */
+  const overallSync = (): number => {
+    const r = syncRound.current;
+    for (const [id, v] of Object.entries(sync)) r.pct.set(id, syncPercent(v, accounts.find((x) => x.id === id)?.detail));
+    for (const id of r.pct.keys()) if (!(id in sync)) r.pct.set(id, 100);
+    const vals = [...r.pct.values()];
+    r.shown = Math.max(r.shown, vals.reduce((a, b) => a + b, 0) / Math.max(1, vals.length));
+    return r.shown;
+  };
+  // eşitleme bitince tur sıfırlanır
+  if (!Object.keys(sync).length && syncRound.current.pct.size) syncRound.current = { pct: new Map(), shown: 0 };
   /** Karşı taraf yazıyor: sohbet → {ad, düşme zamanı}; 6 sn'de kendiliğinden düşer */
   const [typing, setTyping] = useState<Record<string, { name?: string; until: number }>>({});
   useEffect(() => {
@@ -1285,7 +1301,7 @@ export default function App() {
             <section className="list" aria-label="Sohbet listesi">
               {(booting || Object.keys(sync).length > 0) && (
                 <div className="synctop">
-                  <SyncBar progress={booting ? 5 : Math.min(...Object.entries(sync).map(([id, s]) => syncPercent(s, accounts.find((x) => x.id === id)?.detail)))} since={booting ? bootSince : Math.min(...Object.values(sync).map((s) => s.since))} />
+                  <SyncBar progress={booting ? 5 : overallSync()} since={booting ? bootSince : Math.min(...Object.values(sync).map((s) => s.since))} />
                   <span className="synclbl">{booting === 'data' ? 'Sohbetler yükleniyor' : booting ? 'Çekirdek başlatılıyor' : `${Object.keys(sync).length} kanal eşitleniyor`}</span>
                 </div>
               )}

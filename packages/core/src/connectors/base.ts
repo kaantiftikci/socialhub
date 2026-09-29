@@ -126,11 +126,6 @@ export abstract class BaseConnector implements Connector {
    * yeniden deneniyor") yine görünür.
    */
   private everSynced = false;
-  /**
-   * 'connecting' durumunda eşitleme çubuğu başlasın mı. Tarayıcı kanallarında hayır: oturum doğrulanmadan (giriş penceresi
-   * açık/kapatılmışken) "Bağlanıyor %25" yükselip duruyordu; çubuk oturum doğrulanınca (bridge %45) başlar.
-   */
-  protected syncOnConnecting = true;
   /** Bağlanma/eşitleme ilerlemesi (0-100). Connector kilometre taşlarını bildirir; bağlandıktan sonra 6 sn sohbet gelmezse 100 sayılır. */
   protected syncProgress(progress: number, label?: string): void {
     if (this.syncDone && progress < 100) this.syncDone = false;
@@ -165,8 +160,10 @@ export abstract class BaseConnector implements Connector {
     this.account.detail = detail;
     this.store.upsertAccount(this.account);
     bus.emit({ type: 'account.status', account: { ...this.account } });
+    // 'connecting' eşitleme çubuğu BAŞLATMAZ (29.09, Kaan: Telegram'da Bağlan → "%7" sonra QR; giriş yapılmadan yüzde gösterilmesin).
+    // Çubuk oturum doğrulanınca başlar: 'connected' (WhatsApp/Telegram/IMAP…) ya da tarayıcı kanalında oturum doğrulandı (%45).
     if (status === 'connecting') {
-      if (!this.everSynced && this.syncOnConnecting) this.syncProgress(5, 'bağlanıyor');
+      /* eşitleme henüz yok */
     } else if (status === 'connected') {
       if (!this.everSynced) {
         this.syncProgress(this.syncLast >= 60 ? this.syncLast : 60, 'sohbetler alınıyor');

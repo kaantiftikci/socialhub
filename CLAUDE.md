@@ -271,7 +271,7 @@ Dil: arayüz ve yorumlar Türkçe.
 - **Giriş penceresi bekçisi (29.09, Kaan: Slack giriş penceresini kapattım, "Bağlanıyor" + yüzde artmaya devam etti)**: ayrı giriş penceresi
   açılınca durum hemen 'pairing' (`launchLogin`), köprü saniyede bir açık sayfa kalmış mı bakar (`watchLoginWindow`, iki ardışık boş denetim;
   macOS'ta son pencere kapanınca bağlam açık kalıp 'close' gelmiyor) → `loginCancelled` ("Bağlı değil"); giriş algılanınca ya da PIN adımında
-  (oturum var) bekçi durur. Tarayıcı kanallarında 'connecting'de eşitleme çubuğu BAŞLAMAZ (`syncOnConnecting=false`; çubuk oturum doğrulanınca %45).
+  (oturum var) bekçi durur. HİÇBİR kanalda 'connecting'de eşitleme çubuğu BAŞLAMAZ (29.09, Kaan: Telegram Bağlan → %7 sonra QR; sahte yüzde yok): çubuk giriş doğrulanınca ('connected' %60, tarayıcıda oturum doğrulandı %45).
   Açılışta etkileşimsiz tarayıcı kanalları sıraya girer (`acquireBootSlot`, yuva ≤45 sn); kullanıcının "Bağlan"ı sıraya girmez.
 - **Açılış planı (29.09, `boot-plan.ts`)**: hafif kanallar (WhatsApp/Telegram/iMessage/IMAP/pazaryeri) hemen birlikte; tarayıcı kanalları
   (`isBrowserAccount`, registry) ağırlıklı en kısa iş önce: puan = (1+okunmamış/10)·(0,3+yakınlık)/beklenen süre; süre = hesabın ölçülen
@@ -416,7 +416,7 @@ Dil: arayüz ve yorumlar Türkçe.
   önizleme. WhatsApp/Telegram canlı tepkide de aynı önizleme. Test: reaction-preview.test.ts.
 - **Listede tik (29.09)**: `Chat.lastStatus` (store alt sorgusu) → son mesaj benimse satırda balondaki tik (`statusIcon`; e-posta/pazaryeri ve
   tepki önizlemesinde yok); alındı gelince connector sohbeti de yayınlar (`outgoingRead`, Telegram `emitRead`; arayüz `messages.read`'de yerelde).
-- **Eşitleme yüzdesi tek kaynak (29.09)**: `ui.tsx syncPercent(sync[id], account.detail)` — durum metnindeki gerçek "%N" (WhatsApp geçmişi, tarayıcı bileşeni) varsa o, yoksa `account.sync` ilerlemesi; üst "N kanal eşitleniyor", kanal satırı ve Bağlan kartı aynısını kullanır (eskiden üst çubuk yalnız genel ilerlemeyi, satır WhatsApp'ın yüzdesini gösteriyordu).
+- **Eşitleme yüzdesi tek kaynak (29.09)**: `ui.tsx syncPercent(sync[id], account.detail)` — durum metnindeki gerçek "%N" (WhatsApp geçmişi, tarayıcı bileşeni) varsa o, yoksa `account.sync` ilerlemesi; üst "N kanal eşitleniyor", kanal satırı ve Bağlan kartı aynısını kullanır; üst çubuk turdaki TÜM kanalların ortalaması (biten 100 sayılır, geri gitmez; `overallSync`) (eskiden üst çubuk yalnız genel ilerlemeyi, satır WhatsApp'ın yüzdesini gösteriyordu).
 - Sistem mesajı baş emojileri (🔒 🚫 ⏳ 🗑 ⚠; `SYSTEM_LEAD`) balonda da ikon (`bubbleText`). Kendi (mor) balonumda seçim beyaz zemin
   (`.grp.me .bub ::selection`). SyncBar yüzdesi çubukla aynı hizada, dolan ucun üstünde.
 - **Web bildirimleri**: tarayıcı izni yalnız kullanıcı tıklamasıyla istenebilir (açılışta istenen sessizce engelleniyordu → sağ üstte

@@ -288,7 +288,6 @@ function nextBootSlot(): void {
 }
 
 export class BrowserConnector extends BaseConnector {
-  protected override syncOnConnecting = false;
   private chromium?: (typeof import('playwright'))['chromium'];
   private request?: (typeof import('playwright'))['request'];
   private ctx?: BrowserContext;
