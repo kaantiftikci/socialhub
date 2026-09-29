@@ -87,6 +87,19 @@ async function main(): Promise<void> {
     process.exit(e.code === 'EADDRINUSE' ? 0 : 1);
   });
 
+  // Tanı: olay döngüsü 1,5 sn'den uzun kilitlenirse (eşzamanlı ağır iş) süresi ve kilitten hemen önceki son günlük satırı yazılır —
+  // masaüstünde "Çekirdek başlatılıyor"da kalmanın kaynağı core.log'dan okunabilsin (29.09: dinliyor ama yanıt vermiyordu)
+  let lastTick = Date.now();
+  setInterval(() => {
+    const now = Date.now();
+    const lag = now - lastTick - 1000;
+    lastTick = now;
+    if (lag > 1500) {
+      const before = bus.recent.filter((r) => r.ts <= now - lag).slice(-1)[0];
+      bus.log('warn', `Olay döngüsü ${(lag / 1000).toFixed(1)} sn kilitlendi (öncesinde: ${before ? before.text.slice(0, 120) : '—'})`);
+    }
+  }, 1000).unref();
+
   if (DEMO_MODE) {
     const existing = registry.list().find((a) => a.platform === 'demo');
     if (existing) await registry.restart(existing.id);

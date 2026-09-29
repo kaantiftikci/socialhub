@@ -1,3 +1,4 @@
+import { bus } from './bus.js';
 import Database from 'better-sqlite3-multiple-ciphers';
 import fs from 'node:fs';
 import { DB_PATH } from './config.js';
@@ -310,16 +311,21 @@ export class Store {
     return (this.stmt("SELECT key FROM meta WHERE key LIKE 'removing:%'").all() as Array<{ key: string }>).map((r) => r.key.slice('removing:'.length));
   }
   /** Hesabı hemen gizle, mesajlarını 2000'lik dilimlerle (arada olay döngüsüne dönerek) sil, sonra sohbetleri ve hesabı kaldır */
-  async purgeAccount(id: string, step = 2000): Promise<void> {
+  async purgeAccount(id: string, step = 500): Promise<void> {
     this.removing.add(id);
     this.setFlag(`removing:${id}`);
     try {
       const del = this.stmt('DELETE FROM messages WHERE rowid IN (SELECT m.rowid FROM messages m JOIN chats c ON c.id = m.chat_id WHERE c.account_id = ? LIMIT ?)');
+      // küçük dilimler + arada zamanlayıcı turu: silme sürerken HTTP istekleri (arayüz) bekletilmesin
+      let total = 0;
+      const t0 = Date.now();
       for (;;) {
         const n = del.run(id, step).changes;
+        total += n;
         if (n < step) break;
-        await new Promise((r) => setImmediate(r));
+        await new Promise((r) => setTimeout(r, 5));
       }
+      if (total) bus.log('info', `${id}: kaldırılan hesabın ${total} mesajı silindi (${Math.round((Date.now() - t0) / 1000)} sn)`);
       this.deleteAccount(id);
       this.purged.add(id);
       this.stmt('DELETE FROM meta WHERE key = ?').run(`removing:${id}`);
@@ -857,7 +863,18 @@ export class Store {
     return out;
   }
 
+  /**
+   * Sağlık uçundaki sayılar. `COUNT(*) FROM messages` şifreli (SQLCipher) ve büyük veritabanında tüm tabloyu çözüp tarıyor
+   * (yüz binlerce satırda saniyeler); arayüz açılışta ve sık sık çağırıyordu → 30 sn önbellek.
+   */
+  private statsCache?: { at: number; v: { accounts: number; chats: number; messages: number; unread: number } };
   stats(): { accounts: number; chats: number; messages: number; unread: number } {
+    if (this.statsCache && Date.now() - this.statsCache.at < 30_000) return this.statsCache.v;
+    const v = this.statsNow();
+    this.statsCache = { at: Date.now(), v };
+    return v;
+  }
+  private statsNow(): { accounts: number; chats: number; messages: number; unread: number } {
     const one = (sql: string) => Number((this.stmt(sql).get() as { n: number }).n);
     return {
       accounts: one('SELECT COUNT(*) AS n FROM accounts'),

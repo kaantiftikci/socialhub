@@ -726,6 +726,12 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   const distDir = [path.resolve(here, '../web'), path.resolve(here, '../../web'), path.resolve(here, '../../../apps/web/dist'), path.resolve(here, '../../apps/web/dist')].find((d) => fs.existsSync(path.join(d, 'index.html')));
 
   const onRequest = async (req: http.IncomingMessage, res: http.ServerResponse) => {
+    // Tanı: 3 sn'den uzun süren istekler günlüğe (yol + süre; sorgu parametreleri ve içerik yazılmaz)
+    const reqStart = Date.now();
+    res.once('finish', () => {
+      const ms = Date.now() - reqStart;
+      if (ms > 3000 && !/^\/api\/media\//.test(req.url ?? '')) bus.log('warn', `Yavaş istek: ${req.method} ${(req.url ?? '').split('?')[0]} ${(ms / 1000).toFixed(1)} sn`);
+    });
     const origin = req.headers.origin;
     // Yerel arayüzler: Vite (localhost:5173), Tauri (tauri://localhost / http://tauri.localhost) ve WKWebView'ın
     // özel şema sayfaları için gönderdiği "null" kaynağı (yalnızca belirteçle). Sunucu yalnızca 127.0.0.1'e bağlıdır.
