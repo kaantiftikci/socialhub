@@ -18,7 +18,8 @@
     "app": "npm run desktop:build && node scripts/open-app.mjs",
     "demo:html": "node scripts/demo-html.mjs",
     "autodeploy": "node scripts/auto-deploy.mjs",
-    "e2e": "node scripts/e2e.mjs"
+    "e2e": "node scripts/e2e.mjs",
+    "ci": "node scripts/ci-watch.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

@@ -53,6 +53,10 @@ Dil: arayüz ve yorumlar Türkçe.
   (şifreli DB, ~250 bin yer tutucu mesaj, Instagram/iMessage/Telegram hesapları + `removing:` bayraklı 100 bin mesajlık hesap) ve çekirdek 120 sn ölçülür.
   Sonuç iş günlüğünde + `smoke-logs` çıktısında (Claude `get_job_logs` ile okur). Gerçek kullanıcı verisi/TCC/Anahtar Zinciri penceresi taklit EDİLMEZ.
   Linux ölçümü (29.09): 250 bin mesaj, en uzun yanıt 0,48 sn, 100 bin mesaj silme 5 sn.
+- **GitHub Actions canlı izleme** (`npm run ci`, `scripts/ci-watch.mjs`, Kaan 29.09): terminalde son çalışmalar (derleme/duman testi/demo yayını)
+  iş + adım + süre, süren adım adı, başarısız adım; yeni çalışma kendiliğinden eklenir, başlayınca/bitince macOS bildirimi + zil. `--once` tek sefer,
+  `--logs` başarısız adımın son 40 satırı (giriş gerekir). Belirteç: `GITHUB_TOKEN` ya da `gh auth token` (401'de girişsize düşer); girişsiz saatte
+  60 istek (ETag 304 sayılmaz) → süren işte 15 sn, boşta 60 sn; girişliyse 5/20 sn. Belirteç yazdırılmaz.
 - `node scripts/verify-strategy.mjs <slack|instagram|linkedin|x|messenger>` — canlı oturumun profil KOPYASIYLA (uygulamaya dokunmadan)
   threads/messages/before doğrulaması. Önce `npm run build -w packages/core`.
 
