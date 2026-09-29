@@ -37,6 +37,15 @@ async function call<T>(method: string, path: string, body?: unknown, retried = f
 const enc = encodeURIComponent;
 
 /** Paketli uygulamanın lisans durumu (çekirdek license.ts) */
+export interface UpdateStatus {
+  state: 'idle' | 'downloading' | 'ready' | 'installing' | 'error';
+  supported: boolean;
+  current?: string;
+  version?: string;
+  pct: number;
+  error?: string;
+}
+
 /** Mivelo profili (yalnız bu bilgisayarda, ~/.mivelo/profile.json) */
 export interface Profile {
   name?: string;
@@ -62,6 +71,10 @@ const liveApi = {
   license: (check = false) => call<LicenseStatus>('GET', check ? '/license?check=1' : '/license'),
   activateLicense: (key: string) => call<LicenseStatus>('POST', '/license', { key }),
   releaseLicense: () => call<LicenseStatus>('DELETE', '/license'),
+  // uygulama içi güncelleme (paketli masaüstü): durum · arka planda indir · kur (uygulama kapanıp yenisi açılır)
+  updateStatus: () => call<UpdateStatus>('GET', '/update'),
+  startUpdate: () => call<UpdateStatus>('POST', '/update'),
+  installUpdate: () => call<UpdateStatus>('POST', '/update/install'),
   profile: () => call<Profile>('GET', '/profile'),
   saveProfile: (p: Profile) => call<Profile>('POST', '/profile', p),
   /** Tüm verileri sil: her kanaldan çıkış + mesaj/oturum/ayar silme (lisans kalır) */

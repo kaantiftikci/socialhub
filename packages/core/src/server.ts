@@ -26,6 +26,7 @@ import { MEDIA_HOSTS, PLATFORM_MEDIA_HOSTS, MEDIA_MAX } from './media-hosts.js';
 import { fetchPreview } from './link-preview.js';
 import { checkSend, persistSendGuard, resetSendGuard, SendBlocked } from './send-guard.js';
 import { PROFILE_FILE, ProfileError, readProfile, saveProfile } from './profile.js';
+import { downloadUpdate, installUpdate, updateStatus } from './updater.js';
 import { EventBatcher, type WsBatch } from './ws-batch.js';
 import { fullDiskAccess, messagesAutomation, PRIVACY_PANES, tccStatus } from './permissions.js';
 import type { Chat, CoreEvent, Platform } from './model.js';
@@ -256,6 +257,24 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     return licenseStatus();
   });
 
+  // Uygulama içi güncelleme (paketli masaüstü): durum, arka planda indirme, kurulum (uygulama kapanıp yenisi açılır)
+  route('GET', '/api/update', () => updateStatus());
+  route('POST', '/api/update', async (r) => {
+    localOnly(r);
+    try {
+      return await downloadUpdate();
+    } catch (e) {
+      throw new HttpError(400, (e as Error).message);
+    }
+  });
+  route('POST', '/api/update/install', (r) => {
+    localOnly(r);
+    try {
+      return installUpdate();
+    } catch (e) {
+      throw new HttpError(409, (e as Error).message);
+    }
+  });
   // Mivelo profili (Ayarlar → Profil): yalnız bu bilgisayarda
   route('GET', '/api/profile', () => readProfile());
   route('POST', '/api/profile', (r, _s, _p, body) => {
@@ -874,7 +893,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     const url = new URL(req.url ?? '/', 'http://x');
     try {
       // Paketli uygulama lisanssızken yalnız sağlık ve lisans uçları açık (arayüz lisans ekranını gösterir)
-      if (url.pathname.startsWith('/api/') && url.pathname !== '/api/health' && url.pathname !== '/api/license' && url.pathname !== '/api/shutdown' && !licenseStatus().valid) {
+      if (url.pathname.startsWith('/api/') && url.pathname !== '/api/health' && url.pathname !== '/api/license' && url.pathname !== '/api/shutdown' && !url.pathname.startsWith('/api/update') && !licenseStatus().valid) {
         res.writeHead(402, { 'content-type': 'application/json' });
         return void res.end(JSON.stringify({ error: 'Lisans gerekli', license: true }));
       }

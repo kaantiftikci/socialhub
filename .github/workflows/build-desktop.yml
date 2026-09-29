@@ -153,8 +153,9 @@ jobs:
           ls -la files
           [ -n "$(ls files)" ] || { echo "yüklenecek paket yok"; exit 1; }
           node -e '
-            const fs=require("fs"); const v=process.argv[1];
-            const files={}; for (const f of fs.readdirSync("files")) files[f]={size:fs.statSync("files/"+f).size};
+            const fs=require("fs"); const crypto=require("crypto"); const v=process.argv[1];
+            // sha256: uygulama içi güncelleme (updater.ts) indirdiği paketi bununla doğrular
+            const files={}; for (const f of fs.readdirSync("files")) files[f]={size:fs.statSync("files/"+f).size, sha256:crypto.createHash("sha256").update(fs.readFileSync("files/"+f)).digest("hex")};
             fs.writeFileSync("files/latest.json", JSON.stringify({version:v, date:new Date().toISOString(), files}, null, 2));
           ' "${{ needs.version.outputs.v }}"
           cp deploy/indir/.htaccess files/.htaccess

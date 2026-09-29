@@ -184,8 +184,15 @@ Dil: arayüz ve yorumlar Türkçe.
   tasarımı gösteriyordu; admin/ ile aynı kural). Kök `.htaccess` YAZILMAZ (sunucudaki cPanel PHP işleyicisini ezer). Chromium pakette YOK:
   `packages/core/src/browser-install.ts` `ensureChromium` — köprü `launch` öncesi yoksa `playwright install --no-shell chromium` (gömülü node ile,
   tek uçuş, ilerleme hesap durumunda "Tarayıcı bileşeni indiriliyor… %N"); indirilemezse hata + "Yeniden bağlan". Uygulama içi yeni sürüm kartı
-  `UpdateBanner.tsx` (yalnız Tauri + `VITE_APP_VERSION`; 6 sa'de bir latest.json; "İndir" → mivelo.app/indir, "Sonra" o sürümü atlar). Gerçek
-  cihazda DENENMEDİ; ffmpeg pakette yok (sesli mesaj ogg).
+  `UpdateBanner.tsx` (yalnız Tauri + `VITE_APP_VERSION`; 6 sa'de bir latest.json; "Sonra" o sürümü atlar). **"Güncelle" = uygulama içi kurulum**
+  (29.09, Kaan: indirme sayfasına gitmesin): çekirdek `updater.ts` — latest.json'dan bu OS/işlemcinin paketi (`assetName`: mac arm64/intel DMG,
+  Windows setup; ad ve adres yalnız mivelo.app/indir/files, körlemesine alınmaz) `~/.mivelo/update/`e akışla iner, boyut + sha256 (CI latest.json'a
+  yazar) doğrulanır; kart ilerleme çubuğu (`GET /api/update` 600 ms), bitince kendiliğinden `POST /api/update/install` → kopuk betik (günlük
+  `~/.mivelo/update.log`): Mac `kur.sh` (Mivelo'yu Apple event ile kapatır, ≤30 sn bekler, DMG'den `Mivelo.app.yeni` → eskisiyle değiştirir, hata
+  olursa eskisi geri, karantina silinir, `open`), Windows `kur.ps1` (kurulum klasöründeki Mivelo/node süreçleri kapatılır, NSIS `/S` sessiz, yeniden
+  açılır). Uygulama konumu `appLocation` (Mac execPath'teki .app, Windows Mivelo.exe'li klasör); geliştirme/elle taşınmış pakette `supported:false`
+  → indirme sayfası. /api/update lisanssızken de açık. Tauri updater KULLANILMADI (imza anahtarı gizlisi ister). İlk bu özellikli sürüm elle
+  kurulmalı. Gerçek Mac/Windows'ta DENENMEDİ (betik sözdizimi + indirme/sha256/sürüm testleri: updater*.test.ts). ffmpeg pakette yok (sesli mesaj ogg).
 - **Lisans (yalnız paketli DMG/EXE)**: kabuk (lib.rs) çekirdeği release'te `MIVELO_REQUIRE_LICENSE=1` + `MIVELO_APP_VERSION` ile başlatır (tauri dev,
   `npm run dev`, demo lisans istemez). Çekirdek `license.ts`: `~/.mivelo/license.json` {key, activation, device, lastOk, expiresAt} (0600); cihaz kimliği
   donanım kimliği (29.09: IOPlatformUUID/MachineGuid/machine-id, yedek hostname|kullanıcı; eski MAC'li kayıtlar hoşgörüyle); lisanssızken kanallar başlamaz (`whenLicensed` → bootAll) ve /api 402 (yalnız /api/health + /api/license);

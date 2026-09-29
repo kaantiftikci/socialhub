@@ -474,6 +474,9 @@ function demoIcs(ev: CalendarDraft): string {
 
 export const staticApi = {
   license: async () => ({ required: false, valid: true }),
+  updateStatus: async (): Promise<import('./api').UpdateStatus> => ({ state: 'idle', supported: false, pct: 0 }),
+  startUpdate: async (): Promise<import('./api').UpdateStatus> => ({ state: 'idle', supported: false, pct: 0 }),
+  installUpdate: async (): Promise<import('./api').UpdateStatus> => ({ state: 'idle', supported: false, pct: 0 }),
   // demoda profil yalnız bu tarayıcıda; tüm verileri silme masaüstüne özgü
   profile: async (): Promise<import('./api').Profile> => {
     try {
