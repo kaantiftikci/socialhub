@@ -91,9 +91,9 @@ test('iMessage ingest: tapback mesaj olmaz, klasör güncellenir, (smsft) eki ad
   assert.ok(store.getMessage(`${cid}#g1`));
 
   // gönderen numarasız kendi mesajı + filtre ekli tanımlayıcı → ad ekten arındırılır
-  const cid2 = `${account.id}/any;-;+905559449797(smsft)`;
-  priv.ingest(imRow({ guid: 'g4', is_from_me: 1, handle: null, chat_identifier: '+905559449797(smsft)', chat_guid: 'any;-;+905559449797(smsft)', is_filtered: 4 }), false);
-  assert.equal(store.getChat(cid2)?.name, '+905559449797');
+  const cid2 = `${account.id}/any;-;+905000000099(smsft)`;
+  priv.ingest(imRow({ guid: 'g4', is_from_me: 1, handle: null, chat_identifier: '+905000000099(smsft)', chat_guid: 'any;-;+905000000099(smsft)', is_filtered: 4 }), false);
+  assert.equal(store.getChat(cid2)?.name, '+905000000099');
   assert.equal(store.getChat(cid2)?.meta?.folder, 'unknown');
 });
 

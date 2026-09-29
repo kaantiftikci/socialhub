@@ -19,6 +19,11 @@ Dil: arayüz ve yorumlar Türkçe.
 - Değişiklik sonrası: `npm run typecheck`, `npm run build -w packages/core`, `npm run build -w apps/web`; mümkünse demo
   modunda (`npm run demo`) Playwright ile görsel doğrulama.
 
+- **Depo HERKESE AÇIK (Kaan, 29.09; Actions dakikaları ücretsiz olsun diye)**: depoya ve commit mesajlarına ASLA gizli bilgi yazma (şifre,
+  API anahtarı, token, gerçek e-posta/telefon, müşteri/üye verisi, sunucu şifresi); gizliler GitHub Secrets'ta ya da sunucudaki ~/mivelo-data'da.
+  Testlerde yalnız yer tutucu (905000000099, ornek@example.com). Geçmiş tarandı (29.09): bilinçli açık kalanlar admin/demo bcrypt karmaları
+  (`DEFAULT_HASH`, `SEED_USERS`; Kaan panelden şifreyi değiştirince sunucudaki karma geçerli olur) ve Telegram api_hash (masaüstü paketinde zaten var).
+
 ## Test ve doğrulama
 - **Canlı E2E** (`npm run e2e -- <komut>`, `scripts/e2e.mjs`; kullanıcının Mac'inde, `npm run dev` açıkken): `setup` ana ⇄ test hesap/sohbet
   eşleştirmesi (`~/.mivelo/e2e.json`; ikisi de Mivelo'ya bağlı; tek hesapta "elle" mod), `run [--ui] [wa ig …]` gidiş (`#e2e-ID-g`) /
