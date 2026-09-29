@@ -28,8 +28,28 @@ jobs:
             v="$base.$GITHUB_RUN_NUMBER"; fi
           echo "v=$v" >>"$GITHUB_OUTPUT"; echo "sürüm: $v"
 
+  # Birim testleri YALNIZ burada, bir kez ve Linux'ta: özel depoda macOS dakikası kotadan 10 kat, Windows 2 kat düşüyor
+  # (0.1.7'de testler üç makinede 15+ dk takılıp aylık 2.000 dakikanın %90'ını bitirdi). Sonuç paketlemeyi durdurmaz.
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Çekirdek birim testleri
+        run: npm test -w packages/core
+
   build:
     needs: version
+    # takılan bir adım pahalı Mac dakikalarını yakmasın (normal derleme ≈10-12 dk)
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -64,11 +84,6 @@ jobs:
       - run: npm ci
       - run: npm run build -w packages/core
       - run: npm run build -w apps/web
-      - name: Çekirdek birim testleri
-        run: npm test -w packages/core
-        continue-on-error: true
-        # açık kalan bir ağ bağlantısı paketlemeyi sonsuza dek bekletmesin (0.1.7'de 15+ dk takıldı)
-        timeout-minutes: 8
       - name: Çekirdeği paketle (bundle-core + gömülü node)
         run: node scripts/bundle-core.mjs
         env:

@@ -139,9 +139,13 @@ Dil: arayüz ve yorumlar Türkçe.
   takvim, kanallar/gizlilik) iOS uyarlaması; `node design/appstore/render.mjs` → `out/` 1290×2796 PNG (git dışı). Ayrıntı README.
 - **Masaüstü paketleri (DMG + EXE, gerçek kullanım yolu — demo sunucusu değil; ban/gizlilik: kullanıcının kendi IP'si ve cihazı)**:
   `.github/workflows/build-desktop.yml` (eski build-windows.yml'in yerine): YALNIZ elle (Actions → Run workflow) ya da v* etiketi — main'e itme
-  sürüm YAYINLAMAZ. **Sürümü Claude otomatik çıkarır (Kaan, 29.09: "sen otomatik yap sürüm işlerini")**: uygulamayı (core/web/desktop) etkileyen
-  doğrulanmış her iş turunun sonunda, main'e ittikten sonra GitHub MCP `actions_run_trigger run_workflow build-desktop.yml ref main` (etiket
-  itmek bu ortamda proxy 403 veriyor; sürüm numarası 0.1.<run>) ve sonucu kontrol eder (başarısızsa kök nedeni düzeltip yeniden). Sürüm 0.1.<run> (etikette
+  sürüm YAYINLAMAZ. **Sürümü Claude otomatik çıkarır (Kaan, 29.09: "sen otomatik yap sürüm işlerini")** — AMA GitHub Actions KOTASI SINIRLI
+  (özel depo, ayda 2.000 dk ücretsiz; macOS dakikası ×10, Windows ×2 → bir sürüm ≈ 2 Mac işi × ~12 dk × 10 + Windows ≈ 250-270 kota dakikası;
+  ayda en çok ~7 sürüm; aşım ÜCRETLİ, Kaan ücretli hiçbir şey istemiyor). 29.09'da takılan 0.1.7 derlemesi kotanın %90'ını bitirdi → iki derleme
+  iptal edildi, kota 1 Ekim'de sıfırlanıyor. Kural: değişiklikleri biriktir, en çok GÜNDE BİR sürüm; kalan kota bir sürüme yetmiyorsa
+  (GitHub'dan 80/90% uyarısı geldiyse) sürüm ÇIKARMA, Kaan'a söyle. Tetik: GitHub MCP `actions_run_trigger run_workflow build-desktop.yml ref main`
+  (etiket itmek bu ortamda proxy 403 veriyor; sürüm 0.1.<run>), sonucu kontrol et; takılırsa HEMEN iptal et. Birim testleri yalnız ayrı
+  `test` işinde (ubuntu, 1×, ≤10 dk; sonucu paketlemeyi durdurmaz), `build` işi ≤30 dk; `npm test` `--test-force-exit --test-timeout=120000`. Sürüm 0.1.<run> (etikette
   etiketinki), `--config {"version"}` ile. Matris: mac-arm64 (macos-14), mac-intel (macos-14 + x64 Node/Rosetta + x86_64-apple-darwin), windows-x64 (NSIS).
   DMG'den gizli `.VolumeIcon.icns` + `.fseventsd` CI'da silinir (Finder'da gizli dosyalar açıkken ikinci "amblem" görünüyordu; UDRW → sil → UDZO).
   Mac simgesi `icons/icon.icns` Apple şablonunda (1024 tuval, ortada 824 squircle + gölge; `apps/desktop/scripts/mac-icon.py` → `icon-macos.png`
