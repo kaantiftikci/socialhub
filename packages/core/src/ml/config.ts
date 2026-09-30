@@ -36,7 +36,7 @@ export interface ModelSpec {
  *   masaüstünde wasm ile çok yavaş. Sesli mesajlar kısa: small yeterli hızda.
  * - multilingual-e5-small (q8 ≈ 120 MB, 384 boyut): 100 dilde erişim (retrieval) için eğitilmiş; paraphrase-MiniLM'den aramada iyi.
  *   "query: " / "passage: " önekleri şart.
- * Yerel çeviri modeli (NLLB-200, ≈900 MB) 30.09'da KALDIRILDI (Kaan): ağır ve yavaştı; çeviri Google Cloud Translation ya da Claude.
+ * Yerel çeviri modeli (NLLB-200, ≈900 MB) 30.09'da KALDIRILDI (Kaan): ağır ve yavaştı; çeviri yalnız Google Cloud Translation.
  */
 export const MODEL_SPECS: Record<ModelKey, ModelSpec> = {
   whisper: { key: 'whisper', id: 'Xenova/whisper-small', title: 'Konuşma tanıma (Whisper small)', approxMb: 250, onnx: ['onnx/encoder_model_quantized.onnx', 'onnx/decoder_model_merged_quantized.onnx'] },

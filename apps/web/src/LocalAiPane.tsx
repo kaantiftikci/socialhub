@@ -163,8 +163,6 @@ export function LocalAiPane({ notify }: { notify: (t: string, err?: boolean) => 
           hint={
             st.translate.engine === 'google'
               ? 'Google Cloud Translation ile (yalnız "Çevir" dediğinde o metin Google’a gider)'
-              : st.translate.engine === 'claude'
-              ? 'Anthropic anahtarınla Claude çevirir (yalnız "Çevir" dediğinde, o metin gider)'
               : 'Aşağıdan Google çeviri anahtarı ekle'
           }
         >

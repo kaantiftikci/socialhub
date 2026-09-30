@@ -8,7 +8,7 @@ import { demoMlApi } from './demo-ml';
  * Statik demoda model indirmeden taklit (demo-ml.ts).
  */
 export type ModelKey = 'whisper' | 'embed';
-export type TranslateEngine = 'google' | 'claude';
+export type TranslateEngine = 'google';
 export interface MlModel {
   key: ModelKey;
   id: string;
