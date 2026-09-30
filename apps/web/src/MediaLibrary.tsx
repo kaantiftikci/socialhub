@@ -116,7 +116,7 @@ function useVisible<T extends Element>(): [RefObject<T | null>, boolean] {
 export function MediaLibrary({ notify, onMenu, onOpenMessage }: { notify: (t: string, err?: boolean) => void; onMenu?: () => void; onOpenMessage: (chatId: string, messageId: string, ts: number) => void }) {
   const [tab, setTab] = useState<Tab>('all');
   const [platform, setPlatform] = useState<Platform | null>(null);
-  const [chat, setChat] = useState<string>('');
+  const chat = '';
   const [qInput, setQInput] = useState('');
   const [q, setQ] = useState('');
   const [items, setItems] = useState<LibItem[]>([]);
@@ -257,16 +257,6 @@ export function MediaLibrary({ notify, onMenu, onOpenMessage }: { notify: (t: st
           <h1>Medya</h1>
           <span>{facets ? `${allCount.toLocaleString('tr-TR')} öğe · tüm uygulamalardan` : ' '}</span>
         </div>
-        <span style={{ flexGrow: 1 }} />
-        <label className="ml-search">
-          <Icon name="search" size={15} />
-          <input value={qInput} onChange={(e) => setQInput(e.target.value)} placeholder="Ada, sohbete göre ara" aria-label="Medyada ara" />
-          {qInput && (
-            <button type="button" className="b" aria-label="Aramayı temizle" onClick={() => setQInput('')}>
-              <Icon name="x" size={12} sw={2} />
-            </button>
-          )}
-        </label>
       </div>
 
       <div className="ml-filters">
@@ -289,14 +279,15 @@ export function MediaLibrary({ notify, onMenu, onOpenMessage }: { notify: (t: st
               </button>
             ))}
           </div>
-          <select className="ml-chat" value={chat} onChange={(e) => setChat(e.target.value)} aria-label="Kişi / sohbet">
-            <option value="">Tüm kişi ve sohbetler</option>
-            {(facets?.chats ?? []).map((c) => (
-              <option key={c.chatId} value={c.chatId}>
-                {c.name} · {PLATFORMS[c.platform]?.name ?? c.platform} ({c.count})
-              </option>
-            ))}
-          </select>
+          <label className="ml-search">
+            <Icon name="search" size={15} />
+            <input value={qInput} onChange={(e) => setQInput(e.target.value)} placeholder="Ada, sohbete göre ara" aria-label="Medyada ara" />
+            {qInput && (
+              <button type="button" className="b" aria-label="Aramayı temizle" onClick={() => setQInput('')}>
+                <Icon name="x" size={12} sw={2} />
+              </button>
+            )}
+          </label>
         </div>
       </div>
 

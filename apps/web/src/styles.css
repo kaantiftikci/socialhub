@@ -2155,7 +2155,8 @@ button.att-card.xpost img, button.att-card .att-thumb img { cursor: pointer; }
 .ml-tabs { align-self: flex-start; max-width: 100%; }
 .ml-tabs button { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; }
 .ml-row2 { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-.ml-plats { flex: 1 1 auto; min-width: 0; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.ml-row2 .ml-search { flex: none; width: 280px; }
+.ml-plats { flex: 1 1 0; min-width: 0; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
 .ml-plats::-webkit-scrollbar { display: none; }
 .ml-pchip { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--text2); font-size: 12px; font-weight: 500; }
 .ml-pchip.on { border-color: var(--v); background: var(--v-soft); color: var(--v-txt); }
