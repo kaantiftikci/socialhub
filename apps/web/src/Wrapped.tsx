@@ -312,7 +312,7 @@ export function WrappedView({ notify, onMenu, onOpenChat, onWaiting }: { notify:
   const platTotal = s ? s.platforms.reduce((a, p) => a + p.total, 0) || 1 : 1;
 
   return (
-    <section className="wrapped" aria-label="Raporum">
+    <section className="wrapped" aria-label="Miveloji">
       <div className="wr-head">
         {onMenu && (
           <button className="btn icon b b2" aria-label="Menü" title="Menü" onClick={onMenu}>
@@ -320,7 +320,7 @@ export function WrappedView({ notify, onMenu, onOpenChat, onWaiting }: { notify:
           </button>
         )}
         <div className="wr-title">
-          <h1>Raporum</h1>
+          <h1>Miveloji</h1>
           <span>{s ? `${s.label}${platform ? ` · ${PLATFORMS[platform as keyof typeof PLATFORMS]?.name ?? platform}` : ''}` : ' '}</span>
         </div>
         <span style={{ flexGrow: 1 }} />
@@ -858,7 +858,7 @@ function Story({ s, hide, setHide, onClose, onShare }: { s: WrappedStats; hide: 
   };
 
   return (
-    <div className="st-overlay" role="dialog" aria-modal="true" aria-label={`Raporum hikâyesi: ${s.label}`}>
+    <div className="st-overlay" role="dialog" aria-modal="true" aria-label={`Miveloji hikâyesi: ${s.label}`}>
       <div ref={boxRef} tabIndex={-1} className={`st-box tone-${slide.tone} ${paused ? 'paused' : ''}`}>
         <div className="st-bars" aria-hidden="true">
           {slides.map((sl, k) => (
@@ -874,7 +874,7 @@ function Story({ s, hide, setHide, onClose, onShare }: { s: WrappedStats; hide: 
         </div>
         <div className="st-top">
           <span className="st-brand">
-            <Logo size={22} /> Raporum
+            <Logo size={22} /> Miveloji
           </span>
           <span style={{ flexGrow: 1 }} />
           <button className="st-btn" onClick={() => setHide(!hide)} aria-pressed={hide} title={hide ? 'İsimleri göster' : 'İsimleri gizle'} aria-label={hide ? 'İsimleri göster' : 'İsimleri gizle'}>
@@ -940,7 +940,7 @@ function ShareDialog({ s, hide, setHide, notify, onClose }: { s: WrappedStats; h
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
-  const fileName = `Mivelo Raporum ${s.label}${format === 'square' ? ' kare' : ''}.png`;
+  const fileName = `Miveloji ${s.label}${format === 'square' ? ' kare' : ''}.png`;
   const download = async () => {
     if (!blob) return;
     setBusy(true);

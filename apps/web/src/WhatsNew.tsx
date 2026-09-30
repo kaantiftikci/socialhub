@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { CHANGELOG, type ChangeEntry } from './changelog';
 import { Icon, Logo } from './ui';
 
+
 /**
  * "Yenilikler" penceresi: güncellemeden sonra (uygulama kapanıp yeniden açılınca) açılış animasyonu ve yükleme bittiğinde
  * bir kez çıkar; kullanıcının son gördüğü kayıttan sonra eklenenleri listeler (changelog.ts).
@@ -106,11 +107,11 @@ export function WhatsNew({ ready }: { ready: boolean }) {
   }
   let n = 0;
   const Items = ({ e }: { e: ChangeEntry }) => (
-    <ul className="wn-list">
-      {e.items.map((it) => (
-        <li key={it.title} style={{ animationDelay: `${180 + n++ * 70}ms` }}>
-          <span className="wn-ic">
-            <Icon name={it.icon} size={17} />
+    <ol className="wn-list">
+      {e.items.map((it, i) => (
+        <li key={it.title} style={{ animationDelay: `${260 + n++ * 70}ms` }}>
+          <span className="wn-n" aria-hidden="true">
+            {String(i + 1).padStart(2, '0')}
           </span>
           <span className="wn-t">
             <b>{it.title}</b>
@@ -118,19 +119,20 @@ export function WhatsNew({ ready }: { ready: boolean }) {
           </span>
         </li>
       ))}
-    </ul>
+    </ol>
   );
   return (
     <div className={`wn-back ${closing ? 'closing' : ''}`} onClick={close} role="presentation">
       <div className="wn" role="dialog" aria-modal="true" aria-label="Yenilikler" onClick={(e) => e.stopPropagation()}>
         <div className="wn-hero">
-          <span className="wn-glow" aria-hidden="true" />
-          <span className="wn-logo">
-            <Logo size={34} />
-          </span>
-          <span className="wn-kicker">Yenilikler</span>
-          <h2>{cur.title}</h2>
-          <span className="wn-date">{fmtDate(cur.date)}</span>
+          <div className="wn-copy">
+            <span className="wn-kicker">Bu güncellemede</span>
+            <h2>{cur.title}</h2>
+            <span className="wn-date">
+              <Counter to={cur.items.length} /> yenilik · {fmtDate(cur.date)}
+            </span>
+          </div>
+          <Unbox />
           <button className="wn-x b" aria-label="Kapat" onClick={close}>
             <Icon name="x" size={14} sw={2} />
           </button>
@@ -159,6 +161,44 @@ export function WhatsNew({ ready }: { ready: boolean }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Yenilik sayısı 0'dan sayarak gelir (kutudan çıkanlar sayılıyor gibi) */
+function Counter({ to }: { to: number }) {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return setN(to);
+    let i = 0;
+    const t = window.setInterval(() => {
+      i += 1;
+      setN(i);
+      if (i >= to) clearInterval(t);
+    }, 110);
+    return () => clearInterval(t);
+  }, [to]);
+  return <b className="wn-count">{n}</b>;
+}
+
+/**
+ * Sağdaki küçük sahne: kapağı açılan bir kutu ve içinden yükselen parçalar (yeni gelenler). Yalnız transform/opacity;
+ * ilk açılış bir kez büyük, sonra ~5 sn'de bir hafifçe yinelenir.
+ */
+function Unbox() {
+  const bits = ['b1', 'b2', 'b3', 'b4', 'b5', 'b6'];
+  return (
+    <div className="wn-stage" aria-hidden="true">
+      <span className="wn-ring" />
+      {bits.map((b) => (
+        <i key={b} className={`wn-bit ${b}`} />
+      ))}
+      <span className="wn-box">
+        <span className="wn-lid" />
+        <span className="wn-base">
+          <Logo size={26} />
+        </span>
+      </span>
     </div>
   );
 }

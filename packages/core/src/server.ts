@@ -33,6 +33,7 @@ import { fullDiskAccess, messagesAutomation, PRIVACY_PANES, tccStatus } from './
 import { getStats } from './stats.js';
 import { libraryFacets, queryLibrary, startLibraryIndexer, type LibQuery } from './library.js';
 import { saveDownload } from './downloads.js';
+import { clearMediaCache, clearTempFiles, MEDIA_KINDS, storageReport, type MediaKind } from './storage.js';
 import type { Chat, CoreEvent, Platform } from './model.js';
 import { checkDigest, isDigestTime, marketSummary, readDigestSettings, SHOP_PLATFORMS, writeDigestSettings } from './market-summary.js';
 import { dayKey, formatMoney, isDayKey, orderCurrency, parseAmount } from './market-calc.js';
@@ -405,8 +406,21 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   /** Sohbet başına son watch() zamanı (/read) */
   const watchedAt = new Map<string, number>();
   const WATCH_EVERY_MS = 60_000;
-  route('POST', '/api/chats/:id/read', (_r, _s, p) => {
+  // Ayarlar → Depolama (storage.ts): kaplanan yer + medya önbelleği / geçici dosya temizliği
+  route('GET', '/api/storage', (req) => storageReport(store, { fresh: new URL(req.url ?? '/', 'http://x').searchParams.get('fresh') === '1' }));
+  route('POST', '/api/storage/clear', async (req, _s, _p, body) => {
+    localOnly(req);
+    const b = body as { days?: unknown; kinds?: unknown };
+    const days = Number(b.days);
+    if (![0, 30, 90, 120].includes(days)) throw new HttpError(400, 'Geçersiz gün');
+    const kinds = (Array.isArray(b.kinds) ? b.kinds : []).filter((k): k is MediaKind => MEDIA_KINDS.includes(k as MediaKind));
+    if (!kinds.length) throw new HttpError(400, 'Tür seçilmedi');
+    return clearMediaCache({ olderThanDays: days, kinds });
+  });
+  route('POST', '/api/storage/temp', (req) => (localOnly(req), clearTempFiles()));
+  route('POST', '/api/chats/:id/read', (req, _s, p) => {
     const id = dec(p.id);
+    const silent = new URL(req.url ?? '/', 'http://x').searchParams.get('silent') === '1';
     const before = store.getChatLite(id);
     if (!before) return { ok: true };
     // sohbet açık: yazıyor/çevrimiçi aboneliği (WhatsApp presence vb.). Arayüz açık sohbetteki HER gelen mesaj olayında /read
@@ -425,7 +439,8 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     if (chat) {
       bus.emit({ type: 'chat.upsert', chat });
       // platformda da okundu işaretle (arka planda)
-      if (before.unread > 0) void registry.get(chat.accountId)?.markRead?.(chat.remoteId).catch((e) => bus.log('warn', `${chat.platform}: okundu işaretlenemedi: ${(e as Error).message}`));
+      // Gizli okuma (Ayarlar → Genel): yalnız Mivelo'da okundu sayılır, karşı tarafa okundu bilgisi gitmez
+      if (before.unread > 0 && !silent) void registry.get(chat.accountId)?.markRead?.(chat.remoteId).catch((e) => bus.log('warn', `${chat.platform}: okundu işaretlenemedi: ${(e as Error).message}`));
     }
     return { ok: true };
   });

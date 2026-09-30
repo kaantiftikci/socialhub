@@ -37,6 +37,12 @@ export function FeedbackButton() {
   const website = useRef('');
 
   useEffect(() => () => atts.forEach((a) => URL.revokeObjectURL(a.url)), []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Ayarlar → Yardım / Hakkında: "Sorun bildir"
+  useEffect(() => {
+    const on = () => (setHidden(false), setOpen(true));
+    window.addEventListener('mivelo-feedback', on);
+    return () => window.removeEventListener('mivelo-feedback', on);
+  }, []);
 
   const add = (files: File[]) => {
     setErr('');

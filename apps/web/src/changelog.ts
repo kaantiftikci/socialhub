@@ -1,10 +1,9 @@
 /**
- * "Yenilikler" penceresinin içeriği (WhatsNew.tsx). Yeni sürüm çıkarken EN ÜSTE bir kayıt ekle: `id` benzersiz (tarih + sıra),
- * maddeler kullanıcı diliyle kısa (teknik ayrıntı yok). Pencere, kullanıcının son gördüğü kayıttan sonra eklenenleri gösterir.
- * İkon adları ui.tsx `Icon` kümesinden; emoji yazma.
+ * "Yenilikler" penceresinin içeriği (WhatsNew.tsx). Yeni sürüm çıkarken EN ÜSTE bir kayıt ekle: `id` benzersiz (tarih + sıra).
+ * Maddeler kullanıcı diliyle, iki üç cümle: ne değişti + nerede bulunur / ne işe yarar (teknik ayrıntı yok, emoji yok).
+ * Pencere, kullanıcının son gördüğü kayıttan sonra eklenenleri gösterir; maddeler sırayla numaralanır.
  */
 export interface ChangeItem {
-  icon: string;
   title: string;
   text: string;
 }
@@ -17,16 +16,31 @@ export interface ChangeEntry {
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    id: '2026-09-30c',
+    date: '2026-09-30',
+    title: 'Yepyeni ayarlar',
+    items: [
+      { title: 'Baştan tasarlanan ayarlar', text: 'Ayarlar artık solda aranabilir, renkli simgeli bölümlerle geliyor. Aradığın ayarın adını yaz; tek dokunuşla o satıra gider ve vurgular. ⌘, (Windows’ta Ctrl+,) ile her yerden açılır.' },
+      { title: 'Gizli okuma', text: 'Genel bölümünden açarsan sohbeti okuduğunda karşı tarafa “görüldü” gitmez; mesajlar yalnız Mivelo’da okundu sayılır. Birine hemen dönmek istemediğin anlar için.' },
+      { title: 'Daha akıllı bildirimler', text: 'Aynı kişiden art arda gelen mesajlar istersen tek bildirimde toplanır. Okumadığın bir sohbet için belirlediğin süre sonunda bir kez daha hatırlatılırsın.' },
+      { title: 'Depolama', text: 'Mivelo’nun bilgisayarında ne kadar yer kapladığını türlere göre görürsün. İndirilmiş eski fotoğraf ve videoları tek tuşla temizleyebilirsin; mesajların silinmez.' },
+      { title: 'Görünüm ve yazma', text: 'Açık, koyu ya da sistem teması; arayüz boyutu ve hareketleri azaltma seçenekleri eklendi. Uzun mesaj yazanlar için Enter yerine ⌘+Enter ile gönderme de var.' },
+      { title: 'Her uygulamada yanıtla', text: 'Mesajı sağa çekerek ya da “Yanıtla”ya basarak yanıt verme artık TikTok, X, Messenger, LinkedIn ve iMessage’da da var. Bu uygulamalarda mesajın başına kısa bir alıntı satırı eklenir; Mivelo onu balonda alıntı kutusu olarak gösterir.' },
+      { title: 'Miveloji', text: 'Raporum’un yeni adı Miveloji: mesajlaşma alışkanlıklarının bilimi. İçerik aynı, ismi artık bizden.' },
+      { title: 'Yardım ve Hakkında', text: 'Sık sorulan soruların cevapları, sorun bildirme ve kısayollar listesi artık ayarların içinde. Hakkında bölümünde güncel sürümde olup olmadığını görürsün.' },
+    ],
+  },
+  {
     id: '2026-09-30b',
     date: '2026-09-30',
     title: 'Raporun daha derin, bildirimler daha sade',
     items: [
-      { icon: 'chart', title: 'Uygulama uygulama rapor', text: 'Raporum’da bir uygulama seç, yalnız onun istatistiklerini gör.' },
-      { icon: 'grid', title: 'Tıklanabilir ısı haritası', text: 'Bir saate dokun: o saatte hangi uygulamada, kimle konuştuğunu gör. Artık 24 saatin hepsi yazıyor.' },
-      { icon: 'sun', title: 'Günün hangi saatinde', text: 'Sabah, öğle, akşam ve gece payların; hafta içi ile hafta sonu farkın.' },
-      { icon: 'bell', title: 'Daha sade bildirim kartı', text: 'Mesajın daha uzun görünür; yanıt kutusu yalnız “Yanıtla” deyince açılır.' },
-      { icon: 'play', title: 'TikTok videoları oynuyor', text: 'Sohbette paylaşılan TikTok videoları artık uygulamanın içinde açılıyor.' },
-      { icon: 'search', title: 'Medya’da hızlı arama', text: 'Arama kutusu uygulama düğmelerinin yanına taşındı.' },
+      { title: 'Uygulama uygulama rapor', text: 'Miveloji’nin (eski adıyla Raporum) üstündeki uygulama düğmelerinden birini seç; tüm sayılar, kişiler ve saatler yalnız o uygulamaya göre yeniden hesaplanır. WhatsApp’ta kimlerle, Instagram’da hangi saatlerde konuştuğunu ayrı ayrı görebilirsin.' },
+      { title: 'Dokunulabilen ısı haritası', text: 'Haftanın hangi gün ve saatinde yazıştığını gösteren haritada artık 24 saatin hepsi yazıyor. Bir kareye dokununca o saatte en çok hangi uygulamada ve kimlerle konuştuğun altta açılır.' },
+      { title: 'Günün hangi bölümünde', text: 'Isı haritasının altında sabah, öğle, akşam ve gece paylarını görürsün. Hafta içi ile hafta sonu alışkanlıkların da yan yana karşılaştırılır.' },
+      { title: 'Daha sade bildirim kartı', text: 'Sağ üstte çıkan mesaj kartında uygulama adı yerine küçük logosu var ve mesajın daha uzun kısmı okunuyor. Yanıt kutusu artık kendiliğinden açılmıyor; “Yanıtla”ya basınca geliyor.' },
+      { title: 'TikTok videoları oynuyor', text: 'TikTok sohbetlerinde paylaşılan videolara dokununca artık uygulamanın içinde oynatıcı açılıyor. Tarayıcıya geçmen gerekmiyor.' },
+      { title: 'Medya’da hızlı arama', text: 'Medya kütüphanesinde arama kutusu uygulama düğmelerinin hemen yanına taşındı. Bir uygulama seçip aynı satırda dosya adıyla arayabilirsin.' },
     ],
   },
   {
@@ -34,13 +48,13 @@ export const CHANGELOG: ChangeEntry[] = [
     date: '2026-09-30',
     title: 'Sekiz yeni özellik',
     items: [
-      { icon: 'chart', title: 'Raporum', text: 'Ayın ve yılın iletişim özeti; paylaşılabilir, isimsiz kart.' },
-      { icon: 'image', title: 'Medya kütüphanesi', text: 'Tüm uygulamalardan gelen fotoğraf, video, dosya ve bağlantılar tek yerde.' },
-      { icon: 'users', title: 'Kişi birleştirme', text: 'Aynı kişinin farklı uygulamalardaki sohbetleri tek zaman çizelgesinde.' },
-      { icon: 'transcript', title: 'Sesli mesajlar yazıya', text: 'Sesli mesajların altında metni; bilgisayarında, internete gitmeden.' },
-      { icon: 'sparkle', title: 'Doğal dille arama', text: '⌘K → Anlamsal: “geçen ay gelen fatura” gibi ara.' },
-      { icon: 'send', title: 'Hızlı gönder', text: '⌘⇧K ile her yerden kişi seç, yaz, gönder.' },
-      { icon: 'receipt', title: 'Pazaryeri gün sonu', text: 'Günün siparişleri, cirosu ve bekleyen soruları; ürün sorularına AI taslak.' },
+      { title: 'Miveloji', text: 'Ayın ve yılın iletişim özetin: en çok yazıştığın kişiler, en hareketli günlerin, yanıt hızın ve serilerin. İsimleri gizleyip paylaşılabilir bir kart olarak kaydedebilirsin.' },
+      { title: 'Medya kütüphanesi', text: 'Tüm uygulamalardan gelen fotoğraf, video, dosya ve bağlantılar tek bir yerde toplanıyor. Türe ve uygulamaya göre süzebilir, bir öğeden doğrudan sohbetine gidebilirsin.' },
+      { title: 'Kişi birleştirme', text: 'Aynı kişiyle farklı uygulamalardaki sohbetlerin tek bir zaman çizelgesinde birleşiyor. Mivelo aynı numara ya da e-postayı fark edince birleştirmeyi önerir; onay senden.' },
+      { title: 'Sesli mesajlar yazıya', text: 'Sesli mesajların altında okunabilir metni belirir. Döküm senin bilgisayarında yapılır; ses hiçbir sunucuya gönderilmez.' },
+      { title: 'Doğal dille arama', text: '⌘K arama penceresinde “Anlamsal”ı açıp “geçen ay gelen fatura” gibi yazman yeterli. Kelimesi kelimesine geçmese de anlamca yakın mesajlar bulunur.' },
+      { title: 'Hızlı gönder', text: '⌘⇧K ile hangi ekranda olursan ol kişiyi seç, mesajını yaz, gönder. Sohbeti açman gerekmez; gönderim durumu sağ üstte görünür.' },
+      { title: 'Pazaryeri gün sonu', text: 'Mağazan için günün siparişleri, cirosu ve bekleyen soruları her akşam özetlenir. Ürün sorularına geçmiş cevaplarından yararlanan bir yanıt taslağı da hazırlanabilir.' },
     ],
   },
 ];

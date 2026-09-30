@@ -5,13 +5,14 @@ import { EmojiPicker } from './emoji';
 import { api, USE_STATIC } from './api';
 import { EventEditor } from './CalendarView';
 import { API_BASE, isTauri, mediaUrl, openExternal } from './desktop';
-import { DEFAULT_TAGS, EDIT_LIMIT_MS, EDIT_PLATFORMS, PLATFORMS, REPLY_PLATFORMS, UNSEND_LIMIT_MS, UNSEND_PLATFORMS, isOrderPage, questionOrderRef, shopKind, QUICK_REACTIONS, REACT_PLATFORMS, TAG_COLORS, openInAppLink, type Attachment, type CalendarDraft, type Chat, type ChatFlags, type DraftResult, type LinkPreview, type Message, type Platform, type Reaction } from './types';
+import { DEFAULT_TAGS, EDIT_LIMIT_MS, QUOTE_TEXT_PLATFORMS, parseQuoteLine, quoteLine, EDIT_PLATFORMS, PLATFORMS, REPLY_PLATFORMS, UNSEND_LIMIT_MS, UNSEND_PLATFORMS, isOrderPage, questionOrderRef, shopKind, QUICK_REACTIONS, REACT_PLATFORMS, TAG_COLORS, openInAppLink, type Attachment, type CalendarDraft, type Chat, type ChatFlags, type DraftResult, type LinkPreview, type Message, type Platform, type Reaction } from './types';
 import { guessWhen } from './when';
 import { useAiPrefs } from './ai-prefs';
 import { QuestionDraftBar, isShopQuestion } from './QuestionDraft';
 import { PersonPanel } from './PersonPanel';
 import { VoiceTranscript } from './MlBubble';
 import { loadChatTranscripts } from './ml-client';
+import { getPrefs, usePrefs } from './prefs';
 import { useClosing, Avatar, Chip, Icon, IconText, Resizer, Tag, ago, fmtDay, fmtStamp, fmtTime, leadIcon } from './ui';
 
 /** Bağlayıcıların yazdığı sistem mesajı baş emojileri (kullanıcıların nadiren mesaja başladığı): balonda ikon olarak çizilir */
@@ -251,6 +252,7 @@ export function Conversation({
   // Anında görünen giden mesajlar: Enter'a basınca "Gönderiliyor" balonu hemen çıkar, platform onaylayınca gerçek kayıt
   // (WS message.upsert) aynı metinle gelir ve bu kopya gizlenir. Hata olursa balon kalkar, metin kutuya geri döner.
   // realId: platformun verdiği kimlik (onaydan sonra); metin sonradan düzenlense/silinse de kopya kimlikle eşleşir
+  const prefs = usePrefs();
   const [outbox, setOutbox] = useState<Array<Message & { realId?: string }>>([]);
   const messages = useMemo(() => {
     // bire bir eşleşme: aynı metin art arda gönderilince ilk gerçek kayıt iki balonu birden gizlemesin
@@ -331,7 +333,7 @@ export function Conversation({
   /** Yanıtlanan mesaj (sağa kaydır / Yanıtla): yazma alanının üstünde çubuk, gönderimde alıntılı yanıt */
   const [replyTarget, setReplyTarget] = useState<Message | null>(null);
   useEffect(() => setReplyTarget(null), [chat.id]);
-  const canReplyChat = REPLY_PLATFORMS.has(chat.platform);
+  const canReplyChat = REPLY_PLATFORMS.has(chat.platform) || QUOTE_TEXT_PLATFORMS.has(chat.platform);
   const startReply = useCallback((m: Message) => {
     // düzenleme sürüyorsa bırakılır: yazma alanı düzenleme öncesi metnine döner
     setEditTarget((cur) => {
@@ -920,6 +922,9 @@ export function Conversation({
                       );
                     }
                     const { m, i } = u;
+                    // alıntı satırıyla gönderilmiş yanıt (TikTok/X/Messenger/LinkedIn/iMessage): kutu olarak göster, metinden çıkar
+                    const tq = !m.replyTo ? parseQuoteLine(m.text) : null;
+                    const mText = tq ? tq.rest : m.text;
                     // birleşik zaman çizelgesinde başka kanalın mesajı: yanıt/tepki/düzenleme yalnız gönderim kanalındakilerde
                     const foreign = !!timeline && m.chatId !== chat.id;
                     const replyable = !foreign && canReplyChat && !m.remoteId.startsWith('local-') && !m.remoteId.startsWith('out-') && !m.id.startsWith('out-');
@@ -958,6 +963,25 @@ export function Conversation({
                               <span>{m.replyTo.text || 'Mesaj'}</span>
                             </button>
                           )}
+                          {tq && (
+                            <button
+                              type="button"
+                              className={`quote b ${tq.senderName === 'Sen' ? 'mine' : ''}`}
+                              onClick={() => {
+                                const key = tq.text.replace(/…$/, '');
+                                const hit = [...messages].reverse().find((x) => x.id !== m.id && x.ts <= m.ts && (parseQuoteLine(x.text)?.rest ?? x.text).replace(/\s+/g, ' ').replace(/[”]/g, '"').startsWith(key));
+                                const el = hit && document.querySelector<HTMLElement>(`[data-mid="${CSS.escape(hit.id)}"]`);
+                                if (!el) return act.current.notify('Yanıtlanan mesaj yüklenmemiş (daha eski)');
+                                el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                                el.classList.remove('flash');
+                                void el.offsetWidth;
+                                el.classList.add('flash');
+                              }}
+                            >
+                              <b>{tq.senderName}</b>
+                              <span>{tq.text || 'Mesaj'}</span>
+                            </button>
+                          )}
                           {m.attachments?.map((a, j) => (
                             <AttachmentView key={j} a={a} onOpen={setLightbox} />
                           ))}
@@ -971,16 +995,16 @@ export function Conversation({
                                 {g.fromMe && statusIcon(m.status)}
                               </time>
                             ) : null;
-                            if (m.text && m.attachments?.length)
+                            if (mText && m.attachments?.length)
                               return (
                                 <span className="bub-text">
-                                  {bubbleText(m.text)}
+                                  {bubbleText(mText)}
                                   {timeEl}
                                 </span>
                               );
                             return (
                               <>
-                                {m.text ? bubbleText(m.text) : null}
+                                {mText ? bubbleText(mText) : null}
                                 {timeEl}
                               </>
                             );
@@ -1156,13 +1180,15 @@ export function Conversation({
         });
       return;
     }
-    const body = (typeof override === 'string' ? override : text || draftShown?.draft || '').trim();
-    if (!body) return;
+    const typed = (typeof override === 'string' ? override : text || draftShown?.draft || '').trim();
+    if (!typed) return;
     const chatId = chat.id;
-    // yanıt: Slack'te iş parçacığına, diğerlerinde alıntılı yanıt (platform kimliğiyle)
+    // yanıt: Slack'te iş parçacığına, yerel alıntısı olanlarda alıntılı yanıt (platform kimliğiyle), diğerlerinde alıntı satırı
     const rt = replyTarget;
+    const textQuote = !!rt && QUOTE_TEXT_PLATFORMS.has(chat.platform);
+    const body = textQuote && rt ? quoteLine(rt.fromMe ? 'Sen' : rt.senderName, parseQuoteLine(rt.text)?.rest ?? (rt.text || rt.attachments?.[0]?.name || 'Mesaj')) + typed : typed;
     const threadId = threadFocus ?? (rt && chat.platform === 'slack' ? rt.threadId ?? rt.remoteId : undefined);
-    const replyTo = rt && chat.platform !== 'slack' ? rt.remoteId : undefined;
+    const replyTo = rt && chat.platform !== 'slack' && !textQuote ? rt.remoteId : undefined;
     const quote = rt && replyTo ? { remoteId: rt.remoteId, senderName: rt.fromMe ? 'Sen' : rt.senderName, text: (rt.text || rt.attachments?.[0]?.name || '').slice(0, 160), fromMe: rt.fromMe } : undefined;
     const id = `out-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     setOutbox((x) => [...x, { id, chatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text: body, ts: Date.now(), status: 'pending', threadId, replyTo: quote }]);
@@ -1184,7 +1210,7 @@ export function Conversation({
     } catch (e) {
       setOutbox((x) => x.filter((o) => o.id !== id));
       // açık kompozöre (bu sohbet hâlâ açıksa) ya da sohbet yeniden açılınca kompozöre geri gelsin
-      restoreFailed(chatId, body);
+      restoreFailed(chatId, typed);
       notify((e as Error).message, true);
     }
   }
@@ -1206,6 +1232,9 @@ export function Conversation({
       return;
     }
     if (e.key === 'Enter' && !e.shiftKey && !e.altKey && !e.nativeEvent.isComposing) {
+      // Ayarlar → Genel: Enter gönderir ya da ⌘/Ctrl+Enter gönderir (Enter yeni satır)
+      const mod = e.metaKey || e.ctrlKey;
+      if (!getPrefs().enterSends && !mod) return;
       e.preventDefault();
       void send();
     }
@@ -1345,6 +1374,12 @@ export function Conversation({
           {messages.length === 0 && (
             <div className="empty">
               {olderBusy ? 'Mesajlar yükleniyor…' : 'Bu sohbette henüz mesaj yok.'}
+              {!olderBusy && chat.platform === 'slack' && (
+                <>
+                  <br />
+                  <span style={{ fontSize: 12 }}>Slack’in ücretsiz planı 90 günden eski mesajları gizliyor (Slack’in kendi uygulamasında da görünmez). Bu sohbete yeni mesaj gelince burada görünür.</span>
+                </>
+              )}
               {!olderBusy && chat.unread > 0 && (
                 <>
                   <br />
@@ -1520,10 +1555,11 @@ export function Conversation({
           )}
           {draftShown && !text.trim() && <div className="ghost-draft">{draftShown.draft}</div>}
           <textarea
+            spellCheck={prefs.spellcheck}
             ref={taRef}
             rows={2}
             value={text}
-            placeholder={threadFocus ? 'İş parçacığına yanıt yaz…' : pending ? 'Açıklama ekle (isteğe bağlı) ve Gönder' : draftShown ? 'Taslağı kabul etmek için Tab, düzenlemek için yazmaya başla' : chat.platform === 'shopier' ? 'Siparişe yerel not ekle (Shopier alıcıya mesaj ucu sunmuyor)…' : isMail ? 'Yanıtını yaz… (Enter gönderir, Shift+Enter yeni satır)' : `${chat.name.length > 40 ? chat.name.slice(0, 38) + '…' : chat.name} için mesaj yaz…`}
+            placeholder={threadFocus ? 'İş parçacığına yanıt yaz…' : pending ? 'Açıklama ekle (isteğe bağlı) ve Gönder' : draftShown ? 'Taslağı kabul etmek için Tab, düzenlemek için yazmaya başla' : chat.platform === 'shopier' ? 'Siparişe yerel not ekle (Shopier alıcıya mesaj ucu sunmuyor)…' : isMail ? (prefs.enterSends ? 'Yanıtını yaz… (Enter gönderir, Shift+Enter yeni satır)' : 'Yanıtını yaz… (⌘/Ctrl+Enter gönderir)') : `${chat.name.length > 40 ? chat.name.slice(0, 38) + '…' : chat.name} için mesaj yaz…`}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKey}
             style={draftShown && !text.trim() ? { minHeight: 28, paddingTop: 0 } : undefined}

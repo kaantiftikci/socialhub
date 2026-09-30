@@ -8,8 +8,10 @@ import { loadDemoAccounts } from './static-demo';
 import './styles.css';
 import { initSentry } from './sentry';
 import { applyTheme, watchSystemTheme } from './theme';
+import { applyLookPrefs } from './prefs';
 
 applyTheme();
+applyLookPrefs();
 watchSystemTheme();
 void initSentry(); // yalnız demo derlemesinde ve DSN varsa etkin
 

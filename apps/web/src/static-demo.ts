@@ -1,4 +1,4 @@
-import type { CalendarResult, DeviceCalendars } from './api';
+import type { CalendarResult, DeviceCalendars, StorageKind, StorageReport } from './api';
 import type { CalEvent } from './types';
 import type { Account, Attachment, CalendarDraft, Chat, ChatFlags, CoreEvent, CoreOs, DraftResult, LinkPreview, Message, Platform } from './types';
 import { DELETED_TEXT, PLATFORMS } from './types';
@@ -788,6 +788,21 @@ export const staticApi = {
   stats: async (range: StatsRange, at?: string, platform?: string) => demoStats({ chats, messages, fresh: freshUser }, range, at, Date.now(), platform),
   library: async (q: LibQuery) => demoLibrary({ chats, messages, fresh: freshUser }, q),
   libraryFacets: async () => demoLibraryFacets({ chats, messages, fresh: freshUser }),
+  // Depolama: demoda örnek boyutlar (sohbetler gerçek demo sohbetleri, boyutlar mesaj sayısından)
+  storage: async (_fresh = false): Promise<StorageReport> => {
+    const list = chats
+      .map((c) => {
+        const ms = messages.filter((m) => m.chatId === c.id);
+        return { chatId: c.id, name: c.name, platform: c.platform, ...(c.avatarUrl ? { avatarUrl: c.avatarUrl } : {}), messages: ms.length, files: ms.filter((m) => m.attachments?.length).length, bytes: ms.reduce((n, m) => n + m.text.length + 180 + (m.attachments?.length ?? 0) * 900, 0) };
+      })
+      .sort((a, b) => b.bytes - a.bytes)
+      .slice(0, 30);
+    const k = freshUser ? 0 : 1;
+    const parts = { messages: 4_200_000 + list.reduce((n, c) => n + c.bytes, 0), images: k * 38_400_000, videos: k * 91_000_000, audio: k * 6_300_000, files: k * 12_800_000, mail: k * 9_700_000, sessions: 142_000_000, models: 0, other: 400_000 };
+    return { total: Object.values(parts).reduce((a, b) => a + b, 0), parts, chats: list, at: Date.now() };
+  },
+  clearStorage: async (days: number, kinds: StorageKind[]) => ({ files: days === 0 ? kinds.length * 37 : kinds.length * 12, bytes: 0 }),
+  clearTemp: async () => ({ bytes: 3_200_000 }),
   saveDownload: async (_name: string, _data: string): Promise<{ ok: boolean; name: string }> => ({ ok: false, name: '' }),
 };
 

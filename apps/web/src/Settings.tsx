@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
 import { PLATFORMS, type Account } from './types';
 import { Avatar, Chip, Icon, PasswordInput } from './ui';
@@ -12,34 +12,39 @@ import { isTauri } from './desktop';
 import { signOut } from './LicenseGate';
 import { PermissionSettings } from './Onboarding';
 import { LocalAiPane } from './LocalAiPane';
+import { AboutPane, AccountsPane, DevicesPane, GeneralPane, HelpPane, HighlightCtx, KeysPane, LookPane, NotifyBehavior, Row, StoragePane, Switch } from './SettingsPanes';
 import type { LicenseStatus, Profile } from './api';
 
-type Tab = 'profile' | 'notify' | 'apps' | 'ai' | 'localai' | 'phone' | 'perms' | 'account' | 'logout' | 'reset';
+type Tab = 'profile' | 'accounts' | 'general' | 'look' | 'notify' | 'apps' | 'keys' | 'devices' | 'ai' | 'localai' | 'perms' | 'storage' | 'help' | 'about' | 'account' | 'logout' | 'reset';
 type Lan = { enabled: boolean; urls: string[]; qr?: string } | null;
+type Section = { k: Tab; l: string; ic: string; c: string };
 
-/** Açma/kapama anahtarı (checkbox yerine; tüm ayarlarda aynı görünüm) */
-function Switch({ on, onChange, disabled, label }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean; label: string }) {
-  return <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled} className={`sw ${on ? 'on' : ''}`} onClick={() => onChange(!on)} />;
-}
-
-/** Ayar satırı: solda başlık + açıklama, sağda denetim */
-function Row({ title, hint, children, dim }: { title: string; hint?: ReactNode; children: ReactNode; dim?: boolean }) {
-  return (
-    <div className={`set-row ${dim ? 'dim' : ''}`}>
-      <span className="set-txt">
-        <b>{title}</b>
-        {hint && <em>{hint}</em>}
-      </span>
-      <span className="set-ctl">{children}</span>
-    </div>
-  );
-}
+/** Aramada bulunan satır başlıkları (bölüm → satırlar); Row başlıklarıyla birebir aynı olanlar vurgulanır */
+const SETTINGS_INDEX: Partial<Record<Tab, string[]>> = {
+  profile: ['Ad soyad', 'Kullanıcı adı', 'E-posta', 'Telefon', 'Profil fotoğrafı'],
+  accounts: ['Uygulama bağla', 'Yeniden bağlan', 'Hesabı kaldır'],
+  general: ['Enter ile gönder', 'Yazım denetimi', 'Gizli okuma', 'Rozet sayısı'],
+  look: ['Tema', 'Gece modu', 'Yazı ve arayüz boyutu', 'Hareketleri azalt'],
+  notify: ['Bildirim sesleri', 'Ses düzeyi', 'Masaüstü bildirimleri', 'Deneme bildirimi', 'Grup ve kanal bildirimleri', 'Mivelo öndeyken de bildir', 'Art arda gelenleri birleştir', 'Okunmadıysa yeniden hatırlat', 'Gün sonu özeti'],
+  apps: ['Zil sesi', 'Uygulama ses düzeyi'],
+  keys: ['Klavye kısayolları'],
+  devices: ['Telefondan erişim', 'Bu cihaz', 'QR kod'],
+  ai: ['Anthropic anahtarı', 'Özetler', 'Taslaklar', 'Aksiyon çıkarma'],
+  localai: ['Sesli mesajı yazıya dök', 'Anlamsal arama', 'Model indir'],
+  perms: ['Tam Disk Erişimi', 'Mikrofon', 'Takvim izni'],
+  storage: ['Kaplanan alan', 'İndirilen medyayı temizle', 'Geçici dosyaları temizle', 'Sohbetlere göre'],
+  help: ['Sık sorulan sorular', 'Sorun bildir', 'Öneride bulun'],
+  about: ['Sürüm', 'Güncelleme', 'Yenilikler', 'Gizlilik politikası', 'Kullanım koşulları'],
+  account: ['Lisans', 'Tüm verileri sil'],
+};
+const fold = (x: string) => x.toLocaleLowerCase('tr').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/ı/g, 'i');
 
 /**
- * Ayarlar penceresi: sol menüde bölümler (Bildirimler · Uygulamalar · AI · Telefondan erişim),
- * sağda o bölümün satırları. Görünüm (gece/gündüz) burada değil, kenar çubuğundaki düğmede.
+ * Ayarlar penceresi (30.09, Beeper düzeninde): solda arama, profil kartı ve renkli simgeli bölüm grupları; sağda bölüm.
+ * Bölümler: Hesaplar · Genel · Görünüm · Bildirimler · Uygulama sesleri · Kısayollar | Cihazlar · AI · Yerel AI · İzinler |
+ * Depolama · Yardım · Hakkında · Hesap ve veriler. Yeni bölümler SettingsPanes.tsx'te.
  */
-export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi, notify, lan, setLan, initialTab = 'notify' }: {
+export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi, notify, lan, setLan, initialTab = 'notify', onConnect }: {
   closing: boolean;
   onClose: () => void;
   accounts: Account[];
@@ -50,8 +55,12 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
   lan: Lan;
   setLan: (l: Lan) => void;
   initialTab?: Tab;
+  onConnect: (focus?: string) => void;
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
+  const [q, setQ] = useState('');
+  const [hl, setHl] = useState<string | null>(null);
+  const [me, setMe] = useState<{ name: string; sub: string; photo?: string; licensed: boolean }>({ name: PROFILE_NAME || 'Mivelo', sub: '', licensed: false });
   const aiPrefs = useAiPrefs();
   const [sndOn, setSndOn] = useState(soundsEnabled);
   const [bnrOn, setBnrOn] = useState(bannersEnabled);
@@ -67,6 +76,20 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
     window.addEventListener('keydown', k, true);
     return () => window.removeEventListener('keydown', k, true);
   }, [onClose]);
+  // profil kartı: profil (ad/foto) + lisans sahibi; Profil bölümünden çıkınca tazelenir
+  const onProfile = tab === 'profile';
+  useEffect(() => {
+    let off = false;
+    void Promise.all([api.profile().catch(() => ({}) as Profile), STATIC_DEMO ? Promise.resolve(null) : (api.license().catch(() => null) as Promise<LicenseStatus | null>)]).then(([p, lic]) => {
+      if (off) return;
+      const name = p.name?.trim() || lic?.owner?.name || PROFILE_NAME || 'Mivelo';
+      const sub = p.email || lic?.owner?.email || (p.username ? `@${p.username.replace(/^@/, '')}` : 'Profilini düzenle');
+      setMe({ name, sub, photo: p.photo || undefined, licensed: !!lic?.required && !!lic.valid });
+    });
+    return () => {
+      off = true;
+    };
+  }, [onProfile]);
 
   const changeTone = (platform: string, id: string) => {
     setPlatformTone(platform, id);
@@ -87,31 +110,100 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
 
   // aynı platformdan birden çok hesap olabilir; ses ayarları platform başına → tek satır
   const platforms = [...new Map(accounts.map((a) => [a.platform, a])).values()];
-  const TABS: Array<[Tab, string, string]> = [
-    ...(!DEMO_OFFLINE ? ([['profile', 'Profil', 'user']] as Array<[Tab, string, string]>) : []),
-    ['notify', 'Bildirimler', 'bell'],
-    ['apps', 'Uygulama sesleri', 'volume'],
-    ['ai', 'AI özellikleri', 'sparkle'],
-    ['localai', 'Yerel AI modelleri', 'cpu'],
-    ['phone', 'Telefondan erişim', 'link'],
-    // masaüstü: ilk kurulumdaki izinler (verilmeyenler buradan yeniden istenir)
-    ...(isTauri ? ([['perms', 'İzinler', 'shield']] as Array<[Tab, string, string]>) : []),
-    // yerel / masaüstü: profil + lisans (web demoda hesap = demo oturumu, çıkış doğrudan menüde)
-    ...(!STATIC_DEMO ? ([['account', 'Hesap ve veriler', 'shield']] as Array<[Tab, string, string]>) : []),
+  const GROUPS: Section[][] = [
+    [
+      { k: 'accounts', l: 'Hesaplar', ic: 'link', c: '#8b5cf6' },
+      { k: 'general', l: 'Genel', ic: 'settings', c: '#3b82f6' },
+      { k: 'look', l: 'Görünüm', ic: 'brush', c: '#ec4899' },
+      { k: 'notify', l: 'Bildirimler', ic: 'bell', c: '#22c55e' },
+      { k: 'apps', l: 'Uygulama sesleri', ic: 'volume', c: '#14b8a6' },
+      { k: 'keys', l: 'Kısayollar', ic: 'keyboard', c: '#f59e0b' },
+    ],
+    [
+      { k: 'devices', l: 'Cihazlar', ic: 'phone', c: '#f97316' },
+      { k: 'ai', l: 'AI', ic: 'sparkle', c: '#06b6d4' },
+      { k: 'localai', l: 'Yerel AI', ic: 'cpu', c: '#6366f1' },
+      ...(isTauri ? [{ k: 'perms', l: 'İzinler', ic: 'shield', c: '#64748b' } as Section] : []),
+    ],
+    [
+      { k: 'storage', l: 'Depolama', ic: 'drive', c: '#78716c' },
+      { k: 'help', l: 'Yardım', ic: 'help', c: '#94a3b8' },
+      { k: 'about', l: 'Hakkında', ic: 'info', c: '#0ea5e9' },
+      // yerel / masaüstü: lisans + tüm verileri sil (web demoda hesap = demo oturumu, çıkış doğrudan menüde)
+      ...(!STATIC_DEMO ? [{ k: 'account', l: 'Hesap ve veriler', ic: 'lock', c: '#ef4444' } as Section] : []),
+    ],
   ];
-  const heading = tab === 'logout' ? 'Çıkış yap' : tab === 'reset' ? 'Tüm verileri sil' : TABS.find(([k]) => k === tab)?.[1];
+  const all = GROUPS.flat();
+  const labelOf = (k: Tab) => (k === 'profile' ? 'Profil' : k === 'logout' ? 'Çıkış yap' : k === 'reset' ? 'Tüm verileri sil' : (all.find((x) => x.k === k)?.l ?? ''));
+  const hits = useMemo(() => {
+    const f = fold(q.trim());
+    if (!f) return [];
+    const out: Array<{ k: Tab; title: string }> = [];
+    for (const s of [...(DEMO_OFFLINE ? [] : [{ k: 'profile' as Tab, l: 'Profil' }]), ...all]) {
+      if (fold(s.l).includes(f)) out.push({ k: s.k, title: '' });
+      for (const t of SETTINGS_INDEX[s.k] ?? []) if (fold(t).includes(f)) out.push({ k: s.k, title: t });
+    }
+    return out.slice(0, 14);
+  }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
+  const go = (k: Tab, title = '') => {
+    setTab(k);
+    setHl(title || null);
+    if (title) window.setTimeout(() => setHl((h) => (h === title ? null : h)), 2400);
+  };
 
   return (
     <div className={`overlay set-ov ${closing ? 'closing' : ''}`} onClick={onClose}>
       <div className="modal set-modal" role="dialog" aria-label="Ayarlar" onClick={(e) => e.stopPropagation()}>
-        <aside className="set-nav" role="tablist" aria-label="Ayar bölümleri">
+        <aside className="set-nav" aria-label="Ayar bölümleri">
           <h2>Ayarlar</h2>
-          {TABS.map(([k, l, ic]) => (
-            <button key={k} role="tab" aria-selected={tab === k} className={`set-tab b ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>
-              <Icon name={ic} size={16} />
-              <span>{l}</span>
-            </button>
-          ))}
+          <label className="set-search">
+            <Icon name="search" size={14} />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ayarlarda ara" aria-label="Ayarlarda ara" onKeyDown={(e) => e.key === 'Enter' && hits[0] && (go(hits[0].k, hits[0].title), setQ(''))} />
+            {q && (
+              <button type="button" className="clr" aria-label="Aramayı temizle" onClick={() => setQ('')}>
+                <Icon name="x" size={12} sw={2} />
+              </button>
+            )}
+          </label>
+          {q.trim() ? (
+            <div className="set-hits" aria-label="Arama sonuçları">
+              {hits.length === 0 && <p className="set-nohit">Eşleşen ayar yok</p>}
+              {hits.map((h, i) => (
+                <button key={`${h.k}:${h.title}:${i}`} type="button" className="set-hit b" onClick={() => (go(h.k, h.title), setQ(''))}>
+                  <b>{h.title || labelOf(h.k)}</b>
+                  {h.title && <em>{labelOf(h.k)}</em>}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <>
+              {!DEMO_OFFLINE && (
+                <button type="button" className={`set-me b ${tab === 'profile' ? 'on' : ''}`} onClick={() => go('profile')}>
+                  <Avatar name={me.name} size={34} url={me.photo} />
+                  <span className="who">
+                    <b>{me.name}</b>
+                    <em>{me.sub}</em>
+                  </span>
+                  <span className="pill">{STATIC_DEMO ? 'Demo' : me.licensed ? 'Lisanslı' : 'Ücretsiz'}</span>
+                </button>
+              )}
+              <div className="set-sections" role="tablist" aria-label="Ayar bölümleri">
+                {GROUPS.map((g, gi) => (
+                  <div key={gi} className="set-sec">
+                    {g.map(({ k, l, ic, c }) => (
+                      <button key={k} role="tab" aria-selected={tab === k} className={`set-tab b ${tab === k ? 'on' : ''}`} onClick={() => go(k)}>
+                        <span className="set-ic" style={{ background: c }}>
+                          <Icon name={ic} size={13} sw={2} />
+                        </span>
+                        <span>{l}</span>
+                        {k === 'accounts' && accounts.length > 0 && <em className="cnt">{accounts.length}</em>}
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
           {/* web demo: çıkış doğrudan menüde, basınca hemen çıkar. Yerel / masaüstü: önce ne olacağını anlatan onay */}
           {!DEMO_OFFLINE && (
             <button type="button" className={`set-tab set-logout b ${tab === 'logout' ? 'on' : ''}`} onClick={() => (STATIC_DEMO ? leaveDemoPanel() : setTab('logout'))}>
@@ -122,13 +214,22 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
         </aside>
         <section className="set-body">
           <header className="set-head">
-            <h3>{heading}</h3>
+            <h3>{labelOf(tab)}</h3>
             <button className="btn icon b b2" onClick={onClose} aria-label="Kapat">
               <Icon name="x" size={15} sw={2} />
             </button>
           </header>
-
+          <HighlightCtx.Provider value={hl}>
+            {tab === 'accounts' && <AccountsPane accounts={accounts} handleOf={handleOf} onConnect={onConnect} />}
+            {tab === 'general' && <GeneralPane />}
+            {tab === 'look' && <LookPane />}
+            {tab === 'keys' && <KeysPane />}
+            {tab === 'storage' && <StoragePane notify={notify} />}
+            {tab === 'help' && <HelpPane onKeys={() => go('keys')} />}
+            {tab === 'about' && <AboutPane />}
+            {tab === 'devices' && <DevicesPane lan={lan} onLan={(v) => void api.setLan(v).then(setLan).catch((err) => notify((err as Error).message, true))} />}
           {tab === 'notify' && (
+            <>
             <div className="set-group">
               <Row title="Bildirim sesleri" hint="Yeni mesaj gelince ses çal">
                 <Switch label="Bildirim sesleri" on={sndOn} onChange={(v) => (setSoundsEnabled(v), setSndOn(v), v && playPing(undefined, true, vol / 100))} />
@@ -171,15 +272,16 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
               </Row>
               {/* pazaryeri gün sonu özeti (MarketSummary.tsx): yalnız pazaryeri hesabı bağlıysa */}
               {accounts.some((a) => PLATFORMS[a.platform]?.category === 'shop') && <MarketDigestSettings notify={notify} />}
-              <button type="button" className="set-link b" onClick={() => setTab('apps')}>
+              <button type="button" className="set-link b" onClick={() => go('apps')}>
                 Uygulama başına zil sesi ve ses düzeyi
                 <span style={{ display: 'inline-flex', transform: 'rotate(-90deg)' }}>
                   <Icon name="chev" size={14} sw={2} />
                 </span>
               </button>
             </div>
+              <NotifyBehavior />
+            </>
           )}
-
           {tab === 'apps' &&
             (platforms.length === 0 ? (
               <p className="set-empty">Bağlı uygulama yok.</p>
@@ -236,7 +338,6 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
                 <p className="set-note">Ses düzeyi, genel düzeyin yüzdesidir. Kapalı uygulama ne ses çalar ne bildirim kartı gösterir.</p>
               </>
             ))}
-
           {tab === 'ai' && (
             <>
               <div className="set-group">
@@ -259,39 +360,13 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
               <p className="set-note">Sohbet içeriği yalnız sen bir AI özelliğini kullandığında, o sohbetin son mesajlarıyla Anthropic'e gider.{!ai && ' Özellikleri kullanmak için önce anahtar ekle.'}</p>
             </>
           )}
-
-          {tab === 'localai' && <LocalAiPane notify={notify} />}
-
-          {tab === 'perms' && <PermissionSettings />}
-
-          {tab === 'profile' && <ProfilePane notify={notify} />}
-
-          {(tab === 'account' || tab === 'logout' || tab === 'reset') && (
-            <AccountPane mode={tab === 'logout' ? 'logout' : tab === 'reset' ? 'reset' : 'view'} onReset={() => setTab('reset')} onCancel={() => setTab('account')} notify={notify} />
-          )}
-
-          {tab === 'phone' && (
-            <>
-              <div className="set-group">
-                <Row title="Aynı Wi‑Fi'daki telefondan aç" hint={STATIC_DEMO ? 'Masaüstü uygulamasında kullanılabilir' : 'Telefonun tarayıcısından Mivelo’yu kullan'}>
-                  <Switch label="Telefondan erişim" disabled={STATIC_DEMO} on={!!lan?.enabled} onChange={(v) => api.setLan(v).then(setLan).catch((err) => notify((err as Error).message, true))} />
-                </Row>
-              </div>
-              {lan?.enabled && (
-                <div className="set-lan">
-                  {lan.qr && <img src={lan.qr} alt="Bağlantı QR kodu" />}
-                  <div>
-                    <b>Telefonun kamerasıyla QR'ı okut</b>
-                    {lan.urls.map((u) => (
-                      <code key={u}>{u}</code>
-                    ))}
-                    <em>Bağlantı gizli bir anahtar içerir; yalnızca kendi cihazlarına ver. Bilgisayar uyurken erişim durur.</em>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-
+            {tab === 'localai' && <LocalAiPane notify={notify} />}
+            {tab === 'perms' && <PermissionSettings />}
+            {tab === 'profile' && <ProfilePane notify={notify} />}
+            {(tab === 'account' || tab === 'logout' || tab === 'reset') && (
+              <AccountPane mode={tab === 'logout' ? 'logout' : tab === 'reset' ? 'reset' : 'view'} onReset={() => setTab('reset')} onCancel={() => setTab('account')} notify={notify} />
+            )}
+          </HighlightCtx.Provider>
         </section>
       </div>
     </div>
@@ -351,7 +426,6 @@ function AiKeyRow({ ai, onChange, notify }: { ai: boolean; onChange: (on: boolea
   );
 }
 
-const APP_VERSION = (import.meta.env.VITE_APP_VERSION as string | undefined) || '';
 
 /** Kalan gün: "12 gün kaldı · 10 Ekim 2026" */
 function licenseLeft(exp?: string | null): string {
@@ -472,16 +546,6 @@ function AccountPane({ mode, onReset, onCancel, notify }: { mode: 'view' | 'logo
         )}
         <Row title="Lisans" hint={required ? (lic?.valid ? licenseLeft(lic.expiresAt) : 'Geçersiz') : 'Bu sürümde lisans gerekmiyor (yerel / geliştirme)'}>
           <span className="set-val mono">{required ? (lic?.key ?? '—') : 'Yerel sürüm'}</span>
-        </Row>
-        {APP_VERSION && (
-          <Row title="Sürüm" hint="Yeni sürüm çıkınca uygulama içinde haber verilir">
-            <span className="set-val">{APP_VERSION}</span>
-          </Row>
-        )}
-        <Row title="Yenilikler" hint="Son güncellemelerde neler değişti">
-          <button type="button" className="btn xs b" onClick={() => window.dispatchEvent(new Event('mivelo-whats-new'))}>
-            Göster
-          </button>
         </Row>
       </div>
       <div className="set-group">

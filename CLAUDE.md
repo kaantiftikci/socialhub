@@ -768,6 +768,24 @@ Dil: arayüz ve yorumlar Türkçe.
 - **Yenilikler penceresi (30.09)** `WhatsNew.tsx` + `changelog.ts` (HER SÜRÜMDE en üste yeni kayıt ekle: id, tarih, başlık, maddeler icon/title/text, kullanıcı dili):
   açılış animasyonu/lisans/kurulum ekranı bittikten sonra bir kez; `mivelo.seenChangelog` son görülen id; ilk kurulumda gösterilmez (önceden kullanılmışsa en yeni kayıt);
   Ayarlar → Hesap → "Yenilikler · Göster" (`mivelo-whats-new` olayı).
+- **Ayarlar yeniden (30.09, Kaan: Beeper ayarları gibi)** `Settings.tsx` kabuk + `SettingsPanes.tsx` bölümler: solda "Ayarlarda ara" (SETTINGS_INDEX satır başlıkları → bölüme gider,
+  `HighlightCtx` satırı vurgular), profil kartı (profil/lisans adı, e-posta, Lisanslı/Ücretsiz/Demo), renkli simgeli 3 grup: Hesaplar (bağlı hesaplar + "Yönet" → Bağlan,
+  `onConnect`) · Genel (Enter ile gönder / ⌘+Enter, yazım denetimi, **Gizli okuma** = `/read?silent=1` → platforma okundu gitmez, Dock rozeti okunmamış mesaj/sohbet/kapalı) ·
+  Görünüm (tema kartları, arayüz boyutu CSS zoom 90-120, hareketleri azalt `html.reduce-motion`) · Bildirimler (+ öndeyken bildir, art arda gelenleri birleştir 10/30/60 sn,
+  okunmadıysa yeniden hatırlat 5-60 dk; App `batchNotify/showNotify`) · Uygulama sesleri · Kısayollar (salt okunur liste, `HOTKEYS`) | Cihazlar (telefondan erişim kartı + bu cihaz) ·
+  AI · Yerel AI · İzinler | Depolama · Yardım (SSS, `mivelo-feedback` olayı Feedback'i açar) · Hakkında (sürüm, latest.json ile güncellik, yenilikler, gizlilik/koşullar) ·
+  Hesap ve veriler. Tercihler `prefs.ts` (localStorage `mivelo.prefs`, `usePrefs/getPrefs`, `applyLookPrefs` main.tsx'te). ⌘, ayarları açar.
+  **Depolama** çekirdek `storage.ts`: `GET /api/storage` (DB+WAL, medya önbelleği `.type`'a göre görsel/video/ses/dosya, e-posta ekleri, oturumlar, modeller; ilk 30 sohbet
+  yaklaşık boyut, 60 sn önbellek), `POST /api/storage/clear {days 0|30|90|120, kinds}` yalnız yeniden indirilebilir önbellek (sha1 + .type; e-posta hesapları, `out-`,
+  media-index SİLİNMEZ), `POST /api/storage/temp` (update/ outbox 10 dk'dan eski). Test storage.test.ts. Beeper'daki MCP/Desktop API entegrasyonu otomatik güvenlik
+  denetimine takıldı (yerel servisi dışa açma) → YAPILMADI; Kaan isterse ayrıca onaylanmalı.
+- **Alıntılı yanıt her sohbet uygulamasında (30.09, Kaan: TikTok'a da sağa çekip yanıt)**: yerel alıntısı olmayanlar `QUOTE_TEXT_PLATFORMS` (tiktok, x, messenger,
+  linkedin, imessage; types.ts): gönderimde metnin başına tek satır `quoteLine` ("↪ Ad: “…80 kr…”\n"), balonda `parseQuoteLine` → alıntı kutusu (tıkla → metinle eşleşen
+  mesaja kaydır), listede satır gizlenir. Yerel düzenleme/geri alma/tepki bu uygulamalarda EKLENMEDİ: TikTok/X/Messenger DOM ya da LinkedIn uçları gerçek hesapla
+  doğrulanamadan eklenirse yanlış mesaja işlem riski var.
+- **Miveloji** (30.09, Kaan: Raporum yerine Mivelo kelime oyunu): kenar çubuğu, başlık, hikâye, PNG adı. Kod adları (Wrapped, stats) aynı.
+- Yenilikler penceresi (30.09 ikinci tur, Kaan: "AI ürünü gibi"): simge yerine 01/02 numaralar, üstte kutu açılma sahnesi (`Unbox`: kapak açılır, parçalar yükselir,
+  halka; 5 sn döngü), "N yenilik" sayacı, maddeler 2-3 cümle. Slack boş sohbette "ücretsiz plan 90 günden eski mesajları gizliyor" notu (Kaan'ın günlüğü: is_limited).
 - **Dokümantasyon** `docs/dokumantasyon.html` → `docs/Mivelo-Dokumantasyon.pdf` (`CHROMIUM=<chrome yolu> node docs/build-pdf.mjs`); özellik eklenince güncelle.
 
 ## Sunucu/arayüz sözleşmesi

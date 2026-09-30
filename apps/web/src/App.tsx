@@ -18,6 +18,7 @@ import { ConnectModal } from './Connect';
 import { Focus } from './Focus';
 import { onThemeChange, resolvedTheme, setThemePref } from './theme';
 import { SettingsModal } from './Settings';
+import { getPrefs, usePrefs } from './prefs';
 import { SearchPalette } from './SearchPalette';
 import { QuickReplyStack, QuickSend, rememberBackground, takeBackground, useRevealOnFocus } from './QuickSend';
 import { MarketTodayCard } from './MarketSummary';
@@ -210,7 +211,10 @@ export default function App() {
   }, [query]);
   const [connectOpen, setConnectOpen] = useState(false);
   /** Bağlan penceresinde açık gelecek hesap (uyarıdaki "QR'ı göster") */
+  const prefs = usePrefs();
   const [connectFocus, setConnectFocus] = useState<string | null>(null);
+  const notifyBatch = useRef(new Map<string, { count: number; body: string; focused: boolean; chat: Chat }>());
+  const repeatTimers = useRef(new Map<string, number>());
   // Kanal uyarı kartı (yanıp sönen kırmızı işaretin üzerine gelince / dokununca): hangi hesap, işaretin konumu
   const [alertPop, setAlertPop] = useState<{ id: string; x: number; y: number } | null>(null);
   const alertTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -503,6 +507,52 @@ export default function App() {
           if (again && selectedRef.current === sel) refetchOpen(sel);
         });
     };
+    /**
+     * Bildirim gösterimi (Ayarlar → Bildirimler): "biriktir" açıksa aynı sohbetten N sn içinde gelenler tek bildirimde ("3 yeni mesaj");
+     * "yeniden hatırlat" açıksa sohbet N dk sonra hâlâ okunmamışsa bir kez daha.
+     */
+    const showNotify = (chat: Chat, body: string, focused: boolean, count = 1) => {
+      const text = count > 1 ? `${count} yeni mesaj · ${body}` : body;
+      // pencere öndeyse sistem bildirimi yerine uygulama içi kart (hangi platformdan geldiği belli olsun)
+      if (focused) pushInToast(chat, text);
+      else if (bannersEnabled()) {
+        // pencere öne gelince (ya da web bildirimine tıklanınca) bu mesajın hızlı yanıt kartı çıkar
+        rememberBackground(chat, body);
+        desktopNotify(chat.name, stripLeadIcon(text), false, { tag: chat.id, onClick: () => takeBackground(chat.id).forEach((b) => pushInToast(b.chat, b.text)) });
+      }
+      // genel anahtar + uygulama zil sesi + ses düzeyleri
+      playNotifySound(chat.platform);
+      const rep = getPrefs().repeatMin;
+      clearTimeout(repeatTimers.current.get(chat.id));
+      if (rep > 0)
+        repeatTimers.current.set(
+          chat.id,
+          window.setTimeout(() => {
+            repeatTimers.current.delete(chat.id);
+            const cur = chatsRef.current.get(chat.id);
+            if (!cur || cur.unread <= 0 || cur.muted || cur.id === visibleChatRef.current) return;
+            if (bannersEnabled()) desktopNotify(`${cur.name} · hâlâ okunmadı`, stripLeadIcon(cur.lastPreview || body).slice(0, 300), false, { tag: `${cur.id}:r`, onClick: () => pushInToast(cur, cur.lastPreview || body) });
+            playNotifySound(cur.platform);
+          }, rep * 60_000),
+        );
+    };
+    const batchNotify = (chat: Chat, body: string, focused: boolean) => {
+      const sec = getPrefs().batchSec;
+      if (!sec) return showNotify(chat, body, focused);
+      const b = notifyBatch.current.get(chat.id);
+      if (b) {
+        b.count++;
+        b.body = body;
+        b.focused = focused;
+        return;
+      }
+      const nb = { count: 1, body, focused, chat };
+      notifyBatch.current.set(chat.id, nb);
+      window.setTimeout(() => {
+        notifyBatch.current.delete(chat.id);
+        showNotify(chatsRef.current.get(chat.id) ?? nb.chat, nb.body, nb.focused, nb.count);
+      }, sec * 1000);
+    };
     const onEvent = (ev: CoreEvent) => {
       if (pushLoginEvent(ev)) return; // Mivelo içi giriş ekranı kareleri App durumundan geçmez
       if (pushMlEvent(ev)) return; // yerel AI (model durumu, sesli mesaj metni): ml-client.ts kendi deposunda
@@ -647,18 +697,10 @@ export default function App() {
           // yalnızca canlı gelen (eşitleme/geçmiş değil) ve yeni mesajlar bildirim çalsın
           if (chat && ev.live && !ev.message.fromMe && !chat.muted && !chat.hidden && !chat.archived && Date.now() - bootTs > 60_000 && Date.now() - ev.message.ts < 120_000) {
             void windowFocused().then((focused) => {
-              // uygulamanın bildirimi kapalıysa ne kart ne ses
-              if ((!focused || ev.message.chatId !== visibleChatRef.current) && platformNotifyOn(chat.platform) && (chat.kind === 'direct' || groupsNotify())) {
+              // uygulamanın bildirimi kapalıysa ne kart ne ses; Ayarlar → Bildirimler "Mivelo öndeyken de bildir" kapalıysa öndeyken sessiz
+              if ((!focused || ev.message.chatId !== visibleChatRef.current) && (!focused || getPrefs().notifyInFocus) && platformNotifyOn(chat.platform) && (chat.kind === 'direct' || groupsNotify())) {
                 const body = (ev.message.text || ev.message.attachments?.[0]?.name || 'Yeni mesaj').slice(0, 400);
-                // pencere öndeyse sistem bildirimi yerine uygulama içi kart (hangi platformdan geldiği belli olsun)
-                if (focused) pushInToast(chat, body);
-                else if (bannersEnabled()) {
-                  // pencere öne gelince (ya da web bildirimine tıklanınca) bu mesajın hızlı yanıt kartı çıkar
-                  rememberBackground(chat, body);
-                  desktopNotify(chat.name, stripLeadIcon(body), false, { tag: chat.id, onClick: () => takeBackground(chat.id).forEach((b) => pushInToast(b.chat, b.text)) });
-                }
-                // genel anahtar + uygulama zil sesi + ses düzeyleri
-                playNotifySound(chat.platform);
+                batchNotify(chat, body, focused);
               }
             });
           }
@@ -962,8 +1004,10 @@ export default function App() {
     startScheduledSends();
   }, []);
   useEffect(() => {
-    void setBadge(Math.min(totals.unread, 999));
-  }, [totals.unread]);
+    // Ayarlar → Genel: Dock/tepsi rozeti okunmamış mesaj, okunmamış sohbet ya da kapalı
+    const mode = prefs.badge;
+    void setBadge(mode === 'off' ? 0 : Math.min(mode === 'chats' ? inboxChats.filter((c) => countable(c) > 0).length : totals.unread, 999));
+  }, [totals.unread, prefs.badge, inboxChats]);
   // Web: bildirim izni ilk tıklamada istenir (tarayıcılar kullanıcı hareketi olmadan istenen izni gösterme/engelliyor)
   useEffect(() => {
     if (isTauri || !('Notification' in window) || Notification.permission !== 'default') return;
@@ -1025,6 +1069,12 @@ export default function App() {
         if (isTauri) return;
         setPaletteOpen(false);
         setQuickSend((q) => (q ? null : {}));
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === ',') {
+        // ⌘, (Windows'ta Ctrl+,): Ayarlar
+        e.preventDefault();
+        setSettingsOpen(true);
         return;
       }
         if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'k') {
@@ -1287,7 +1337,7 @@ export default function App() {
           <NavItem icon="sparkle" label="Odak" badge="AI" count={focusWaiting.length} active={view === 'focus'} onClick={() => setView('focus')} />
           <NavItem icon="archive" label="Okunmamış" count={totals.unread} active={view === 'inbox' && filter === 'unread' && !platformFilter && !tagFilter} onClick={() => goInbox('unread')} />
           <NavItem icon="calendar" label="Takvim" title="Mivelo takvimi: mesajlardan eklenenler ve kendi etkinliklerin" count={todayEvents} active={view === 'calendar'} onClick={() => setView('calendar')} />
-          <NavItem icon="chart" label="Raporum" title="Aylık ve yıllık iletişim raporun (yalnız bu cihazda hesaplanır)" count={0} active={view === 'wrapped'} onClick={() => setView('wrapped')} />
+          <NavItem icon="chart" label="Miveloji" title="Mesajlaşma alışkanlıklarının aylık ve yıllık raporu (yalnız bu cihazda hesaplanır)" count={0} active={view === 'wrapped'} onClick={() => setView('wrapped')} />
           <NavItem icon="image" label="Medya" title="Tüm uygulamalardan fotoğraf, video, dosya ve bağlantılar" count={0} active={view === 'media'} onClick={() => setView('media')} />
           {FLAG_VIEWS.filter((f) => f.view === 'archived' || flagged[f.flag].length > 0).map((f) => (
             <NavItem key={f.view} icon={f.icon} label={f.label} count={flagged[f.flag].length} active={view === f.view} onClick={() => setView(f.view)} />
@@ -1727,6 +1777,11 @@ export default function App() {
           lan={lan}
           setLan={setLanState}
           initialTab={settingsTab}
+          onConnect={(focus) => {
+            setSettingsOpen(false);
+            setConnectFocus(focus ?? null);
+            setConnectOpen(true);
+          }}
         />
       )}
       {alertPop &&
@@ -2222,7 +2277,7 @@ const ChatRow = memo(function ChatRow({
             <span className={`prev ${chat.lastReaction ? 'rx' : ''}`}>
               {/* son mesaj benimse balondaki gibi tik: gönderildi / iletildi / görüldü (tepki önizlemesinde, e-postada ve pazaryerinde yok) */}
               {chat.lastFromMe && !chat.lastReaction && chat.lastStatus && !isMail && PLATFORMS[chat.platform].category !== 'shop' && statusIcon(chat.lastStatus)}
-              {(isMail ? mailPreview : chat.lastPreview) ? <IconText text={isMail ? mailPreview! : trPreview(chat.lastPreview)} size={12} /> : '…'}
+              {(isMail ? mailPreview : chat.lastPreview) ? <IconText text={isMail ? mailPreview! : trPreview(chat.lastPreview.replace(/↪ [^\n:]{1,60}: “[^”\n]{0,160}”\n/, ''))} size={12} /> : '…'}
             </span>
           )}
           {chat.unread > 0 && <span className="badge" aria-label={`${chat.unread} okunmamış`}>{fmtBadge(chat)}</span>}

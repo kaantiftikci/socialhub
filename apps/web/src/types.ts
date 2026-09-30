@@ -110,6 +110,22 @@ export interface Message {
 
 /** Mesaja alıntılı yanıt verilebilen platformlar (sağa kaydır / Yanıtla); Slack'te yanıt iş parçacığına gider */
 export const REPLY_PLATFORMS = new Set<Platform>(['whatsapp', 'telegram', 'instagram', 'slack', 'demo']);
+/**
+ * Yerel alıntılı yanıtı olmayan mesajlaşma uygulamaları (TikTok, X, Messenger, LinkedIn, iMessage): sağa kaydır / Yanıtla yine çalışır,
+ * mesajın başına tek satır alıntı eklenir ("↪ Ayşe: “…”"). Mivelo bu satırı balonda alıntı kutusu olarak gösterir (karşı taraf da Mivelo
+ * kullanıyorsa onda da); öteki uygulamalarda düz metin olarak okunur.
+ */
+export const QUOTE_TEXT_PLATFORMS = new Set<Platform>(['tiktok', 'x', 'messenger', 'linkedin', 'imessage']);
+const QUOTE_LINE = /^↪ ([^\n:]{1,60}): “([^”\n]{0,160})”\n([\s\S]*)$/;
+export function quoteLine(senderName: string, text: string): string {
+  const t = text.replace(/\s+/g, ' ').replace(/[”]/g, '"').trim();
+  return `↪ ${senderName.replace(/[:\n]/g, ' ').slice(0, 40)}: “${t.length > 80 ? `${t.slice(0, 78)}…` : t}”\n`;
+}
+/** Metnin başındaki alıntı satırı (yoksa null) */
+export function parseQuoteLine(text: string): { senderName: string; text: string; rest: string } | null {
+  const m = QUOTE_LINE.exec(text);
+  return m && m[3].trim() ? { senderName: m[1], text: m[2], rest: m[3] } : null;
+}
 /** Kendi mesajını düzenleyebilen platformlar (API destekli) */
 export const EDIT_PLATFORMS = new Set<Platform>(['whatsapp', 'telegram', 'slack', 'demo']);
 /** Kendi mesajını herkesten silebilen (geri alabilen) platformlar */

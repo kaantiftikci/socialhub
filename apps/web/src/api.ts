@@ -1,6 +1,7 @@
 import type { Account, CalEvent, LoginInput, CalendarDraft, Chat, ChatFlags, CoreEvent, CoreOs, DraftResult, LinkPreview, Message, Platform } from './types';
 import { API_BASE, REMOTE_CORE, coreToken, refreshCoreToken } from './desktop';
 import { STATIC_DEMO } from './profile';
+import { getPrefs } from './prefs';
 import { connectStaticEvents, staticApi } from './static-demo';
 import { libQueryString, type LibFacets, type LibPage, type LibQuery, type StatsRange, type WrappedStats } from './insights-types';
 import type { MarketSummary } from './market-calc';
@@ -106,7 +107,7 @@ const liveApi = {
   editMessage: (messageId: string, text: string) => call<Message>('POST', `/messages/${enc(messageId)}/edit`, { text }),
   setFlags: (chatId: string, flags: ChatFlags) => call<Chat>('POST', `/chats/${enc(chatId)}/flags`, flags),
   preview: (url: string) => call<LinkPreview>('GET', `/preview?url=${enc(url)}`),
-  markRead: (chatId: string) => call('POST', `/chats/${enc(chatId)}/read`),
+  markRead: (chatId: string) => call('POST', `/chats/${enc(chatId)}/read${getPrefs().silentRead ? '?silent=1' : ''}`),
   setTags: (chatId: string, tags: string[]) => call<Chat>('POST', `/chats/${enc(chatId)}/tags`, { tags }),
   sendFile: (chatId: string, file: { name: string; mime: string; data: string; caption?: string; voice?: boolean }) => call<{ remoteId: string }>('POST', `/chats/${enc(chatId)}/send-file`, file),
   moreChats: (accountId: string) => call<{ added: number; supported: boolean }>('POST', `/accounts/${enc(accountId)}/more`),
@@ -138,6 +139,10 @@ const liveApi = {
   stats: (range: StatsRange, at?: string, platform?: string) => call<WrappedStats>('GET', `/stats?range=${range}${at ? `&at=${enc(at)}` : ''}${platform ? `&platform=${enc(platform)}` : ''}`),
   library: (q: LibQuery) => call<LibPage>('GET', `/library?${libQueryString(q)}`),
   libraryFacets: () => call<LibFacets>('GET', '/library/facets'),
+  // ---- Ayarlar → Depolama (çekirdek storage.ts) ----
+  storage: (fresh = false) => call<StorageReport>('GET', `/storage${fresh ? '?fresh=1' : ''}`),
+  clearStorage: (days: number, kinds: StorageKind[]) => call<{ files: number; bytes: number }>('POST', '/storage/clear', { days, kinds }),
+  clearTemp: () => call<{ bytes: number }>('POST', '/storage/temp'),
   /** Masaüstü: dosyayı İndirilenler'e yaz (WKWebView <a download>'ı yok sayar); data = base64 */
   saveDownload: (name: string, data: string) => call<{ ok: boolean; name: string }>('POST', '/downloads', { name, data }),
   // zamanlanmış gönderim (çekirdekte; arayüz kapalıyken de gider)
@@ -255,4 +260,13 @@ export function connectEvents(onEvent: (ev: CoreEvent) => void, onState?: (open:
     if (timer) clearTimeout(timer);
     ws?.close();
   };
+}
+
+/** Ayarlar → Depolama (packages/core/src/storage.ts ile aynı) */
+export type StorageKind = 'images' | 'videos' | 'audio' | 'files';
+export interface StorageReport {
+  total: number;
+  parts: { messages: number; images: number; videos: number; audio: number; files: number; mail: number; sessions: number; models: number; other: number };
+  chats: Array<{ chatId: string; name: string; platform: string; avatarUrl?: string; messages: number; files: number; bytes: number }>;
+  at: number;
 }
