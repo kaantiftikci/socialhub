@@ -63,6 +63,8 @@ export class MautrixConnector extends BaseConnector {
   private off?: () => void;
   private stopping = false;
   private loginProc?: string;
+  /** giriş sürerken gelen, henüz bilinmeyen oturumun olayları (CONNECTED giriş yanıtından önce gelebilir) */
+  private early: BridgeEvent[] = [];
   private cancelLogin = false;
   /** toplu (geçmiş) gönderimde sohbet başına son kendi mesajımdan sonraki gelen mesaj sayısı */
   private batchUnread = new Map<string, number>();
@@ -170,6 +172,7 @@ export class MautrixConnector extends BaseConnector {
     } finally {
       if (this.loginProc) void sidecar.call('login.cancel', { proc: this.loginProc }, 5_000).catch(() => undefined);
       this.loginProc = undefined;
+      this.early = [];
     }
   }
 
@@ -256,6 +259,9 @@ export class MautrixConnector extends BaseConnector {
     this.saveState();
     this.applyName(name);
     this.setStatus('connecting', 'Sohbetler alınıyor');
+    const early = this.early.filter((e) => e.login === login);
+    this.early = [];
+    for (const e of early) this.onEvent(e);
   }
 
   private applyName(name: string | undefined): void {
@@ -284,7 +290,11 @@ export class MautrixConnector extends BaseConnector {
       if (this.state.login && !this.stopping) void sidecar.call('connect', { net: this.net, login: this.state.login }).catch(() => undefined);
       return;
     }
-    if (!this.mine(e) || this.stopping) return;
+    if (this.stopping) return;
+    if (!this.mine(e)) {
+      if (this.loginProc && e.net === this.net && e.login && e.login !== this.state.login && this.early.length < 2000) this.early.push(e);
+      return;
+    }
     switch (e.ev) {
       case 'status':
         return this.onStatus(e);

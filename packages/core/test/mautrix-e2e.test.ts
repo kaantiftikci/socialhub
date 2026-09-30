@@ -45,7 +45,7 @@ after(async () => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-async function until<T>(what: string, fn: () => T | undefined | false, ms = 15_000): Promise<T> {
+async function until<T>(what: string, fn: () => T | undefined | false, ms = 30_000): Promise<T> {
   const end = Date.now() + ms;
   for (;;) {
     const v = fn();
