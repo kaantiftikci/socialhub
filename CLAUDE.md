@@ -765,6 +765,9 @@ Dil: arayüz ve yorumlar Türkçe.
 - **Hızlı yanıt kartı (30.09)**: platform adı yok, logo rozeti `.qr-badge` (eski `.msgtoast .plat` kuralı Chip'i daraltıyordu), metin 4 satır (bildirim gövdesi ≤400),
   yanıt kutusu "Yanıtla" ile açılır. TikTok paylaşılan video: bağlantısız kartta kimlik öznitelik/React props'tan (`videoIdOf`) → `@_/video/<id>` → gömülü oynatıcı.
 - Medya kütüphanesi: kişi/sohbet seçicisi kaldırıldı; arama kutusu uygulama çiplerinin sağında.
+- **Yenilikler penceresi (30.09)** `WhatsNew.tsx` + `changelog.ts` (HER SÜRÜMDE en üste yeni kayıt ekle: id, tarih, başlık, maddeler icon/title/text, kullanıcı dili):
+  açılış animasyonu/lisans/kurulum ekranı bittikten sonra bir kez; `mivelo.seenChangelog` son görülen id; ilk kurulumda gösterilmez (önceden kullanılmışsa en yeni kayıt);
+  Ayarlar → Hesap → "Yenilikler · Göster" (`mivelo-whats-new` olayı).
 - **Dokümantasyon** `docs/dokumantasyon.html` → `docs/Mivelo-Dokumantasyon.pdf` (`CHROMIUM=<chrome yolu> node docs/build-pdf.mjs`); özellik eklenince güncelle.
 
 ## Sunucu/arayüz sözleşmesi

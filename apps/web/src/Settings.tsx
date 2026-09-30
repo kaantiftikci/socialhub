@@ -478,6 +478,11 @@ function AccountPane({ mode, onReset, onCancel, notify }: { mode: 'view' | 'logo
             <span className="set-val">{APP_VERSION}</span>
           </Row>
         )}
+        <Row title="Yenilikler" hint="Son güncellemelerde neler değişti">
+          <button type="button" className="btn xs b" onClick={() => window.dispatchEvent(new Event('mivelo-whats-new'))}>
+            Göster
+          </button>
+        </Row>
       </div>
       <div className="set-group">
         <Row title="Tüm verileri sil" hint="Her uygulamadan çıkış yapar; mesajlar, oturumlar, profil ve ayarlar bu bilgisayardan silinir">

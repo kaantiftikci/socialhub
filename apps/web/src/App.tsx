@@ -24,6 +24,7 @@ import { MarketTodayCard } from './MarketSummary';
 import { CalendarView, ymd } from './CalendarView';
 import { WrappedView } from './Wrapped';
 import { MediaLibrary } from './MediaLibrary';
+import { WhatsNew } from './WhatsNew';
 import { hideWindow, MOD_KEY, isTauri, notify as desktopNotify, requestWebNotify, onDesktopEvent, playPing, setBadge, windowFocused, coreInfo, playNotifySound, platformNotifyOn, soundsEnabled, bannersEnabled, groupsNotify, unlockAudio } from './desktop';
 import { DEMO_OFFLINE, PROFILE_NAME, PROFILE_PHOTO, STATIC_DEMO, applyProfile, setFallbackProfileName } from './profile';
 
@@ -1712,6 +1713,7 @@ export default function App() {
       <UpdateBanner />
       <PermissionBanner hasIMessage={accounts.some((a) => a.platform === 'imessage')} />
       <FeedbackButton />
+      <WhatsNew ready={!booting} />
 
       {settingsP.value && (
         <SettingsModal
