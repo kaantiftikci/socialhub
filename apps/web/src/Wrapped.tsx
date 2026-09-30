@@ -74,14 +74,14 @@ function CountUp({ value, run = true, ms, format = fmtNum }: { value: number; ru
 
 /* ───────────────────────── grafikler (kütüphanesiz SVG) ───────────────────────── */
 
-function Donut({ parts, size = 168, stroke = 20, children, glow }: { parts: Array<{ key: string; value: number; color: string }>; size?: number; stroke?: number; children?: ReactNode; glow?: boolean }) {
+function Donut({ parts, size = 168, stroke = 20, children, glow, onPick }: { parts: Array<{ key: string; value: number; color: string; dim?: boolean }>; size?: number; stroke?: number; children?: ReactNode; glow?: boolean; onPick?: (key: string) => void }) {
   const r = (size - stroke) / 2;
   const C = 2 * Math.PI * r;
   const total = parts.reduce((a, p) => a + p.value, 0) || 1;
   let acc = 0;
   return (
     <div className={`wr-donut ${glow ? 'glow' : ''}`} style={{ width: size, height: size }}>
-      <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size} aria-hidden="true">
+      <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size} aria-hidden="true" className={onPick ? 'pick' : undefined}>
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" className="wr-donut-track" strokeWidth={stroke} />
         {parts.map((p, i) => {
           const len = (C * p.value) / total;
@@ -99,8 +99,9 @@ function Donut({ parts, size = 168, stroke = 20, children, glow }: { parts: Arra
               strokeDasharray={`${Math.max(0.01, len - gap)} ${C}`}
               strokeDashoffset={-acc}
               transform={`rotate(-90 ${size / 2} ${size / 2})`}
-              className="wr-arc"
+              className={`wr-arc ${p.dim ? 'dim' : ''}`}
               style={{ '--c': C, animationDelay: `${i * 90}ms` } as CSSProperties}
+              onClick={onPick ? () => onPick(p.key) : undefined}
             />
           );
           acc += len;
@@ -317,6 +318,8 @@ export function WrappedView({ notify, onMenu, onOpenChat, onWaiting }: { notify:
   // uygulama seçimi: null = tüm uygulamalar; çip listesi son "tümü" raporundaki platformlardan
   const [platform, setPlatform] = useState<string | null>(null);
   const [allPlats, setAllPlats] = useState<string[]>([]);
+  // Platformlar kartı: bir uygulama seçiliyken de tüm uygulamaların payı görünsün (son "tümü" raporundan, aynı dönem)
+  const [allShares, setAllShares] = useState<{ period: string; list: WrappedStats['platforms'] } | null>(null);
   const [cell, setCell] = useState<number | null>(null);
   const setHideP = (v: boolean) => (setHide(v), ls.set(HIDE_KEY, v ? '1' : '0'));
 
@@ -331,7 +334,10 @@ export function WrappedView({ notify, onMenu, onOpenChat, onWaiting }: { notify:
       .then((s) => {
         if (!alive) return;
         setData(s);
-        if (!platform) setAllPlats(s.platforms.filter((p) => p.total > 0).map((p) => p.platform));
+        if (!platform) {
+          setAllPlats(s.platforms.filter((p) => p.total > 0).map((p) => p.platform));
+          setAllShares({ period, list: s.platforms });
+        }
       })
       .catch((e) => alive && setError((e as Error).message))
       .finally(() => alive && setLoading(false));
@@ -344,7 +350,10 @@ export function WrappedView({ notify, onMenu, onOpenChat, onWaiting }: { notify:
   const s = data;
   const empty = !!s && s.totals.total < MIN_MESSAGES;
   const prof = s ? profileText(s) : null;
-  const platTotal = s ? s.platforms.reduce((a, p) => a + p.total, 0) || 1 : 1;
+  // kart verisi: seçim varken aynı döneme ait tüm uygulama payları (yoksa raporun kendi listesi)
+  const shares = s ? (platform && allShares?.period === period ? allShares.list : s.platforms) : [];
+  const platTotal = shares.reduce((a, p) => a + p.total, 0) || 1;
+  const pickPlatform = (p: string) => (setPlatform(platform === p ? null : p), setCell(null));
 
   return (
     <section className="wrapped" aria-label="Miveloji">
@@ -442,20 +451,43 @@ export function WrappedView({ notify, onMenu, onOpenChat, onWaiting }: { notify:
             </span>
           </div>
 
-          {/* Platformlar */}
+          {/* Platformlar: dilime ya da satıra basınca tüm rapor o uygulamaya göre (yeniden basınca tümü) */}
           <div className="wr-card">
-            <span className="wr-k">Platformlar</span>
+            <div className="wr-row-head">
+              <span className="wr-k">Platformlar</span>
+              {platform && (
+                <button className="wr-link b" onClick={() => setPlatform(null)}>
+                  Tümünü göster
+                </button>
+              )}
+            </div>
             <div className="wr-plat">
-              <Donut parts={s.platforms.map((p) => ({ key: p.platform, value: p.total, color: PLATFORMS[p.platform]?.color ?? 'var(--v)' }))} size={132} stroke={16}>
-                <b>{s.platforms.length}</b>
-                <span>uygulama</span>
+              <Donut
+                parts={shares.map((p) => ({ key: p.platform, value: p.total, color: PLATFORMS[p.platform]?.color ?? 'var(--v)', dim: !!platform && p.platform !== platform }))}
+                size={132}
+                stroke={16}
+                onPick={pickPlatform}
+              >
+                {platform ? (
+                  <>
+                    <Chip platform={platform as keyof typeof PLATFORMS} size={26} />
+                    <span>%{Math.round(((shares.find((x) => x.platform === platform)?.total ?? 0) / platTotal) * 100)}</span>
+                  </>
+                ) : (
+                  <>
+                    <b>{shares.length}</b>
+                    <span>uygulama</span>
+                  </>
+                )}
               </Donut>
               <ul className="wr-legend">
-                {s.platforms.slice(0, 5).map((p) => (
+                {shares.slice(0, 6).map((p) => (
                   <li key={p.platform}>
-                    <Chip platform={p.platform} size={16} />
-                    <span className="n">{PLATFORMS[p.platform]?.name ?? p.platform}</span>
-                    <span className="v">%{Math.round((p.total / platTotal) * 100)}</span>
+                    <button className={`wr-leg b ${platform === p.platform ? 'on' : ''} ${platform && platform !== p.platform ? 'dim' : ''}`} onClick={() => pickPlatform(p.platform)} aria-pressed={platform === p.platform} title={`Yalnız ${PLATFORMS[p.platform]?.name ?? p.platform} istatistikleri`}>
+                      <Chip platform={p.platform} size={16} />
+                      <span className="n">{PLATFORMS[p.platform]?.name ?? p.platform}</span>
+                      <span className="v">%{Math.round((p.total / platTotal) * 100)}</span>
+                    </button>
                   </li>
                 ))}
               </ul>

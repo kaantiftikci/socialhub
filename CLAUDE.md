@@ -788,6 +788,12 @@ Dil: arayüz ve yorumlar Türkçe.
   halka; 5 sn döngü), "N yenilik" sayacı, maddeler 2-3 cümle. Slack boş sohbette "ücretsiz plan 90 günden eski mesajları gizliyor" notu (Kaan'ın günlüğü: is_limited).
 - Yenilikler maddeleri düz işlevle (`items(e)`) çizilir, iç bileşen DEĞİL (App her güncellemede yeni bileşen türü → liste yeniden kurulup animasyon sürekli oynuyordu); `WhatsNew` memo.
 - Miveloji (30.09 üçüncü tur): gruplar kişilerle aynı `PersonRow` (sıra, avatar, çubuk aynı hizada); ısı haritası kartının altında `WeekBars` (günlere göre esneyen çubuklar, en yoğun gün ortalamadan %, en sessiz saat) — kart yandaki kişiler kartının boyuna uzadığı için boşluğu doldurur.
+- **Tepki her sohbet uygulamasında (30.09, Kaan: TikTok'ta tepki yok)**: `reactAsText` = REACT_PLATFORMS dışındaki QUOTE_TEXT_PLATFORMS (TikTok, X, Messenger,
+  iMessage): tepki = hedefi alıntılayan emoji mesajı (`send(emoji, m)`, yazma alanına dokunmaz); balonda `foldTextReactions` yalnız 1-2 emojili alıntı yanıtını hedef
+  mesajın tepki çipine çevirir, ayrı balon göstermez (çipe tıklamak geri almaz). Yerel DOM tepkisi gerçek hesapla doğrulanmadan EKLENMEDİ.
+- Miveloji Platformlar kartı tıklanır (`pickPlatform`: halka dilimi / satır → `platform`; seçimde tüm uygulamaların payı `allShares`'ten, diğerleri soluk, "Tümünü göster").
+- Medya: küçük resmi olmayan (ya da küçük resmi kırık) videoda ilk kare `<video preload=metadata src=…#t=0.5>`, görünürken + en çok 3 eşzamanlı (`useVideoSlot`).
+  Bu ortamdaki Chromium H.264 çözemez (demo mp4 hata → eski simgeye düşer); Mac WKWebView çözer.
 - **Dokümantasyon** `docs/dokumantasyon.html` → `docs/Mivelo-Dokumantasyon.pdf` (`CHROMIUM=<chrome yolu> node docs/build-pdf.mjs`); özellik eklenince güncelle.
 
 ## Sunucu/arayüz sözleşmesi

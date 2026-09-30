@@ -16,6 +16,17 @@ export interface ChangeEntry {
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    id: '2026-09-30d',
+    date: '2026-09-30',
+    title: 'Her uygulamada tepki, daha canlı Miveloji',
+    items: [
+      { title: 'TikTok, X, Messenger ve iMessage’da tepki', text: 'Mesajın üzerine gelip emoji seçebilirsin. Bu uygulamaların tepki özelliğine dışarıdan ulaşılamadığı için tepki, mesajı alıntılayan kısa bir emoji yanıtı olarak gider; Mivelo’da mesajın altında tepki olarak görünür.' },
+      { title: 'Miveloji’de uygulamaya dokun', text: 'Platformlar kartındaki halkaya ya da listedeki bir uygulamaya bastığında tüm rapor o uygulamaya göre değişir. Tekrar basınca ya da “Tümünü göster” ile hepsine dönersin.' },
+      { title: 'Günlere göre grafik', text: 'Isı haritasının altında haftanın her günü için bir çubuk var; en yoğun günün ve en sessiz saatin tek bakışta görünüyor.' },
+      { title: 'Video önizlemeleri', text: 'Medya kütüphanesinde küçük resmi olmayan videolar artık ilk kareleriyle görünüyor; yalnız ekrana geldiklerinde ve birkaçı birden yükleniyor.' },
+    ],
+  },
+  {
     id: '2026-09-30c',
     date: '2026-09-30',
     title: 'Yepyeni ayarlar',

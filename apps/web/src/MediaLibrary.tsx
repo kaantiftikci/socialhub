@@ -100,6 +100,46 @@ function queued(url: string): Promise<LinkPreview> {
   previewCache.set(url, p);
   return p;
 }
+/** Video ilk kare önizlemeleri aynı anda en çok 3 (WhatsApp/Telegram videoları vekilden tamamen iner) */
+let vSlots = 3;
+const vWait: Array<() => void> = [];
+function useVideoSlot(want: boolean): [boolean, () => void] {
+  const [ok, setOk] = useState(false);
+  const held = useRef(false);
+  const release = useRef(() => {
+    if (!held.current) return;
+    held.current = false;
+    const next = vWait.shift();
+    if (next) next();
+    else vSlots++;
+  });
+  useEffect(() => {
+    if (!want) return;
+    let live = true;
+    const grant = () => {
+      if (!live) {
+        // izin gelmeden bileşen gitti: yuvayı sıradakine devret
+        const next = vWait.shift();
+        if (next) next();
+        else vSlots++;
+        return;
+      }
+      held.current = true;
+      setOk(true);
+    };
+    if (vSlots > 0) (vSlots--, grant());
+    else vWait.push(grant);
+    const rel = release.current;
+    return () => {
+      live = false;
+      const i = vWait.indexOf(grant);
+      if (i >= 0) vWait.splice(i, 1);
+      rel();
+    };
+  }, [want]);
+  return [ok, release.current];
+}
+
 function useVisible<T extends Element>(): [RefObject<T | null>, boolean] {
   const ref = useRef<T>(null);
   const [vis, setVis] = useState(false);
@@ -397,13 +437,22 @@ function Check({ on, onToggle }: { on: boolean; onToggle: () => void }) {
 
 function Tile({ it, selected, selecting, onToggle, onOpen }: { it: LibItem; selected: boolean; selecting: boolean; onToggle: () => void; onOpen: () => void }) {
   const [broken, setBroken] = useState(false);
+  const [vBroken, setVBroken] = useState(false);
   const thumb = broken ? undefined : thumbOf(it.att);
+  // küçük resmi olmayan video (WhatsApp, Telegram…): dosyanın ilk karesi önizleme olur; yalnız ekrana gelince yüklenir
+  const vsrc = it.kind === 'video' && !thumb && !vBroken ? fileOf(it) : undefined;
+  const [ref, vis] = useVisible<HTMLDivElement>();
+  const [slot, releaseSlot] = useVideoSlot(!!vsrc && vis);
   const media = it.kind === 'image' || it.kind === 'video';
   return (
-    <div className={`ml-tile ${media ? 'media' : 'doc'} ${selected ? 'sel' : ''}`}>
+    <div ref={ref} className={`ml-tile ${media ? 'media' : 'doc'} ${selected ? 'sel' : ''}`}>
       <button type="button" className="ml-tile-btn" onClick={selecting ? onToggle : onOpen} title={`${nameOf(it)} · ${it.chatName}`}>
         {media && thumb ? (
           <img src={thumb} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setBroken(true)} />
+        ) : vsrc && slot ? (
+          <video className="ml-vthumb" src={`${vsrc}#t=0.5`} preload="metadata" muted playsInline disablePictureInPicture tabIndex={-1} aria-hidden="true" onLoadedData={releaseSlot} onError={() => (releaseSlot(), setVBroken(true))} />
+        ) : vsrc ? (
+          <span className="ml-vph" aria-hidden="true" />
         ) : (
           <span className="ml-doc">
             <span className={`ml-doc-ic k-${it.kind}`}>
@@ -413,7 +462,7 @@ function Tile({ it, selected, selecting, onToggle, onOpen }: { it: LibItem; sele
             <span className="ml-doc-m">{it.kind === 'link' ? 'Bağlantı' : [extOf(it), fmtSize(it.att.size)].filter(Boolean).join(' · ')}</span>
           </span>
         )}
-        {it.kind === 'video' && thumb && (
+        {it.kind === 'video' && (thumb || vsrc) && (
           <span className="ml-play">
             <Icon name="play" size={16} />
           </span>

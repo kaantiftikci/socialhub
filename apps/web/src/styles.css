@@ -2580,3 +2580,20 @@ html.reduce-motion *, html.reduce-motion *::before, html.reduce-motion *::after 
 .wr-wcol.top .d { color: var(--text); font-weight: 650; }
 @keyframes wrColUp { from { transform: scaleY(0); } to { transform: none; } }
 @media (prefers-reduced-motion: reduce) { .wr-wcol .bar i { animation: none; } }
+/* Miveloji → Platformlar kartı: uygulamaya basınca rapor o uygulamaya göre */
+.wr-leg { width: 100%; display: flex; align-items: center; gap: 8px; padding: 4px 6px; margin: -4px -6px; border: 0; border-radius: 9px; background: transparent; color: inherit; font: inherit; font-size: 13px; text-align: left; cursor: pointer; transition: background .12s ease, opacity .15s ease; }
+.wr-leg:hover { background: var(--ctx-bg); }
+.wr-leg.on { background: var(--v-soft); color: var(--v-txt); }
+.wr-leg.dim { opacity: .5; }
+.wr-legend li { display: block; }
+.wr-legend .wr-leg .n { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.wr-donut svg.pick .wr-arc { cursor: pointer; pointer-events: stroke; transition: opacity .15s ease; }
+.wr-donut .wr-arc.dim { opacity: .22; }
+.wr-link { border: 0; background: transparent; color: var(--v-txt); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; padding: 0; }
+.wr-link:hover { text-decoration: underline; }
+.wr-donut-in { pointer-events: none; }
+/* Medya: küçük resmi olmayan videoda ilk kare */
+.ml-tile .ml-vthumb { display: block; width: 100%; height: 100%; object-fit: cover; pointer-events: none; background: #111; transition: transform .35s ease, border-radius .2s; }
+.ml-tile:hover .ml-vthumb { transform: scale(1.04); }
+.ml-tile.sel .ml-vthumb { transform: scale(.9); border-radius: 8px; }
+.ml-tile .ml-vph { display: block; width: 100%; height: 100%; background: var(--ctx-bg); }

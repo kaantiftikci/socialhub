@@ -19,6 +19,35 @@ import { useClosing, Avatar, Chip, Icon, IconText, Resizer, Tag, ago, fmtDay, fm
 const SYSTEM_LEAD = new Set(['🔒', '🚫', '⏳', '⌛', '🗑', '⚠']);
 
 /** Balon metni: sistem mesajıysa baştaki emoji ikon ("🔒 Tek seferlik fotoğraf…"), değilse olduğu gibi (bağlantılar tıklanır) */
+/** Yalnız 1-2 emojiden oluşan metin (ten rengi, ZWJ birleşimleri dahil) */
+const EMOJI_ONLY = /^(?:\p{Extended_Pictographic}(?:\uFE0F|[\u{1F3FB}-\u{1F3FF}]|\u200D\p{Extended_Pictographic})*\s?){1,2}$/u;
+const normQuote = (t: string) => t.replace(/\s+/g, ' ').replace(/[”]/g, '"').trim();
+/**
+ * Yerel tepkisi olmayan uygulamalarda (TikTok, X, Messenger, iMessage) Mivelo tepkisi alıntı satırlı emoji mesajı olarak gider
+ * ("↪ Ayşe: “…”\n❤️"). Sohbette ayrı balon yerine alıntılanan mesajın altında tepki çipi olarak gösterilir; hedef bulunamazsa
+ * mesaj olduğu gibi kalır.
+ */
+function foldTextReactions(list: Message[]): Message[] {
+  if (!list.some((m) => m.text.startsWith('↪ '))) return list;
+  const out = [...list];
+  const drop = new Set<number>();
+  for (let i = 0; i < out.length; i++) {
+    const q = parseQuoteLine(out[i].text);
+    if (!q || !EMOJI_ONLY.test(q.rest.trim())) continue;
+    const key = q.text.replace(/…$/, '');
+    for (let j = i - 1; j >= 0; j--) {
+      if (drop.has(j)) continue;
+      const t = out[j];
+      if (!normQuote(parseQuoteLine(t.text)?.rest ?? t.text).startsWith(key)) continue;
+      const r = { emoji: q.rest.trim(), senderId: out[i].senderId, senderName: out[i].senderName, fromMe: out[i].fromMe };
+      out[j] = { ...t, reactions: [...(t.reactions ?? []), r] };
+      drop.add(i);
+      break;
+    }
+  }
+  return drop.size ? out.filter((_, i) => !drop.has(i)) : out;
+}
+
 function bubbleText(raw: string) {
   const text = trReactionText(raw);
   const first = Array.from(text)[0] ?? '';
@@ -556,7 +585,9 @@ export function Conversation({
     return () => window.removeEventListener('mousedown', close);
   }, [ownFor]);
   useEffect(() => (setThreadFocus(null), setEmojiOpen(false), setReactPick(null), setBarFor(null)), [chat.id]);
-  const canReact = REACT_PLATFORMS.has(chat.platform);
+  // yerel tepkisi olmayan mesajlaşma uygulamaları (TikTok, X, Messenger, iMessage): tepki alıntılı emoji yanıtı olarak gider
+  const reactAsText = !REACT_PLATFORMS.has(chat.platform) && QUOTE_TEXT_PLATFORMS.has(chat.platform);
+  const canReact = REACT_PLATFORMS.has(chat.platform) || reactAsText;
   // takip hatırlatıcısı pazaryeri dışında her sohbette (sağ paneldeki ile aynı)
   const canFollow = PLATFORMS[chat.platform].category !== 'shop';
   const byRemote = useMemo(() => new Map(messages.map((m) => [m.remoteId, m])), [messages]);
@@ -578,6 +609,7 @@ export function Conversation({
   }, [messages, chat.platform]);
   async function react(m: Message, emoji: string) {
     setReactPick(null);
+    if (reactAsText) return void send(emoji, m);
     try {
       await api.react(chat.id, m.id, emoji);
     } catch (e) {
@@ -857,7 +889,7 @@ export function Conversation({
   const shown = useMemo(() => {
     const q = (search ?? '').trim().toLocaleLowerCase('tr-TR');
     // "X bir mesajı beğendi" türü olay metinleri sohbette satır olarak gösterilmez (liste önizlemesinde kalır; tepkiler çip olarak görünür)
-    const visible = messages.filter((m) => !REACT_TEXT.test(m.text));
+    const visible = foldTextReactions(messages.filter((m) => !REACT_TEXT.test(m.text)));
     const base = threadFocus ? visible.filter((m) => m.remoteId === threadFocus || m.threadId === threadFocus) : visible;
     if (!q) return base;
     return base.filter((m) => m.text.toLocaleLowerCase('tr-TR').includes(q) || m.senderName.toLocaleLowerCase('tr-TR').includes(q) || m.attachments?.some((a) => a.name?.toLocaleLowerCase('tr-TR').includes(q)));
@@ -917,7 +949,7 @@ export function Conversation({
                               {g.fromMe && statusIcon(last.status)}
                             </time>
                           </div>
-                          {reacts.length ? <ReactionChips list={reacts} onToggle={canReact && !foreignA ? (e) => act.current.react(last, e) : undefined} /> : null}
+                          {reacts.length ? <ReactionChips list={reacts} onToggle={canReact && !reactAsText && !foreignA ? (e) => act.current.react(last, e) : undefined} /> : null}
                         </div>
                       );
                     }
@@ -1011,7 +1043,7 @@ export function Conversation({
                           })()}
                         </div>
                         {url && <LinkCard url={url} />}
-                        {m.reactions?.length ? <ReactionChips list={m.reactions} onToggle={canReact && !foreign ? (e) => act.current.react(m, e) : undefined} /> : null}
+                        {m.reactions?.length ? <ReactionChips list={m.reactions} onToggle={canReact && !reactAsText && !foreign ? (e) => act.current.react(m, e) : undefined} /> : null}
                         {!!m.replyCount && !threadFocus && (
                           <button type="button" className="treplies b" onClick={() => setThreadFocus(m.remoteId)}>
                             <span className="tav">
@@ -1065,7 +1097,7 @@ export function Conversation({
                           <span className="rbar" role="toolbar" aria-label="Hızlı işlemler">
                             {canReact &&
                               QUICK_REACTIONS.map((e) => (
-                                <button key={e} type="button" className={m.reactions?.some((r) => r.fromMe && r.emoji === e) ? 'on' : ''} onClick={() => (act.current.react(m, e), setBarFor(null))} title={`${e} tepkisi`}>
+                                <button key={e} type="button" className={m.reactions?.some((r) => r.fromMe && r.emoji === e) ? 'on' : ''} onClick={() => (act.current.react(m, e), setBarFor(null))} title={reactAsText ? `${e}: ${platform.name}’da tepki yok; alıntılı emoji yanıtı olarak gider (Mivelo’da tepki olarak görünür)` : `${e} tepkisi`}>
                                   {e}
                                 </button>
                               ))}
@@ -1165,9 +1197,10 @@ export function Conversation({
   }, []);
 
   /** override: yazma alanı yerine bu metni gönder (yerel AI "Çevir ve gönder") */
-  async function send(override?: unknown) {
-    if (editTarget) return saveEdit();
-    if (pending) {
+  /** reaction: yerel tepkisi olmayan uygulamada tepki = hedef mesajı alıntılayan emoji yanıtı (yazma alanına dokunmaz) */
+  async function send(override?: unknown, reaction?: Message) {
+    if (editTarget && !reaction) return saveEdit();
+    if (pending && !reaction) {
       if (uploading) return;
       const f = pending.file;
       const voice = !!pending.voice;
@@ -1184,7 +1217,7 @@ export function Conversation({
     if (!typed) return;
     const chatId = chat.id;
     // yanıt: Slack'te iş parçacığına, yerel alıntısı olanlarda alıntılı yanıt (platform kimliğiyle), diğerlerinde alıntı satırı
-    const rt = replyTarget;
+    const rt = reaction ?? replyTarget;
     const textQuote = !!rt && QUOTE_TEXT_PLATFORMS.has(chat.platform);
     const body = textQuote && rt ? quoteLine(rt.fromMe ? 'Sen' : rt.senderName, parseQuoteLine(rt.text)?.rest ?? (rt.text || rt.attachments?.[0]?.name || 'Mesaj')) + typed : typed;
     const threadId = threadFocus ?? (rt && chat.platform === 'slack' ? rt.threadId ?? rt.remoteId : undefined);
@@ -1192,9 +1225,11 @@ export function Conversation({
     const quote = rt && replyTo ? { remoteId: rt.remoteId, senderName: rt.fromMe ? 'Sen' : rt.senderName, text: (rt.text || rt.attachments?.[0]?.name || '').slice(0, 160), fromMe: rt.fromMe } : undefined;
     const id = `out-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     setOutbox((x) => [...x, { id, chatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text: body, ts: Date.now(), status: 'pending', threadId, replyTo: quote }]);
-    setText('');
-    setDraft(null);
-    setReplyTarget(null);
+    if (!reaction) {
+      setText('');
+      setDraft(null);
+      setReplyTarget(null);
+    }
     // art arda gönderimler sırasını korusun (her biri bir öncekini bekler; arayüz beklemez). Zincir modül düzeyinde,
     // sohbet kimliğine göre: sohbetten çıkıp dönünce yeni mesaj yoldaki eskisini geçmesin
     const run = (sendChains.get(chatId) ?? Promise.resolve()).then(() => api.send(chatId, body, threadId, replyTo));
@@ -1210,7 +1245,7 @@ export function Conversation({
     } catch (e) {
       setOutbox((x) => x.filter((o) => o.id !== id));
       // açık kompozöre (bu sohbet hâlâ açıksa) ya da sohbet yeniden açılınca kompozöre geri gelsin
-      restoreFailed(chatId, typed);
+      if (!reaction) restoreFailed(chatId, typed);
       notify((e as Error).message, true);
     }
   }
