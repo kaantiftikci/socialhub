@@ -84,6 +84,9 @@ Dil: arayüz ve yorumlar Türkçe.
   `apps/landing/` (bekleme listesi sayfası, tek dosya `index.html`; iletişim hello@mivelo.app) → `mivelo.app/`; kayıtlar
   `api/waitlist.php` → `~/mivelo-data/waitlist.json` (e-posta tekil ve sıkı biçim, davet kodu `?ref=`, `refs` sayacı, gizli `website`
   bot tuzağı, IP başına 20/saat + günlük 2000). `gizlilik.html`, `kosullar.html`, `og.png`, `apple-touch-icon.png` de burada.
+  **Landing 30.09 güncellemesi**: hero kareleri artık ayrı dosyalar `apps/landing/img/hero-*.webp` (17 kare, ilk kare hemen, diğerleri yüklemeden sonra;
+  index.html tek dosya DEĞİL), sekmeler Gelen kutusu · Odak · Hızlı gönder · Pazaryeri · Miveloji; "Yenilikler" bölümü (Miveloji, kişi zaman çizelgesi,
+  cihazda AI, gün sonu özeti), menüde İndir; arayüz değişince kareler demodan yeniden çekilmeli. Hareketler Mivelo eğrileriyle.
   Landing hero'su: görünüm sekmeleri yalnız sahnenin altındaki `#seg` ("Kendine göre ayarla"; sahnedeki yüzen kopya kaldırıldı); her sekme imleçle ufak bir görev
   oynatır (`TASKS` dizisi, kaplamalar 1440×900 kare koordinatlarında). Telefon/tablette de masaüstü penceresi gösterilir.
   "21 uygulama" bölümü (`.dock` grupları Sosyal medya 9 · E-posta 5 · Pazaryerleri 7 — ePttAVM sarı "ePtt" SVG kutusu n11'den sonra): telefonda
