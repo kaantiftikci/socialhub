@@ -949,7 +949,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     return lanInfo(true);
   });
   // ---- yerel ML (ml/: sesli mesaj metni, anlamsal arama, çeviri) ----
-  registerMlRoutes(route, { store, media: registry, httpError: (st, msg) => new HttpError(st, msg) });
+  registerMlRoutes(route, { store, media: registry, httpError: (st, msg) => new HttpError(st, msg), localOnly });
 
   route('GET', '/api/search', (req) => {
     const sp = new URL(req.url ?? '/', 'http://x').searchParams;

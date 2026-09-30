@@ -156,7 +156,7 @@ export function ComposeTranslate({ chat, messages, text, setText, onSend, disabl
       .translateText(src, to, detectLanguage(src).lang ?? 'tr')
       .then((r) => {
         setOut(r.text);
-        setEngine(r.engine === 'claude' ? 'Claude ile' : 'cihazında');
+        setEngine(r.engine === 'google' ? 'Google Çeviri ile' : r.engine === 'claude' ? 'Claude ile' : 'cihazında');
       })
       .catch((e) => (setErr((e as Error).message), setOut(null)))
       .finally(() => setBusy(false));

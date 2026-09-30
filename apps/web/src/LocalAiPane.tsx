@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { Icon } from './ui';
+import { Icon, PasswordInput } from './ui';
 import { mlApi, type MlModel, type MlSettings, type ModelKey } from './ml-api';
 import { refreshMlStatus, useMlStatus } from './ml-client';
 
@@ -10,7 +10,7 @@ import { refreshMlStatus, useMlStatus } from './ml-client';
 const DESC: Record<ModelKey, string> = {
   whisper: 'WhatsApp, Telegram ve iMessage sesli mesajlarının altında metin; metin aramada da bulunur.',
   embed: '"Geçen ay Ahmet’in gönderdiği fatura" gibi doğal dille arama (⌘K → Anlamsal).',
-  translate: 'Anthropic anahtarı yoksa çeviri bu modelle cihazında yapılır. Büyük bir modeldir.',
+  translate: 'Google çeviri ya da Anthropic anahtarı yoksa çeviri bu modelle cihazında yapılır. Büyük ve yavaş bir modeldir; gerekmedikçe indirme.',
 };
 
 function Row({ title, hint, children, dim }: { title: string; hint?: ReactNode; children: ReactNode; dim?: boolean }) {
@@ -162,11 +162,13 @@ export function LocalAiPane({ notify }: { notify: (t: string, err?: boolean) => 
         <Row
           title="Çeviri"
           hint={
-            st.translate.engine === 'claude'
+            st.translate.engine === 'google'
+              ? 'Google Cloud Translation ile (yalnız "Çevir" dediğinde o metin Google’a gider)'
+              : st.translate.engine === 'claude'
               ? 'Anthropic anahtarınla Claude çevirir (yalnız "Çevir" dediğinde, o metin gider)'
               : st.translate.engine === 'local'
                 ? 'Cihazındaki modelle çevrilir (hiçbir metin gönderilmez)'
-                : 'AI anahtarı ekle ya da yerel çeviri modelini indir'
+                : 'Aşağıdan Google çeviri anahtarı ekle (önerilen)'
           }
         >
           <select className="lai-select" value={st.settings.translateTarget} onChange={(e) => void save({ translateTarget: e.target.value })} aria-label="Çeviri hedef dili">
@@ -177,13 +179,66 @@ export function LocalAiPane({ notify }: { notify: (t: string, err?: boolean) => 
             ))}
           </select>
         </Row>
-        {st.translate.ai && (
-          <Row title="Yalnız yerel çeviri" hint="Anahtar olsa da çeviri cihazdaki modelle yapılır" dim={!ready('translate')}>
+        <GoogleKeyRow info={st.translate.google} notify={notify} />
+        {(st.translate.ai || st.translate.google?.set) && (
+          <Row title="Yalnız yerel çeviri" hint="Anahtar olsa da çeviri cihazdaki modelle yapılır (hiçbir metin gönderilmez)" dim={!ready('translate')}>
             <Switch label="Yalnız yerel çeviri" on={st.settings.localOnlyTranslate} onChange={(v) => void save({ localOnlyTranslate: v })} />
           </Row>
         )}
       </div>
       <p className="set-note">Modeller ~/.mivelo/models klasöründe durur. Çalışırken biraz işlemci kullanır; birkaç dakika kullanılmayınca bellekten çıkar.</p>
     </>
+  );
+}
+
+/** Google Cloud Translation anahtarı (resmi API; ayda 500 bin karakter ücretsiz). Değer çekirdekte gizli depoda, burada yalnız maske. */
+function GoogleKeyRow({ info, notify }: { info?: { set: boolean; hint: string | null }; notify: (t: string, err?: boolean) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState('');
+  const [busy, setBusy] = useState(false);
+  const save = (key: string | null) => {
+    setBusy(true);
+    mlApi
+      .setGoogleKey(key)
+      .then(() => (notify(key ? 'Google çeviri anahtarı kaydedildi' : 'Google çeviri anahtarı kaldırıldı'), setEditing(false), setVal(''), refreshMlStatus()))
+      .catch((e) => notify((e as Error).message, true))
+      .finally(() => setBusy(false));
+  };
+  if (editing)
+    return (
+      <form className="lai-gkey" onSubmit={(e) => (e.preventDefault(), val.trim() && save(val.trim()))}>
+        <b>Google çeviri anahtarı</b>
+        <em>
+          Google Cloud Console → yeni proje → “Cloud Translation API”yi etkinleştir → Kimlik bilgileri → API anahtarı oluştur. Ayda 500 bin karakter ücretsiz;
+          Google faturalandırma hesabı ister.
+        </em>
+        <PasswordInput autoFocus placeholder="AIza…" value={val} onChange={(e) => setVal(e.target.value)} aria-label="Google API anahtarı" autoComplete="off" spellCheck={false} />
+        <div className="lai-gkey-act">
+          <button type="submit" className="btn primary xs b b2" disabled={busy || !val.trim()}>
+            Kaydet
+          </button>
+          <button type="button" className="btn ghost xs b" onClick={() => (setEditing(false), setVal(''))}>
+            Vazgeç
+          </button>
+        </div>
+      </form>
+    );
+  return (
+    <Row title="Google çeviri" hint={info?.set ? `Anahtar kayıtlı (${info.hint ?? ''})` : 'Resmi Google Cloud Translation; ayda 500 bin karakter ücretsiz'}>
+      {info?.set ? (
+        <span style={{ display: 'flex', gap: 6 }}>
+          <button type="button" className="btn xs b" onClick={() => setEditing(true)}>
+            Değiştir
+          </button>
+          <button type="button" className="btn ghost xs b" disabled={busy} onClick={() => save(null)}>
+            Kaldır
+          </button>
+        </span>
+      ) : (
+        <button type="button" className="btn xs b" onClick={() => setEditing(true)}>
+          <Icon name="translate" size={13} /> Anahtar ekle
+        </button>
+      )}
+    </Row>
   );
 }

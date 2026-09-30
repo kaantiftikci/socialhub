@@ -140,6 +140,9 @@ function indexStatus(): IndexStatus {
   return { enabled: settings().semanticIndex, ready: state.embed.state === 'ready', indexed: n, total: n, pct: 100, running: false };
 }
 
+/** Demo: Google anahtarı yalnız bellekte (hiçbir yere gönderilmez) */
+let demoGoogle: string | null = null;
+
 function status(): MlStatus {
   return {
     demo: true,
@@ -147,7 +150,7 @@ function status(): MlStatus {
     runtime: { ready: true, approxMb: 36 },
     settings: settings(),
     index: indexStatus(),
-    translate: { engine: state.translate.state === 'ready' ? 'local' : null, ai: false },
+    translate: { engine: demoGoogle ? 'google' : state.translate.state === 'ready' ? 'local' : null, ai: false, google: { set: !!demoGoogle, hint: demoGoogle ? `…${demoGoogle.slice(-4)}` : null } },
     languages: LANG_NAMES,
   };
 }
@@ -262,16 +265,22 @@ export const demoMlApi = {
       index: indexStatus(),
     };
   },
+  setGoogleKey: async (key: string | null) => {
+    if (key && !/^AIza[0-9A-Za-z_-]{30,60}$/.test(key.trim())) throw new Error('Geçersiz Google API anahtarı (AIza… ile başlamalı)');
+    demoGoogle = key?.trim() || null;
+    await wait(300);
+    return status();
+  },
   translate: async (messageId: string, target = 'tr', force = false): Promise<MessageTranslation> => {
     const m = demoPeopleSource.messages().find((x) => x.id === messageId);
     if (!m) throw new Error('Mesaj bulunamadı');
     const g = detectLanguage(m.text);
     if (!force && g.lang === target) return { messageId, lang: target, source: g.lang, text: m.text, same: true };
     await wait(450);
-    return { messageId, lang: target, source: g.lang, text: demoTranslate(m.text, target), engine: 'local' };
+    return { messageId, lang: target, source: g.lang, text: demoTranslate(m.text, target), engine: demoGoogle ? 'google' : 'local' };
   },
   translateText: async (text: string, target: string, source?: string | null) => {
     await wait(500);
-    return { text: demoTranslate(text, target), source: source ?? detectLanguage(text).lang ?? 'tr', target, engine: 'local' as const };
+    return { text: demoTranslate(text, target), source: source ?? detectLanguage(text).lang ?? 'tr', target, engine: demoGoogle ? ('google' as const) : ('local' as const) };
   },
 };

@@ -6,6 +6,7 @@ import { mlSettings, MlError } from './config.js';
 import { isModelUsable, runMl } from './engine.js';
 import { detectLanguage, dominantLanguage, LANG_NAMES } from './lang.js';
 import { getTranslation, saveTranslation } from './ml-store.js';
+import { googleKey, viaGoogle } from './google-translate.js';
 
 /**
  * Anlık çeviri. Motor: kullanıcının Anthropic anahtarı varsa Claude (hızlı, bağlamı ve üslubu koruyan), yoksa ya da
@@ -20,10 +21,12 @@ export const NLLB_CODES: Record<string, string> = {
   fa: 'pes_Arab', he: 'heb_Hebr', zh: 'zho_Hans', ja: 'jpn_Jpan', ko: 'kor_Hang', hi: 'hin_Deva', th: 'tha_Thai', ka: 'kat_Geor', hy: 'hye_Armn',
 };
 
-export type Engine = 'claude' | 'local';
+export type Engine = 'google' | 'claude' | 'local';
 
 export function translationEngine(): Engine | null {
   const s = mlSettings();
+  // öncelik: kullanıcının Google Cloud Translation anahtarı (resmi, ayda 500 bin karakter ücretsiz) → Claude → yerel model
+  if (googleKey() && !s.localOnlyTranslate) return 'google';
   if (aiEnabled() && !s.localOnlyTranslate) return 'claude';
   if (isModelUsable('translate')) return 'local';
   return null;
@@ -36,7 +39,7 @@ function requireEngine(): Engine {
     409,
     mlSettings().localOnlyTranslate
       ? 'Yerel çeviri için önce modeli indir: Ayarlar → Yerel AI modelleri → Yerel çeviri'
-      : "Çeviri için Ayarlar → AI özellikleri'nden Anthropic anahtarı ekle ya da Ayarlar → Yerel AI modelleri'nden yerel çeviri modelini indir",
+      : "Çeviri için Ayarlar → Yerel AI modelleri → Çeviri'den Google çeviri anahtarı ekle (ya da Anthropic anahtarı / yerel model)",
   );
 }
 
@@ -108,7 +111,7 @@ async function viaLocal(texts: string[], target: string, source: string | null, 
 export async function translateTexts(texts: string[], target: string, opts: { source?: string | null; interactive?: boolean } = {}): Promise<{ texts: string[]; source: string | null; engine: Engine }> {
   if (!NLLB_CODES[target]) throw new MlError(400, 'Desteklenmeyen hedef dil');
   const engine = requireEngine();
-  const r = engine === 'claude' ? await viaClaude(texts, target, opts.source) : await viaLocal(texts, target, opts.source ?? null, opts.interactive ?? true);
+  const r = engine === 'google' ? await viaGoogle(texts, target, opts.source) : engine === 'claude' ? await viaClaude(texts, target, opts.source) : await viaLocal(texts, target, opts.source ?? null, opts.interactive ?? true);
   return { ...r, engine };
 }
 

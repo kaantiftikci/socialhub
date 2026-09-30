@@ -10,6 +10,7 @@ import { SemanticIndex } from './semantic.js';
 import { TranscribeService, type MediaSource } from './transcribe.js';
 import { chatLanguage, translateMessage, translateTexts, translationEngine } from './translate.js';
 import { LANG_NAMES } from './lang.js';
+import { googleKeyInfo, setGoogleKey } from './google-translate.js';
 
 type Handler = (req: http.IncomingMessage, res: http.ServerResponse, params: Record<string, string>, body: unknown) => Promise<unknown> | unknown;
 type Route = (method: string, path: string, handler: Handler) => void;
@@ -18,7 +19,7 @@ type Route = (method: string, path: string, handler: Handler) => void;
  * Yerel ML uçları (/api/ml/…). server.ts yalnız bağlar: registerMlRoutes(route, …). Hatalar anlaşılır Türkçe metinle ilgili
  * HTTP durumuna çevrilir (409 = model indirilmemiş / anahtar yok).
  */
-export function registerMlRoutes(route: Route, deps: { store: Store; media: MediaSource; httpError: (status: number, message: string) => Error }): { semantic: SemanticIndex; transcribe: TranscribeService } {
+export function registerMlRoutes(route: Route, deps: { store: Store; media: MediaSource; httpError: (status: number, message: string) => Error; localOnly?: (req: http.IncomingMessage) => void }): { semantic: SemanticIndex; transcribe: TranscribeService } {
   const { store, httpError } = deps;
   const transcribe = new TranscribeService(store, deps.media);
   const semantic = new SemanticIndex(store);
@@ -46,11 +47,23 @@ export function registerMlRoutes(route: Route, deps: { store: Store; media: Medi
     runtime: { ready: runtimeReady(), approxMb: RUNTIME_APPROX_MB },
     settings: mlSettings(),
     index: semantic.status(),
-    translate: { engine: translationEngine(), ai: aiEnabled() },
+    translate: { engine: translationEngine(), ai: aiEnabled(), google: googleKeyInfo() },
     languages: LANG_NAMES,
   });
 
   route('GET', '/api/ml', wrap(() => status()));
+  // Google Cloud Translation anahtarı (yalnız bu bilgisayardan; değer asla geri dönmez, yalnız maske)
+  route(
+    'POST',
+    '/api/ml/google-key',
+    wrap((req, _s, _p, body) => {
+      deps.localOnly?.(req);
+      const k = (body as { key?: unknown } | null)?.key;
+      setGoogleKey(typeof k === 'string' ? k : null);
+      emitMlStatus(true);
+      return status();
+    }),
+  );
   route(
     'POST',
     '/api/ml/settings',

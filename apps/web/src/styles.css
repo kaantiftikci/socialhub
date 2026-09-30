@@ -2308,3 +2308,10 @@ button.att-card.xpost img, button.att-card .att-thumb img { cursor: pointer; }
 .lai-actions .danger-btn { color: var(--danger-txt); border-color: var(--danger-line); background: var(--danger-bg); }
 @media (max-width: 640px) { .lai-top { flex-wrap: wrap; } .lai-state { width: 100%; padding-left: 42px; } }
 @media (prefers-reduced-motion: reduce) { .ctr-pop { animation: none; } .lai-bar span { transition: none; } }
+
+/* ---- Google çeviri anahtarı ---- */
+.lai-gkey { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; }
+.lai-gkey b { font-size: 13.5px; }
+.lai-gkey em { font-style: normal; font-size: 12px; color: var(--text2); line-height: 1.45; }
+.lai-gkey input { height: 36px; border-radius: 10px; border: 1px solid var(--line); padding: 0 12px; font-size: 13px; background: var(--field); color: var(--text); outline: none; width: 100%; }
+.lai-gkey-act { display: flex; gap: 6px; }

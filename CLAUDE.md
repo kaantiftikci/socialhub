@@ -759,6 +759,10 @@ Dil: arayüz ve yorumlar Türkçe.
   `ml.status`, `transcript.update`. Arayüz `MlBubble.tsx` (balon altı metin/çeviri, "Çevir", "Çevir ve gönder", sağ panel "Otomatik çevir" `mivelo.autoTranslate`), ⌘K "Anlamsal"
   (`mivelo.searchSemantic`), `LocalAiPane.tsx`. Demo `demo-ml.ts`. Gerçek modellerle ve gerçek Mac/Windows'ta DOĞRULANMADI (bu ortamda Hugging Face 403); ilk kullanımda
   `Sesli mesaj yazıya döküldü: N sn ses…` günlüğüne bakılmalı.
+- **Google çeviri (30.09, Kaan: "yerel çeviri yerine ücretsiz resmi translate")** `ml/google-translate.ts`: resmi Google Cloud Translation v2 (Basic),
+  kullanıcının KENDİ `AIza…` anahtarı (ayda 500 bin karakter ücretsiz, Google faturalandırma hesabı şart) → gizli depo `google-translate` (secrets.ts), arayüze yalnız maske;
+  `POST /api/ml/google-key` yalnız yerelden. Motor önceliği: Google anahtarı → Claude → yerel NLLB ("Yalnız yerel çeviri" hepsini ezer). Ayarlar → Yerel AI modelleri →
+  "Google çeviri" satırı (`GoogleKeyRow`). Anahtarsız resmi olmayan translate.googleapis.com "gtx" KULLANILMAZ (ToS). Test: ml-google-translate.test.ts. Gerçek anahtarla denenmedi.
 - **Dokümantasyon** `docs/dokumantasyon.html` → `docs/Mivelo-Dokumantasyon.pdf` (`CHROMIUM=<chrome yolu> node docs/build-pdf.mjs`); özellik eklenince güncelle.
 
 ## Sunucu/arayüz sözleşmesi
