@@ -2545,7 +2545,7 @@ function embedUrl(link: string): string | undefined {
   if (m) return `https://platform.twitter.com/embed/Tweet.html?dnt=true&embedId=twitter-widget-0&frame=false&hideCard=false&hideThread=false&id=${m[1]}&lang=tr&theme=light&widgetsVersion=2615f7e52b7e0%3A1702314776716`;
   m = link.match(/^https?:\/\/(?:www\.|m\.)?youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|live\/)([A-Za-z0-9_-]{6,})/) ?? link.match(/^https?:\/\/youtu\.be\/([A-Za-z0-9_-]{6,})/);
   if (m) return `https://www.youtube-nocookie.com/embed/${m[1]}?autoplay=1&rel=0`;
-  m = link.match(/^https?:\/\/(?:www\.|m\.)?tiktok\.com\/(?:@[^/]+\/(?:video|photo)|v|embed(?:\/v2)?)\/(\d+)/);
+  m = link.match(/^https?:\/\/(?:www\.|m\.)?tiktok\.com\/(?:@[^/]*\/(?:video|photo)|share\/video|video|v|embed(?:\/v2)?)\/(\d+)/);
   if (m) return `https://www.tiktok.com/embed/v2/${m[1]}`;
   m = link.match(/^https?:\/\/(?:www\.)?vimeo\.com\/(\d+)/);
   if (m) return `https://player.vimeo.com/video/${m[1]}?autoplay=1`;

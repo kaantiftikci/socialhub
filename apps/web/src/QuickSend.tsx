@@ -254,8 +254,9 @@ function ReplyCard({ t, onDismiss, onOpen }: { t: InToast; onDismiss: () => void
   const [reply, setReply] = useState('');
   const [hold, setHold] = useState(false);
   const [focus, setFocus] = useState(false);
+  const [open, setOpen] = useState(false);
   const canReply = !isOrderPage(t.chat) && t.chat.kind !== 'channel';
-  const paused = hold || focus || !!reply;
+  const paused = hold || focus || open || !!reply;
   useEffect(() => {
     if (paused) return;
     const h = window.setTimeout(onDismiss, TOAST_MS);
@@ -271,13 +272,14 @@ function ReplyCard({ t, onDismiss, onOpen }: { t: InToast; onDismiss: () => void
     <div className={`msgtoast qr-card ${paused ? 'held' : ''}`} role="group" aria-label={`${t.chat.name} bildirimi`} onMouseEnter={() => setHold(true)} onMouseLeave={() => setHold(false)}>
       <button type="button" className="qr-head b" onClick={onOpen} title="Sohbeti aç">
         <span className="avwrap">
-          <Avatar name={t.chat.name} size={34} url={t.chat.avatarUrl} />
-          <Chip platform={t.chat.platform} size={16} ring="var(--card)" />
+          <Avatar name={t.chat.name} size={38} url={t.chat.avatarUrl} />
+          <span className="qr-badge">
+            <Chip platform={t.chat.platform} size={20} ring="var(--surface)" />
+          </span>
         </span>
         <span className="body">
           <span className="top">
             <b>{t.chat.name}</b>
-            <span className="plat">{PLATFORMS[t.chat.platform].name}</span>
           </span>
           <span className="txt">
             <IconText text={t.text} size={12} />
@@ -287,7 +289,17 @@ function ReplyCard({ t, onDismiss, onOpen }: { t: InToast; onDismiss: () => void
       <button type="button" className="x b" aria-label="Kapat" onClick={onDismiss}>
         <Icon name="x" size={12} sw={2} />
       </button>
-      {canReply && (
+      {canReply && !open && (
+        <div className="qr-acts">
+          <button type="button" className="btn xs b b2" onClick={() => setOpen(true)}>
+            <Icon name="reply" size={13} sw={2} /> Yanıtla
+          </button>
+          <button type="button" className="btn ghost xs b b2" onClick={onOpen}>
+            Aç
+          </button>
+        </div>
+      )}
+      {canReply && open && (
         <form
           className="qr-reply"
           onSubmit={(e) => {
@@ -296,12 +308,13 @@ function ReplyCard({ t, onDismiss, onOpen }: { t: InToast; onDismiss: () => void
           }}
         >
           <input
+            autoFocus
             value={reply}
             onChange={(e) => setReply(e.target.value)}
             onFocus={() => setFocus(true)}
             onBlur={() => setFocus(false)}
             onKeyDown={(e) => {
-              if (e.key === 'Escape') (e.preventDefault(), e.stopPropagation(), onDismiss());
+              if (e.key === 'Escape') (e.preventDefault(), e.stopPropagation(), reply ? setReply('') : setOpen(false));
             }}
             placeholder="Hızlı yanıt…"
             aria-label={`${t.chat.name} kişisine hızlı yanıt`}

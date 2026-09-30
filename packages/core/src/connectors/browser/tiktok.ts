@@ -211,6 +211,54 @@ function installLib(cfg: { sel: Sel; v: number }): void {
     return m ? m[1] : '';
   };
   const http = (s?: string | null) => (s && /^https?:\/\//.test(s) ? s : '');
+  /** Paylaşılan video kartında video kimliği (yeni DM düzeninde kart çoğu zaman <a href> değil, tıklama işleyicili div):
+   *  önce /video/<id> bağlantısı, sonra öznitelikler (data-*-id, href, src), sonra React props'ta itemId/videoId/aweme id. */
+  const videoIdOf = (root: Element): { id: string; author?: string } | null => {
+    const ID = /^\d{15,21}$/;
+    const fromUrl = (u: string | null | undefined) => {
+      const m = (u ?? '').match(/(?:@([\w.-]+)\/)?(?:video|v|embed(?:\/v2)?)\/(\d{15,21})/);
+      return m ? { id: m[2], author: m[1] } : null;
+    };
+    const nodes = [root, ...Array.from(root.querySelectorAll('*')).slice(0, 80)];
+    for (let p = root.parentElement, i = 0; p && i < 3; p = p.parentElement, i++) nodes.push(p);
+    for (const n of nodes) {
+      for (const a of Array.from(n.attributes)) {
+        const hit = fromUrl(a.value);
+        if (hit) return hit;
+        if (/(item|video|aweme)[-_]?id/i.test(a.name) && ID.test(a.value)) return { id: a.value };
+      }
+    }
+    // React props (yalnız okuma): kart bileşeninin props'unda öğe kimliği
+    const scan = (o: unknown, depth: number): { id: string; author?: string } | null => {
+      if (!o || typeof o !== 'object' || depth > 2) return null;
+      for (const [k, v] of Object.entries(o as Record<string, unknown>)) {
+        if (/^(item|video|aweme)_?id$|^itemid$/i.test(k) && (typeof v === 'string' || typeof v === 'number') && ID.test(String(v))) {
+          const au = (o as Record<string, unknown>).author as { uniqueId?: string } | string | undefined;
+          return { id: String(v), author: typeof au === 'string' ? au : au?.uniqueId };
+        }
+        if (/^(item|video|aweme|itemInfo|itemStruct|content|data|message)$/i.test(k)) {
+          const r = scan(v, depth + 1);
+          if (r) return r;
+        }
+        if (k === 'id' && /video|item/i.test(Object.keys(o as object).join(' ')) && ID.test(String(v))) return { id: String(v) };
+      }
+      return null;
+    };
+    for (const n of nodes.slice(0, 12)) {
+      for (const key of Object.keys(n)) {
+        if (!key.startsWith('__reactProps$') && !key.startsWith('__reactFiber$')) continue;
+        let f = (n as unknown as Record<string, unknown>)[key] as Record<string, unknown> | undefined;
+        for (let i = 0; f && i < 6; i++) {
+          const props = (key.startsWith('__reactProps$') ? f : (f.memoizedProps as Record<string, unknown>)) ?? {};
+          const r = scan(props, 0);
+          if (r) return r;
+          if (key.startsWith('__reactProps$')) break;
+          f = f.return as Record<string, unknown> | undefined;
+        }
+      }
+    }
+    return null;
+  };
   const alpha = (c: string) => {
     const m = c.match(/rgba?\(([^)]+)\)/);
     if (!m) return c === 'transparent' ? 0 : 1;
@@ -954,9 +1002,13 @@ function installLib(cfg: { sel: Sel; v: number }): void {
       else if (bubble && (!vid || !vid.contains(bubble) || bubble.contains(vid))) text = lines(bubble, (x) => CLOCK.test(x) || STATUS.test(x));
       if (vid) {
         const a = vid.matches('a[href*="/video/"]') ? vid : vid.querySelector('a[href*="/video/"]') ?? vid.closest('a[href*="/video/"]');
-        const href = a ? new URL(a.getAttribute('href') ?? '', location.origin).href : undefined;
+        let href = a ? new URL(a.getAttribute('href') ?? '', location.origin).href : undefined;
+        if (!href || !/\/video\/\d/.test(href)) {
+          const v = videoIdOf(vid);
+          if (v) href = `https://www.tiktok.com/@${v.author || '_'}/video/${v.id}`;
+        }
         const cover = bgUrl(vid) || bgUrl(vid.querySelector('[style*="background-image"]')) || http(vid.querySelector('img')?.getAttribute('src')) || undefined;
-        attachments.push({ kind: 'other', name: 'TikTok videosu', link: href, url: cover, page: href });
+        attachments.push({ kind: href ? 'video' : 'other', name: 'TikTok videosu', link: href, url: cover, page: href });
         if (bubble && vid.contains(bubble)) text = ''; // kart altındaki video açıklaması mesaj metni değil
         if (text && vid.textContent && norm(vid.textContent) === norm(text)) text = '';
       }

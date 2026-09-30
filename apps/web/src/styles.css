@@ -832,8 +832,8 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .msgtoast .body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .msgtoast .top { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .msgtoast .top b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.msgtoast .plat { font-size: 11px; color: var(--v-txt); background: var(--v-soft); padding: 0 6px; border-radius: 6px; line-height: 16px; flex: none; }
 .msgtoast .txt { font-size: 12.5px; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msgtoast.qr-card .txt { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-height: 1.4; overflow-wrap: anywhere; }
 .msgtoast .x { position: absolute; top: 6px; right: 8px; color: var(--text3); display: inline-flex; padding: 2px; border-radius: 6px; }
 .msgtoast .x:hover { color: var(--text); background: var(--bg2); }
 @keyframes toastInR { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
@@ -1799,10 +1799,15 @@ button.att-card.xpost img, button.att-card .att-thumb img { cursor: pointer; }
 .qs-out .x { display: inline-flex; padding: 3px; border: 0; background: transparent; color: var(--text3); border-radius: 6px; cursor: pointer; }
 .msgtoast.qr-card { flex-direction: column; align-items: stretch; gap: 8px; cursor: default; overflow: hidden; }
 .msgtoast.qr-card:hover { background: var(--surface); }
-.qr-head { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 0 18px 0 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.qr-head { display: flex; align-items: flex-start; gap: 11px; min-width: 0; padding: 0 18px 0 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .qr-head:hover b { text-decoration: underline; }
 .msgtoast.qr-card .x { border: 0; background: transparent; cursor: pointer; }
 .qr-reply { display: flex; align-items: center; gap: 6px; }
+.qr-acts { display: flex; justify-content: flex-end; gap: 6px; }
+.qr-acts .btn { display: inline-flex; align-items: center; gap: 5px; }
+.qr-head .avwrap .qr-badge { position: absolute; right: -4px; bottom: -4px; line-height: 0; }
+.qr-head .avwrap .qr-badge .plat { position: static; transform: none; }
+.msgtoasts { width: 340px; }
 .qr-reply input { flex: 1; min-width: 0; height: 30px; border: 1px solid var(--line); border-radius: 9px; padding: 0 10px; background: var(--field); color: var(--text); font: inherit; font-size: 13px; outline: none; }
 .qr-reply input:focus { border-color: var(--v-line); box-shadow: 0 0 0 3px var(--v-soft); }
 .qr-timer { position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; background: var(--v); opacity: .45; transform-origin: left; animation: qrTimer linear forwards; }

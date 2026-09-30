@@ -145,7 +145,7 @@ function renderBox() {
     : '<div data-e2e="dm-new-chat-item" class="item css-9x-7937d88b--DivChatItemWrapper' + (m.me ? ' me' : '') + '">'
       + (m.me ? '' : '<a href="/@' + c.handle + '"><span data-e2e="chat-avatar"><img alt="" src="' + IMG('av' + open) + '"></span></a>')
       + '<div class="vert css-2y-7937d88b--DivMessageVerticalContainer">'
-      + (m.video ? '<div data-e2e="dm-new-shared-video" style="width:180px;height:240px;border-radius:8px;background-image:url(' + IMG('cover' + open) + ');background-size:cover"></div>'
+      + (m.video ? '<div data-e2e="dm-new-shared-video" data-item-id="7412345678901234567" style="width:180px;height:240px;border-radius:8px;background-image:url(' + IMG('cover' + open) + ');background-size:cover"></div>'
         : '<div data-e2e="dm-new-message-text" class="bub css-3z-7937d88b--DivTextContainer"><p class="css-4w-7937d88b--PText">' + m.text + '</p></div>')
       + (m.me ? '<div style="font-size:11px;color:#999">Görüldü</div>' : '') + '</div><div data-e2e="dm-warning"></div></div>') + '</div>').join('');
   const box = document.getElementById('box');
@@ -187,6 +187,9 @@ test('TikTok DOM (a): data-e2e düzeni — liste, sıra, okunmamış, mesajlar, 
       assert.equal(deniz.length, 2);
       assert.equal(deniz[0].attachments?.[0]?.name, 'TikTok videosu');
       assert.equal(deniz[0].attachments?.[0]?.url, IMG('cover2'));
+      // bağlantısız kart: kimlik öznitelikten → oynatılabilir sayfa adresi
+      assert.equal(deniz[0].attachments?.[0]?.page, 'https://www.tiktok.com/@_/video/7412345678901234567');
+      assert.equal(deniz[0].attachments?.[0]?.kind, 'video');
       assert.deepEqual([deniz[1].text, deniz[1].fromMe], ['2', true]);
 
       await tiktok.send(page, {}, byName(ts, 'Mert').id, 'Test mesajı ✓');

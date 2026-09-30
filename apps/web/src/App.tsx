@@ -648,7 +648,7 @@ export default function App() {
             void windowFocused().then((focused) => {
               // uygulamanın bildirimi kapalıysa ne kart ne ses
               if ((!focused || ev.message.chatId !== visibleChatRef.current) && platformNotifyOn(chat.platform) && (chat.kind === 'direct' || groupsNotify())) {
-                const body = (ev.message.text || ev.message.attachments?.[0]?.name || 'Yeni mesaj').slice(0, 140);
+                const body = (ev.message.text || ev.message.attachments?.[0]?.name || 'Yeni mesaj').slice(0, 400);
                 // pencere öndeyse sistem bildirimi yerine uygulama içi kart (hangi platformdan geldiği belli olsun)
                 if (focused) pushInToast(chat, body);
                 else if (bannersEnabled()) {
