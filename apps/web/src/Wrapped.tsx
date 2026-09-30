@@ -217,6 +217,41 @@ function DayParts({ heat }: { heat: number[] }) {
   );
 }
 
+/**
+ * Isı haritası kartının altı (Kaan: boşluk kalmasın): haftanın günlerine göre çubuklar + en sessiz saat. Kart ızgarada yandaki
+ * kişiler kartının boyuna uzar; bu blok kalan yüksekliği doldurur (çubuklar esner).
+ */
+function WeekBars({ heat }: { heat: number[] }) {
+  const days = DAY_NAMES.map((name, d) => ({ name, n: heat.slice(d * 24, d * 24 + 24).reduce((a, b) => a + b, 0) }));
+  const max = Math.max(1, ...days.map((d) => d.n));
+  const avg = days.reduce((a, d) => a + d.n, 0) / 7 || 1;
+  const top = days.reduce((a, b) => (b.n > a.n ? b : a), days[0]);
+  const hours = Array.from({ length: 24 }, (_, h) => days.reduce((a, _d, d) => a + (heat[d * 24 + h] ?? 0), 0));
+  const quietH = hours.indexOf(Math.min(...hours));
+  const topPct = Math.round((top.n / avg - 1) * 100);
+  return (
+    <div className="wr-wbars">
+      <div className="wr-row-head">
+        <span className="wr-k sm">Günlere göre</span>
+        <span className="wr-muted">
+          <b>{top.name}</b> ortalamadan %{Math.max(0, topPct)} yoğun · en sessiz saatin <b>{hourRange(quietH)}</b>
+        </span>
+      </div>
+      <div className="wr-wbars-cols">
+        {days.map((d, i) => (
+          <div key={d.name} className={`wr-wcol ${d === top ? 'top' : ''}`} title={`${d.name}: ${fmtNum(d.n)} mesaj`}>
+            <span className="v">{fmtNum(d.n)}</span>
+            <span className="bar">
+              <i style={{ height: `${Math.max(4, (d.n / max) * 100)}%`, animationDelay: `${i * 60}ms` }} />
+            </span>
+            <span className="d">{DAY_SHORT[i]}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Heatmap({ heat, dark, sel, onSel }: { heat: number[]; dark?: boolean; sel?: number | null; onSel?: (cell: number | null) => void }) {
   const max = Math.max(1, ...heat);
   return (
@@ -442,16 +477,12 @@ export function WrappedView({ notify, onMenu, onOpenChat, onWaiting }: { notify:
             {s.groups.length > 0 && (
               <div className="wr-groups">
                 <span className="wr-k sm">Gruplar</span>
-                {s.groups.slice(0, 4).map((g) => (
-                  <button key={g.chatId} className="wr-grp b" onClick={() => onOpenChat(g.chatId)} title={`${g.name}: ${fmtNum(g.total)} mesaj`}>
-                    <span className="avwrap">
-                      <Avatar name={g.name} size={28} url={g.avatarUrl} />
-                      <Chip platform={g.platform} size={13} ring="var(--card)" />
-                    </span>
-                    <span className="n">{g.name}</span>
-                    <span className="v">{fmtNum(g.total)}</span>
-                  </button>
-                ))}
+                {/* kişilerle aynı satır bileşeni: sıra, avatar ve sayılar üstteki listeyle aynı hizada */}
+                <ol>
+                  {s.groups.slice(0, 4).map((g, i) => (
+                    <PersonRow key={g.chatId} p={g} i={i} max={s.groups[0].total} onOpen={() => onOpenChat(g.chatId)} />
+                  ))}
+                </ol>
               </div>
             )}
           </div>
@@ -469,6 +500,7 @@ export function WrappedView({ notify, onMenu, onOpenChat, onWaiting }: { notify:
             <Heatmap heat={s.heat} sel={cell} onSel={setCell} />
             {cell != null && <CellDetail s={s} cell={cell} onClose={() => setCell(null)} onOpenChat={onOpenChat} />}
             <DayParts heat={s.heat} />
+            <WeekBars heat={s.heat} />
           </div>
 
           {/* Yanıt süresi */}

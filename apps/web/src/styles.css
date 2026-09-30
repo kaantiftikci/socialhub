@@ -2566,3 +2566,17 @@ html.reduce-motion *, html.reduce-motion *::before, html.reduce-motion *::after 
   .set-hero { flex-direction: column; text-align: center; }
   .set-hero > div { align-items: center; }
 }
+/* Miveloji: ısı haritası kartının altı — günlere göre çubuklar (kalan yüksekliği doldurur) */
+.wr-wbars { flex: 1 1 auto; display: flex; flex-direction: column; gap: 10px; min-height: 150px; padding-top: 14px; border-top: 1px solid var(--line3); }
+.wr-wbars .wr-muted b { color: var(--text); }
+.wr-wbars-cols { flex: 1; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; min-height: 110px; }
+.wr-wcol { display: flex; flex-direction: column; align-items: center; gap: 6px; min-height: 0; }
+.wr-wcol .v { font-size: 11.5px; font-weight: 600; color: var(--text3); font-variant-numeric: tabular-nums; }
+.wr-wcol .bar { flex: 1; width: 100%; max-width: 56px; display: flex; align-items: flex-end; border-radius: 10px; background: var(--ctx-bg); overflow: hidden; }
+.wr-wcol .bar i { display: block; width: 100%; border-radius: 10px; background: color-mix(in srgb, var(--v) 38%, var(--card)); transform-origin: bottom; animation: wrColUp .8s cubic-bezier(.2,.8,.2,1) both; }
+.wr-wcol.top .bar i { background: linear-gradient(180deg, var(--v-hl), var(--v)); }
+.wr-wcol.top .v { color: var(--v-txt); }
+.wr-wcol .d { font-size: 12px; color: var(--text2); }
+.wr-wcol.top .d { color: var(--text); font-weight: 650; }
+@keyframes wrColUp { from { transform: scaleY(0); } to { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .wr-wcol .bar i { animation: none; } }

@@ -787,6 +787,7 @@ Dil: arayüz ve yorumlar Türkçe.
 - Yenilikler penceresi (30.09 ikinci tur, Kaan: "AI ürünü gibi"): simge yerine 01/02 numaralar, üstte kutu açılma sahnesi (`Unbox`: kapak açılır, parçalar yükselir,
   halka; 5 sn döngü), "N yenilik" sayacı, maddeler 2-3 cümle. Slack boş sohbette "ücretsiz plan 90 günden eski mesajları gizliyor" notu (Kaan'ın günlüğü: is_limited).
 - Yenilikler maddeleri düz işlevle (`items(e)`) çizilir, iç bileşen DEĞİL (App her güncellemede yeni bileşen türü → liste yeniden kurulup animasyon sürekli oynuyordu); `WhatsNew` memo.
+- Miveloji (30.09 üçüncü tur): gruplar kişilerle aynı `PersonRow` (sıra, avatar, çubuk aynı hizada); ısı haritası kartının altında `WeekBars` (günlere göre esneyen çubuklar, en yoğun gün ortalamadan %, en sessiz saat) — kart yandaki kişiler kartının boyuna uzadığı için boşluğu doldurur.
 - **Dokümantasyon** `docs/dokumantasyon.html` → `docs/Mivelo-Dokumantasyon.pdf` (`CHROMIUM=<chrome yolu> node docs/build-pdf.mjs`); özellik eklenince güncelle.
 
 ## Sunucu/arayüz sözleşmesi
