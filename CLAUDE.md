@@ -822,6 +822,8 @@ Dil: arayüz ve yorumlar Türkçe.
 - Miveloji Platformlar kartı tıklanır (`pickPlatform`: halka dilimi / satır → `platform`; seçimde tüm uygulamaların payı `allShares`'ten, diğerleri soluk, "Tümünü göster").
 - Medya: küçük resmi olmayan (ya da küçük resmi kırık) videoda ilk kare `<video preload=metadata src=…#t=0.5>`, görünürken + en çok 3 eşzamanlı (`useVideoSlot`).
   Bu ortamdaki Chromium H.264 çözemez (demo mp4 hata → eski simgeye düşer); Mac WKWebView çözer.
+- **Animasyon skill'i** `.claude/skills/motion-design/` (LottieFiles, MIT): animasyon işlerinde uygula. Önerilen Mivelo hareket kimliği: imza eğri
+  cubic-bezier(.2,0,0,1), giriş (.05,.7,.1,1), çıkış (.3,0,1,1), süreler 150/260/400 ms; yalnız transform/opacity.
 - **Dokümantasyon** `docs/dokumantasyon.html` → `docs/Mivelo-Dokumantasyon.pdf` (`CHROMIUM=<chrome yolu> node docs/build-pdf.mjs`); özellik eklenince güncelle.
 
 ## Sunucu/arayüz sözleşmesi
