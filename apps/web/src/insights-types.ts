@@ -17,6 +17,7 @@ export interface WrappedPerson {
 
 export interface WrappedStats {
   range: StatsRange;
+  platform?: string | null;
   at: string;
   label: string;
   from: number;
@@ -31,6 +32,7 @@ export interface WrappedStats {
   reply: { count: number; avgMs: number; medianMs: number; fastest?: WrappedPerson } | null;
   /** 7×24: gün×24 + saat, gün 0 = Pazartesi */
   heat: number[];
+  cells?: Array<{ sent: number; platforms: Array<{ platform: string; n: number }>; people: Array<{ chatId: string; name: string; platform: string; avatarUrl?: string; kind: string; n: number }> } | null>;
   busiestHour: { hour: number; count: number } | null;
   busiestDay: { day: number; count: number } | null;
   streak: { longest: number; from?: string; to?: string; current: number };

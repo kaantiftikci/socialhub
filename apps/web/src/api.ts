@@ -135,7 +135,7 @@ const liveApi = {
   style: (platform?: string) => call<{ lines: string[] }>('GET', `/style${platform ? `?platform=${enc(platform)}` : ''}`),
   search: (q: string, limit = 50) => call<Array<{ message: Message; chat: Chat }>>('GET', `/search?q=${enc(q)}&limit=${limit}`),
   // ---- Raporum + Medya kütüphanesi (çekirdek stats.ts / library.ts) ----
-  stats: (range: StatsRange, at?: string) => call<WrappedStats>('GET', `/stats?range=${range}${at ? `&at=${enc(at)}` : ''}`),
+  stats: (range: StatsRange, at?: string, platform?: string) => call<WrappedStats>('GET', `/stats?range=${range}${at ? `&at=${enc(at)}` : ''}${platform ? `&platform=${enc(platform)}` : ''}`),
   library: (q: LibQuery) => call<LibPage>('GET', `/library?${libQueryString(q)}`),
   libraryFacets: () => call<LibFacets>('GET', '/library/facets'),
   /** Masaüstü: dosyayı İndirilenler'e yaz (WKWebView <a download>'ı yok sayar); data = base64 */

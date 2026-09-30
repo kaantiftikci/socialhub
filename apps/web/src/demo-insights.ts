@@ -61,14 +61,14 @@ export function emptyStats(range: StatsRange, at?: string, now = Date.now()): Wr
   };
 }
 
-export function demoStats(ctx: DemoCtx, range: StatsRange, at?: string, now = Date.now()): WrappedStats {
+export function demoStats(ctx: DemoCtx, range: StatsRange, at?: string, now = Date.now(), platform?: string): WrappedStats {
   const p = period(range, at, now);
   const to = Math.min(p.end, now);
-  const talk = ctx.chats.filter((c) => PLATFORMS[c.platform]?.category !== 'shop');
+  const talk = ctx.chats.filter((c) => PLATFORMS[c.platform]?.category !== 'shop' && (!platform || c.platform === platform));
   if (ctx.fresh || ctx.messages.length < 5 || !talk.length || to <= p.from) return emptyStats(range, at, now);
-  const r = rng(`${range}:${p.at}`);
+  const r = rng(`${range}:${p.at}:${platform ?? ''}`);
   const days = Math.max(1, Math.ceil((to - p.from) / DAY));
-  const total = Math.round(days * (70 + r() * 22));
+  const total = Math.max(3, Math.round(days * (70 + r() * 22) * (platform ? Math.min(1, (PLATFORM_WEIGHT[platform as Platform] ?? 0.03) * 1.3) : 1)));
   const sent = Math.round(total * (0.44 + r() * 0.06));
   const received = total - sent;
 
@@ -130,6 +130,7 @@ export function demoStats(ctx: DemoCtx, range: StatsRange, at?: string, now = Da
   const changeOf = (base: number) => Math.round(base * 10) / 10;
   return {
     range,
+    platform: platform ?? null,
     at: p.at,
     label: p.label,
     from: p.from,
@@ -143,6 +144,21 @@ export function demoStats(ctx: DemoCtx, range: StatsRange, at?: string, now = Da
     groups,
     reply: { count: Math.round(sent * 0.42), avgMs: Math.round((13 + r() * 8) * 60_000), medianMs: Math.round((3 + r() * 2.5) * 60_000), fastest },
     heat,
+    // hücre ayrıntısı: genel platform payları + kişiler/gruplar arasından hücreye göre dönen seçim (belirlenimci)
+    cells: heat.map((n, i) => {
+      if (!n) return null;
+      const cr = rng(`${range}:${p.at}:${platform ?? ''}:c${i}`);
+      const plats = platforms.map((x) => ({ platform: x.platform, n: Math.round(n * (x.total / Math.max(1, total)) * (0.6 + cr() * 0.8)) })).filter((x) => x.n > 0).sort((a, b) => b.n - a.n).slice(0, 4);
+      const pool = [...people, ...groups];
+      const picks = pool.map((x) => ({ x, k: cr() * (x.total || 1) })).sort((a, b) => b.k - a.k).slice(0, 4);
+      let left = n;
+      const ppl = picks.map(({ x }, j) => {
+        const v = j === picks.length - 1 ? Math.max(1, Math.round(left * 0.5)) : Math.max(1, Math.round(left * (0.35 + cr() * 0.2)));
+        left = Math.max(1, left - v);
+        return { chatId: x.chatId, name: x.name, platform: x.platform, avatarUrl: x.avatarUrl, kind: groups.includes(x) ? 'group' : 'direct', n: v };
+      }).sort((a, b) => b.n - a.n);
+      return { sent: Math.round(n * (sent / Math.max(1, total))), platforms: plats, people: ppl };
+    }),
     busiestHour: { hour: bh, count: hours[bh] },
     busiestDay: { day: bd, count: byDay[bd] },
     streak: { longest, from: ymd(startDay), to: ymd(new Date(startDay.getTime() + (longest - 1) * DAY)), current: p.end > now ? Math.min(longest, 6 + Math.round(r() * 4)) : 0 },

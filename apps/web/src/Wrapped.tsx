@@ -112,23 +112,144 @@ function Donut({ parts, size = 168, stroke = 20, children, glow }: { parts: Arra
   );
 }
 
-function Heatmap({ heat, dark }: { heat: number[]; dark?: boolean }) {
+/** Isı haritasında seçilen gün+saat: o saatte hangi uygulama, kim (Raporum → hücreye tıkla) */
+function CellDetail({ s, cell, onClose, onOpenChat }: { s: WrappedStats; cell: number; onClose: () => void; onOpenChat: (chatId: string) => void }) {
+  const n = s.heat[cell] ?? 0;
+  const d = s.cells?.[cell];
+  const day = Math.floor(cell / 24);
+  const hour = cell % 24;
+  const tot = d ? d.platforms.reduce((a, p) => a + p.n, 0) || 1 : 1;
+  return (
+    <div className="wr-cell" role="region" aria-label="Seçilen saat">
+      <div className="wr-cell-head">
+        <b>
+          {DAY_NAMES[day]} · {hourRange(hour)}
+        </b>
+        <span className="wr-muted">
+          {fmtNum(n)} mesaj{d ? ` · ${fmtNum(d.sent)} gönderdin` : ''}
+        </span>
+        <button className="wr-cell-x b" aria-label="Kapat" onClick={onClose}>
+          <Icon name="x" size={12} sw={2} />
+        </button>
+      </div>
+      {d ? (
+        <div className="wr-cell-body">
+          <div className="wr-cell-col">
+            <span className="wr-k sm">Uygulamalar</span>
+            {d.platforms.map((p) => (
+              <div key={p.platform} className="wr-cell-plat">
+                <Chip platform={p.platform as keyof typeof PLATFORMS} size={16} />
+                <span className="n">{PLATFORMS[p.platform as keyof typeof PLATFORMS]?.name ?? p.platform}</span>
+                <span className="wr-part-bar">
+                  <span style={{ width: `${Math.max(4, Math.round((p.n / tot) * 100))}%` }} />
+                </span>
+                <span className="v">%{Math.round((p.n / tot) * 100)}</span>
+              </div>
+            ))}
+          </div>
+          <div className="wr-cell-col">
+            <span className="wr-k sm">Kiminle</span>
+            {d.people.map((p) => (
+              <button key={p.chatId} className="wr-grp b" onClick={() => onOpenChat(p.chatId)} title={`${p.name}: ${fmtNum(p.n)} mesaj`}>
+                <span className="avwrap">
+                  <Avatar name={p.name} size={26} url={p.avatarUrl} />
+                  <Chip platform={p.platform as keyof typeof PLATFORMS} size={12} ring="var(--card)" />
+                </span>
+                <span className="n">{p.name}</span>
+                <span className="v">{fmtNum(p.n)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <p className="wr-muted">Bu saat için ayrıntı yok; rapor yenilenince gelir.</p>
+      )}
+    </div>
+  );
+}
+
+/** Isı haritasının altı: gün dilimleri + hafta içi / hafta sonu (ısı haritasından; gün 0 = Pazartesi) */
+const PARTS: Array<[string, number, number, string]> = [
+  ['Sabah', 6, 12, '06–12'],
+  ['Öğle', 12, 18, '12–18'],
+  ['Akşam', 18, 24, '18–24'],
+  ['Gece', 0, 6, '00–06'],
+];
+function DayParts({ heat }: { heat: number[] }) {
+  const total = heat.reduce((a, b) => a + b, 0) || 1;
+  const part = (lo: number, hi: number) => {
+    let n = 0;
+    for (let d = 0; d < 7; d++) for (let h = lo; h < hi; h++) n += heat[d * 24 + h] ?? 0;
+    return n;
+  };
+  const parts = PARTS.map(([name, lo, hi, range]) => ({ name, range, n: part(lo, hi) }));
+  const top = parts.reduce((a, b) => (b.n > a.n ? b : a), parts[0]);
+  let wk = 0;
+  for (let d = 5; d < 7; d++) for (let h = 0; h < 24; h++) wk += heat[d * 24 + h] ?? 0;
+  const perWeekday = (total - wk) / 5;
+  const perWeekend = wk / 2;
+  const pct = (n: number) => Math.round((n / total) * 100);
+  return (
+    <div className="wr-parts">
+      <div className="wr-parts-grid">
+        {parts.map((p) => (
+          <div key={p.name} className={`wr-part ${p === top ? 'top' : ''}`}>
+            <span className="wr-part-n">
+              {p.name} <em>{p.range}</em>
+            </span>
+            <b>%{pct(p.n)}</b>
+            <span className="wr-part-bar">
+              <span style={{ width: `${Math.max(3, pct(p.n))}%` }} />
+            </span>
+          </div>
+        ))}
+      </div>
+      <div className="wr-week">
+        <span>
+          Hafta içi günde <b>{fmtNum(Math.round(perWeekday))}</b>
+        </span>
+        <span>
+          Hafta sonu günde <b>{fmtNum(Math.round(perWeekend))}</b>
+        </span>
+        <span className="wr-muted">{perWeekend > perWeekday * 1.1 ? 'Hafta sonları daha konuşkansın' : perWeekday > perWeekend * 1.1 ? 'Hafta içi daha yoğunsun' : 'Her gün benzer tempodasın'}</span>
+      </div>
+    </div>
+  );
+}
+
+function Heatmap({ heat, dark, sel, onSel }: { heat: number[]; dark?: boolean; sel?: number | null; onSel?: (cell: number | null) => void }) {
   const max = Math.max(1, ...heat);
   return (
-    <div className={`wr-heat ${dark ? 'dark' : ''}`} role="img" aria-label="Güne ve saate göre mesaj yoğunluğu">
+    <div className={`wr-heat ${dark ? 'dark' : ''} ${onSel ? 'live' : ''} ${sel != null ? 'has-sel' : ''}`} role={onSel ? 'grid' : 'img'} aria-label="Güne ve saate göre mesaj yoğunluğu">
       {DAY_SHORT.map((d, di) => (
         <div key={d} className="wr-heat-row">
           <span className="wr-hd">{d}</span>
           {Array.from({ length: 24 }, (_, h) => {
             const v = heat[di * 24 + h] ?? 0;
-            return <i key={h} className={v ? '' : 'z'} style={v ? ({ '--o': (0.14 + 0.86 * (v / max)).toFixed(3), animationDelay: `${(di * 24 + h) * 3}ms` } as CSSProperties) : undefined} title={`${DAY_NAMES[di]} ${hourLabel(h)} · ${fmtNum(v)} mesaj`} />;
+            const idx = di * 24 + h;
+            const style = v ? ({ '--o': (0.14 + 0.86 * (v / max)).toFixed(3), animationDelay: `${idx * 3}ms` } as CSSProperties) : undefined;
+            const title = `${DAY_NAMES[di]} ${hourLabel(h)} · ${fmtNum(v)} mesaj`;
+            if (!onSel) return <i key={h} className={v ? '' : 'z'} style={style} title={title} />;
+            return (
+              <i
+                key={h}
+                role="gridcell"
+                tabIndex={v ? 0 : -1}
+                aria-selected={sel === idx}
+                className={`${v ? '' : 'z'} ${sel === idx ? 'on' : ''}`}
+                style={style}
+                title={title}
+                onClick={() => v && onSel(sel === idx ? null : idx)}
+                onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && v && (e.preventDefault(), onSel(sel === idx ? null : idx))}
+              />
+            );
           })}
         </div>
       ))}
       <div className="wr-heat-row wr-heat-axis" aria-hidden="true">
         <span className="wr-hd" />
         {Array.from({ length: 24 }, (_, h) => (
-          <b key={h}>{h % 6 === 0 ? String(h).padStart(2, '0') : ''}</b>
+          <b key={h}>{String(h).padStart(2, '0')}</b>
         ))}
       </div>
     </div>
@@ -158,6 +279,10 @@ export function WrappedView({ notify, onMenu, onOpenChat, onWaiting }: { notify:
   const [share, setShare] = useState(false);
   const [hide, setHide] = useState(() => ls.get(HIDE_KEY) !== '0');
   const [reload, setReload] = useState(0);
+  // uygulama seçimi: null = tüm uygulamalar; çip listesi son "tümü" raporundaki platformlardan
+  const [platform, setPlatform] = useState<string | null>(null);
+  const [allPlats, setAllPlats] = useState<string[]>([]);
+  const [cell, setCell] = useState<number | null>(null);
   const setHideP = (v: boolean) => (setHide(v), ls.set(HIDE_KEY, v ? '1' : '0'));
 
   useEffect(() => {
@@ -167,14 +292,19 @@ export function WrappedView({ notify, onMenu, onOpenChat, onWaiting }: { notify:
     setError(null);
     ls.set(PERIOD_KEY, period);
     api
-      .stats(range, at)
-      .then((s) => alive && setData(s))
+      .stats(range, at, platform ?? undefined)
+      .then((s) => {
+        if (!alive) return;
+        setData(s);
+        if (!platform) setAllPlats(s.platforms.filter((p) => p.total > 0).map((p) => p.platform));
+      })
       .catch((e) => alive && setError((e as Error).message))
       .finally(() => alive && setLoading(false));
     return () => {
       alive = false;
     };
-  }, [period, reload]);
+  }, [period, reload, platform]);
+  useEffect(() => setCell(null), [period, platform]);
 
   const s = data;
   const empty = !!s && s.totals.total < MIN_MESSAGES;
@@ -191,7 +321,7 @@ export function WrappedView({ notify, onMenu, onOpenChat, onWaiting }: { notify:
         )}
         <div className="wr-title">
           <h1>Raporum</h1>
-          <span>{s ? s.label : ' '}</span>
+          <span>{s ? `${s.label}${platform ? ` · ${PLATFORMS[platform as keyof typeof PLATFORMS]?.name ?? platform}` : ''}` : ' '}</span>
         </div>
         <span style={{ flexGrow: 1 }} />
         <div className="tabs wr-periods" role="tablist" aria-label="Dönem">
@@ -202,6 +332,18 @@ export function WrappedView({ notify, onMenu, onOpenChat, onWaiting }: { notify:
           ))}
         </div>
       </div>
+      {allPlats.length > 1 && (
+        <div className="wr-apps" role="group" aria-label="Uygulama">
+          <button className={`ml-pchip b ${!platform ? 'on' : ''}`} onClick={() => setPlatform(null)}>
+            Tüm uygulamalar
+          </button>
+          {allPlats.map((p) => (
+            <button key={p} className={`ml-pchip b ${platform === p ? 'on' : ''}`} onClick={() => setPlatform(platform === p ? null : p)}>
+              <Chip platform={p as keyof typeof PLATFORMS} size={15} /> {PLATFORMS[p as keyof typeof PLATFORMS]?.name ?? p}
+            </button>
+          ))}
+        </div>
+      )}
 
       {error && !loading && (
         <div className="wr-empty">
@@ -290,7 +432,7 @@ export function WrappedView({ notify, onMenu, onOpenChat, onWaiting }: { notify:
             <span className="wr-k">En çok yazıştıkların</span>
             {s.people.length ? (
               <ol>
-                {s.people.slice(0, 5).map((p, i) => (
+                {s.people.slice(0, 8).map((p, i) => (
                   <PersonRow key={p.chatId} p={p} i={i} max={s.people[0].total} onOpen={() => onOpenChat(p.chatId)} />
                 ))}
               </ol>
@@ -300,9 +442,12 @@ export function WrappedView({ notify, onMenu, onOpenChat, onWaiting }: { notify:
             {s.groups.length > 0 && (
               <div className="wr-groups">
                 <span className="wr-k sm">Gruplar</span>
-                {s.groups.slice(0, 3).map((g) => (
+                {s.groups.slice(0, 4).map((g) => (
                   <button key={g.chatId} className="wr-grp b" onClick={() => onOpenChat(g.chatId)} title={`${g.name}: ${fmtNum(g.total)} mesaj`}>
-                    <Chip platform={g.platform} size={14} />
+                    <span className="avwrap">
+                      <Avatar name={g.name} size={28} url={g.avatarUrl} />
+                      <Chip platform={g.platform} size={13} ring="var(--card)" />
+                    </span>
                     <span className="n">{g.name}</span>
                     <span className="v">{fmtNum(g.total)}</span>
                   </button>
@@ -321,7 +466,9 @@ export function WrappedView({ notify, onMenu, onOpenChat, onWaiting }: { notify:
                 </span>
               )}
             </div>
-            <Heatmap heat={s.heat} />
+            <Heatmap heat={s.heat} sel={cell} onSel={setCell} />
+            {cell != null && <CellDetail s={s} cell={cell} onClose={() => setCell(null)} onOpenChat={onOpenChat} />}
+            <DayParts heat={s.heat} />
           </div>
 
           {/* Yanıt süresi */}

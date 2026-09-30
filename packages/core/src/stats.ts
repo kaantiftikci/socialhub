@@ -25,6 +25,8 @@ export interface WrappedPerson {
 
 export interface WrappedStats {
   range: StatsRange;
+  /** yalnız bu uygulama (null = hepsi) */
+  platform?: string | null;
   /** 'YYYY-MM' (ay), 'YYYY' (yıl), '' (tümü) */
   at: string;
   label: string;
@@ -42,6 +44,8 @@ export interface WrappedStats {
   reply: { count: number; avgMs: number; medianMs: number; fastest?: WrappedPerson } | null;
   /** 7×24 ısı haritası: indeks = gün×24 + saat; gün 0 = Pazartesi (yerel saat) */
   heat: number[];
+  /** hücre ayrıntısı (heat ile aynı indeks): o gün+saatte en çok hangi uygulama ve kim (ilk 4); boş hücre null */
+  cells?: Array<{ sent: number; platforms: Array<{ platform: string; n: number }>; people: Array<{ chatId: string; name: string; platform: string; avatarUrl?: string; kind: string; n: number }> } | null>;
   busiestHour: { hour: number; count: number } | null;
   busiestDay: { day: number; count: number } | null;
   streak: { longest: number; from?: string; to?: string; current: number };
@@ -165,19 +169,24 @@ const ymdOf = (day: number): string => {
 };
 
 /** Önbelleksiz hesap (testler ve önbellek dolumu) */
-export async function computeStats(store: Store, range: StatsRange, at?: string, now = Date.now()): Promise<WrappedStats> {
+export async function computeStats(store: Store, range: StatsRange, at?: string, now = Date.now(), platform?: string): Promise<WrappedStats> {
   const t0 = Date.now();
   const first = range === 'all' ? ((store.sql('SELECT MIN(ts) AS t FROM messages WHERE ts > ?').get(MIN_TS) as { t: number | null }).t ?? now) : undefined;
   const p = periodOf(range, at, now, first);
   const to = Math.min(p.end, now);
   const current = p.end > now;
   const chats = chatMap(store);
+  // tek uygulama seçildiyse (Raporum → uygulama çipi) öteki uygulamaların sohbetleri sayılmaz
+  if (platform) for (const c of chats.values()) if (c.platform !== platform) c.skip = true;
 
   let sent = 0;
   let received = 0;
   const perChat = new Map<string, { s: number; r: number }>();
   const perPlat = new Map<string, { s: number; r: number }>();
   const heat = new Array<number>(7 * 24).fill(0);
+  /** ısı haritası hücresi → sohbet başına mesaj (tıklayınca "o saatte kim, hangi uygulama") */
+  const cellChat = new Map<number, Map<string, number>>();
+  const cellSent = new Array<number>(7 * 24).fill(0);
   const hourAll = new Array<number>(24).fill(0);
   const hourMine = new Array<number>(24).fill(0);
   const sentDays = new Set<number>();
@@ -204,6 +213,13 @@ export async function computeStats(store: Store, range: StatsRange, at?: string,
     const hour = d.getHours();
     const dow = (d.getDay() + 6) % 7;
     heat[dow * 24 + hour]++;
+    {
+      const cell = dow * 24 + hour;
+      let cm = cellChat.get(cell);
+      if (!cm) cellChat.set(cell, (cm = new Map()));
+      cm.set(row.c, (cm.get(row.c) ?? 0) + 1);
+      if (mine) cellSent[cell]++;
+    }
     hourAll[hour]++;
     if (mine) {
       hourMine[hour]++;
@@ -307,20 +323,42 @@ export async function computeStats(store: Store, range: StatsRange, at?: string,
     change = { total: pct(total, ps + pr), sent: pct(sent, ps), received: pct(received, pr), prevTotal: ps + pr, prevLabel: p.prev.label };
   }
 
+  const cells: WrappedStats['cells'] = Array.from({ length: 7 * 24 }, (_, i) => {
+    const cm = cellChat.get(i);
+    if (!cm) return null;
+    const plats = new Map<string, number>();
+    for (const [id, n] of cm) {
+      const c = chats.get(id);
+      if (c) plats.set(c.platform, (plats.get(c.platform) ?? 0) + n);
+    }
+    return {
+      sent: cellSent[i],
+      platforms: [...plats.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([platform, n]) => ({ platform, n })),
+      people: [...cm.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 4)
+        .map(([id, n]) => {
+          const c = chats.get(id)!;
+          return { chatId: id, name: c.name, platform: c.platform, avatarUrl: c.avatar, kind: c.kind, n };
+        }),
+    };
+  });
+
   const waiting = Number(
     (
       store
         .sql(
           `SELECT COUNT(*) AS n FROM chats WHERE kind = 'direct' AND last_from_me = 0 AND last_reaction = 0 AND last_message_at > ?
-             AND platform NOT IN ('shopier','trendyol','hepsiburada','etsy','shopify','n11','amazon','pttavm')
+             AND platform NOT IN ('shopier','trendyol','hepsiburada','etsy','shopify','n11','amazon','pttavm') AND (? = '' OR platform = ?)
              AND (flags IS NULL OR (flags NOT LIKE '%"archived":true%' AND flags NOT LIKE '%"hidden":true%' AND flags NOT LIKE '%"muted":true%'))`,
         )
-        .get(now - 14 * 86_400_000) as { n: number }
+        .get(now - 14 * 86_400_000, platform ?? '', platform ?? '') as { n: number }
     ).n,
   );
 
   return {
     range,
+    platform: platform ?? null,
     at: p.at,
     label: p.label,
     from: p.from,
@@ -342,6 +380,7 @@ export async function computeStats(store: Store, range: StatsRange, at?: string,
     groups,
     reply: gaps.length ? { count: gaps.length, avgMs: Math.round(gaps.reduce((x, y) => x + y, 0) / gaps.length), medianMs: median(gaps), fastest } : null,
     heat,
+    cells,
     busiestHour: bh >= 0 ? { hour: bh, count: hourAll[bh] } : null,
     busiestDay: bd >= 0 ? { day: bd, count: byDay[bd] } : null,
     streak: { longest, from: longest ? ymdOf(lFrom) : undefined, to: longest ? ymdOf(lTo) : undefined, current: cur },
@@ -356,7 +395,7 @@ export async function computeStats(store: Store, range: StatsRange, at?: string,
 /** Mail platformları (arayüz "E-posta" altında toplayabilir) */
 export const isMailPlatform = (p: string): boolean => MAIL.has(p);
 
-const CACHE_VER = 'v1';
+const CACHE_VER = 'v2';
 const mem = new Map<string, WrappedStats>();
 const inflight = new Map<string, Promise<WrappedStats>>();
 
@@ -364,10 +403,10 @@ const inflight = new Map<string, Promise<WrappedStats>>();
  * Önbellekli rapor. Anahtar dönem başına (meta tablosunda kalıcı; çekirdek yeniden başlasa da hızlı açılır).
  * Süren dönem 10 dk, geçmiş dönem 6 sa sonra yeniden hesaplanır (eşitleme eski mesajları sonradan getirebilir).
  */
-export async function getStats(store: Store, range: StatsRange, at?: string, opts: { now?: number; fresh?: boolean } = {}): Promise<WrappedStats> {
+export async function getStats(store: Store, range: StatsRange, at?: string, opts: { now?: number; fresh?: boolean; platform?: string } = {}): Promise<WrappedStats> {
   const now = opts.now ?? Date.now();
   const p = periodOf(range, at, now);
-  const key = `wrapped:${CACHE_VER}:${range}:${p.at}`;
+  const key = `wrapped:${CACHE_VER}:${range}:${p.at}${opts.platform ? `:${opts.platform}` : ''}`;
   const ttl = range === 'all' ? 30 * 60_000 : p.end > now ? 10 * 60_000 : 6 * 3_600_000;
   const fresh = (s: WrappedStats | undefined) => !!s && !opts.fresh && now - s.computedAt < ttl && now >= s.computedAt;
   const hit = mem.get(key);
@@ -387,7 +426,7 @@ export async function getStats(store: Store, range: StatsRange, at?: string, opt
   }
   const running = inflight.get(key);
   if (running) return running;
-  const job = computeStats(store, range, p.at || undefined, now)
+  const job = computeStats(store, range, p.at || undefined, now, opts.platform)
     .then((s) => {
       mem.set(key, s);
       try {

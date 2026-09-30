@@ -785,7 +785,7 @@ export const staticApi = {
       .map((message) => ({ message, chat: chatOf(message.chatId) }));
   },
   // ---- Raporum + Medya kütüphanesi (demo-insights.ts; yeni üye örnek veri görmez) ----
-  stats: async (range: StatsRange, at?: string) => demoStats({ chats, messages, fresh: freshUser }, range, at),
+  stats: async (range: StatsRange, at?: string, platform?: string) => demoStats({ chats, messages, fresh: freshUser }, range, at, Date.now(), platform),
   library: async (q: LibQuery) => demoLibrary({ chats, messages, fresh: freshUser }, q),
   libraryFacets: async () => demoLibraryFacets({ chats, messages, fresh: freshUser }),
   saveDownload: async (_name: string, _data: string): Promise<{ ok: boolean; name: string }> => ({ ok: false, name: '' }),

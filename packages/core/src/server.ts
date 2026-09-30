@@ -962,7 +962,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   route('GET', '/api/stats', async (req) => {
     const sp = new URL(req.url ?? '/', 'http://x').searchParams;
     const range = sp.get('range');
-    return getStats(store, range === 'year' || range === 'all' ? range : 'month', sp.get('at') ?? undefined, { fresh: sp.get('fresh') === '1' });
+    return getStats(store, range === 'year' || range === 'all' ? range : 'month', sp.get('at') ?? undefined, { fresh: sp.get('fresh') === '1', platform: /^[a-z0-9]{2,20}$/.test(sp.get('platform') ?? '') ? sp.get('platform')! : undefined });
   });
   startLibraryIndexer(store);
   route('GET', '/api/library', (req) => {
