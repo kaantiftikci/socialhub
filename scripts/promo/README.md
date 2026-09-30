@@ -36,3 +36,21 @@ node scripts/promo/render.mjs <varlık> kareler/ --stills 3,10.5,22        # sto
 - Başlıklar waitlist sitesiyle aynı yığını kullanır: `-apple-system`, SF Pro Display. Mac'te render alınırsa SF Pro ile çizilir.
 - SF Pro yoksa (Linux/CI) Inter Display (opsz) kullanılır.
 - Uygulamanın kendi arayüzü Inter'dir.
+
+## Film 2 (`reel2.html`, 30.09): 50,8 sn, yapay zekâ ağırlıklı
+
+Örnek alınan stil: kırık beyaz zemin, kelime kelime açılan büyük başlıklar, ikonlu özellik etiketi ve yanında patlayan onay hapı
+(`tag()`), piksellerden çözülen logo (`S0`, canvas), birer birer dizilen 21 uygulama simgesi.
+Sahneler: logo → 21 uygulama tek yerde → bildirimden yanıt → ⌘⇧K hızlı gönder → **yapay zekâ bölümü** (aksiyon çıkarma + takvime ekleme,
+senin tarzında taslak, pazaryeri sorusuna AI yanıtı ve gün özeti, cihazda sesli mesaj → metin, anlamsal arama) → bir kişi tüm kanallar →
+Odak + zamanlama → gündüz/gece → Miveloji → kapanış.
+
+```bash
+npm run demo:html
+node scripts/promo/render.mjs <varlık> mivelo-reel2.mp4 --comp reel2.html --warm 62 --scale 2
+```
+
+- `--warm 62`: bildirim kartı uygulama açıldıktan 60 sn sonra çıkar; kayıttan önce sanal saat ilerletilir.
+- Varlık klasöründe `chip-<platform>.png` (21 uygulama; `apps/web/src/brand-icons.ts` SVG'lerinden çizilir, trendyol/n11 PNG) ve `fonts/`.
+- Uygulamanın bekleme süreleri (AI soru yanıtı, anlamsal arama) için `GAPS` sahne uzatmaları; `window.AUDIO` müziğin sadeleşme/final anlarını verir.
+- render.mjs iframe'de `document.hasFocus()` = true yapar (bildirim kartı arka plan kuyruğuna değil ekrana düşsün), Yenilikler penceresini kapatır.

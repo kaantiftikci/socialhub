@@ -48,7 +48,8 @@ if (!fs.existsSync(DEMO)) {
 
 // reel.html + varlıklar + demo aynı kökten sunulur (iframe aynı köken olsun: DOM'a erişim ve gerçek girişler)
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'mivelo-reel-'));
-fs.copyFileSync(path.join(HERE, 'reel.html'), path.join(work, 'reel.html'));
+const COMP = arg('comp', 'reel.html'); // kompozisyon: reel.html (ilk film) · reel2.html (48 sn, AI ağırlıklı)
+fs.copyFileSync(path.join(HERE, COMP), path.join(work, 'reel.html'));
 fs.symlinkSync(path.resolve(assets), path.join(work, 'assets'));
 fs.mkdirSync(path.join(work, 'app'));
 fs.copyFileSync(DEMO, path.join(work, 'app/index.html'));
@@ -82,8 +83,12 @@ await ctx.addInitScript(() => {
   Math.random = () => ((seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296);
   try {
     localStorage.setItem('mivelo.theme', 'light');
+    localStorage.setItem('mivelo.seenChangelog', '2026-09-30f'); // Yenilikler penceresi çıkmasın (changelog.ts'teki en üst kaydın id'si)
+    localStorage.setItem('mivelo.searchSemantic', '1');
   } catch {}
   if (location.pathname.startsWith('/app/')) {
+    // uygulama penceresi öndeymiş gibi: bildirim kartları arka plan kuyruğuna değil ekrana düşsün
+    Document.prototype.hasFocus = () => true;
     // uygulamanın yazı tipi Inter: çevrimdışı çizimde yerel dosyadan
     const css = ['latin', 'latin-ext']
       .map((r) => `@font-face{font-family:'Inter';font-style:normal;font-weight:100 900;font-display:block;src:url(/assets/fonts/inter-${r}-wght-normal.woff2) format('woff2');unicode-range:${r === 'latin' ? 'U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD' : 'U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF'}}`)
@@ -113,6 +118,8 @@ for (let waited = 0; !(await page.evaluate(() => window.appReady?.())); waited +
   await ctx.clock.runFor(100);
 }
 await ctx.clock.runFor(1500); // açılış animasyonları otursun
+// --warm N: kayıttan önce N sn sanal zaman geçir (ör. bildirim kartı açılıştan 60 sn sonra çıkar)
+if (Number(arg('warm', 0)) > 0) await ctx.clock.runFor(Number(arg('warm', 0)) * 1000);
 const fontOk = await page.evaluate(() => window.ready);
 console.log('uygulama:', await page.evaluate(() => { const w = document.getElementById('app').contentWindow; const d = w.document; const r = (s) => { const e = d.querySelector(s); if (!e) return '-'; const b = e.getBoundingClientRect(); return `${Math.round(b.x)},${Math.round(b.y)} ${Math.round(b.width)}×${Math.round(b.height)}`; }; return `${w.innerWidth}×${w.innerHeight} dpr=${w.devicePixelRatio} .app=${r('.app')} conv=${r('section.conv')} Inter=${d.fonts.check("500 14px 'Inter'")} font=${getComputedStyle(d.body).fontFamily}`; }));
 if (!fontOk) console.warn('Uyarı: başlık yazı tipi yüklenemedi');
@@ -165,6 +172,7 @@ for (let i = 0; i < frames; i++) {
   if (i % 60 === 0) process.stdout.write(`\r${Math.round((i / frames) * 100)}% · ${t.toFixed(1)} sn · ${((Date.now() - t0) / 1000).toFixed(0)} sn geçti   `);
 }
 const staticCues = await page.evaluate(() => window.CUES_STATIC);
+const audioOpts = await page.evaluate(() => window.AUDIO ?? {});
 await browser.close();
 server.close();
 fs.rmSync(work, { recursive: true, force: true });
@@ -178,7 +186,7 @@ const allCues = [...staticCues, ...cues].sort((a, b) => a.t - b.t);
 fs.writeFileSync(out.replace(/\.mp4$/, '') + '.cues.json', JSON.stringify({ dur: TO, cues: allCues }, null, 1));
 if (!flag('no-audio')) {
   const wav = out.replace(/\.mp4$/, '') + '.wav';
-  renderAudio({ dur: TO, cues: allCues }, wav);
+  renderAudio({ dur: TO, cues: allCues, ...audioOpts }, wav);
   // ses: -14 LUFS (Instagram/TikTok), video kopyalanır
   await new Promise((res, rej) => {
     const p = spawn(FFMPEG, ['-y', '-loglevel', 'error', '-i', videoTmp, '-i', wav, '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-af', 'loudnorm=I=-14:TP=-1.2:LRA=9', '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-shortest', '-movflags', '+faststart', out], { stdio: 'inherit' });

@@ -75,15 +75,15 @@ function reverb(inp, mix = 0.3, size = 1) {
   return { l: l.map((v) => v * mix * 0.25), r: r.map((v) => v * mix * 0.25) };
 }
 
-export function renderAudio({ dur, cues }, outPath) {
+export function renderAudio({ dur, cues, out: outAt = 40, final: finalAt = 44 }, outPath) {
   const N = Math.ceil((dur + 0.2) * SR);
   const music = new Bus(N);
   const send = new Float32Array(N); // yankıya giden (pad, pluck, çan)
   const duck = new Float32Array(N).fill(1); // kick'e bağlı sıkıştırma (pad/bas nefes alsın)
 
   const INTRO = 2 * BAR; // 0–4 sn
-  const OUT = 40; // sadeleşme
-  const FINAL = 44;
+  const OUT = outAt; // sadeleşme
+  const FINAL = finalAt;
   const CH = [
     { root: 45, notes: [57, 60, 64, 67] }, // Am7
     { root: 41, notes: [57, 60, 64, 65] }, // Fmaj7
@@ -311,6 +311,9 @@ export function renderAudio({ dur, cues }, outPath) {
         break;
       case 'success':
         [72, 76, 79].forEach((m, j) => tone(t + j * 0.07, mtof(m + 12), mtof(m + 12), 0.5, 0.045, 7, 'tri'));
+        break;
+      case 'riser':
+        riser(music, send, t - 1.3, t, 0.09);
         break;
       case 'final':
         for (let i = 0; i < 2 * SR; i++) {

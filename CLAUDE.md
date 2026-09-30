@@ -156,6 +156,8 @@ Dil: arayüz ve yorumlar Türkçe.
   bulanıklıktan açılan başlıklar; logolar yalnız ilk iki sahnede), `render.mjs` (--scale 2, --stills), `audio.mjs` (kodla üretilen 120 BPM
   müzik + tık/tuş/gönder/bildirim efektleri, -14 LUFS). Başlık fontu -apple-system/SF Pro (Mac'te), yoksa Inter Display. Demo kancası
   `window.__miveloDemo.incoming(ad, metin)` (static-demo.ts). Ayrıntı `scripts/promo/README.md`; MP4 depoya konmaz.
+- **Tanıtım filmi 2** (30.09, `scripts/promo/reel2.html`, dikey 1080×1920, 50,8 sn, AI ağırlıklı; örnek video stilinde piksel logo + ikonlu onay
+  etiketleri): `render.mjs --comp reel2.html --warm 62 --scale 2`. Ayrıntı promo README. MP4 depoya konmaz.
 - **App Store tasarımı (mobil, henüz uygulama YOK)** `design/appstore/`: Liquid Glass (iOS 26) dilinde `template.html` 6 ekran (gelen kutusu, AI özet, Odak, pazaryeri,
   takvim, kanallar/gizlilik) iOS uyarlaması; `node design/appstore/render.mjs` → `out/` 1290×2796 PNG (git dışı). Ayrıntı README.
 - **Masaüstü paketleri (DMG + EXE, gerçek kullanım yolu — demo sunucusu değil; ban/gizlilik: kullanıcının kendi IP'si ve cihazı)**:
