@@ -3,44 +3,31 @@ import { ANTHROPIC_MODEL } from '../config.js';
 import { aiEnabled, aiKey } from '../ai.js';
 import type { Store } from '../store.js';
 import { mlSettings, MlError } from './config.js';
-import { isModelUsable, runMl } from './engine.js';
 import { detectLanguage, dominantLanguage, LANG_NAMES } from './lang.js';
 import { getTranslation, saveTranslation } from './ml-store.js';
 import { googleKey, viaGoogle } from './google-translate.js';
 
 /**
- * Anlık çeviri. Motor: kullanıcının Anthropic anahtarı varsa Claude (hızlı, bağlamı ve üslubu koruyan), yoksa ya da
- * "yalnız yerel" seçiliyse cihazdaki NLLB-200. Mesaj çevirileri `translations` tablosunda önbelleklenir (aynı mesaj ikinci kez
- * modele gitmez; mesaj düzenlenince tetikleyici siler).
+ * Anlık çeviri. Motor: kullanıcının Google Cloud Translation anahtarı (resmi, ayda 500 bin karakter ücretsiz) varsa Google, yoksa
+ * Anthropic anahtarıyla Claude. Yerel çeviri modeli (NLLB) 30.09'da kaldırıldı (ağır/yavaş). Mesaj çevirileri `translations` tablosunda
+ * önbelleklenir (aynı mesaj ikinci kez servise gitmez; mesaj düzenlenince tetikleyici siler).
  */
 
-/** ISO 639-1 → NLLB-200 (FLORES) kodu */
-export const NLLB_CODES: Record<string, string> = {
-  tr: 'tur_Latn', en: 'eng_Latn', de: 'deu_Latn', fr: 'fra_Latn', es: 'spa_Latn', it: 'ita_Latn', pt: 'por_Latn', nl: 'nld_Latn', pl: 'pol_Latn',
-  ro: 'ron_Latn', sv: 'swe_Latn', az: 'azj_Latn', id: 'ind_Latn', ru: 'rus_Cyrl', uk: 'ukr_Cyrl', bg: 'bul_Cyrl', el: 'ell_Grek', ar: 'arb_Arab',
-  fa: 'pes_Arab', he: 'heb_Hebr', zh: 'zho_Hans', ja: 'jpn_Jpan', ko: 'kor_Hang', hi: 'hin_Deva', th: 'tha_Thai', ka: 'kat_Geor', hy: 'hye_Armn',
-};
+/** Desteklenen hedef diller (ISO 639-1) */
+export const TARGET_LANGS = new Set(['tr', 'en', 'de', 'fr', 'es', 'it', 'pt', 'nl', 'pl', 'ro', 'sv', 'az', 'id', 'ru', 'uk', 'bg', 'el', 'ar', 'fa', 'he', 'zh', 'ja', 'ko', 'hi', 'th', 'ka', 'hy']);
 
-export type Engine = 'google' | 'claude' | 'local';
+export type Engine = 'google' | 'claude';
 
 export function translationEngine(): Engine | null {
-  const s = mlSettings();
-  // öncelik: kullanıcının Google Cloud Translation anahtarı (resmi, ayda 500 bin karakter ücretsiz) → Claude → yerel model
-  if (googleKey() && !s.localOnlyTranslate) return 'google';
-  if (aiEnabled() && !s.localOnlyTranslate) return 'claude';
-  if (isModelUsable('translate')) return 'local';
+  if (googleKey()) return 'google';
+  if (aiEnabled()) return 'claude';
   return null;
 }
 
 function requireEngine(): Engine {
   const e = translationEngine();
   if (e) return e;
-  throw new MlError(
-    409,
-    mlSettings().localOnlyTranslate
-      ? 'Yerel çeviri için önce modeli indir: Ayarlar → Yerel AI modelleri → Yerel çeviri'
-      : "Çeviri için Ayarlar → Yerel AI modelleri → Çeviri'den Google çeviri anahtarı ekle (ya da Anthropic anahtarı / yerel model)",
-  );
+  throw new MlError(409, "Çeviri için Ayarlar → Yerel AI modelleri → Google çeviri'den anahtar ekle (ya da Ayarlar → AI özellikleri'nden Anthropic anahtarı)");
 }
 
 let client: { key: string; c: Anthropic } | undefined;
@@ -98,20 +85,10 @@ async function viaClaude(texts: string[], target: string, source?: string | null
   }
 }
 
-async function viaLocal(texts: string[], target: string, source: string | null, interactive: boolean): Promise<{ texts: string[]; source: string | null }> {
-  const src = source ?? dominantLanguage(texts).lang;
-  const s = src ? NLLB_CODES[src] : undefined;
-  const t = NLLB_CODES[target];
-  if (!s) throw new MlError(422, src ? `Yerel model bu dili çeviremiyor (${LANG_NAMES[src] ?? src})` : 'Metnin dili algılanamadı');
-  if (!t) throw new MlError(422, `Yerel model bu dile çeviremiyor (${LANG_NAMES[target] ?? target})`);
-  const out = await runMl((b) => b.translate(texts, s, t), interactive ? 'interactive' : 'background');
-  return { texts: out, source: src };
-}
-
-export async function translateTexts(texts: string[], target: string, opts: { source?: string | null; interactive?: boolean } = {}): Promise<{ texts: string[]; source: string | null; engine: Engine }> {
-  if (!NLLB_CODES[target]) throw new MlError(400, 'Desteklenmeyen hedef dil');
+export async function translateTexts(texts: string[], target: string, opts: { source?: string | null } = {}): Promise<{ texts: string[]; source: string | null; engine: Engine }> {
+  if (!TARGET_LANGS.has(target)) throw new MlError(400, 'Desteklenmeyen hedef dil');
   const engine = requireEngine();
-  const r = engine === 'google' ? await viaGoogle(texts, target, opts.source) : engine === 'claude' ? await viaClaude(texts, target, opts.source) : await viaLocal(texts, target, opts.source ?? null, opts.interactive ?? true);
+  const r = engine === 'google' ? await viaGoogle(texts, target, opts.source) : await viaClaude(texts, target, opts.source);
   return { ...r, engine };
 }
 

@@ -750,8 +750,8 @@ Dil: arayüz ve yorumlar Türkçe.
 - **Dosya kaydetme (masaüstü)** `POST /api/downloads` (`downloads.ts`, yalnız yerel, gövde ≤80 MB) → İndirilenler + Finder/Gezgin'de göster; arayüz `save-file.ts saveBlob`.
   `store.sql()` (Ajan C) B'nin modüllerince kullanılıyor.
 - **Yerel AI (30.09, `packages/core/src/ml/`)**: sesli mesajı yazıya dökme (`Xenova/whisper-small` q8 ≈250 MB), anlamsal arama (`Xenova/multilingual-e5-small` q8, 384 boyut,
-  int8 vektör `embeddings`, bellek içi kaba kuvvet + FTS ile RRF hibrit, tarih/kişi ipuçları `query.ts`), çeviri (anahtar varsa Claude, yoksa NLLB-600M q8 ≈900 MB; dil algılama
-  modelsiz `lang.ts`, arayüz kopyası `lang-detect.ts` AYNI kalmalı). Modeller yalnız Ayarlar → Yerel AI modelleri'nde onayla `~/.mivelo/models`e iner; ayarlar `~/.mivelo/ml.json`.
+  int8 vektör `embeddings`, bellek içi kaba kuvvet + FTS ile RRF hibrit, tarih/kişi ipuçları `query.ts`), çeviri (Google Cloud Translation anahtarı varsa Google, yoksa Claude; YEREL ÇEVİRİ MODELİ (NLLB) 30.09'da KALDIRILDI — Kaan: ağır; eski indirme
+  açılışta diskten silinir; dil algılama modelsiz `lang.ts`, arayüz kopyası `lang-detect.ts` AYNI kalmalı). Modeller yalnız Ayarlar → Yerel AI modelleri'nde onayla `~/.mivelo/models`e iner; ayarlar `~/.mivelo/ml.json`.
   Çalışma zamanı pakette YOK: ilk indirmede npm'den sabit sürüm + sha512 (transformers 4.3.0 Node yapısı + onnxruntime-web wasm) → `~/.mivelo/ml/runtime/<sürüm>`;
   `Symbol.for('onnxruntime')` + `device:'auto'`; sharp/onnxruntime-node yerine boş taslak. onnxruntime-node KULLANILMAZ (darwin-x64 ikilisi yok, 113 MB). Çıkarım worker_thread'de
   (`engine.ts`, tek kuyruk, kullanıcı işi önce, 3 dk boşta işçi kapanır). Ses: Ogg/Opus `opus-decoder` (bağımlılık), WAV; diğerleri macOS afconvert, yoksa ffmpeg.
@@ -761,7 +761,7 @@ Dil: arayüz ve yorumlar Türkçe.
   `Sesli mesaj yazıya döküldü: N sn ses…` günlüğüne bakılmalı.
 - **Google çeviri (30.09, Kaan: "yerel çeviri yerine ücretsiz resmi translate")** `ml/google-translate.ts`: resmi Google Cloud Translation v2 (Basic),
   kullanıcının KENDİ `AIza…` anahtarı (ayda 500 bin karakter ücretsiz, Google faturalandırma hesabı şart) → gizli depo `google-translate` (secrets.ts), arayüze yalnız maske;
-  `POST /api/ml/google-key` yalnız yerelden. Motor önceliği: Google anahtarı → Claude → yerel NLLB ("Yalnız yerel çeviri" hepsini ezer). Ayarlar → Yerel AI modelleri →
+  `POST /api/ml/google-key` yalnız yerelden. Motor önceliği: Google anahtarı → Claude (yerel model ve "Yalnız yerel çeviri" kaldırıldı). Ayarlar → Yerel AI modelleri →
   "Google çeviri" satırı (`GoogleKeyRow`). Anahtarsız resmi olmayan translate.googleapis.com "gtx" KULLANILMAZ (ToS). Test: ml-google-translate.test.ts. Gerçek anahtarla denenmedi.
 - **Dokümantasyon** `docs/dokumantasyon.html` → `docs/Mivelo-Dokumantasyon.pdf` (`CHROMIUM=<chrome yolu> node docs/build-pdf.mjs`); özellik eklenince güncelle.
 

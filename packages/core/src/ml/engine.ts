@@ -12,7 +12,6 @@ export interface MlBackend {
   transcribe(audio: Uint8Array, language: string | null): Promise<{ text: string; lang: string | null; seconds?: number }>;
   /** Birim uzunlukta gömmeler (önekler çağıranda eklenir: "query: " / "passage: ") */
   embed(texts: string[]): Promise<Float32Array[]>;
-  translate(texts: string[], src: string, tgt: string): Promise<string[]>;
   dispose?(): void;
 }
 
@@ -84,10 +83,6 @@ class WorkerBackend implements MlBackend {
     return out;
   }
 
-  translate(texts: string[], src: string, tgt: string) {
-    return this.call<string[]>({ op: 'translate', model: MODEL_SPECS.translate.id, texts, src, tgt });
-  }
-
   dispose(): void {
     const w = this.worker;
     this.worker = null;
@@ -100,7 +95,7 @@ let mockReady: Set<ModelKey> | null = null;
 export const mlQueue = new JobQueue();
 
 /** Testler: sahte arka uç + "hazır" sayılacak modeller */
-export function setMlBackend(b: MlBackend | null, ready: ModelKey[] = ['whisper', 'embed', 'translate']): void {
+export function setMlBackend(b: MlBackend | null, ready: ModelKey[] = ['whisper', 'embed']): void {
   backend?.dispose?.();
   backend = b;
   mockReady = b ? new Set(ready) : null;
@@ -114,7 +109,7 @@ export function isModelUsable(key: ModelKey): boolean {
 /** Model hazır değilse anlaşılır hata */
 export function requireModel(key: ModelKey): void {
   if (isModelUsable(key)) return;
-  const what = { whisper: 'Sesli mesajı yazıya dökmek', embed: 'Anlamsal arama', translate: 'Yerel çeviri' }[key];
+  const what = { whisper: 'Sesli mesajı yazıya dökmek', embed: 'Anlamsal arama' }[key];
   throw new MlError(409, `${what} için önce modeli indir: Ayarlar → Yerel AI modelleri → ${MODEL_SPECS[key].title}`);
 }
 

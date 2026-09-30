@@ -51,13 +51,19 @@ setMlBackend({
     calls.embed++;
     return texts.map(fakeEmbed);
   },
-  async translate(texts, src, tgt) {
-    calls.translate++;
-    return texts.map((t) => `[${src}>${tgt}] ${t}`);
-  },
 });
+// çeviri: Google Cloud Translation (sahte fetch + yer tutucu anahtar)
+const { resetGoogleKeyCache } = await import('../src/ml/google-translate.js');
+resetGoogleKeyCache('AIza' + 'x'.repeat(35));
+const realFetch = globalThis.fetch;
+globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+  if (!String(url).includes('translation.googleapis.com')) return realFetch(url, init);
+  calls.translate++;
+  const b = JSON.parse(String(init?.body)) as { q: string[]; target: string; source?: string };
+  return new Response(JSON.stringify({ data: { translations: b.q.map((t) => ({ translatedText: `[${b.source ?? '?'}>${b.target}] ${t}`, detectedSourceLanguage: b.source ?? 'en' })) } }), { status: 200 });
+}) as typeof fetch;
 resetMlSettingsCache();
-saveMlSettings({ semanticIndex: true, autoTranscribe: false, localOnlyTranslate: true });
+saveMlSettings({ semanticIndex: true, autoTranscribe: false });
 
 const DAY = 86400e3;
 const NOW = new Date(2026, 8, 30, 12, 0);
@@ -162,12 +168,12 @@ test('ml akış: anlamsal dizin + hibrit arama (tarih/kişi ipuçları), silinen
 
 test('ml akış: çeviri — yabancı mesaj çevrilir ve önbelleklenir, Türkçe mesaj modele gitmez, düzenleme önbelleği siler', async () => {
   const s = seed();
-  assert.equal(translationEngine(), 'local');
+  assert.equal(translationEngine(), 'google');
   const before = calls.translate;
   const tr = await translateMessage(s.store, s.m4.id, 'tr');
   assert.equal(tr.source, 'en');
-  assert.equal(tr.engine, 'local');
-  assert.equal(tr.text, '[eng_Latn>tur_Latn] Hello, when will my order ship? Thanks!');
+  assert.equal(tr.engine, 'google');
+  assert.equal(tr.text, '[en>tr] Hello, when will my order ship? Thanks!');
   const cached = await translateMessage(s.store, s.m4.id, 'tr');
   assert.equal(cached.cached, true);
   assert.equal(calls.translate, before + 1, 'ikinci istek önbellekten');
@@ -203,17 +209,17 @@ test('ml uçları: durum, ayar kaydı, hata eşleme (409 model yok → Türkçe 
   try {
     const call = (key: string, body?: unknown, url = '/', params: Record<string, string> = {}) => routes.get(key)!({ url }, {}, params, body);
     const st = (await call('GET /api/ml')) as { models: Array<{ key: string }>; settings: { semanticIndex: boolean } };
-    assert.deepEqual(st.models.map((m) => m.key), ['whisper', 'embed', 'translate']);
+    assert.deepEqual(st.models.map((m) => m.key), ['whisper', 'embed']);
     const saved = (await call('POST /api/ml/settings', { autoTranscribe: true, translateTarget: 'xx-bad' })) as { settings: { autoTranscribe: boolean; translateTarget: string } };
     assert.equal(saved.settings.autoTranscribe, true);
     assert.equal(saved.settings.translateTarget, 'tr', 'geçersiz dil kodu yok sayılır');
     await assert.rejects(Promise.resolve().then(() => call('POST /api/ml/transcribe', {})), (e: HttpErr) => e.status === 400);
     await assert.rejects(Promise.resolve().then(() => call('POST /api/ml/models/:key/download', undefined, '/', { key: 'yok' })), (e: HttpErr) => e.status === 404);
     const tr = (await call('POST /api/ml/translate-text', { text: 'Almanya’ya gönderiyoruz, teşekkürler', target: 'en' })) as { text: string; engine: string };
-    assert.match(tr.text, /^\[tur_Latn>eng_Latn\]/);
+    assert.match(tr.text, /^\[\?>en\]/);
     // model "yok" sayılınca anlaşılır 409
     setMlBackend(
-      { transcribe: async () => ({ text: '', lang: null }), embed: async () => [], translate: async () => [] },
+      { transcribe: async () => ({ text: '', lang: null }), embed: async () => [] },
       [],
     );
     await assert.rejects(Promise.resolve().then(() => call('POST /api/ml/transcribe', { messageId: s.voice.id })), (e: HttpErr) => e.status === 409 && /modeli indir/.test(e.message));

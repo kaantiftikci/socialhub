@@ -46,7 +46,7 @@ export function useMlStatus(): MlStatus | null {
   return s;
 }
 
-export const modelReady = (s: MlStatus | null, key: 'whisper' | 'embed' | 'translate') => !!s?.models.find((m) => m.key === key && m.state === 'ready');
+export const modelReady = (s: MlStatus | null, key: 'whisper' | 'embed') => !!s?.models.find((m) => m.key === key && m.state === 'ready');
 
 // ---- sesli mesaj metinleri ----
 const transcripts = new Map<string, Transcript>();

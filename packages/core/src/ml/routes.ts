@@ -1,8 +1,10 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import type http from 'node:http';
 import { aiEnabled } from '../ai.js';
 import { bus } from '../bus.js';
 import type { Store } from '../store.js';
-import { MODEL_KEYS, MlError, mlSettings, saveMlSettings, type ModelKey } from './config.js';
+import { MODEL_KEYS, MODELS_DIR, MlError, mlSettings, saveMlSettings, type ModelKey } from './config.js';
 import { disposeMl } from './engine.js';
 import { chatTranscripts } from './ml-store.js';
 import { allModelStatus, cancelDownload, emitMlStatus, removeModel, RUNTIME_APPROX_MB, runtimeReady, startDownload } from './models.js';
@@ -25,6 +27,8 @@ export function registerMlRoutes(route: Route, deps: { store: Store; media: Medi
   const semantic = new SemanticIndex(store);
   transcribe.start();
   semantic.start();
+  // 30.09: yerel çeviri modeli kaldırıldı — önceden indirilmişse (≈900 MB) diskten sil
+  fs.promises.rm(path.join(MODELS_DIR, 'Xenova', 'nllb-200-distilled-600M'), { recursive: true, force: true }).catch(() => undefined);
 
   const wrap =
     (fn: Handler): Handler =>
@@ -147,7 +151,7 @@ export function registerMlRoutes(route: Route, deps: { store: Store; media: Medi
       if (!text) throw httpError(400, 'Metin boş');
       if (text.length > 8000) throw httpError(413, 'Metin çok uzun');
       if (!b.target) throw httpError(400, 'Hedef dil gerekli');
-      const r = await translateTexts([text], b.target, { source: b.source ?? null, interactive: true });
+      const r = await translateTexts([text], b.target, { source: b.source ?? null });
       return { text: r.texts[0] ?? '', source: r.source, target: b.target, engine: r.engine };
     }),
   );

@@ -22,8 +22,7 @@ interface Init {
 }
 type Req =
   | { id: number; op: 'transcribe'; model: string; audio: Uint8Array; language: string | null }
-  | { id: number; op: 'embed'; model: string; texts: string[] }
-  | { id: number; op: 'translate'; model: string; texts: string[]; src: string; tgt: string };
+  | { id: number; op: 'embed'; model: string; texts: string[] };
 
 type Pipe = ((input: unknown, opts?: Record<string, unknown>) => Promise<unknown>) & {
   dispose?: () => Promise<void>;
@@ -105,15 +104,10 @@ async function handle(req: Req): Promise<{ result: unknown; transfer?: ArrayBuff
     const text = (Array.isArray(out) ? out.map((o) => o.text ?? '').join(' ') : out.text ?? '').replace(/\s+/g, ' ').trim();
     return { result: { text, lang, seconds: pcm.length / SAMPLE_RATE } };
   }
-  if (req.op === 'embed') {
-    const pipe = await getPipe('feature-extraction', req.model);
-    const out = (await pipe(req.texts, { pooling: 'mean', normalize: true })) as { data: Float32Array; dims: number[] };
-    const data = new Float32Array(out.data); // kopya: aktarılabilir tampon
-    return { result: { data, dim: out.dims.at(-1) }, transfer: [data.buffer] };
-  }
-  const pipe = await getPipe('translation', req.model);
-  const out = (await pipe(req.texts, { src_lang: req.src, tgt_lang: req.tgt, max_new_tokens: 512 })) as Array<{ translation_text?: string }>;
-  return { result: out.map((o) => (o.translation_text ?? '').trim()) };
+  const pipe = await getPipe('feature-extraction', req.model);
+  const out = (await pipe(req.texts, { pooling: 'mean', normalize: true })) as { data: Float32Array; dims: number[] };
+  const data = new Float32Array(out.data); // kopya: aktarılabilir tampon
+  return { result: { data, dim: out.dims.at(-1) }, transfer: [data.buffer] };
 }
 
 parentPort?.on('message', (req: Req) => {

@@ -17,13 +17,12 @@ const emit = (ev: CoreEvent) => emitter?.(ev);
 const SIZES: Record<ModelKey, [string, string, number]> = {
   whisper: ['Xenova/whisper-small', 'Konuşma tanıma (Whisper small)', 250],
   embed: ['Xenova/multilingual-e5-small', 'Anlamsal arama (multilingual-e5-small)', 135],
-  translate: ['Xenova/nllb-200-distilled-600M', 'Yerel çeviri (NLLB-200 600M)', 900],
 };
-const state: Record<ModelKey, { state: MlModel['state']; pct: number }> = { whisper: { state: 'ready', pct: 100 }, embed: { state: 'ready', pct: 100 }, translate: { state: 'ready', pct: 100 } };
+const state: Record<ModelKey, { state: MlModel['state']; pct: number }> = { whisper: { state: 'ready', pct: 100 }, embed: { state: 'ready', pct: 100 } };
 
 const SET_KEY = 'mivelo.mlDemo';
 function settings(): MlSettings {
-  const d: MlSettings = { autoTranscribe: true, semanticIndex: true, translateTarget: 'tr', localOnlyTranslate: false };
+  const d: MlSettings = { autoTranscribe: true, semanticIndex: true, translateTarget: 'tr' };
   try {
     return { ...d, ...(JSON.parse(localStorage.getItem(SET_KEY) || '{}') as Partial<MlSettings>) };
   } catch {
@@ -150,7 +149,7 @@ function status(): MlStatus {
     runtime: { ready: true, approxMb: 36 },
     settings: settings(),
     index: indexStatus(),
-    translate: { engine: demoGoogle ? 'google' : state.translate.state === 'ready' ? 'local' : null, ai: false, google: { set: !!demoGoogle, hint: demoGoogle ? `…${demoGoogle.slice(-4)}` : null } },
+    translate: { engine: 'google', ai: false, google: { set: !!demoGoogle, hint: demoGoogle ? `…${demoGoogle.slice(-4)}` : null } },
     languages: LANG_NAMES,
   };
 }
@@ -277,10 +276,10 @@ export const demoMlApi = {
     const g = detectLanguage(m.text);
     if (!force && g.lang === target) return { messageId, lang: target, source: g.lang, text: m.text, same: true };
     await wait(450);
-    return { messageId, lang: target, source: g.lang, text: demoTranslate(m.text, target), engine: demoGoogle ? 'google' : 'local' };
+    return { messageId, lang: target, source: g.lang, text: demoTranslate(m.text, target), engine: 'google' };
   },
   translateText: async (text: string, target: string, source?: string | null) => {
     await wait(500);
-    return { text: demoTranslate(text, target), source: source ?? detectLanguage(text).lang ?? 'tr', target, engine: demoGoogle ? ('google' as const) : ('local' as const) };
+    return { text: demoTranslate(text, target), source: source ?? detectLanguage(text).lang ?? 'tr', target, engine: 'google' as const };
   },
 };

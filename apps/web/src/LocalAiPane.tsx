@@ -4,13 +4,12 @@ import { mlApi, type MlModel, type MlSettings, type ModelKey } from './ml-api';
 import { refreshMlStatus, useMlStatus } from './ml-client';
 
 /**
- * Ayarlar → Yerel AI modelleri: cihazda çalışan modeller (konuşma tanıma, anlamsal arama, yerel çeviri).
+ * Ayarlar → Yerel AI modelleri: cihazda çalışan modeller (konuşma tanıma, anlamsal arama) + çeviri servisi.
  * Her model yalnız kullanıcı "İndir" deyip boyutu onaylayınca Hugging Face'ten iner; ilerleme canlı (ml.status olayı).
  */
 const DESC: Record<ModelKey, string> = {
   whisper: 'WhatsApp, Telegram ve iMessage sesli mesajlarının altında metin; metin aramada da bulunur.',
   embed: '"Geçen ay Ahmet’in gönderdiği fatura" gibi doğal dille arama (⌘K → Anlamsal).',
-  translate: 'Google çeviri ya da Anthropic anahtarı yoksa çeviri bu modelle cihazında yapılır. Büyük ve yavaş bir modeldir; gerekmedikçe indirme.',
 };
 
 function Row({ title, hint, children, dim }: { title: string; hint?: ReactNode; children: ReactNode; dim?: boolean }) {
@@ -41,7 +40,7 @@ function ModelCard({ m, runtimeMb, runtimeReady, demo, notify }: { m: MlModel; r
     <div className={`lai-card ${m.state}`}>
       <div className="lai-top">
         <span className="lai-ic" aria-hidden="true">
-          <Icon name={m.key === 'whisper' ? 'mic' : m.key === 'embed' ? 'search' : 'translate'} size={16} />
+          <Icon name={m.key === 'whisper' ? 'mic' : 'search'} size={16} />
         </span>
         <span className="lai-txt">
           <b>{m.title}</b>
@@ -166,9 +165,7 @@ export function LocalAiPane({ notify }: { notify: (t: string, err?: boolean) => 
               ? 'Google Cloud Translation ile (yalnız "Çevir" dediğinde o metin Google’a gider)'
               : st.translate.engine === 'claude'
               ? 'Anthropic anahtarınla Claude çevirir (yalnız "Çevir" dediğinde, o metin gider)'
-              : st.translate.engine === 'local'
-                ? 'Cihazındaki modelle çevrilir (hiçbir metin gönderilmez)'
-                : 'Aşağıdan Google çeviri anahtarı ekle (önerilen)'
+              : 'Aşağıdan Google çeviri anahtarı ekle'
           }
         >
           <select className="lai-select" value={st.settings.translateTarget} onChange={(e) => void save({ translateTarget: e.target.value })} aria-label="Çeviri hedef dili">
@@ -180,11 +177,6 @@ export function LocalAiPane({ notify }: { notify: (t: string, err?: boolean) => 
           </select>
         </Row>
         <GoogleKeyRow info={st.translate.google} notify={notify} />
-        {(st.translate.ai || st.translate.google?.set) && (
-          <Row title="Yalnız yerel çeviri" hint="Anahtar olsa da çeviri cihazdaki modelle yapılır (hiçbir metin gönderilmez)" dim={!ready('translate')}>
-            <Switch label="Yalnız yerel çeviri" on={st.settings.localOnlyTranslate} onChange={(v) => void save({ localOnlyTranslate: v })} />
-          </Row>
-        )}
       </div>
       <p className="set-note">Modeller ~/.mivelo/models klasöründe durur. Çalışırken biraz işlemci kullanır; birkaç dakika kullanılmayınca bellekten çıkar.</p>
     </>

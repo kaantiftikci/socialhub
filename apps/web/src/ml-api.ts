@@ -7,8 +7,8 @@ import { demoMlApi } from './demo-ml';
  * Yerel AI (cihazda çalışan modeller) istemcisi: çekirdeğin /api/ml/… uçları (packages/core/src/ml/routes.ts).
  * Statik demoda model indirmeden taklit (demo-ml.ts).
  */
-export type ModelKey = 'whisper' | 'embed' | 'translate';
-export type TranslateEngine = 'google' | 'claude' | 'local';
+export type ModelKey = 'whisper' | 'embed';
+export type TranslateEngine = 'google' | 'claude';
 export interface MlModel {
   key: ModelKey;
   id: string;
@@ -23,7 +23,6 @@ export interface MlSettings {
   autoTranscribe: boolean;
   semanticIndex: boolean;
   translateTarget: string;
-  localOnlyTranslate: boolean;
 }
 export interface IndexStatus {
   enabled: boolean;
