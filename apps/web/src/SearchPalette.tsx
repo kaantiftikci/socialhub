@@ -2,8 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
 import { PLATFORMS, type Chat, type Message, type Platform } from './types';
 import { Avatar, Chip, Icon, fmtTime } from './ui';
+import { mlApi, type SemanticResult } from './ml-api';
 
-type Hit = { message: Message; chat: Chat };
+/** transcript: eşleşen sesli mesaj metni; via: anlamsal aramada hangi koldan geldi */
+type Hit = { message: Message; chat: Chat; transcript?: string; via?: 'semantic' | 'text' | 'both' };
+const SEM_KEY = 'mivelo.searchSemantic';
 type Item = { kind: 'chat'; chat: Chat } | { kind: 'msg'; hit: Hit };
 
 const norm = (s: string) => s.toLocaleLowerCase('tr-TR');
@@ -51,6 +54,25 @@ export function SearchPalette({ chats, onClose, onOpenChat, onOpenMessage }: { c
   const [busy, setBusy] = useState(false);
   const [active, setActive] = useState(0);
   const [only, setOnly] = useState<Platform | null>(null);
+  // Anlamsal (doğal dil) arama: yerel gömme modeliyle; tercih bu tarayıcıda hatırlanır
+  const [semantic, setSemantic] = useState(() => {
+    try {
+      return localStorage.getItem(SEM_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const [sem, setSem] = useState<Pick<SemanticResult, 'mode' | 'hints' | 'index'> | null>(null);
+  const [semErr, setSemErr] = useState<string | null>(null);
+  const toggleSemantic = () =>
+    setSemantic((v) => {
+      try {
+        localStorage.setItem(SEM_KEY, v ? '0' : '1');
+      } catch {
+        /* depolama kapalı */
+      }
+      return !v;
+    });
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   useEffect(() => inputRef.current?.focus(), []);
@@ -65,18 +87,30 @@ export function SearchPalette({ chats, onClose, onOpenChat, onOpenMessage }: { c
     }
     setBusy(true);
     let alive = true;
-    const t = window.setTimeout(() => {
-      api
-        .search(term, LIMIT)
-        .then((h) => alive && setHits(h))
-        .catch(() => alive && setHits([]))
-        .finally(() => alive && setBusy(false));
-    }, 180);
+    const t = window.setTimeout(
+      () => {
+        const run: Promise<Hit[]> = semantic
+          ? mlApi.search(term, LIMIT).then((r) => {
+              if (alive) (setSem({ mode: r.mode, hints: r.hints, index: r.index }), setSemErr(null));
+              return r.hits;
+            })
+          : api.search(term, LIMIT);
+        run
+          .then((h) => alive && setHits(h))
+          .catch((e) => {
+            if (!alive) return;
+            setHits([]);
+            if (semantic) setSemErr((e as Error).message);
+          })
+          .finally(() => alive && setBusy(false));
+      },
+      semantic ? 320 : 180,
+    );
     return () => {
       alive = false;
       clearTimeout(t);
     };
-  }, [q]);
+  }, [q, semantic]);
 
   const chatHits = useMemo(() => {
     const term = norm(q.trim());
@@ -129,10 +163,38 @@ export function SearchPalette({ chats, onClose, onOpenChat, onOpenMessage }: { c
       <div className="palette" role="dialog" aria-label="Her yerde ara" onMouseDown={(e) => e.stopPropagation()} onKeyDown={onKey}>
         <div className="pal-in">
           <Icon name="search" size={17} />
-          <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Tüm uygulamalarda ara — kişi, mesaj, dosya adı…" aria-label="Arama" spellCheck={false} />
+          <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder={semantic ? 'Doğal dille ara — "geçen ay Ahmet’in gönderdiği fatura"' : 'Tüm uygulamalarda ara — kişi, mesaj, dosya adı…'} aria-label="Arama" spellCheck={false} />
           {busy && <span className="spin" />}
+          <button type="button" className={`pal-mode b ${semantic ? 'on' : ''}`} onClick={() => (toggleSemantic(), inputRef.current?.focus())} aria-pressed={semantic} title="Anlamsal arama: kelimesi kelimesine değil, anlamca yakın mesajlar (cihazında)">
+            <Icon name="sparkle" size={13} /> Anlamsal
+          </button>
           <span className="kbd">Esc</span>
         </div>
+        {semantic && term.length >= 2 && (sem || semErr) && (
+          <div className="pal-sem">
+            {semErr ? (
+              <span className="err">{semErr}</span>
+            ) : sem ? (
+              <>
+                {sem.hints.dateLabel && (
+                  <span className="pal-hint">
+                    <Icon name="calendar" size={11} /> {sem.hints.dateLabel}
+                  </span>
+                )}
+                {sem.hints.people.map((p) => (
+                  <span key={p} className="pal-hint">
+                    <Icon name="user" size={11} /> {p}
+                  </span>
+                ))}
+                {sem.mode === 'text' ? (
+                  <em>{sem.index.ready ? (sem.index.enabled ? 'Dizin henüz boş; tam metin sonuçları' : 'Anlamsal dizin kapalı (Ayarlar → Yerel AI modelleri); tam metin sonuçları') : 'Anlamsal arama modeli indirilmemiş (Ayarlar → Yerel AI modelleri); tam metin sonuçları'}</em>
+                ) : (
+                  <em>Anlamca yakın mesajlar{sem.index.pct < 100 ? ` · dizin %${sem.index.pct}` : ''}</em>
+                )}
+              </>
+            ) : null}
+          </div>
+        )}
         {term.length >= 2 && (
           <div className="pal-sum">
             {total > 0 ? (
@@ -204,7 +266,14 @@ export function SearchPalette({ chats, onClose, onOpenChat, onOpenMessage }: { c
                       </b>
                       <span>
                         {h.message.fromMe ? 'Sen: ' : h.chat.kind !== 'direct' && h.message.senderName ? `${h.message.senderName}: ` : ''}
-                        {att && !norm(h.message.text).includes(norm(term.split(/\s+/)[0] ?? '')) ? (
+                        {h.transcript && (semantic || !norm(h.message.text).includes(norm(term.split(/\s+/)[0] ?? ''))) ? (
+                          <>
+                            <span className="lead-ic" aria-hidden="true">
+                              <Icon name="mic" size={12} />
+                            </span>
+                            <Marked text={snippet(h.transcript, term)} q={term} />
+                          </>
+                        ) : att && !norm(h.message.text).includes(norm(term.split(/\s+/)[0] ?? '')) ? (
                           <>
                             <span className="lead-ic" aria-hidden="true">
                               <Icon name="clip" size={12} />

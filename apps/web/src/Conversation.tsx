@@ -5,9 +5,13 @@ import { EmojiPicker } from './emoji';
 import { api, USE_STATIC } from './api';
 import { EventEditor } from './CalendarView';
 import { API_BASE, isTauri, mediaUrl, openExternal } from './desktop';
-import { DEFAULT_TAGS, EDIT_LIMIT_MS, EDIT_PLATFORMS, PLATFORMS, REPLY_PLATFORMS, UNSEND_LIMIT_MS, UNSEND_PLATFORMS, isOrderPage, questionOrderRef, shopKind, QUICK_REACTIONS, REACT_PLATFORMS, TAG_COLORS, openInAppLink, type Attachment, type CalendarDraft, type Chat, type ChatFlags, type DraftResult, type LinkPreview, type Message, type Reaction } from './types';
+import { DEFAULT_TAGS, EDIT_LIMIT_MS, EDIT_PLATFORMS, PLATFORMS, REPLY_PLATFORMS, UNSEND_LIMIT_MS, UNSEND_PLATFORMS, isOrderPage, questionOrderRef, shopKind, QUICK_REACTIONS, REACT_PLATFORMS, TAG_COLORS, openInAppLink, type Attachment, type CalendarDraft, type Chat, type ChatFlags, type DraftResult, type LinkPreview, type Message, type Platform, type Reaction } from './types';
 import { guessWhen } from './when';
 import { useAiPrefs } from './ai-prefs';
+import { QuestionDraftBar, isShopQuestion } from './QuestionDraft';
+import { PersonPanel } from './PersonPanel';
+import { AutoTranslateRow, ComposeTranslate, TranslationBlock, VoiceTranscript, canTranslate } from './MlBubble';
+import { loadChatTranscripts, translateMessage as mlTranslate, useAutoTranslateEffect } from './ml-client';
 import { useClosing, Avatar, Chip, Icon, IconText, Resizer, Tag, ago, fmtDay, fmtStamp, fmtTime, leadIcon } from './ui';
 
 /** Bağlayıcıların yazdığı sistem mesajı baş emojileri (kullanıcıların nadiren mesaja başladığı): balonda ikon olarak çizilir */
@@ -205,6 +209,10 @@ export function Conversation({
   seed,
   onSeedUsed,
   relatedQuestion,
+  timeline,
+  headerExtra,
+  composerExtra,
+  onSelectChat,
 }: {
   chat: Chat;
   messages: Message[];
@@ -232,6 +240,13 @@ export function Conversation({
   onSeedUsed?: () => void;
   /** Sipariş sayfası: aynı siparişe bağlı müşteri sorusu sohbeti (varsa) */
   relatedQuestion?: Chat | null;
+  /** Kişi birleştirme: birleşik zaman çizelgesi (mesajlar birden çok sohbetten; balonda platform logosu, `chat` = gönderim kanalı) */
+  timeline?: { platformOf: (chatId: string) => Platform | undefined };
+  /** Başlık altı şerit (kişinin kanalları) ve yazma alanı üstü (gönderim kanalı seçimi) */
+  headerExtra?: React.ReactNode;
+  composerExtra?: React.ReactNode;
+  /** Kimlikle sohbete geç (Kişi paneli) */
+  onSelectChat?: (id: string) => void;
 }) {
   // Anında görünen giden mesajlar: Enter'a basınca "Gönderiliyor" balonu hemen çıkar, platform onaylayınca gerçek kayıt
   // (WS message.upsert) aynı metinle gelir ve bu kopya gizlenir. Hata olursa balon kalkar, metin kutuya geri döner.
@@ -266,6 +281,12 @@ export function Conversation({
     }, 80);
     return () => clearTimeout(t);
   }, [focusMessageId, stored]);
+  // ---- yerel AI: sesli mesaj metinleri + otomatik çeviri (MlBubble.tsx / ml-client.ts) ----
+  const voiceChats = useMemo(() => [...new Set(messages.filter((m) => m.attachments?.some((a) => a.kind === 'audio')).map((m) => m.chatId))].join('|'), [messages]);
+  useEffect(() => {
+    if (voiceChats) for (const id of voiceChats.split('|')) loadChatTranscripts(id);
+  }, [voiceChats]);
+  useAutoTranslateEffect(chat.id, messages);
   const [search, setSearch] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -583,7 +604,7 @@ export function Conversation({
   const summary = draft && draft.summary.length > 0 ? draft.summary : sampleSummary;
   const [summaryAt, setSummaryAt] = useState(0);
   /** E-posta kanalları: balon yerine ileti kartları ve e-posta yanıt alanı */
-  const isMail = platform.category === 'mail';
+  const isMail = platform.category === 'mail' && !timeline; // birleşik zaman çizelgesi e-posta düzeninde çizilmez
   // Pazaryeri yanıtları (Trendyol/HB/n11 soru-cevap, sipariş notu) yalnız metin: dosya ve ses gönderilemez
   const canMedia = platform.category !== 'shop';
   /** Sohbet notu: hızlı ve yerel (localStorage, sohbet kimliğine göre); sohbet değişince yeniden okunur */
@@ -884,26 +905,30 @@ export function Conversation({
                       const end = u.i + u.items.length - 1;
                       const pos = g.items.length === u.items.length ? 'first last' : u.i === 0 ? 'first' : end === g.items.length - 1 ? 'last' : 'mid';
                       const reacts = u.items.flatMap((x) => x.reactions ?? []);
+                      const foreignA = !!timeline && last.chatId !== chat.id;
                       return (
                         <div key={u.items[0].id} data-mid={u.items[0].id} className={`bwrap ${g.fromMe ? 'me' : ''}`}>
                           <div className={`bub album-bub ${pos}`}>
                             <AlbumView items={u.items} onOpen={setLightbox} />
                             <time className="bt" dateTime={new Date(last.ts).toISOString()} title={fmtStamp(last.ts)}>
+                              {timeline && <TlMark p={timeline.platformOf(last.chatId)} />}
                               {fmtTime(last.ts)}
                               {g.fromMe && statusIcon(last.status)}
                             </time>
                           </div>
-                          {reacts.length ? <ReactionChips list={reacts} onToggle={canReact ? (e) => act.current.react(last, e) : undefined} /> : null}
+                          {reacts.length ? <ReactionChips list={reacts} onToggle={canReact && !foreignA ? (e) => act.current.react(last, e) : undefined} /> : null}
                         </div>
                       );
                     }
                     const { m, i } = u;
-                    const replyable = canReplyChat && !m.remoteId.startsWith('local-') && !m.remoteId.startsWith('out-') && !m.id.startsWith('out-');
+                    // birleşik zaman çizelgesinde başka kanalın mesajı: yanıt/tepki/düzenleme yalnız gönderim kanalındakilerde
+                    const foreign = !!timeline && m.chatId !== chat.id;
+                    const replyable = !foreign && canReplyChat && !m.remoteId.startsWith('local-') && !m.remoteId.startsWith('out-') && !m.id.startsWith('out-');
                     const isReact = /^(👍|❤️|😂|🔥|👏|😮) .+ (bir mesajı beğendi|mesajına tepki verdi)$/.test(m.text);
                     const parent = m.threadId ? byRemote.get(m.threadId) : undefined;
                     const url = !isReact && !m.attachments?.length && !m.deleted ? firstUrl(m.text) : undefined;
                     // kendi mesajım: düzenle (yalnız metin, süre sınırı içinde) / herkesten sil
-                    const own = m.fromMe && !m.deleted && !isReact && !m.remoteId.startsWith('local-') && !m.id.startsWith('out-') && !m.remoteId.startsWith('out-');
+                    const own = !foreign && m.fromMe && !m.deleted && !isReact && !m.remoteId.startsWith('local-') && !m.id.startsWith('out-') && !m.remoteId.startsWith('out-');
                     const editable = own && canEditChat && !!m.text.trim() && !m.attachments?.some((a) => a.kind !== 'other') && within(m.ts, EDIT_LIMIT_MS[chat.platform]);
                     const unsendable = own && canUnsendChat && within(m.ts, UNSEND_LIMIT_MS[chat.platform]);
                     return (
@@ -937,10 +962,12 @@ export function Conversation({
                           {m.attachments?.map((a, j) => (
                             <AttachmentView key={j} a={a} onOpen={setLightbox} />
                           ))}
+                          <VoiceTranscript m={m} />
                           {(() => {
                             const timeEl = !isReact ? (
                               <time className="bt" dateTime={new Date(m.ts).toISOString()} title={fmtStamp(m.ts)}>
                                 {m.edited && !m.deleted && <span className="edited">düzenlendi</span>}
+                                {timeline && <TlMark p={timeline.platformOf(m.chatId)} />}
                                 {fmtTime(m.ts)}
                                 {g.fromMe && statusIcon(m.status)}
                               </time>
@@ -960,8 +987,9 @@ export function Conversation({
                             );
                           })()}
                         </div>
+                        {!isReact && <TranslationBlock m={m} />}
                         {url && <LinkCard url={url} />}
-                        {m.reactions?.length ? <ReactionChips list={m.reactions} onToggle={canReact ? (e) => act.current.react(m, e) : undefined} /> : null}
+                        {m.reactions?.length ? <ReactionChips list={m.reactions} onToggle={canReact && !foreign ? (e) => act.current.react(m, e) : undefined} /> : null}
                         {!!m.replyCount && !threadFocus && (
                           <button type="button" className="treplies b" onClick={() => setThreadFocus(m.remoteId)}>
                             <span className="tav">
@@ -984,7 +1012,7 @@ export function Conversation({
                                 <Icon name="reply" size={14} />
                               </button>
                             ),
-                            (canReact || chat.platform === 'slack') && (
+                            !foreign && (canReact || chat.platform === 'slack') && (
                               <button key="r" type="button" className={`rtrig ${barFor === m.id ? 'on' : ''}`} aria-label={canReact ? 'Tepki ver' : 'Hızlı işlemler'} title={canReact ? 'Tepki ver' : 'Hızlı işlemler'} onClick={() => (setBarFor(barFor === m.id ? null : m.id), setReactPick(null))}>
                                 <Icon name={canReact ? 'smile' : 'thread'} size={15} />
                               </button>
@@ -997,6 +1025,11 @@ export function Conversation({
                             canFollow && (
                               <button key="f" type="button" className={`rtrig ${chat.followUp ? 'rtrig-on' : ''}`} aria-label={chat.followUp ? 'Takip hatırlatıcısını kaldır' : '2 gün yanıt gelmezse hatırlat'} title={chat.followUp ? 'Takip hatırlatıcısını kaldır' : 'Takip: 2 gün yanıt gelmezse hatırlat'} onClick={() => void act.current.setFollowUp(chat.followUp ? null : 2)}>
                                 <Icon name="bell" size={14} />
+                              </button>
+                            ),
+                            canTranslate(m) && !isReact && (
+                              <button key="t" type="button" className="rtrig" aria-label="Çevir" title="Çevir" onClick={() => (void mlTranslate(m.id), setBarFor(null))}>
+                                <Icon name="translate" size={14} />
                               </button>
                             ),
                             (editable || unsendable) && (
@@ -1074,7 +1107,7 @@ export function Conversation({
           ),
     // swipeProps yalnız ref'lerle ve sabit startReply ile çalışır; süre sınırı (within) bir sonraki değişimde tazelenir
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [groups, chat, avatarOf, byRemote, messages, threadFocus, barFor, ownFor, delAsk, reactPick, setLightbox, startReply],
+    [groups, chat, avatarOf, byRemote, messages, threadFocus, barFor, ownFor, delAsk, reactPick, setLightbox, startReply, timeline],
   );
   const lastIncoming = [...messages].reverse().find((m) => !m.fromMe);
   const needsReply = !!lastIncoming && messages[messages.length - 1]?.id === lastIncoming.id;
@@ -1114,7 +1147,8 @@ export function Conversation({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function send() {
+  /** override: yazma alanı yerine bu metni gönder (yerel AI "Çevir ve gönder") */
+  async function send(override?: unknown) {
     if (editTarget) return saveEdit();
     if (pending) {
       if (uploading) return;
@@ -1129,7 +1163,7 @@ export function Conversation({
         });
       return;
     }
-    const body = (text || draftShown?.draft || '').trim();
+    const body = (typeof override === 'string' ? override : text || draftShown?.draft || '').trim();
     if (!body) return;
     const chatId = chat.id;
     // yanıt: Slack'te iş parçacığına, diğerlerinde alıntılı yanıt (platform kimliğiyle)
@@ -1221,6 +1255,7 @@ export function Conversation({
             <Icon name="search" size={15} />
           </button>
         </header>
+        {headerExtra}
         {search !== null && (
           <div className="chat-search">
             <Icon name="search" size={14} />
@@ -1395,6 +1430,7 @@ export function Conversation({
         </div>
 
         <div className={`composer ${draftShown ? 'ai' : ''} ${isMail ? 'mail' : ''}`}>
+          {composerExtra}
           {isMail && (
             <div className="mail-reply-head">
               <span>
@@ -1405,7 +1441,9 @@ export function Conversation({
               </span>
             </div>
           )}
-          {draftOn && (
+          {/* pazaryeri sorusu: kurallara uygun AI cevap taslağı (QuestionDraft.tsx); genel "Taslak yaz" yerine */}
+          {aiP.drafts && isShopQuestion(chat) && <QuestionDraftBar chat={chat} ai={ai} notify={notify} onDraft={(t) => (setText(t), setDraft(null))} />}
+          {draftOn && !isShopQuestion(chat) && (
             <div className="comp-top">
               {draftShown ? (
                 <span className="aipill on" title={draftShown.style?.length ? `Tarzın: ${draftShown.style.join(', ')}` : undefined}>
@@ -1541,6 +1579,7 @@ export function Conversation({
               </button>
               {emojiOpen && <EmojiPicker onPick={insertEmoji} onClose={() => setEmojiOpen(false)} />}
             </span>
+            <ComposeTranslate chat={chat} messages={messages} text={text} setText={setText} onSend={(t) => void send(t)} disabled={!!pending || !!editTarget || !!rec} />
             {rec ? (
               <span className="rec-bar" role="status" aria-live="polite">
                 <span className="rec-dot" />
@@ -1625,6 +1664,8 @@ export function Conversation({
           </button>
         </div>
 
+        <PersonPanel chat={chat} onSelectChat={onSelectChat} notify={notify} />
+
         {onFlags && (
           <div className="ctx-sec">
             <span className="label">Eylemler</span>
@@ -1654,6 +1695,8 @@ export function Conversation({
             </div>
           </div>
         )}
+
+        <AutoTranslateRow chatId={chat.id} />
 
         {PLATFORMS[chat.platform].category !== 'shop' && (
           <div className="ctx-sec">
@@ -2576,6 +2619,15 @@ function within(ts: number, limit?: number): boolean {
   return limit == null || Date.now() - ts < limit;
 }
 
+/** Birleşik zaman çizelgesi: balonun saatinin yanında mesajın geldiği kanalın küçük logosu */
+function TlMark({ p }: { p?: Platform }) {
+  return p ? (
+    <span className="tl-mark" title={PLATFORMS[p]?.name}>
+      <Chip platform={p} size={14} />
+    </span>
+  ) : null;
+}
+
 export function statusIcon(s: Message['status']) {
   if (s === 'read') return <span className="tick read" title="Görüldü"><Icon name="checks" size={14} sw={2.2} /></span>;
   if (s === 'delivered') return <span className="tick" title="İletildi"><Icon name="checks" size={14} sw={2.2} /></span>;
@@ -2954,3 +3006,6 @@ function fmtSize(n: number) {
   if (n > 1e3) return Math.round(n / 1e3) + ' KB';
   return n + ' B';
 }
+
+// ---- Medya kütüphanesi (MediaLibrary.tsx): aynı medya penceresi ve bağlantı → ek dönüşümü ----
+export { Lightbox as MediaLightbox, linkAttachment, isMediaFile as isMediaFileUrl };

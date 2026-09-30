@@ -26,10 +26,18 @@ import { MEDIA_HOSTS, PLATFORM_MEDIA_HOSTS, MEDIA_MAX } from './media-hosts.js';
 import { fetchPreview } from './link-preview.js';
 import { checkSend, persistSendGuard, resetSendGuard, SendBlocked } from './send-guard.js';
 import { PROFILE_FILE, ProfileError, readProfile, saveProfile } from './profile.js';
+import { People, PeopleError } from './people.js';
 import { downloadUpdate, installUpdate, updateStatus } from './updater.js';
 import { EventBatcher, type WsBatch } from './ws-batch.js';
 import { fullDiskAccess, messagesAutomation, PRIVACY_PANES, tccStatus } from './permissions.js';
+import { getStats } from './stats.js';
+import { libraryFacets, queryLibrary, startLibraryIndexer, type LibQuery } from './library.js';
+import { saveDownload } from './downloads.js';
 import type { Chat, CoreEvent, Platform } from './model.js';
+import { checkDigest, isDigestTime, marketSummary, readDigestSettings, SHOP_PLATFORMS, writeDigestSettings } from './market-summary.js';
+import { dayKey, formatMoney, isDayKey, orderCurrency, parseAmount } from './market-calc.js';
+import { questionDraft } from './question-draft.js';
+import { registerMlRoutes } from './ml/routes.js';
 
 /**
  * Yerel API: yalnızca 127.0.0.1'e bağlanır. Arayüz (ve ileride MCP/otomasyonlar) bunu kullanır.
@@ -302,6 +310,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
       const n = await registry.removeAll();
       scheduled.clear();
       store.wipeAll();
+      people.clear(); // kişi birleştirme önerileri önbelleği
       resetSendGuard();
       setAiKey(null);
       if (lanEnabled) {
@@ -683,6 +692,90 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     if (!result) throw new HttpError(503, 'AI taslak kapalı: ANTHROPIC_API_KEY tanımlı değil');
     return result;
   });
+  // ---- pazaryeri gün sonu özeti + soru yanıtı AI taslağı ----
+  // Günlük özet: ?day=YYYY-MM-DD (yoksa bugün, yerel saat) &platform=trendyol (yoksa tüm pazaryerleri)
+  route('GET', '/api/market/summary', (req) => {
+    const sp = new URL(req.url ?? '/', 'http://x').searchParams;
+    const day = sp.get('day') || dayKey(Date.now());
+    if (!isDayKey(day)) throw new HttpError(400, 'Geçersiz gün (YYYY-MM-DD)');
+    const platform = sp.get('platform') || null;
+    if (platform && !SHOP_PLATFORMS.includes(platform as Platform)) throw new HttpError(400, 'Geçersiz pazaryeri');
+    return marketSummary(store, day, platform);
+  });
+  route('GET', '/api/market/digest', () => {
+    const { enabled, time } = readDigestSettings();
+    return { enabled, time };
+  });
+  route('POST', '/api/market/digest', (req, _s, _p, body) => {
+    localOnly(req);
+    const b = (body ?? {}) as { enabled?: unknown; time?: unknown };
+    const cur = readDigestSettings();
+    if (b.time !== undefined && !isDigestTime(b.time)) throw new HttpError(400, 'Saat SS:DD biçiminde olmalı');
+    const next = writeDigestSettings({ ...cur, enabled: b.enabled === undefined ? cur.enabled : b.enabled === true, time: isDigestTime(b.time) ? b.time : cur.time });
+    return { enabled: next.enabled, time: next.time };
+  });
+  // Pazaryeri sorusuna AI cevap taslağı: yalnız kompozöre konur, gönderilmez
+  route('POST', '/api/chats/:id/question-draft', async (_r, _s, p) => {
+    const id = dec(p.id);
+    const chat = store.getChat(id);
+    if (!chat) throw new HttpError(404, 'Sohbet yok');
+    const q = chat.meta?.question as Record<string, unknown> | undefined;
+    if (!SHOP_PLATFORMS.includes(chat.platform) || !q || chat.meta?.order) throw new HttpError(400, 'Bu sohbet bir pazaryeri sorusu değil');
+    if (!aiEnabled()) throw new HttpError(503, 'AI anahtarı gerekli (Ayarlar → AI özellikleri)');
+    const msgs = store.listMessages(id, 20);
+    const isSystem = (t: string) => /^\s*(📝|🚫|⚠|⏱)/u.test(t);
+    const question = [...msgs].reverse().find((m) => !m.fromMe && m.text.trim())?.text ?? '';
+    if (!question) throw new HttpError(400, 'Yanıtlanacak soru metni yok');
+    const prod = (q.product ?? {}) as Record<string, unknown>;
+    const s = (v: unknown) => (typeof v === 'string' || typeof v === 'number' ? String(v) : undefined);
+    const productName = s(q.productName) ?? s(prod.name);
+    const productId = s(q.productMainId) ?? s(q.productId) ?? s(prod.sku) ?? s(prod.stockCode);
+    // fiyat: bu hesabın siparişlerinde aynı adlı ürünün en son birim fiyatı
+    let price: string | undefined;
+    if (productName) {
+      const want = productName.toLocaleLowerCase('tr').trim();
+      let best: { at: number; text: string } | undefined;
+      for (const r of store.marketMeta(chat.accountId)) {
+        if (!r.meta.includes('"order"')) continue;
+        try {
+          const o = (JSON.parse(r.meta) as { order?: Record<string, unknown> }).order;
+          for (const it of (Array.isArray(o?.items) ? o.items : []) as Array<Record<string, unknown>>) {
+            if (String(it?.title ?? '').toLocaleLowerCase('tr').trim() !== want) continue;
+            const qty = Math.max(1, parseAmount(it.quantity) || 1);
+            const unit = parseAmount(it.total) / qty;
+            const at = Date.parse(String(o?.dateCreated ?? '')) || r.lastMessageAt;
+            if (unit > 0 && (!best || at > best.at)) best = { at, text: formatMoney({ currency: orderCurrency(o!), amount: unit }, 2) };
+          }
+        } catch {
+          /* bozuk meta */
+        }
+      }
+      price = best?.text;
+    }
+    await yieldLoop();
+    const sameProduct = store.productAnswers(chat.accountId, { name: productName, id: productId }, id, 8);
+    await yieldLoop();
+    const sellerAnswers = store
+      .styleSamples(id, chat.platform, 8)
+      .filter((x) => x.scope !== 'all')
+      .map((x) => ({ them: x.them, me: x.me }));
+    const style = describeStyle(styleFor(chat.platform));
+    await yieldLoop();
+    const result = await questionDraft({
+      platform: chat.platform,
+      question,
+      conversation: msgs.filter((m) => !isSystem(m.text)).map((m) => ({ fromMe: m.fromMe, text: m.text })),
+      product: { name: productName, id: productId, price, subject: typeof q.subject === 'string' ? q.subject : undefined, orderNumber: s(q.orderNumber) },
+      sameProduct,
+      sellerAnswers,
+      style,
+    }).catch((e: unknown) => {
+      if (e instanceof AiError) throw new HttpError(e.status, e.message);
+      throw e;
+    });
+    if (!result) throw new HttpError(503, 'AI anahtarı gerekli (Ayarlar → AI özellikleri)');
+    return result;
+  });
   // "Senin tarzın": kendi mesajlarından yerelde çıkarılan üslup profili (AI anahtarı gerekmez)
   // AI anahtarı (Ayarlar → AI özellikleri): yalnız bu bilgisayardan değiştirilebilir; değer asla geri döndürülmez, yalnız maske
   route('GET', '/api/ai/key', () => {
@@ -855,11 +948,79 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     bus.log('info', lanEnabled ? `Telefondan erişim açıldı: ${lanAddresses().map((ip) => `http://${ip}:${port}`).join(', ')}` : 'Telefondan erişim kapatıldı');
     return lanInfo(true);
   });
+  // ---- yerel ML (ml/: sesli mesaj metni, anlamsal arama, çeviri) ----
+  registerMlRoutes(route, { store, media: registry, httpError: (st, msg) => new HttpError(st, msg) });
+
   route('GET', '/api/search', (req) => {
     const sp = new URL(req.url ?? '/', 'http://x').searchParams;
     const q = sp.get('q') ?? '';
     const limit = Math.max(1, Math.min(200, Number(sp.get('limit')) || 50));
     return q.trim() ? store.search(q, limit) : [];
+  });
+
+  // ---- Raporum (stats.ts) + Medya kütüphanesi (library.ts) + dosya kaydetme ----
+  route('GET', '/api/stats', async (req) => {
+    const sp = new URL(req.url ?? '/', 'http://x').searchParams;
+    const range = sp.get('range');
+    return getStats(store, range === 'year' || range === 'all' ? range : 'month', sp.get('at') ?? undefined, { fresh: sp.get('fresh') === '1' });
+  });
+  startLibraryIndexer(store);
+  route('GET', '/api/library', (req) => {
+    const sp = new URL(req.url ?? '/', 'http://x').searchParams;
+    return queryLibrary(store, {
+      kind: (sp.get('kind') || undefined) as LibQuery['kind'],
+      platform: sp.get('platform') || undefined,
+      chat: sp.get('chat') || undefined,
+      q: sp.get('q') || undefined,
+      before: sp.get('before') || undefined,
+      limit: Number(sp.get('limit')) || undefined,
+    });
+  });
+  route('GET', '/api/library/facets', () => libraryFacets(store));
+  // Masaüstü (WKWebView `download` özniteliğini yok sayar): arayüzün ürettiği dosya (rapor kartı PNG'si, kütüphaneden seçilenler)
+  // İndirilenler klasörüne yazılır ve Finder/Gezgin'de gösterilir. Yalnız bu bilgisayardan.
+  route('POST', '/api/downloads', (req, _s, _p, body) => {
+    localOnly(req);
+    const b = body as { name?: string; data?: string; reveal?: boolean };
+    const data = typeof b.data === 'string' ? Buffer.from(b.data.replace(/^data:[^,]*,/, ''), 'base64') : Buffer.alloc(0);
+    if (!data.length) throw new HttpError(400, 'Dosya boş');
+    if (data.length > 60_000_000) throw new HttpError(413, 'Dosya çok büyük');
+    const file = saveDownload(String(b.name ?? ''), data, { reveal: b.reveal !== false });
+    return { ok: true, name: path.basename(file) };
+  });
+
+  // ---- Kişi birleştirme (people.ts) ----
+  const people = new People(store);
+  people.start();
+  /** PeopleError → HTTP hatası */
+  const pe = <T>(fn: () => T): T => {
+    try {
+      return fn();
+    } catch (e) {
+      if (e instanceof PeopleError) throw new HttpError(e.status, e.message);
+      throw e;
+    }
+  };
+  route('GET', '/api/people', () => people.list());
+  route('GET', '/api/people/suggestions', () => people.listSuggestions());
+  route('POST', '/api/people', (_r, _s, _p, body) => {
+    const b = (body ?? {}) as { chatIds?: unknown; personId?: unknown; name?: unknown };
+    if (!Array.isArray(b.chatIds)) throw new HttpError(400, 'chatIds gerekli');
+    return pe(() => people.merge(b.chatIds as string[], { personId: typeof b.personId === 'string' ? b.personId : undefined, name: typeof b.name === 'string' ? b.name : undefined }));
+  });
+  route('POST', '/api/people/suggestions/merge-strong', () => ({ merged: people.mergeAllStrong() }));
+  route('POST', '/api/people/suggestions/:key/merge', (_r, _s, p) => pe(() => people.mergeSuggestion(dec(p.key))));
+  route('POST', '/api/people/suggestions/:key/dismiss', (_r, _s, p) => ({ ok: people.dismiss(dec(p.key)) }));
+  route('POST', '/api/people/:id', (_r, _s, p, body) => pe(() => people.update(dec(p.id), (body ?? {}) as { name?: unknown; note?: unknown })));
+  route('POST', '/api/people/:id/unlink', (_r, _s, p, body) => {
+    const chatId = (body as { chatId?: unknown } | undefined)?.chatId;
+    if (typeof chatId !== 'string') throw new HttpError(400, 'chatId gerekli');
+    return { person: pe(() => people.unlink(dec(p.id), chatId)) };
+  });
+  route('GET', '/api/people/:id/timeline', (req, _s, p) => {
+    const sp = new URL(req.url ?? '/', 'http://x').searchParams;
+    const before = Number(sp.get('before'));
+    return pe(() => people.timeline(dec(p.id), Number.isFinite(before) && before > 0 ? before : undefined, Number(sp.get('limit')) || 100));
   });
 
   // ---------- static (derlenmiş arayüz varsa) ----------
@@ -980,6 +1141,20 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     }
   };
   const server = http.createServer(onRequest);
+  // ---- pazaryeri gün sonu özeti bildirimi: dakikada bir, seçilen saatte günde bir kez (yalnız pazaryeri hesabı varsa) ----
+  const marketTimer = setInterval(() => {
+    try {
+      const d = checkDigest(store);
+      if (d) {
+        bus.emit({ type: 'market.digest', day: d.day, text: d.text });
+        bus.log('info', `Pazaryeri gün sonu özeti bildirildi (${d.summary.orders} sipariş)`);
+      }
+    } catch (e) {
+      bus.log('warn', `Gün sonu özeti: ${(e as Error).message}`);
+    }
+  }, 60_000);
+  marketTimer.unref();
+  server.on('close', () => clearInterval(marketTimer));
 
   // WebKit (Tauri) bağlantıyı yeniden kullanırken sunucu keep-alive'ı erken kapatırsa "Load failed" oluşur
   server.keepAliveTimeout = 120_000;
@@ -1112,6 +1287,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   }, 60_000);
   followTimer.unref();
   server.on('close', () => {
+    people.stop();
     unsub();
     if (batchTimer) clearTimeout(batchTimer);
     clearInterval(pingTimer);
@@ -1193,7 +1369,7 @@ function readJson(req: http.IncomingMessage): Promise<unknown> {
     req.setEncoding('utf8');
     req.on('data', (c) => {
       data += c;
-      if (data.length > (req.url?.includes('/send-file') ? 80_000_000 : 1_000_000)) {
+      if (data.length > (req.url?.includes('/send-file') || req.url?.startsWith('/api/downloads') ? 80_000_000 : 1_000_000)) {
         reject(new HttpError(413, 'İstek gövdesi çok büyük'));
         req.pause(); // bağlantıyı koparmak yerine 413 yanıtı yazılabilsin
       }

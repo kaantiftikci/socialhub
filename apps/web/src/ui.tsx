@@ -77,6 +77,15 @@ const PATHS: Record<string, ReactNode> = {
   eyeoff: (<><path d="M3 3l18 18" /><path d="M10.6 5.1A10 10 0 0 1 12 5c6 0 9.5 7 9.5 7a17 17 0 0 1-2.6 3.4M6.4 6.5A16 16 0 0 0 2.5 12S6 19 12 19a9.6 9.6 0 0 0 4.2-1" /><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" /></>),
   history: (<><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></>),
   users: (<><path d="M16 20v-1.2A3.8 3.8 0 0 0 12.2 15H7.8A3.8 3.8 0 0 0 4 18.8V20" /><circle cx="10" cy="8" r="3" /><path d="M20 20v-1.1a3.2 3.2 0 0 0-2.4-3.1" /><path d="M16.2 5.1a3 3 0 0 1 0 5.8" /></>),
+  // ---- Raporum / Medya kütüphanesi ----
+  pause: (<><rect x="6.5" y="5" width="3.6" height="14" rx="1.2" /><rect x="13.9" y="5" width="3.6" height="14" rx="1.2" /></>),
+  grid: (<><rect x="4" y="4" width="6.5" height="6.5" rx="1.5" /><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5" /><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5" /><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5" /></>),
+  list: (<><path d="M9 6h11M9 12h11M9 18h11" /><circle cx="4.8" cy="6" r="1" /><circle cx="4.8" cy="12" r="1" /><circle cx="4.8" cy="18" r="1" /></>),
+  folder: (<path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h4l2 2.2h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" />),
+  // ---- yerel AI: çeviri (A / 文), yazıya dökme (ses dalgası → satırlar), cihazdaki model (işlemci) ----
+  translate: (<><path d="M4 5.5h8M8 4v1.5M10.5 5.5c-.6 3.2-2.6 5.9-5.5 7.5M6.2 8.6c1 1.7 2.5 3.1 4.3 4" /><path d="M12.5 20l3.8-9 3.8 9M13.9 16.8h4.8" /></>),
+  transcript: (<><path d="M4 9v6M7 6.5v11M10 9.5v5" /><path d="M13.5 8h6.5M13.5 12h6.5M13.5 16h4" /></>),
+  cpu: (<><rect x="6.5" y="6.5" width="11" height="11" rx="2" /><rect x="9.5" y="9.5" width="5" height="5" rx="1" /><path d="M10 3.5v3M14 3.5v3M10 17.5v3M14 17.5v3M3.5 10h3M3.5 14h3M17.5 10h3M17.5 14h3" /></>),
 };
 
 /**

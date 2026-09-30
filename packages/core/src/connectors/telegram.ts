@@ -600,8 +600,10 @@ export class TelegramConnector extends BaseConnector {
         unread: liveSince ? undefined : d.unreadCount ?? 0,
         lastMessageAt: liveSince ? undefined : last?.date ? last.date * 1000 : undefined,
         lastPreview: liveSince ? undefined : last ? previewOf(last) : undefined,
+        // kişi birleştirme (people.ts): birebir sohbette @kullanıcı adı ve (rehberde paylaşılmışsa) telefon
+        handle: kind === 'direct' ? tgUserHandle(d.entity) : undefined,
         // archived:false da açıkça yazılır ki arşivden çıkarılan sohbet ana listeye dönsün (meta COALESCE ile korunur)
-        meta: { ...(existing?.meta ?? {}), archived },
+        meta: { ...(existing?.meta ?? {}), archived, ...(kind === 'direct' && tgUserPhone(d.entity) ? { phone: tgUserPhone(d.entity) } : {}) },
       });
       // boşluk: son mesaj yazılmadan ÖNCE ölçülür (yazılınca depodaki en büyük kimlik o olur, delik görünmez olurdu).
       // Kanal/süpergrupta kimlikler sohbete özel ve ardışık: yalnız bir sonraki kimlikse boşluk yok.
@@ -1025,4 +1027,15 @@ async function transcodeToMp3(input: Buffer): Promise<Buffer | undefined> {
     fs.rmSync(tmp + '.ogg', { force: true });
     fs.rmSync(tmp + '.mp3', { force: true });
   }
+}
+
+/** Telegram kullanıcısının @kullanıcı adı ya da (yoksa) +telefonu — kişi birleştirme için sohbet tanıtıcısı */
+function tgUserHandle(e: unknown): string | undefined {
+  if (!(e instanceof Api.User) || e.bot || e.self) return undefined;
+  if (e.username) return '@' + e.username;
+  return tgUserPhone(e);
+}
+function tgUserPhone(e: unknown): string | undefined {
+  if (!(e instanceof Api.User) || e.bot || e.self || !e.phone) return undefined;
+  return '+' + String(e.phone).replace(/\D/g, '');
 }

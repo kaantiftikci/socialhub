@@ -138,12 +138,18 @@ export type CoreEvent =
   | { type: 'messages.read'; chatId: string; before: number }
   | { type: 'chat.followup'; chat: Chat }
   | { type: 'scheduled.update' }
+  /** Kişi birleştirme: kişiler ya da öneriler değişti (people-store yeniden çeker) */
+  | { type: 'people.update' }
   | { type: 'events.update' }
   | { type: 'event.reminder'; event: CalEvent }
+  | { type: 'market.digest'; day: string; text: string }
   | { type: 'scheduled.missed'; item: { id: string; chatId: string; text: string; at: number; missed?: { reason: string; at: number } }; chatName: string }
   | { type: 'login.frame'; accountId: string; data: string; width: number; height: number; host: string }
   | { type: 'login.start'; accountId: string }
   | { type: 'login.end'; accountId: string }
+  /** Yerel ML (ml-client.ts): model/dizin durumu değişti; sesli mesaj metni geldi */
+  | { type: 'ml.status' }
+  | { type: 'transcript.update'; chatId: string; messageId: string; transcript: import('./ml-api').Transcript }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; text: string };
 
 /** Mivelo içi giriş ekranına girdi (çekirdek LoginInput ile aynı) */

@@ -88,6 +88,9 @@ export class EventBatcher {
       case 'chat.typing':
         this.replace(`t:${ev.chatId}`, ev);
         return;
+      case 'people.update':
+        this.replace('people', ev);
+        return;
       case 'messages.read':
         this.readChats.add(ev.chatId);
         this.events.push(ev);

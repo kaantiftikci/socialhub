@@ -1,4 +1,7 @@
 import { FeedbackButton } from './Feedback';
+import { PersonChannelBar, SendVia, useUnifiedTimeline } from './UnifiedTimeline';
+import { peopleOnEvent, refreshPeople } from './people-store';
+import { PersonLogos } from './PersonPanel';
 import { LoginView, pushLoginEvent } from './LoginView';
 import { UpdateBanner } from './UpdateBanner';
 import { PermissionBanner } from './PermissionBanner';
@@ -7,6 +10,7 @@ import { clearOpening as clearOpeningFor, markOpening, useLoginOpening } from '.
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { applyAccount, applyRead, mergeAccountsSnapshot, mergeChatsSnapshot, mergeFresh, newTouched, type Touched } from './sync-merge';
 import { api, connectEvents } from './api';
+import { pushMlEvent } from './ml-client';
 import { MAIL_LOGIN_WHO, PLATFORMS, ORDER_Q_PLATFORMS, isOrderPage, questionOrderRef, shopKind, shopPending, shopTabOf, type Account, type Chat, type ChatFlags, type CoreEvent, type Message, type Platform, type ShopTab, DEFAULT_TAGS } from './types';
 import { Avatar, Chip, Icon, IconText, stripLeadIcon, Logo, Resizer, SyncBar, syncPercent, Tag, ago, fmtTime, loadPaneSizes, useClosing } from './ui';
 import { Conversation, REACT_TEXT, refreshScheduled, startScheduledSends, statusIcon } from './Conversation';
@@ -15,11 +19,15 @@ import { Focus } from './Focus';
 import { onThemeChange, resolvedTheme, setThemePref } from './theme';
 import { SettingsModal } from './Settings';
 import { SearchPalette } from './SearchPalette';
+import { QuickReplyStack, QuickSend, rememberBackground, takeBackground, useRevealOnFocus } from './QuickSend';
+import { MarketTodayCard } from './MarketSummary';
 import { CalendarView, ymd } from './CalendarView';
-import { MOD_KEY, isTauri, notify as desktopNotify, requestWebNotify, onDesktopEvent, playPing, setBadge, windowFocused, coreInfo, playNotifySound, platformNotifyOn, soundsEnabled, bannersEnabled, groupsNotify, unlockAudio } from './desktop';
+import { WrappedView } from './Wrapped';
+import { MediaLibrary } from './MediaLibrary';
+import { hideWindow, MOD_KEY, isTauri, notify as desktopNotify, requestWebNotify, onDesktopEvent, playPing, setBadge, windowFocused, coreInfo, playNotifySound, platformNotifyOn, soundsEnabled, bannersEnabled, groupsNotify, unlockAudio } from './desktop';
 import { DEMO_OFFLINE, PROFILE_NAME, PROFILE_PHOTO, STATIC_DEMO, applyProfile, setFallbackProfileName } from './profile';
 
-export type View = 'inbox' | 'focus' | 'calendar' | 'archived' | 'muted' | 'hidden';
+export type View = 'inbox' | 'focus' | 'calendar' | 'wrapped' | 'media' | 'archived' | 'muted' | 'hidden';
 const FLAG_VIEWS: Array<{ view: View; flag: 'archived' | 'muted' | 'hidden'; label: string; icon: string; empty: string }> = [
   { view: 'archived', flag: 'archived', label: 'Arşiv', icon: 'archive', empty: 'Arşivlenmiş sohbet yok. Sağ paneldeki Eylemler’den arşivleyebilirsin.' },
   { view: 'muted', flag: 'muted', label: 'Sessiz', icon: 'mute', empty: 'Sessize alınmış sohbet yok.' },
@@ -278,9 +286,14 @@ export default function App() {
   const inToastSeq = useRef(0);
   const pushInToast = useCallback((chat: Chat, text: string) => {
     const id = ++inToastSeq.current;
-    setInToasts((prev) => [...prev.slice(-2), { id, chat, text }]);
-    window.setTimeout(() => setInToasts((prev) => prev.filter((t) => t.id !== id)), 6000);
+    // aynı sohbetin eski kartı yenisiyle değişir; kaybolma zamanlayıcısı kartta (üzerine gelince / yazarken durur)
+    setInToasts((prev) => [...prev.filter((t) => t.chat.id !== chat.id).slice(-2), { id, chat, text }]);
   }, []);
+  // ---- hızlı gönder (⌘⇧K) + bildirimden hızlı yanıt (QuickSend.tsx) ----
+  const [quickSend, setQuickSend] = useState<{ chatId?: string; text?: string } | null>(null);
+  const quickOpenRef = useRef(false);
+  quickOpenRef.current = !!quickSend;
+  const [settingsTab, setSettingsTab] = useState<'notify' | 'ai'>('notify');
   const [menu, setMenu] = useState<{ x: number; y: number; account: Account; confirm?: boolean } | null>(null);
   const menuP = useClosing(menu);
   const connectP = useClosing(connectOpen || null);
@@ -328,6 +341,7 @@ export default function App() {
     if (refreshing.current) return refreshing.current;
     const p = refreshNow().finally(() => {
       refreshing.current = null;
+      void refreshPeople(); // kişi birleştirme: sohbet listesi tazelenince kişiler/öneriler de
     });
     refreshing.current = p;
     return p;
@@ -490,6 +504,8 @@ export default function App() {
     };
     const onEvent = (ev: CoreEvent) => {
       if (pushLoginEvent(ev)) return; // Mivelo içi giriş ekranı kareleri App durumundan geçmez
+      if (pushMlEvent(ev)) return; // yerel AI (model durumu, sesli mesaj metni): ml-client.ts kendi deposunda
+      peopleOnEvent(ev); // kişi birleştirme: people.update, birleşik zaman çizelgesi
       switch (ev.type) {
         case 'account.status':
           touched.current?.acc.add(ev.account.id);
@@ -593,6 +609,14 @@ export default function App() {
         case 'scheduled.update':
           refreshScheduled();
           break;
+        case 'market.digest':
+          // pazaryeri gün sonu özeti (çekirdek, seçilen saatte günde bir kez)
+          void windowFocused().then((focused) => {
+            if (focused) notify(ev.text);
+            else if (bannersEnabled()) desktopNotify('Mivelo · Gün sonu', ev.text.replace(/^Gün sonu özeti:\s*/, ''));
+            if (soundsEnabled()) playPing(undefined, true);
+          });
+          break;
         case 'scheduled.missed':
           notify(`Zamanlanmış mesaj gönderilmedi (${ev.chatName || 'sohbet'}): ${ev.item.missed?.reason ?? ''} — “${ev.item.text.slice(0, 60)}”`, true);
           break;
@@ -627,7 +651,11 @@ export default function App() {
                 const body = (ev.message.text || ev.message.attachments?.[0]?.name || 'Yeni mesaj').slice(0, 140);
                 // pencere öndeyse sistem bildirimi yerine uygulama içi kart (hangi platformdan geldiği belli olsun)
                 if (focused) pushInToast(chat, body);
-                else if (bannersEnabled()) desktopNotify(chat.name, stripLeadIcon(body));
+                else if (bannersEnabled()) {
+                  // pencere öne gelince (ya da web bildirimine tıklanınca) bu mesajın hızlı yanıt kartı çıkar
+                  rememberBackground(chat, body);
+                  desktopNotify(chat.name, stripLeadIcon(body), false, { tag: chat.id, onClick: () => takeBackground(chat.id).forEach((b) => pushInToast(b.chat, b.text)) });
+                }
                 // genel anahtar + uygulama zil sesi + ses düzeyleri
                 playNotifySound(chat.platform);
               }
@@ -958,12 +986,47 @@ export default function App() {
     };
   }, []);
 
+  useRevealOnFocus(pushInToast, () => visibleChatRef.current);
+  // küresel ⌘⇧K (kabuk: pencereyi öne alır + "quick-send"); pencere zaten öndeyken ("toggle") palet açıksa kapanır ve gizlenir
+  useEffect(() => {
+    let un = () => undefined as void;
+    let cancelled = false;
+    void onDesktopEvent('quick-send', (mode) => {
+      if (mode === 'toggle' && quickOpenRef.current) {
+        setQuickSend(null);
+        void hideWindow();
+      } else {
+        setPaletteOpen(false);
+        setQuickSend((q) => q ?? {});
+      }
+    }).then((u) => (cancelled ? u() : (un = u)));
+    const openSettings = (e: Event) => {
+      const tab = (e as CustomEvent<string>).detail;
+      setSettingsTab(tab === 'ai' ? 'ai' : 'notify');
+      setSettingsOpen(true);
+    };
+    window.addEventListener('mivelo-open-settings', openSettings);
+    return () => {
+      cancelled = true;
+      un();
+      window.removeEventListener('mivelo-open-settings', openSettings);
+    };
+  }, []);
+
   // ---- klavye kısayolları ----
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const typing = !!target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
-        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.code === 'KeyK') {
+        // hızlı gönder paleti (masaüstünde küresel kısayol kabuktan "quick-send" olayıyla gelir; iki kez çevrilmesin)
+        e.preventDefault();
+        if (isTauri) return;
+        setPaletteOpen(false);
+        setQuickSend((q) => (q ? null : {}));
+        return;
+      }
+        if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'k') {
         // genel arama penceresi: tüm uygulamalar, görünüm/filtreden bağımsız
         e.preventDefault();
         setPaletteOpen((o) => !o);
@@ -1179,6 +1242,8 @@ export default function App() {
   };
 
   const current = selected ? chats.get(selected) : undefined;
+  // kişi birleştirme: sohbet bir kişiye bağlıysa "Tüm kanallar" birleşik zaman çizelgesi (UnifiedTimeline.tsx)
+  const tl = useUnifiedTimeline(current, chats);
   const connectedPlatforms = [...new Set(accounts.filter((a) => a.status !== 'disconnected').map((a) => a.platform))];
   const goInbox = (f: Filter = 'all') => {
     setView('inbox');
@@ -1221,6 +1286,8 @@ export default function App() {
           <NavItem icon="sparkle" label="Odak" badge="AI" count={focusWaiting.length} active={view === 'focus'} onClick={() => setView('focus')} />
           <NavItem icon="archive" label="Okunmamış" count={totals.unread} active={view === 'inbox' && filter === 'unread' && !platformFilter && !tagFilter} onClick={() => goInbox('unread')} />
           <NavItem icon="calendar" label="Takvim" title="Mivelo takvimi: mesajlardan eklenenler ve kendi etkinliklerin" count={todayEvents} active={view === 'calendar'} onClick={() => setView('calendar')} />
+          <NavItem icon="chart" label="Raporum" title="Aylık ve yıllık iletişim raporun (yalnız bu cihazda hesaplanır)" count={0} active={view === 'wrapped'} onClick={() => setView('wrapped')} />
+          <NavItem icon="image" label="Medya" title="Tüm uygulamalardan fotoğraf, video, dosya ve bağlantılar" count={0} active={view === 'media'} onClick={() => setView('media')} />
           {FLAG_VIEWS.filter((f) => f.view === 'archived' || flagged[f.flag].length > 0).map((f) => (
             <NavItem key={f.view} icon={f.icon} label={f.label} count={flagged[f.flag].length} active={view === f.view} onClick={() => setView(f.view)} />
           ))}
@@ -1280,7 +1347,7 @@ export default function App() {
           >
             <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={16} />
           </button>
-          <button className="btn ghost sm icon b" aria-label="Ayarlar" title="Ayarlar" onClick={() => setSettingsOpen(!settingsOpen)}>
+          <button className="btn ghost sm icon b" aria-label="Ayarlar" title="Ayarlar" onClick={() => (setSettingsTab('notify'), setSettingsOpen(!settingsOpen))}>
             <Icon name="sliders" size={16} />
           </button>
         </div>
@@ -1293,7 +1360,20 @@ export default function App() {
         </div>
       )}
       <div className="surface">
-        {view === 'calendar' ? (
+        {view === 'wrapped' ? (
+          <WrappedView
+            notify={notify}
+            onMenu={isMobile ? () => setNavOpen(true) : undefined}
+            onOpenChat={(chatId) => (setView('inbox'), setSelected(chatId), setFocusMsg(null))}
+            onWaiting={() => goInbox('waiting')}
+          />
+        ) : view === 'media' ? (
+          <MediaLibrary
+            notify={notify}
+            onMenu={isMobile ? () => setNavOpen(true) : undefined}
+            onOpenMessage={(chatId, id, ts) => (setView('inbox'), setSelected(chatId), setFocusMsg({ chatId, id, ts }))}
+          />
+        ) : view === 'calendar' ? (
           <CalendarView
             chats={chats}
             notify={notify}
@@ -1366,6 +1446,7 @@ export default function App() {
                     </button>
                   </div>
                 )}
+                {view === 'inbox' && isShop && <MarketTodayCard platform={platformFilter!} />}
                 {view === 'inbox' && (
                   <div className={`tabs ${isShop ? `shop n${ORDER_Q_PLATFORMS.has(platformFilter!) || shopCounts.total.orderQ > 0 ? 4 : 3}` : ''}`} role="tablist" aria-label={platformFilter === 'imessage' ? 'Mesajlar klasörleri' : 'Filtreler'}>
                     {/* iMessage: Okunmamış yerine Mesajlar uygulamasındaki klasörler */}
@@ -1522,8 +1603,12 @@ export default function App() {
             {current ? (
               <Conversation
                 key={current.id}
-                chat={current}
-                messages={currentMessages}
+                chat={tl.on && tl.sendChat ? tl.sendChat : current}
+                messages={tl.on ? tl.messages : currentMessages}
+                timeline={tl.on ? tl.info : undefined}
+                headerExtra={<PersonChannelBar tl={tl} current={current} onSelectChat={(id) => (chats.has(id) ? setSelected(id) : notify('Bu sohbet listede yüklü değil', true))} />}
+                composerExtra={<SendVia tl={tl} />}
+                onSelectChat={(id) => (chats.has(id) ? setSelected(id) : notify('Bu sohbet listede yüklü değil', true))}
                 ai={ai}
                 notify={notify}
                 onTags={(tags) => api.setTags(current.id, tags).then((c) => setChats((p) => new Map(p).set(c.id, c))).catch((e) => notify(e.message, true))}
@@ -1537,9 +1622,9 @@ export default function App() {
                 typing={typing[current.id] ? typing[current.id].name ?? '' : null}
                 focusMessageId={focusMsg?.chatId === current.id ? focusMsg.id : undefined}
                 onFocusDone={() => setFocusMsg(null)}
-                olderBusy={olderBusy}
-                hasOlder={noMoreOlder !== current.id}
-                onLoadOlder={async () => {
+                olderBusy={tl.on ? tl.busy : olderBusy}
+                hasOlder={tl.on ? tl.hasMore : noMoreOlder !== current.id}
+                onLoadOlder={tl.on ? tl.loadOlder : async () => {
                   const oldest = currentMessages[0];
                   if (olderBusy) return;
                   setOlderBusy(true);
@@ -1639,6 +1724,7 @@ export default function App() {
           notify={notify}
           lan={lan}
           setLan={setLanState}
+          initialTab={settingsTab}
         />
       )}
       {alertPop &&
@@ -1774,46 +1860,13 @@ export default function App() {
           </div>
         ) : null;
       })()}
-      {inToasts.length > 0 && (
-        <div className="msgtoasts" aria-live="polite">
-          {inToasts.map((t) => (
-            <button
-              key={t.id}
-              className="msgtoast b"
-              onClick={() => {
-                setInToasts((prev) => prev.filter((x) => x.id !== t.id));
-                setView('inbox');
-                setSelected(t.chat.id);
-              }}
-            >
-              <span className="avwrap">
-                <Avatar name={t.chat.name} size={34} url={t.chat.avatarUrl} />
-                <Chip platform={t.chat.platform} size={16} ring="var(--card)" />
-              </span>
-              <span className="body">
-                <span className="top">
-                  <b>{t.chat.name}</b>
-                  <span className="plat">{PLATFORMS[t.chat.platform].name}</span>
-                </span>
-                <span className="txt">
-                  <IconText text={t.text} size={12} />
-                </span>
-              </span>
-              <span
-                className="x"
-                role="button"
-                aria-label="Kapat"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setInToasts((prev) => prev.filter((x) => x.id !== t.id));
-                }}
-              >
-                <Icon name="x" size={12} sw={2} />
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
+      <QuickReplyStack
+        toasts={inToasts}
+        onDismiss={(id) => setInToasts((prev) => prev.filter((x) => x.id !== id))}
+        onOpen={(c) => (setView('inbox'), setSelected(c.id))}
+        onEdit={(chatId, text) => setQuickSend({ chatId, text })}
+      />
+      {quickSend && <QuickSend chats={allChats} initial={quickSend} onClose={() => setQuickSend(null)} onOpenChat={(id) => (setView('inbox'), setSelected(id), setFocusMsg(null))} />}
     </div>
   );
 }
@@ -2150,6 +2203,7 @@ const ChatRow = memo(function ChatRow({
             </span>
           )}
           <span className="name">{isMail && mailSender ? mailSender : chat.name}</span>
+          <PersonLogos chatId={chat.id} platform={chat.platform} />
           {chat.tags.slice(0, 2).map((t) => (
             <Tag key={t} name={t} mini />
           ))}

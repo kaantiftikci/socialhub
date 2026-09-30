@@ -170,9 +170,26 @@ export async function testNotify(): Promise<boolean> {
   return true;
 }
 
-export async function notify(title: string, body: string, force = false): Promise<void> {
+/**
+ * Sistem bildirimi. Tarayıcıda `onClick` bildirime tıklanınca çalışır (pencere öne alınır; Mivelo o sohbetin hızlı yanıt kartını
+ * açar). Tauri'de bildirim eklentisi (2.4) masaüstünde tıklama/eylem olayı VERMEZ (eylemler yalnız mobil): orada yerine pencere
+ * öne gelince son bildirimin hızlı yanıt kartı gösterilir (QuickSend.tsx).
+ */
+export async function notify(title: string, body: string, force = false, opts: { onClick?: () => void; tag?: string } = {}): Promise<void> {
   if (!isTauri) {
-    if ('Notification' in window && Notification.permission === 'granted' && (force || !document.hasFocus())) new Notification(title, { body });
+    if ('Notification' in window && Notification.permission === 'granted' && (force || !document.hasFocus())) {
+      const n = new Notification(title, { body, ...(opts.tag ? { tag: opts.tag } : {}) });
+      if (opts.onClick)
+        n.onclick = () => {
+          try {
+            window.focus();
+          } catch {
+            /* yok */
+          }
+          n.close();
+          opts.onClick?.();
+        };
+    }
     return;
   }
   try {
@@ -184,6 +201,17 @@ export async function notify(title: string, body: string, force = false): Promis
     if (permissionOk) n.sendNotification({ title, body });
   } catch {
     /* yok say */
+  }
+}
+
+/** Masaüstü: pencereyi gizle (⌘⇧K ikinci kez basılınca hızlı gönder kapanır ve Mivelo arka plana döner) */
+export async function hideWindow(): Promise<void> {
+  if (!isTauri) return;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('hide_window');
+  } catch {
+    /* eski kabuk */
   }
 }
 

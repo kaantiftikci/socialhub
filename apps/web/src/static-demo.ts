@@ -7,8 +7,11 @@ import { authSaveAccounts } from './auth-api';
 import { demoAsset } from './demo-asset';
 import { DEMO_OFFLINE } from './profile';
 import { DEMO_APPS, SCRIPTS } from './demo-scripts';
-import { DEMO_STYLE, demoDraft } from './demo-ai';
+import { DEMO_STYLE, demoDraft, demoQuestionDraft } from './demo-ai';
+import { demoDigestGet, demoDigestSet, demoMarketSummary } from './demo-market';
 import { STATIC_DEMO } from './profile';
+import { demoLibrary, demoLibraryFacets, demoStats } from './demo-insights';
+import type { LibQuery, StatsRange } from './insights-types';
 
 /**
  * Herkese açık site. Uygulama listesi kullanıcının oturumunda saklanır;
@@ -286,7 +289,7 @@ function seedAccount(acc: Account, now = Date.now()): void {
           const m = { ...(s.summary?.length ? { summary: s.summary } : {}), ...(s.note ? { note: s.note } : {}), ...(order ? { order } : {}), ...(question ? { question } : {}) };
           return Object.keys(m).length ? m : undefined;
         })(),
-        participants: s.handle && PLATFORMS[acc.platform].category === 'mail' ? [{ id: s.handle, name: s.handle.split('@')[0] ?? s.handle, handle: s.handle, avatarUrl: demoAsset(`avatars/${s.avatar}`) }] : undefined,
+        participants: s.handle && PLATFORMS[acc.platform].category === 'mail' ? [{ id: s.handle, name: s.contact ?? s.handle.split('@')[0] ?? s.handle, handle: s.handle, avatarUrl: demoAsset(`avatars/${s.avatar}`) }] : undefined,
       });
     });
     // platformun kendi arşivi (WhatsApp "Arşivlenmiş", Telegram arşiv klasörü): en eski, okunmuş 2 birebir sohbet
@@ -684,6 +687,14 @@ export const staticApi = {
   },
   moreChats: async () => ({ added: 0, supported: false }),
   loadHistory: async () => undefined,
+  // ---- pazaryeri gün sonu özeti + soru yanıtı AI taslağı (demo-market.ts, demo-ai.ts; model çağrısı yok) ----
+  marketSummary: async (day?: string, platform?: string | null) => demoMarketSummary(chats, accounts, freshUser, day, platform),
+  marketDigest: async () => demoDigestGet(),
+  setMarketDigest: async (s: { enabled?: boolean; time?: string }) => demoDigestSet(s),
+  questionDraft: async (chatId: string) => {
+    await new Promise((r) => setTimeout(r, 700 + Math.random() * 500));
+    return demoQuestionDraft(chatOf(chatId), messages.filter((m) => m.chatId === chatId));
+  },
   // Örnek AI: gerçek model yok; sohbete özel taslak/özet/aksiyon (demo-ai.ts). "Düşünme" süresi gerçekçi olsun
   draft: async (chatId: string, tone?: string): Promise<DraftResult> => {
     await new Promise((r) => setTimeout(r, 650 + Math.random() * 450));
@@ -773,6 +784,11 @@ export const staticApi = {
       .slice(0, limit)
       .map((message) => ({ message, chat: chatOf(message.chatId) }));
   },
+  // ---- Raporum + Medya kütüphanesi (demo-insights.ts; yeni üye örnek veri görmez) ----
+  stats: async (range: StatsRange, at?: string) => demoStats({ chats, messages, fresh: freshUser }, range, at),
+  library: async (q: LibQuery) => demoLibrary({ chats, messages, fresh: freshUser }, q),
+  libraryFacets: async () => demoLibraryFacets({ chats, messages, fresh: freshUser }),
+  saveDownload: async (_name: string, _data: string): Promise<{ ok: boolean; name: string }> => ({ ok: false, name: '' }),
 };
 
 export function connectStaticEvents(onEvent: (ev: CoreEvent) => void, onState?: (open: boolean) => void): () => void {
@@ -783,3 +799,11 @@ export function connectStaticEvents(onEvent: (ev: CoreEvent) => void, onState?: 
     onState?.(false);
   };
 }
+
+/** Kişi birleştirme demosu (demo-people.ts): örnek sohbet/mesajlara salt okunur erişim + olay yayını */
+export const demoPeopleSource = {
+  chats: (): Chat[] => chats,
+  messages: (): Message[] => messages,
+  fresh: (): boolean => freshUser,
+  emit: (ev: CoreEvent) => emit(ev),
+};

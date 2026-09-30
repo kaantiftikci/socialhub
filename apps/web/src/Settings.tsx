@@ -3,6 +3,7 @@ import { api } from './api';
 import { PLATFORMS, type Account } from './types';
 import { Avatar, Chip, Icon, PasswordInput } from './ui';
 import { SOUNDS, getPlatformSound, getPlatformTone, getPlatformVolume, getVolume, groupsNotify, bannersEnabled, soundsEnabled, playNotifySound, playPing, setBannersEnabled, setGroupsNotify, setPlatformSound, setPlatformTone, setPlatformVolume, setSoundsEnabled, setVolume, webNotifyPermission, requestWebNotify, testNotify } from './desktop';
+import { MarketDigestSettings } from './MarketSummary';
 import { setAiPrefs, useAiPrefs } from './ai-prefs';
 import { DEMO_OFFLINE, PROFILE_NAME, STATIC_DEMO, applyProfile } from './profile';
 import { wipeUserLocalData } from './demo-isolation';
@@ -10,9 +11,10 @@ import { leaveDemoPanel } from './demo-session';
 import { isTauri } from './desktop';
 import { signOut } from './LicenseGate';
 import { PermissionSettings } from './Onboarding';
+import { LocalAiPane } from './LocalAiPane';
 import type { LicenseStatus, Profile } from './api';
 
-type Tab = 'profile' | 'notify' | 'apps' | 'ai' | 'phone' | 'perms' | 'account' | 'logout' | 'reset';
+type Tab = 'profile' | 'notify' | 'apps' | 'ai' | 'localai' | 'phone' | 'perms' | 'account' | 'logout' | 'reset';
 type Lan = { enabled: boolean; urls: string[]; qr?: string } | null;
 
 /** Açma/kapama anahtarı (checkbox yerine; tüm ayarlarda aynı görünüm) */
@@ -90,6 +92,7 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
     ['notify', 'Bildirimler', 'bell'],
     ['apps', 'Uygulama sesleri', 'volume'],
     ['ai', 'AI özellikleri', 'sparkle'],
+    ['localai', 'Yerel AI modelleri', 'cpu'],
     ['phone', 'Telefondan erişim', 'link'],
     // masaüstü: ilk kurulumdaki izinler (verilmeyenler buradan yeniden istenir)
     ...(isTauri ? ([['perms', 'İzinler', 'shield']] as Array<[Tab, string, string]>) : []),
@@ -166,6 +169,8 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
               <Row title="Grup ve kanal bildirimleri" hint="Kapalıyken yalnız birebir sohbetler bildirir">
                 <Switch label="Grup ve kanal bildirimleri" on={grpOn} onChange={(v) => (setGroupsNotify(v), setGrpOn(v))} />
               </Row>
+              {/* pazaryeri gün sonu özeti (MarketSummary.tsx): yalnız pazaryeri hesabı bağlıysa */}
+              {accounts.some((a) => PLATFORMS[a.platform]?.category === 'shop') && <MarketDigestSettings notify={notify} />}
               <button type="button" className="set-link b" onClick={() => setTab('apps')}>
                 Uygulama başına zil sesi ve ses düzeyi
                 <span style={{ display: 'inline-flex', transform: 'rotate(-90deg)' }}>
@@ -254,6 +259,8 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
               <p className="set-note">Sohbet içeriği yalnız sen bir AI özelliğini kullandığında, o sohbetin son mesajlarıyla Anthropic'e gider.{!ai && ' Özellikleri kullanmak için önce anahtar ekle.'}</p>
             </>
           )}
+
+          {tab === 'localai' && <LocalAiPane notify={notify} />}
 
           {tab === 'perms' && <PermissionSettings />}
 

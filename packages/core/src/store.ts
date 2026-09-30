@@ -2,6 +2,7 @@ import { bus } from './bus.js';
 import Database from 'better-sqlite3-multiple-ciphers';
 import fs from 'node:fs';
 import { DB_PATH } from './config.js';
+import { ML_SCHEMA, searchTranscripts } from './ml/ml-store.js';
 import { DELETED_TEXT, type Account, type CalEvent, type Chat, type ChatFlags, type FollowUp, type Message, type Platform, type Reaction } from './model.js';
 
 /**
@@ -277,6 +278,30 @@ export class Store {
       WHERE platform IN ('messenger','x','instagram','linkedin','slack','tiktok')
         AND EXISTS (SELECT 1 FROM messages m WHERE m.chat_id = chats.id)
         AND last_message_at > (SELECT MAX(ts) FROM messages m WHERE m.chat_id = chats.id) + 600000`);
+    // ---- Kişi birleştirme (people.ts) ----
+    // kişi ↔ birebir sohbetler; sohbet silinince bağ da gider (CASCADE), iki sohbetten azı kalan kişi prunePeople ile silinir.
+    // people_dismissed: reddedilen öneriler sohbet çifti olarak (a < b) kalıcı
+    this.db.exec(`CREATE TABLE IF NOT EXISTS people (id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', avatar_chat TEXT, note TEXT, created_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS person_chats (chat_id TEXT PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE, person_id TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE, linked_at INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS person_chats_person ON person_chats(person_id);
+      CREATE TABLE IF NOT EXISTS people_dismissed (a TEXT NOT NULL, b TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (a, b));`);
+    // ---- yerel ML (ml/ml-store.ts): sesli mesaj metni + FTS, gömmeler, çeviriler; messages(id)'ye CASCADE bağlı ----
+    this.db.exec(ML_SCHEMA);
+  }
+
+  /** Yerel ML tabloları (ml/ml-store.ts) için hazır sorgu */
+  mlStmt(text: string): Database.Statement {
+    return this.stmt(text);
+  }
+
+  /** Kişi birleştirme (people.ts) için hazır sorgu: kişi tabloları bu modülün dışında yönetilir */
+  sql(text: string): Database.Statement {
+    return this.stmt(text);
+  }
+
+  /** İki sohbetten azı kalan kişileri sil (hesap kaldırma, sohbet birleştirme/silme sonrası; bir kişi = en az iki sohbet) */
+  prunePeople(): number {
+    return this.stmt('DELETE FROM people WHERE (SELECT COUNT(*) FROM person_chats pc WHERE pc.person_id = people.id) < 2').run().changes;
   }
 
   flag(key: string): boolean {
@@ -380,7 +405,7 @@ export class Store {
   /** "Tüm verileri sil": hesaplar kaldırıldıktan sonra kalan her şey (etkinlikler, meta, sahipsiz sohbet/mesaj) */
   wipeAll(): void {
     this.db.transaction(() => {
-      for (const t of ['messages', 'chat_participants', 'chats', 'accounts', 'events', 'meta']) this.db.prepare(`DELETE FROM ${t}`).run();
+      for (const t of ['messages', 'person_chats', 'people', 'people_dismissed', 'chat_participants', 'chats', 'accounts', 'events', 'meta']) this.db.prepare(`DELETE FROM ${t}`).run();
       this.db.exec("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')");
     })();
     this.purged.clear();
@@ -403,6 +428,9 @@ export class Store {
       this.stmt(
         `DELETE FROM meta WHERE length(key) > length(@id) + 1 AND substr(key, -length(@id) - 1) = ':' || @id AND key <> 'removing:' || @id`,
       ).run({ id });
+      // kişi birleştirme: sohbet bağları CASCADE ile gitti; tek sohbeti kalan kişi ve hesabın reddedilmiş önerileri de silinir
+      this.prunePeople();
+      this.stmt(`DELETE FROM people_dismissed WHERE substr(a, 1, length(@id) + 1) = @id || '/' OR substr(b, 1, length(@id) + 1) = @id || '/'`).run({ id });
     })();
   }
 
@@ -471,7 +499,10 @@ export class Store {
           .stmt('UPDATE chats SET unread = unread + ?, last_message_at = MAX(last_message_at, ?), last_preview = CASE WHEN ? > last_message_at THEN ? ELSE last_preview END, avatar_url = COALESCE(avatar_url, ?) WHERE id = ?')
           .run(from.unread, from.lastMessageAt, from.lastMessageAt, from.lastPreview, from.avatarUrl ?? null, toId);
       }
+      // kişi birleştirme: kaynağın kişi bağı hedefe taşınır (hedef zaten bir kişideyse kaynağınki düşer)
+      this.stmt('UPDATE OR IGNORE person_chats SET chat_id = ? WHERE chat_id = ?').run(toId, fromId);
       this.stmt('DELETE FROM chats WHERE id = ?').run(fromId);
+      this.prunePeople();
     })();
   }
 
@@ -895,7 +926,7 @@ export class Store {
     return rows.map((r) => r.text);
   }
 
-  search(q: string, limit = 50): Array<{ message: Message; chat: Chat }> {
+  search(q: string, limit = 50): Array<{ message: Message; chat: Chat; transcript?: string }> {
     const rows = this
       .stmt(
         // ts dizininde yeniden eskiye yürünür, her satır FTS eşleşme kümesinde aranır; limit dolunca durur (eskiden tüm eşleşmeler
@@ -919,9 +950,21 @@ export class Store {
       rows.push(...extra);
       rows.sort((a, b) => b.ts - a.ts);
     }
+    // yerel ML: sesli mesaj metinlerinde de ara (ayrı FTS tablosu; sonuçta mesaj + metni)
+    const spoken = new Map(searchTranscripts(this, ftsQuery(q), limit).map((t) => [t.messageId, t.text]));
+    if (spoken.size) {
+      const seen = new Set(rows.map((m) => m.id));
+      for (const id of spoken.keys()) {
+        const m = seen.has(id) ? undefined : this.getMessage(id);
+        if (m) rows.push(m);
+      }
+      rows.sort((a, b) => b.ts - a.ts);
+      rows.length = Math.min(rows.length, limit);
+    }
     return rows.flatMap((message) => {
       const chat = this.getChat(message.chatId);
-      return chat && !this.removing.has(chat.accountId) ? [{ message, chat }] : [];
+      const transcript = spoken.get(message.id);
+      return chat && !this.removing.has(chat.accountId) ? [transcript ? { message, chat, transcript } : { message, chat }] : [];
     });
   }
 
@@ -1001,6 +1044,44 @@ export class Store {
       messages: one('SELECT COUNT(*) AS n FROM messages'),
       unread: one('SELECT COALESCE(SUM(unread),0) AS n FROM chats'),
     };
+  }
+
+  // ---- pazaryeri gün sonu özeti + soru yanıtı AI taslağı (market-summary.ts, question-draft.ts) ----
+  /** Hesabın sipariş/soru taşıyan sohbetleri: yalnız kimlik + meta (hesap dizininden; katılımcı/son durum okunmaz) */
+  marketMeta(accountId: string): Array<{ id: string; platform: Platform; meta: string; lastMessageAt: number }> {
+    return (
+      this.stmt("SELECT id, platform, meta, last_message_at AS lastMessageAt FROM chats WHERE account_id = ? AND meta IS NOT NULL AND (meta LIKE '%\"order\"%' OR meta LIKE '%\"question\"%')").all(accountId) as Array<{
+        id: string;
+        platform: Platform;
+        meta: string;
+        lastMessageAt: number;
+      }>
+    );
+  }
+  /**
+   * Aynı ürüne (ad ya da ürün kimliği) daha önce verilmiş cevaplar: soru (ilk gelen mesaj) → benim ilk gerçek yanıtım.
+   * Sistem satırları (📝 yerel not, 🚫 reddedilen, ⚠ raporlandı, ⏱ süresi doldu) yanıt sayılmaz.
+   */
+  productAnswers(accountId: string, key: { name?: string; id?: string }, excludeChatId: string, limit = 8): Array<{ question: string; answer: string }> {
+    const name = key.name?.trim() || null;
+    const id = key.id?.trim() || null;
+    if (!name && !id) return [];
+    const rows = this.stmt(
+      `SELECT id FROM chats WHERE account_id = ? AND id <> ? AND meta IS NOT NULL AND json_valid(meta) AND (
+        (? IS NOT NULL AND COALESCE(json_extract(meta, '$.question.productName'), json_extract(meta, '$.question.product.name')) = ?)
+        OR (? IS NOT NULL AND CAST(COALESCE(json_extract(meta, '$.question.productMainId'), json_extract(meta, '$.question.productId'), json_extract(meta, '$.question.product.sku'), json_extract(meta, '$.question.product.stockCode')) AS TEXT) = ?)
+      ) ORDER BY last_message_at DESC LIMIT 40`,
+    ).all(accountId, excludeChatId, name, name, id, id) as Array<{ id: string }>;
+    const msgs = this.stmt('SELECT from_me, text FROM messages WHERE chat_id = ? ORDER BY ts ASC, rowid ASC LIMIT 30');
+    const out: Array<{ question: string; answer: string }> = [];
+    for (const r of rows) {
+      const list = msgs.all(r.id) as Array<{ from_me: number; text: string }>;
+      const q = list.find((m) => !m.from_me && m.text.trim())?.text;
+      const a = list.find((m) => m.from_me && m.text.trim() && !/^\s*(📝|🚫|⚠|⏱)/u.test(m.text))?.text;
+      if (q && a) out.push({ question: q.slice(0, 400), answer: a.slice(0, 600) });
+      if (out.length >= limit) break;
+    }
+    return out;
   }
 
   close(): void {

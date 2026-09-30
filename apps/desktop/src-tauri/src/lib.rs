@@ -509,6 +509,28 @@ fn toggle_main(app: &AppHandle) {
     }
 }
 
+/// Küresel ⌘⇧K / Ctrl+Shift+K: hızlı gönder paleti. Pencere zaten öndeyse arayüze "toggle" gider (palet açıksa arayüz
+/// kapatır ve `hide_window` ile gizler, kapalıysa açar); değilse pencere öne gelir ve palet açılır ("open").
+fn quick_send(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let front = w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false) && !w.is_minimized().unwrap_or(false);
+        if !front {
+            let _ = w.show();
+            let _ = w.unminimize();
+            let _ = w.set_focus();
+        }
+        let _ = app.emit("quick-send", if front { "toggle" } else { "open" });
+    }
+}
+
+/// Arayüzden çağrılır: hızlı gönder ikinci kez ⌘⇧K ile kapatılınca pencere arka plana döner
+#[tauri::command]
+fn hide_window(app: AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.hide();
+    }
+}
+
 fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
@@ -756,13 +778,13 @@ pub fn run() {
                 .with_handler(|app, shortcut, event| {
                     let target = Shortcut::new(Some(SHORTCUT_MOD | Modifiers::SHIFT), Code::KeyK);
                     if shortcut == &target && event.state() == ShortcutState::Pressed {
-                        toggle_main(app);
+                        quick_send(app);
                     }
                 })
                 .build(),
         )
         .manage(CoreProcess(Mutex::new(CoreState::default())))
-        .invoke_handler(tauri::generate_handler![set_badge, focus_window, core_url, core_info, core_token, open_external])
+        .invoke_handler(tauri::generate_handler![set_badge, focus_window, hide_window, core_url, core_info, core_token, open_external])
         .setup(|app| {
             let handle = app.handle().clone();
 
@@ -905,10 +927,11 @@ pub fn run() {
                 .register(Shortcut::new(Some(SHORTCUT_MOD | Modifiers::SHIFT), Code::KeyK));
 
             // Menü çubuğu
-            let show = MenuItem::with_id(app, "show", "Mivelo’yu Göster", true, Some("CmdOrCtrl+Shift+K"))?;
+            let show = MenuItem::with_id(app, "show", "Mivelo’yu Göster", true, None::<&str>)?;
+            let quick = MenuItem::with_id(app, "quick", "Hızlı gönder…", true, Some("CmdOrCtrl+Shift+K"))?;
             let focus = MenuItem::with_id(app, "focus", "Odak modu", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Çıkış", true, Some("CmdOrCtrl+Q"))?;
-            let menu = Menu::with_items(app, &[&show, &focus, &PredefinedMenuItem::separator(app)?, &quit])?;
+            let menu = Menu::with_items(app, &[&show, &quick, &focus, &PredefinedMenuItem::separator(app)?, &quit])?;
 
             // macOS: siyah şablon simge (menü çubuğu temaya göre boyar); Windows/Linux: şablon desteklenmez, siyah simge
             // koyu görev çubuğunda kaybolur → renkli uygulama simgesi
@@ -924,6 +947,7 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, ev| match ev.id().as_ref() {
                     "show" => show_main(app),
+                    "quick" => quick_send(app),
                     "focus" => {
                         show_main(app);
                         let _ = app.emit("navigate", "focus");

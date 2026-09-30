@@ -168,16 +168,24 @@ export type CoreEvent =
   | { type: 'chat.followup'; chat: Chat }
   /** Zamanlanmış gönderim listesi değişti (eklendi/iptal/gönderildi) */
   | { type: 'scheduled.update' }
+  /** Kişi birleştirme: kişiler ya da birleştirme önerileri değişti (arayüz /api/people'ı yeniden çeker) */
+  | { type: 'people.update' }
   | { type: 'license.update'; license: { required: boolean; valid: boolean; key?: string; expiresAt?: string | null; reason?: string; owner?: { name?: string; email?: string } } }
   /** Mivelo takvimi değişti / etkinlik hatırlatması */
   | { type: 'events.update' }
   | { type: 'event.reminder'; event: CalEvent }
+  /** Pazaryeri gün sonu özeti bildirimi (market-summary.ts; kullanıcının seçtiği saatte günde bir kez) */
+  | { type: 'market.digest'; day: string; text: string }
   /** Zamanlanmış mesaj gönderilemedi / kaçırıldı */
   | { type: 'scheduled.missed'; item: { id: string; chatId: string; text: string; at: number; missed?: { reason: string; at: number } }; chatName: string }
   /** Mivelo içi giriş: görünmez tarayıcıdaki giriş sayfasının canlı görüntüsü (JPEG base64; boyut CSS pikseli) */
   | { type: 'login.frame'; accountId: string; data: string; width: number; height: number; host: string }
   | { type: 'login.start'; accountId: string }
   | { type: 'login.end'; accountId: string }
+  /** Yerel ML (ml/): model indirme durumu / dizinleme ilerlemesi değişti (arayüz GET /api/ml'i yeniden okur) */
+  | { type: 'ml.status' }
+  /** Sesli mesaj metni hazır / hata / sürüyor */
+  | { type: 'transcript.update'; chatId: string; messageId: string; transcript: { messageId: string; status: 'pending' | 'done' | 'error'; text: string; lang?: string; error?: string; seconds?: number; updatedAt: number } }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; text: string };
 
 export interface CalEvent {

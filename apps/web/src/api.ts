@@ -2,10 +2,14 @@ import type { Account, CalEvent, LoginInput, CalendarDraft, Chat, ChatFlags, Cor
 import { API_BASE, REMOTE_CORE, coreToken, refreshCoreToken } from './desktop';
 import { STATIC_DEMO } from './profile';
 import { connectStaticEvents, staticApi } from './static-demo';
+import { libQueryString, type LibFacets, type LibPage, type LibQuery, type StatsRange, type WrappedStats } from './insights-types';
+import type { MarketSummary } from './market-calc';
+import type { QuestionDraftResult } from './demo-ai';
 
 const BASE = API_BASE + '/api';
 
-async function call<T>(method: string, path: string, body?: unknown, retried = false): Promise<T> {
+/** Çekirdek REST çağrısı (özellik modülleri de kullanır: people-api.ts) */
+export async function call<T>(method: string, path: string, body?: unknown, retried = false): Promise<T> {
   const token = await coreToken();
   const init: RequestInit = {
     method,
@@ -130,11 +134,29 @@ const liveApi = {
   messagesPermission: () => call<{ result: 'granted' | 'denied' | 'error' }>('POST', '/permissions/messages'),
   style: (platform?: string) => call<{ lines: string[] }>('GET', `/style${platform ? `?platform=${enc(platform)}` : ''}`),
   search: (q: string, limit = 50) => call<Array<{ message: Message; chat: Chat }>>('GET', `/search?q=${enc(q)}&limit=${limit}`),
+  // ---- Raporum + Medya kütüphanesi (çekirdek stats.ts / library.ts) ----
+  stats: (range: StatsRange, at?: string) => call<WrappedStats>('GET', `/stats?range=${range}${at ? `&at=${enc(at)}` : ''}`),
+  library: (q: LibQuery) => call<LibPage>('GET', `/library?${libQueryString(q)}`),
+  libraryFacets: () => call<LibFacets>('GET', '/library/facets'),
+  /** Masaüstü: dosyayı İndirilenler'e yaz (WKWebView <a download>'ı yok sayar); data = base64 */
+  saveDownload: (name: string, data: string) => call<{ ok: boolean; name: string }>('POST', '/downloads', { name, data }),
   // zamanlanmış gönderim (çekirdekte; arayüz kapalıyken de gider)
   scheduled: () => call<ScheduledItem[]>('GET', '/scheduled'),
   schedule: (chatId: string, text: string, at: number, threadId?: string) => call<ScheduledItem>('POST', '/scheduled', { chatId, text, at, threadId }),
   unschedule: (id: string) => call<{ ok: boolean }>('DELETE', `/scheduled/${enc(id)}`),
+  // ---- pazaryeri gün sonu özeti + soru yanıtı AI taslağı ----
+  marketSummary: (day?: string, platform?: string | null) => call<MarketSummary>('GET', `/market/summary?${new URLSearchParams({ ...(day ? { day } : {}), ...(platform ? { platform } : {}) })}`),
+  marketDigest: () => call<MarketDigest>('GET', '/market/digest'),
+  setMarketDigest: (s: Partial<MarketDigest>) => call<MarketDigest>('POST', '/market/digest', s),
+  questionDraft: (chatId: string) => call<QuestionDraftResult>('POST', `/chats/${enc(chatId)}/question-draft`),
 };
+/** Gün sonu özeti bildirimi ayarı (çekirdek ~/.mivelo/market-digest.json; demoda localStorage) */
+export interface MarketDigest {
+  enabled: boolean;
+  time: string;
+}
+export type { MarketSummary } from './market-calc';
+export type { QuestionDraftResult } from './demo-ai';
 
 /** Takvime ekleme sonucu: added → cihaz takvimine eklendi; denied → izin yok; opened → .ics takvim uygulamasında açıldı */
 export interface CalendarResult {

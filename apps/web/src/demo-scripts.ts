@@ -20,6 +20,8 @@ export interface Script {
   order?: Record<string, unknown>;
   /** Pazaryeri sorusu: bağlı olduğu sipariş numarası (meta.question.orderNumber) */
   questionOrderNo?: string;
+  /** E-posta: karşı tarafın adı (katılımcı adı; yoksa adresin @ öncesi) — kişi birleştirme adla eşleştirir */
+  contact?: string;
   lines: Line[];
 }
 
@@ -27,6 +29,8 @@ const pdf = (name: string, size = 128_440): Attachment => ({ kind: 'file', name,
 const csv = (name: string, size = 18_420): Attachment => ({ kind: 'file', name, mime: 'text/csv', size, link: demoAsset('files/siparisler.csv') });
 const pic = (name: string, file = 'urun.jpg', size = 140_000): Attachment => ({ kind: 'image', name, mime: 'image/jpeg', size, url: demoAsset(`files/${file}`) });
 const vid = (name: string, file: string, poster: string, size: number): Attachment => ({ kind: 'video', name, mime: 'video/mp4', size, link: demoAsset(`files/${file}`), url: demoAsset(`files/${poster}`) });
+/** Sesli mesaj (yerel AI demosu: altında hazır yazıya dökülmüş metin — demo-ml.ts) */
+const voice = (secs: number): Attachment => ({ kind: 'audio', name: `Sesli mesaj · 0:${String(secs).padStart(2, '0')}`, mime: 'audio/wav', size: 80_044, link: demoAsset('files/sesli-mesaj.wav') });
 
 /** Bağlı her uygulamanın örnek sohbetleri. Alışveriş kanalları müşteri sorusu olarak yazılır. */
 export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
@@ -35,6 +39,7 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
       remoteId: 'ayse', name: 'Ayşe Demir', kind: 'direct', tags: ['müşteri'], unread: 2, handle: '+90 532 000 00 01', avatar: 'ayse.jpg',
       lines: [
         [false, 'Merhaba, dün verdiğim sipariş hâlâ hazırlanıyor görünüyor. Numara 4821.'],
+        [false, '', [voice(5)]],
         [true, 'Kontrol ediyorum. Keten gömlek stoğu bu sabah geldi, paket bugün çıkacak.'],
         [false, 'Kargo firması belli mi? Adres Kadıköy, kapıcıya bırakılmasın.'],
         [true, 'Yurtiçi. Kapıya teslim notunu ekledim. Fişi de iletiyorum.'],
@@ -305,7 +310,7 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
   ],
   outlook: [
     {
-      remoteId: 'teklif', name: 'Teklif: operasyon kurulumu', kind: 'direct', tags: ['fırsat'], unread: 1, handle: 'ayse.demir@nova.example', avatar: 'ayse.jpg',
+      remoteId: 'teklif', name: 'Teklif: operasyon kurulumu', kind: 'direct', tags: ['fırsat'], unread: 1, handle: 'ayse.demir@nova.example', avatar: 'ayse.jpg', contact: 'Ayşe Demir',
       lines: [
         [false, 'Merhaba,\n\nKonuştuğumuz kapsam için teklif ektedir. Süre altı hafta.\n\nAyşe Demir', [pdf('teklif-nova.pdf', 188_600)]],
         [true, 'Teşekkürler. Üçüncü kalemdeki eğitim gün sayısı ikiye inebilir mi?'],
@@ -512,6 +517,16 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
         [false, 'Teşekkürler, cuma kontrol ederim.'],
       ],
     },
+    {
+      // yabancı müşteri: anlık çeviri demosu (demo-ml.ts hazır çeviriler)
+      remoteId: 'emma', name: 'Emma · ring size', kind: 'direct', tags: ['müşteri'], unread: 1, handle: 'Emma R.', avatar: 'melis.jpg',
+      lines: [
+        [false, 'Hi! I love the gold ring. Is it available in size 7 (US)?'],
+        [true, 'Hi Emma! Yes, size 7 is in stock. It ships within 2 business days.'],
+        [false, 'Great! Do you ship to Germany, and how long does delivery usually take?'],
+        [false, 'Also, could you add a small gift note? It is a birthday present for my sister.'],
+      ],
+    },
   ],
   shopify: [
     {
@@ -576,6 +591,39 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
   ],
 };
 
+
+// Kişi birleştirme demosu: aynı kişinin başka kanallardaki sohbetleri. Ayşe Demir (WhatsApp + Instagram + Outlook) hazır birleşik
+// gelir (birleşik zaman çizelgesi); Pınar (iMessage ↔ WhatsApp, aynı telefon) ve Selin Arslan (LinkedIn ↔ Telegram ↔ Instagram,
+// aynı ad / kullanıcı adı) öneri olarak görünür (demo-people.ts).
+SCRIPTS.instagram!.push({
+  remoteId: 'ayse-demir', name: 'Ayşe Demir', kind: 'direct', tags: ['müşteri'], unread: 0, handle: '@aysedemir.studio', avatar: 'ayse.jpg',
+  lines: [
+    [false, 'Merhaba! Keten gömleği hikâyede paylaştım, etiketledim.'],
+    [true, 'Çok güzel olmuş, teşekkürler. Bir sonraki siparişte kargo bizden.'],
+    [false, 'Harika. Kurumsal teklif için e-postaya da döndüm bu arada.'],
+    [false, 'Hikâye bağlantısı: https://www.instagram.com/p/ornek-keten-gomlek/'],
+  ],
+});
+SCRIPTS.whatsapp!.push({
+  remoteId: 'pinar-aydin', name: 'Pınar Aydın', kind: 'direct', tags: ['kişisel'], unread: 0, handle: '+90 555 010 20 30', avatar: 'pinar.jpg',
+  lines: [
+    [false, 'Akşam için masa ayırttım, 20:00.'],
+    [true, 'Süper, oradayım.'],
+    [false, 'Konumu buraya atıyorum, iMessage’dan da yazmıştım.'],
+    [false, 'Menü de burada: https://www.example.com/restoran/menu'],
+  ],
+});
+SCRIPTS.telegram!.push({
+  remoteId: 'selin-arslan', name: 'Selin Arslan', kind: 'direct', tags: ['fırsat'], unread: 0, handle: '@selin.tasarim', avatar: 'selin.jpg',
+  lines: [
+    [false, 'Reels taslağını buradan da atayım, dosya büyük geldi.'],
+    [true, 'Olur, buradan daha rahat.'],
+    [false, 'Yayın tarihi değişmedi: 18 Ekim.'],
+    [false, 'Moodboard: https://www.figma.com/board/ornek-reels-taslak'],
+    [true, 'Takvime de ekledim: https://calendar.example.org/etkinlik/reels-yayin'],
+  ],
+});
+
 const FOLK: Array<{ id: string; name: string; avatar: string; user: string }> = [
   { id: 'leyla', name: 'Leyla Koç', avatar: 'ayse.jpg', user: 'leylako' },
   { id: 'tarik', name: 'Tarık Uçar', avatar: 'can.jpg', user: 'tarikucar' },
@@ -599,7 +647,11 @@ function handleFor(platform: Platform, folk: (typeof FOLK)[number], n: number): 
   const cat = PLATFORMS[platform].category;
   if (cat === 'mail') return `${folk.user}@posta.example`;
   if (cat === 'shop') return folk.name;
-  if (platform === 'whatsapp' || platform === 'imessage') return `+90 53${n % 10} ${200 + n} 40 ${String(10 + n).padStart(2, '0')}`;
+  // telefon kişiye bağlı (sıraya değil): aynı kişinin WhatsApp ve iMessage'ı aynı numara (kişi birleştirme önerisi doğru eşleşsin)
+  if (platform === 'whatsapp' || platform === 'imessage') {
+    const k = FOLK.indexOf(folk);
+    return `+90 53${k % 10} ${200 + k} 40 ${String(10 + k).padStart(2, '0')}`;
+  }
   if (platform === 'slack') return `@${folk.user}`;
   if (platform === 'linkedin') return folk.name;
   return `@${folk.user}`;

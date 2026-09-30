@@ -720,6 +720,47 @@ Dil: arayüz ve yorumlar Türkçe.
   $29-99/ay + Meta ücretleri. Öneri: kısa vadede resmi WA yok (webhook relay sunucusu gerekir); Pazarama + hazır yanıtlar + mini CRM eklenebilir.
 - **X giriş kısıtlaması (30.09)**: köprü `ignoreDefaultArgs: ['--enable-automation']`; sürerse giriş penceresini sistem Chrome'uyla açmak gerekebilir.
 
+## 30.09 yeni özellikler (Kaan: 1-3-4-5-6-8-10-11)
+- **Kişi birleştirme (30.09)** `people.ts`: kişi = ≥2 BİREBİR sohbet (tablolar `people`, `person_chats` CASCADE, `people_dismissed` sohbet çifti). Gruplar/kanallar/pazaryeri bağlanmaz;
+  <2 sohbet kalan kişi `prunePeople` (deleteAccount, mergeChats bağı taşır, wipeAll). Öneri motoru OTOMATİK birleştirmez: güçlü = aynı telefon (E.164, TR varsayılan)/e-posta;
+  orta = ad anahtarı (Türkçe/emoji/unvan farkı yok, ≥2 kelime, farklı platform)/aynı @kullanıcı adı; kova içi çiftler, bileşen ≤8; güçlü alt grup önce. İstisna: kişiye bağlı
+  adrese yeni e-posta dizisi kendiliğinden eklenir. Hesap: açılıştan 90 sn sonra, account.sync 100'den 30 sn sonra, günde bir; `people.update`. Uçlar `/api/people*`.
+  Arayüz `PersonPanel.tsx` (sağ panel Kişi, Bağla…, Birleştirme önerileri), `UnifiedTimeline.tsx` ("Tüm kanallar", gönderim kanalı seçimi, `.tl-mark`), `people-store.ts`.
+  Demo `demo-people.ts` + `people-match.ts` (çekirdek kurallarının kopyası, AYNI kalmalı), localStorage `mivelo.demoPeople`. Telegram birebir handle @kullanıcı adı/+telefon (`meta.phone`).
+  Test people-*.test.ts. Gerçek hesaplarla doğrulanmadı.
+- **Hızlı gönder (⌘⇧K / Ctrl+Shift+K, `QuickSend.tsx`, 30.09)**: Kime (ad/@kullanıcı/e-posta/numara, Türkçe duyarsız, son yazışılanlar önce) → Enter gönder, ⌘Enter gönder+aç, Esc.
+  İyimser: sağ üst hap, hatada (send-guard dahil) "Yeniden dene"/"Düzenle". Masaüstü: kabuk `quick_send` pencere önde değilse öne alır + `quick-send` "open"; öndeyse "toggle" →
+  arayüz paleti kapatıp `hide_window`; tepsi menüsünde "Hızlı gönder…"; ⌘K artık Shift'le tetiklenmez.
+- **Bildirimden hızlı yanıt**: sağ üst `QuickReplyStack` kartları satır içi yanıtlı (8 sn, üzerine gelince/yazarken durur); arka planda gelen `rememberBackground` → odakta karta
+  döner; web bildirimi tıklanınca aynı kart (`notify(…, {onClick, tag})`). Tauri notification 2.4 masaüstünde tıklama/eylem VERMEZ → gerçek macOS satır içi yanıt YOK.
+- **Pazaryeri gün sonu özeti**: saf `market-calc.ts` (web kopyası AYNI kalmalı, test denetler); `GET /api/market/summary?day&platform`, `GET/POST /api/market/digest`
+  (`~/.mivelo/market-digest.json`, vars. açık 21:00); dakikalık `checkDigest` → `market.digest` bir kez, yalnız pazaryeri hesabı varsa. Ciro iptal/iade hariç, para birimine göre;
+  iptal/iade durum değişim gününde. Arayüz: pazaryeri listesi üstünde katlanabilir "Bugün" (`MarketSummary.tsx`), panel ←/→/T, 7 gün çubuk. Demo `demo-market.ts`.
+- **Soru yanıtına AI taslağı** (`POST /api/chats/:id/question-draft`, `question-draft.ts`): ürün + fiyat + aynı ürüne önceki cevaplar (`store.productAnswers`) + üslup +
+  `MARKET_RULES`; çıktı süzülür (telefon/e-posta/URL/@hesap silinir); yalnız yazma alanına konur. `QuestionDraft.tsx`: Taslaklar kapalıysa gizli, anahtarsız → Ayarlar → AI.
+  Gerçek pazaryeri verisi/gerçek Mac kısayoluyla doğrulanmadı.
+- **Raporum / Wrapped (30.09)** `stats.ts` `GET /api/stats?range=month|year|all&at=`: yalnız yerel DB, mesajlar zaman sırasıyla 0,5–8 binlik dilimler + olay döngüsüne dönüş
+  (300 bin şifreli mesajda tüm zamanlar 0,57 sn, en uzun bekleme 27 ms). Pazaryeri sayılmaz. Yanıt süresi yalnız birebirde (karşıdan ilk yanıtlanmamış mesajdan, >12 sa sayılmaz);
+  kişiler yalnız iki yönlü birebirler; seri kendi mesajlı günler; emoji yalnız kendi mesajlarında. Önbellek meta `wrapped:v1:<dönem>` (süren 10 dk, geçmiş 6 sa, tümü 30 dk).
+  `Wrapped.tsx` (dönem seçici, ızgara, tam ekran hikâye, basılı tut = duraklat), `wrapped-card.ts` canvas PNG 1080×1920/1080×1080, içerik YOK, "İsimleri gizle" vars. açık.
+  Demo `demo-insights.ts`; fresh üyede "Rapor için yeterli mesaj yok".
+- **Medya kütüphanesi** `library.ts` (`/api/library`, `/api/library/facets`): `library_items` (tür/platform/sohbet/zaman dizinli, "ts:rowid" imleç); saf SQL tetikleyiciler
+  → `library_dirty` kuyruğu (JS işlevi YOK: seed.mjs gibi araçlar bozulmaz), 3 sn'de bir bütçeli dizinleyici, eskiler bir kez rowid aralıklarıyla (meta `library_fill`).
+  E-posta abonelik/izleme bağlantıları elenir, mesaj başına ≤8 bağlantı. `MediaLibrary.tsx` Lightbox + "Sohbette göster"/"İndir"; önizleme yalnız görünenler, ≤2 eşzamanlı.
+- **Dosya kaydetme (masaüstü)** `POST /api/downloads` (`downloads.ts`, yalnız yerel, gövde ≤80 MB) → İndirilenler + Finder/Gezgin'de göster; arayüz `save-file.ts saveBlob`.
+  `store.sql()` (Ajan C) B'nin modüllerince kullanılıyor.
+- **Yerel AI (30.09, `packages/core/src/ml/`)**: sesli mesajı yazıya dökme (`Xenova/whisper-small` q8 ≈250 MB), anlamsal arama (`Xenova/multilingual-e5-small` q8, 384 boyut,
+  int8 vektör `embeddings`, bellek içi kaba kuvvet + FTS ile RRF hibrit, tarih/kişi ipuçları `query.ts`), çeviri (anahtar varsa Claude, yoksa NLLB-600M q8 ≈900 MB; dil algılama
+  modelsiz `lang.ts`, arayüz kopyası `lang-detect.ts` AYNI kalmalı). Modeller yalnız Ayarlar → Yerel AI modelleri'nde onayla `~/.mivelo/models`e iner; ayarlar `~/.mivelo/ml.json`.
+  Çalışma zamanı pakette YOK: ilk indirmede npm'den sabit sürüm + sha512 (transformers 4.3.0 Node yapısı + onnxruntime-web wasm) → `~/.mivelo/ml/runtime/<sürüm>`;
+  `Symbol.for('onnxruntime')` + `device:'auto'`; sharp/onnxruntime-node yerine boş taslak. onnxruntime-node KULLANILMAZ (darwin-x64 ikilisi yok, 113 MB). Çıkarım worker_thread'de
+  (`engine.ts`, tek kuyruk, kullanıcı işi önce, 3 dk boşta işçi kapanır). Ses: Ogg/Opus `opus-decoder` (bağımlılık), WAV; diğerleri macOS afconvert, yoksa ffmpeg.
+  Tablolar `transcripts` (+ `transcripts_fts`), `embeddings`, `translations` → `messages(id)` CASCADE; `store.search` sesli mesaj metnini de döndürür. Uçlar `/api/ml/*`; olaylar
+  `ml.status`, `transcript.update`. Arayüz `MlBubble.tsx` (balon altı metin/çeviri, "Çevir", "Çevir ve gönder", sağ panel "Otomatik çevir" `mivelo.autoTranslate`), ⌘K "Anlamsal"
+  (`mivelo.searchSemantic`), `LocalAiPane.tsx`. Demo `demo-ml.ts`. Gerçek modellerle ve gerçek Mac/Windows'ta DOĞRULANMADI (bu ortamda Hugging Face 403); ilk kullanımda
+  `Sesli mesaj yazıya döküldü: N sn ses…` günlüğüne bakılmalı.
+- **Dokümantasyon** `docs/dokumantasyon.html` → `docs/Mivelo-Dokumantasyon.pdf` (`CHROMIUM=<chrome yolu> node docs/build-pdf.mjs`); özellik eklenince güncelle.
+
 ## Sunucu/arayüz sözleşmesi
 - CORS: localhost/127.0.0.1/tauri.localhost/tauri://localhost ve WKWebView'ın `null` kaynağı (paketli uygulama!).
 - keepAliveTimeout 120 s (WebKit "Load failed" önlemi); arayüz `api.ts` ağ hatasında bir kez yeniden dener; açılışta 45 s
@@ -736,8 +777,8 @@ Dil: arayüz ve yorumlar Türkçe.
 - Telegram: varsayılan api_id/api_hash Mivelo'nun kendi kimliği (config.ts, api_id 31111230, my.telegram.org "Mivelo" Desktop); cihaz bilgisi
   deviceModel "Mivelo" + gerçek OS sürümü. Ortam değişkeni ya da Bağlan formundaki kendi kimlik alanları geçersiz kılar.
 - WhatsApp sesli mesaj ffmpeg yoksa ogg (WebKit oynatmayabilir).
-- Yol haritası: Node'suz tek dosya paketleme (sidecar), ⌘K komut paleti, SQLCipher, kişi birleştirme (aynı kişi farklı
-  platformlarda), Trendyol/Hepsiburada/Etsy/Shopify connector'ları, Shopier panel mesajları (DOM üzerinden).
+- Yol haritası: Node'suz tek dosya paketleme (sidecar), Shopier panel mesajları, Pazarama, hazır yanıtlar, mini CRM, yerel AI (Ollama),
+  ilişki hatırlatıcısı, akıllı öncelik, abonelik temizliği, mobil uygulama. (Kişi birleştirme, ⌘K, SQLCipher, pazaryeri connector'ları TAMAM.)
 
 ## Performans notları (Eylül 2026'da öğrenildi)
 - **Eşitleme hızı (29.09, Kaan: WhatsApp 25 dk'da bitmiyor, mesajlar geç geliyor, "sürekli kendini eşitliyor")** kök nedenleri ve çözümler:

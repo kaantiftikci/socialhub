@@ -110,3 +110,46 @@ export function demoDraft(chat: Chat, msgs: Message[], tone: Tone = 'default'): 
   else if (tone === 'formal') draft = draft.replace(/\s?[🙏😊]/gu, '').replace(/^merhaba/i, 'Merhaba').replace(/^([a-zçğıöşü])/, (x) => x.toLocaleUpperCase('tr'));
   return { draft, summary: summarize(chat, msgs), actions: c.actions ?? [], events: events(chat, msgs), style: TEAMISH(chat) ? TEAM_STYLE : DEMO_STYLE };
 }
+
+/** Pazaryeri sorusu cevap taslağı (demo; çekirdekteki POST /api/chats/:id/question-draft karşılığı, model çağrısı yok) */
+export interface QuestionDraftResult {
+  draft: string;
+  notes: string[];
+  removed: string[];
+  style: string[];
+  sameProduct: number;
+}
+const SHOP_STYLE = ['kısa-orta uzunlukta yazar', '"siz" diye hitap eder (resmî)', 'açılışta "Merhaba" der', 'kapanışta "İyi günler dileriz" der'];
+const QUESTION_CURATED: Record<string, { draft: string; notes?: string[]; same?: number }> = {
+  'trendyol:soru-kalip': {
+    draft: 'Merhaba, ürünün kalıbı regular’dır; 170 cm boy ve 62 kg için 38 beden rahat olacaktır. Keten kumaş doğal olarak kırışabilir, nemli ütüyle kolayca düzelir. İyi günler dileriz.',
+    same: 3,
+  },
+  'n11:soru-beden': {
+    draft: 'Merhaba, 165 cm boy ve 58 kg için S beden önerilir. Saat 14:00’e kadar verilen siparişler aynı gün kargoya teslim edilmektedir. İyi günler dileriz.',
+    notes: ['Aynı gün kargo saatini güncel kargo anlaşmanızla doğrulayın'],
+    same: 2,
+  },
+};
+export function demoQuestionDraft(chat: Chat, msgs: Message[]): QuestionDraftResult {
+  const cur = QUESTION_CURATED[`${chat.platform}:${chat.remoteId}`];
+  if (cur) return { draft: cur.draft, notes: cur.notes ?? [], removed: [], style: SHOP_STYLE, sameProduct: cur.same ?? 0 };
+  const q = (msgs.filter((m) => !m.fromMe && m.text.trim()).at(-1)?.text ?? '').toLocaleLowerCase('tr');
+  const product = String((chat.meta?.question as { productName?: string } | undefined)?.productName ?? '').trim();
+  const about = product ? `${product} ` : 'Ürünümüz ';
+  let draft = `Merhaba, sorunuz için teşekkür ederiz. ${about}hakkında detaylı bilgi ürün açıklamasında yer almaktadır; başka sorunuz olursa buradan yanıtlamaktan memnuniyet duyarız. İyi günler dileriz.`;
+  const notes: string[] = [];
+  if (/kargo|ne zaman|teslim/.test(q)) {
+    draft = 'Merhaba, siparişleriniz 1-2 iş günü içinde kargoya teslim edilmektedir. Kargo takip bilgisi sipariş detayınızda görünecektir. İyi günler dileriz.';
+    notes.push('Kargoya teslim süresini mağaza ayarlarınızla doğrulayın');
+  } else if (/beden|kalıp|ölçü|boy|kilo/.test(q)) {
+    draft = `Merhaba, ${product ? `${product} ` : 'ürünün '}kalıbı regular’dır; normalde giydiğiniz bedeni tercih edebilirsiniz. Beden tablosu ürün görsellerinde yer almaktadır. İyi günler dileriz.`;
+  } else if (/iade|değişim|kusur|hasar|çatla/.test(q)) {
+    draft = 'Merhaba, yaşadığınız sorun için üzgünüz. İade ve değişim talebinizi sipariş detayınızdaki “İade talebi oluştur” adımından başlatabilirsiniz; talebiniz en kısa sürede değerlendirilecektir. İyi günler dileriz.';
+    notes.push('İade koşullarını pazaryeri politikanızla karşılaştırın');
+  } else if (/stok|renk|var mı|numara/.test(q)) {
+    draft = `Merhaba, ${product ? `${product} ` : 'ürün '}şu an stoklarımızda mevcuttur; seçenekler ürün sayfasında görünmektedir. İyi günler dileriz.`;
+    notes.push('Stok durumunu doğrulayın');
+  }
+  return { draft, notes, removed: [], style: SHOP_STYLE, sameProduct: 0 };
+}

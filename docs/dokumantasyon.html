@@ -1,0 +1,1198 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mivelo Dokümantasyonu</title>
+<style>
+  :root {
+    --v: #6c47ff;
+    --v-dark: #4b2fd1;
+    --v-soft: #f1edff;
+    --lime: #d4ff3f;
+    --ink: #17151f;
+    --text: #2b2836;
+    --muted: #625d72;
+    --line: #e2dfeb;
+    --soft: #f7f6fb;
+    --ok: #1d7a46;
+    --ok-bg: #e5f5ec;
+    --warn: #8a5a00;
+    --warn-bg: #fff3d6;
+    --dev: #4b2fd1;
+    --dev-bg: #ece7ff;
+    --plan: #4a4757;
+    --plan-bg: #eeedf2;
+    --bad: #a3262e;
+    --bad-bg: #fde8e9;
+  }
+  @page { size: A4; margin: 17mm 15mm 19mm 15mm; }
+  * { box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body {
+    margin: 0;
+    background: #fff;
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, "Liberation Sans", "DejaVu Sans", sans-serif;
+    font-size: 9.6pt;
+    line-height: 1.5;
+  }
+  .page-wrap { max-width: 180mm; margin: 0 auto; }
+  h1, h2, h3, h4 { color: var(--ink); line-height: 1.25; margin: 0; }
+  h1.sec {
+    break-before: page;
+    font-size: 21pt;
+    letter-spacing: -0.01em;
+    padding: 0 0 8pt;
+    margin: 0 0 12pt;
+    border-bottom: 2.5pt solid var(--v);
+    display: flex;
+    align-items: baseline;
+    gap: 9pt;
+  }
+  h1.sec .n {
+    display: inline-block;
+    min-width: 26pt;
+    color: var(--v);
+    font-weight: 800;
+  }
+  h2 { font-size: 13pt; margin: 16pt 0 6pt; break-after: avoid; }
+  h2::before {
+    content: "";
+    display: inline-block;
+    width: 7pt; height: 7pt;
+    margin-right: 7pt;
+    background: var(--lime);
+    border: 1pt solid #9dbd1f;
+    border-radius: 2pt;
+    vertical-align: 1pt;
+  }
+  h3 { font-size: 10.8pt; margin: 12pt 0 4pt; break-after: avoid; color: var(--v-dark); }
+  p { margin: 0 0 6pt; }
+  ul, ol { margin: 0 0 7pt; padding-left: 15pt; }
+  li { margin: 0 0 2.5pt; }
+  code, .mono {
+    font-family: "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace;
+    font-size: 8.4pt;
+    background: var(--soft);
+    border: 0.5pt solid var(--line);
+    border-radius: 3pt;
+    padding: 0 3pt;
+    word-break: break-word;
+  }
+  a { color: var(--v-dark); text-decoration: none; }
+  .lead { font-size: 10.8pt; color: var(--ink); }
+  .muted { color: var(--muted); }
+  .small { font-size: 8.4pt; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 4pt 0 10pt;
+    font-size: 8.5pt;
+    line-height: 1.4;
+  }
+  thead { display: table-header-group; }
+  tr { break-inside: avoid; }
+  th {
+    text-align: left;
+    background: var(--v-soft);
+    color: var(--ink);
+    font-weight: 700;
+    padding: 4.5pt 5pt;
+    border-bottom: 1pt solid #cfc6f5;
+    vertical-align: bottom;
+  }
+  td {
+    padding: 4pt 5pt;
+    border-bottom: 0.5pt solid var(--line);
+    vertical-align: top;
+  }
+  tbody tr:nth-child(even) td { background: #fbfaff; }
+  td code, th code { font-size: 7.8pt; }
+  .w-name { width: 22%; }
+  .nowrap { white-space: nowrap; }
+  .badge {
+    display: inline-block;
+    font-size: 7.4pt;
+    font-weight: 700;
+    padding: 0.5pt 5pt;
+    border-radius: 8pt;
+    white-space: nowrap;
+    letter-spacing: 0.01em;
+  }
+  .b-ok { color: var(--ok); background: var(--ok-bg); }
+  .b-warn { color: var(--warn); background: var(--warn-bg); }
+  .b-dev { color: var(--dev); background: var(--dev-bg); }
+  .b-plan { color: var(--plan); background: var(--plan-bg); }
+  .b-bad { color: var(--bad); background: var(--bad-bg); }
+  .dot { display: inline-block; width: 7pt; height: 7pt; border-radius: 50%; background: var(--v); vertical-align: 0; }
+  .dot.half { background: linear-gradient(90deg, var(--v) 50%, #d9d2fb 50%); }
+  .none { color: #b3aec0; }
+  .matrix td, .matrix th { text-align: center; padding: 3.5pt 3pt; }
+  .matrix td:first-child, .matrix th:first-child { text-align: left; }
+  .callout {
+    border-left: 3pt solid var(--v);
+    background: var(--v-soft);
+    padding: 7pt 10pt;
+    margin: 6pt 0 10pt;
+    border-radius: 0 5pt 5pt 0;
+    break-inside: avoid;
+  }
+  .callout.lime { border-left-color: #9dbd1f; background: #f8ffe2; }
+  .callout.warn { border-left-color: #d69a1a; background: #fff8e6; }
+  .callout b:first-child { color: var(--ink); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8pt 12pt; }
+  .card {
+    border: 0.75pt solid var(--line);
+    border-radius: 6pt;
+    padding: 8pt 10pt;
+    break-inside: avoid;
+    background: #fff;
+  }
+  .card h4 { font-size: 10pt; margin: 0 0 3pt; }
+  .card p, .card ul { margin-bottom: 0; }
+  .plat {
+    border: 0.75pt solid var(--line);
+    border-radius: 6pt;
+    margin: 0 0 8pt;
+    break-inside: avoid;
+    overflow: hidden;
+  }
+  .plat-h {
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--soft);
+    padding: 5pt 9pt;
+    border-bottom: 0.75pt solid var(--line);
+  }
+  .plat-h h4 { font-size: 10.5pt; margin: 0; }
+  .plat-h .sw { display: inline-block; width: 9pt; height: 9pt; border-radius: 2.5pt; margin-right: 6pt; vertical-align: -0.5pt; }
+  .plat dl { display: grid; grid-template-columns: 26mm 1fr; margin: 0; padding: 5pt 9pt 6pt; gap: 2.5pt 8pt; }
+  .plat dt { font-weight: 700; color: var(--muted); font-size: 8.4pt; }
+  .plat dd { margin: 0; font-size: 8.8pt; }
+  /* Kapak */
+  .cover {
+    height: 257mm;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 12mm 4mm 6mm;
+    break-after: page;
+    position: relative;
+  }
+  .cover .logo { display: flex; align-items: center; gap: 12pt; }
+  .cover .logo span { font-size: 22pt; font-weight: 800; color: var(--ink); letter-spacing: -0.02em; }
+  .cover h1 { font-size: 38pt; line-height: 1.05; letter-spacing: -0.03em; margin: 0 0 14pt; }
+  .cover h1 em { font-style: normal; color: var(--v); }
+  .cover .sub { font-size: 13pt; color: var(--muted); max-width: 130mm; }
+  .cover .band {
+    height: 6pt;
+    border-radius: 3pt;
+    background: linear-gradient(90deg, var(--v) 0 72%, var(--lime) 72% 100%);
+    margin: 18pt 0 16pt;
+    width: 120mm;
+  }
+  .cover .meta { display: grid; grid-template-columns: repeat(3, auto); gap: 4pt 26pt; justify-content: start; font-size: 9.5pt; }
+  .cover .meta b { display: block; color: var(--ink); font-size: 11pt; }
+  .cover .meta span { color: var(--muted); font-size: 8.4pt; text-transform: uppercase; letter-spacing: 0.06em; }
+  .cover .foot { font-size: 8.4pt; color: var(--muted); border-top: 0.75pt solid var(--line); padding-top: 8pt; }
+  /* İçindekiler */
+  .toc { break-after: page; }
+  .toc h1 { font-size: 21pt; margin: 0 0 12pt; padding-bottom: 8pt; border-bottom: 2.5pt solid var(--v); }
+  .toc ol { list-style: none; padding: 0; margin: 0; }
+  .toc > ol > li { margin: 0 0 7pt; break-inside: avoid; }
+  .toc > ol > li > a { font-weight: 700; font-size: 11pt; color: var(--ink); display: flex; gap: 8pt; }
+  .toc > ol > li > a .n { color: var(--v); min-width: 20pt; }
+  .toc ol ol { padding-left: 28pt; margin-top: 2pt; display: flex; flex-wrap: wrap; gap: 1pt 12pt; }
+  .toc ol ol li { font-size: 8.8pt; margin: 0; }
+  .toc ol ol a { color: var(--muted); }
+  /* Diyagram */
+  figure { margin: 8pt 0 12pt; break-inside: avoid; }
+  figcaption { font-size: 8.2pt; color: var(--muted); margin-top: 4pt; text-align: center; }
+  svg text { font-family: -apple-system, "Segoe UI", Inter, Roboto, Arial, "Liberation Sans", "DejaVu Sans", sans-serif; }
+  .kbd {
+    display: inline-block;
+    font-family: -apple-system, "Segoe UI", Inter, Roboto, Arial, "DejaVu Sans", sans-serif;
+    font-size: 8pt;
+    border: 0.75pt solid #cfcbdc;
+    border-bottom-width: 1.5pt;
+    border-radius: 3pt;
+    padding: 0 3.5pt;
+    background: #fff;
+    white-space: nowrap;
+  }
+  .avoid { break-inside: avoid; }
+  .cols2 { column-count: 2; column-gap: 14pt; }
+  .cols2 li { break-inside: avoid; }
+  @media screen {
+    body { background: #eceaf2; }
+    .page-wrap { background: #fff; padding: 18mm 15mm; margin: 20px auto; box-shadow: 0 2px 20px rgba(0,0,0,.08); max-width: 210mm; }
+  }
+</style>
+</head>
+<body>
+<div class="page-wrap">
+
+<!-- ============================ KAPAK ============================ -->
+<section class="cover">
+  <div class="logo">
+    <svg width="46" height="46" viewBox="0 0 46 46" aria-hidden="true">
+      <rect x="0" y="0" width="46" height="46" rx="12" fill="#6c47ff"/>
+      <path d="M11 30 C 13 18, 17 16, 19 24 C 21 32, 25 32, 27 22 C 29 14, 33 16, 35 26" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/>
+      <circle cx="35.5" cy="12.5" r="3.6" fill="#d4ff3f"/>
+    </svg>
+    <span>mivelo</span>
+  </div>
+  <div>
+    <h1>Mivelo<br><em>Teknik ve Ürün</em><br>Dokümantasyonu</h1>
+    <p class="sub">Tüm mesajlaşma kanalların, e-postaların ve pazaryeri siparişlerin için yerel öncelikli, ücretsiz ve AI destekli tek gelen kutusu: mimari, araçlar, kütüphaneler, bağlantı yöntemleri, özellikler ve yol haritası.</p>
+    <div class="band"></div>
+    <div class="meta">
+      <div><span>Masaüstü sürümü</span><b>0.1.25</b></div>
+      <div><span>Tarih</span><b>30 Eylül 2026</b></div>
+      <div><span>Kaynak</span><b>main · a358fc3</b></div>
+    </div>
+  </div>
+  <div class="foot">
+    Bu belge depodaki kaynak koddan ve proje notlarından derlenmiştir; yayındaki (main) durumu anlatır. Platform adları ve logoları
+    yalnız hangi kanala bağlanıldığını belirtmek içindir; Mivelo bağımsız bir uygulamadır ve adı geçen platformlarca onaylanmamıştır.
+  </div>
+</section>
+
+<!-- ============================ İÇİNDEKİLER ============================ -->
+<nav class="toc">
+  <h1>İçindekiler</h1>
+  <ol>
+    <li><a href="#s2"><span class="n">1</span>Özet</a>
+      <ol><li><a href="#s2-1">Ürün</a></li><li><a href="#s2-2">Konumlandırma</a></li><li><a href="#s2-3">Hedef kullanıcı</a></li><li><a href="#s2-4">Rakamlarla</a></li></ol></li>
+    <li><a href="#s3"><span class="n">2</span>Mimari</a>
+      <ol><li><a href="#s3-1">Genel şema</a></li><li><a href="#s3-2">Çekirdek</a></li><li><a href="#s3-3">Web arayüzü</a></li><li><a href="#s3-4">Masaüstü kabuğu</a></li><li><a href="#s3-5">Veri klasörü</a></li><li><a href="#s3-6">Olay akışı</a></li><li><a href="#s3-7">Lisans</a></li><li><a href="#s3-8">Güncelleyici</a></li></ol></li>
+    <li><a href="#s4"><span class="n">3</span>Teknoloji yığını ve araçlar</a>
+      <ol><li><a href="#s4-1">Diller ve çerçeveler</a></li><li><a href="#s4-2">Test</a></li><li><a href="#s4-3">CI/CD</a></li><li><a href="#s4-4">Barındırma</a></li><li><a href="#s4-5">Betikler</a></li></ol></li>
+    <li><a href="#s5"><span class="n">4</span>Kütüphaneler</a>
+      <ol><li><a href="#s5-1">Çekirdek</a></li><li><a href="#s5-2">Web arayüzü</a></li><li><a href="#s5-3">Masaüstü</a></li><li><a href="#s5-4">Sunucu tarafı ve harici</a></li></ol></li>
+    <li><a href="#s6"><span class="n">5</span>Kanallar ve bağlantı yöntemleri</a>
+      <ol><li><a href="#s6-1">Yöntem türleri</a></li><li><a href="#s6-2">Yetenek matrisi</a></li><li><a href="#s6-3">Mesajlaşma</a></li><li><a href="#s6-4">E-posta</a></li><li><a href="#s6-5">Pazaryerleri</a></li><li><a href="#s6-6">Yoklama aralıkları</a></li></ol></li>
+    <li><a href="#s7"><span class="n">6</span>Aktif özellikler</a>
+      <ol><li><a href="#s7-1">Gelen kutusu</a></li><li><a href="#s7-2">Odak</a></li><li><a href="#s7-3">AI</a></li><li><a href="#s7-4">Üretkenlik</a></li><li><a href="#s7-5">Mesajlaşma</a></li><li><a href="#s7-6">Medya ve e-posta</a></li><li><a href="#s7-7">Pazaryeri</a></li><li><a href="#s7-8">Ayarlar</a></li><li><a href="#s7-9">Masaüstü deneyimi</a></li><li><a href="#s7-10">Web varlıkları</a></li></ol></li>
+    <li><a href="#s8"><span class="n">7</span>Güvenlik ve gizlilik</a>
+      <ol><li><a href="#s8-1">Yerel veri</a></li><li><a href="#s8-2">Yerel API</a></li><li><a href="#s8-3">Ban önleme</a></li><li><a href="#s8-4">Sunucu çekirdeği kararı</a></li><li><a href="#s8-5">KVKK</a></li></ol></li>
+    <li><a href="#s9"><span class="n">8</span>Performans ve dayanıklılık</a>
+      <ol><li><a href="#s9-1">Eşitleme</a></li><li><a href="#s9-2">Kendiliğinden iyileşme</a></li><li><a href="#s9-3">Açılış planı</a></li><li><a href="#s9-4">Kilit bekçisi</a></li><li><a href="#s9-5">Ölçümler</a></li></ol></li>
+    <li><a href="#s10"><span class="n">9</span>Yol haritası</a>
+      <ol><li><a href="#s10-1">Yeni eklenenler (30.09)</a></li><li><a href="#s10-2">Planlanan</a></li><li><a href="#s10-3">Tamamlanan eski maddeler</a></li></ol></li>
+    <li><a href="#s11"><span class="n">10</span>Bilinen sınırlamalar</a></li>
+    <li><a href="#s12"><span class="n">11</span>Ekler</a>
+      <ol><li><a href="#s12-1">Yerel API</a></li><li><a href="#s12-2">Veri dosyaları</a></li><li><a href="#s12-3">Ortam değişkenleri</a></li><li><a href="#s12-4">Klavye kısayolları</a></li></ol></li>
+  </ol>
+</nav>
+
+<!-- ============================ 1. ÖZET ============================ -->
+<h1 class="sec" id="s2"><span class="n">1</span>Özet</h1>
+
+<h2 id="s2-1">Ürün</h2>
+<p class="lead">Mivelo; WhatsApp, Telegram, iMessage, Slack, Instagram, Messenger, X, LinkedIn ve TikTok mesajlarını, Gmail, Outlook, Yahoo, iCloud ve Yandex e-postalarını ve Trendyol, Hepsiburada, n11, ePttAVM, Amazon, Etsy, Shopify siparişleri ile müşteri sorularını tek bir gelen kutusunda toplayan bir masaüstü uygulamasıdır.</p>
+<p>Uygulama kullanıcının kendi bilgisayarında çalışır: mesajlar, oturumlar ve anahtarlar yalnız o cihazda, şifreli bir veritabanında tutulur. Hiçbir ücretli servise bağımlı değildir; AI özellikleri kullanıcının kendi Anthropic anahtarını girmesiyle isteğe bağlı olarak açılır. macOS (Apple Silicon ve Intel) için DMG, Windows için kurulum paketi (EXE) olarak dağıtılır; herkese açık bir tanıtım demosu (demo.mivelo.app) ve indirme/kayıt sayfası (mivelo.app/indir) vardır.</p>
+
+<h2 id="s2-2">Konumlandırma</h2>
+<div class="grid2">
+  <div class="card"><h4>İş için değil, senin için</h4><p>Ekip gelen kutusu ya da müşteri hizmetleri yazılımı değil; bir kişinin kendi hesaplarını tek yerde okuduğu kişisel bir iletişim merkezi. Küçük satıcılar için pazaryeri siparişleri ve soruları da aynı yerde.</p></div>
+  <div class="card"><h4>Yerel öncelikli</h4><p>Bulut sunucusu yok. Bağlantılar kullanıcının kendi cihazından ve kendi IP adresinden yapılır; bu hem gizliliği hem de platformların hesap kısıtlama riskini doğrudan etkiler.</p></div>
+  <div class="card"><h4>Ücretsiz</h4><p>Mesajlaşma için ücretli API, aracı servis ya da abonelik kullanılmaz. Masaüstü paketi lisans anahtarıyla açılır; anahtar indirme sayfasında kayıt olan kullanıcılara ücretsiz gönderilir.</p></div>
+  <div class="card"><h4>AI isteğe bağlı</h4><p>Özet, taslak ve aksiyon çıkarma yalnız kullanıcı anahtar girer ve özelliği açarsa çalışır; içerik ancak kullanıcı istediğinde modele gider. Her AI yeteneği ayrı ayrı kapatılabilir.</p></div>
+</div>
+
+<h2 id="s2-3">Hedef kullanıcı</h2>
+<ul>
+  <li><b>Çok kanallı bireyler:</b> gün içinde 5-10 farklı uygulamada yazışan, bildirim karmaşasından yorulan kişiler (serbest çalışanlar, girişimciler, içerik üreticileri).</li>
+  <li><b>Küçük e-ticaret satıcıları:</b> Trendyol, Hepsiburada, n11 gibi pazaryerlerinde satış yapan, siparişleri ve müşteri sorularını mesajlarının yanında görmek isteyenler.</li>
+  <li><b>Gizliliğe önem verenler:</b> yazışmalarını bir buluta taşımak istemeyen, verisinin kendi cihazında kalmasını tercih eden kullanıcılar.</li>
+</ul>
+
+<h2 id="s2-4">Rakamlarla</h2>
+<table>
+  <thead><tr><th>Ölçüt</th><th>Değer</th></tr></thead>
+  <tbody>
+    <tr><td>Desteklenen platform</td><td>22 (9 mesajlaşma, 5 e-posta sağlayıcısı + eski IMAP hesapları, 8 pazaryeri; Shopier "Yakında")</td></tr>
+    <tr><td>Son masaüstü sürümü</td><td>0.1.25 (macOS arm64, macOS Intel, Windows x64)</td></tr>
+    <tr><td>Çekirdek birim test dosyası</td><td>63 (<code>packages/core/test</code>, node:test + tsx)</td></tr>
+    <tr><td>Yerel API</td><td>REST + WebSocket, 127.0.0.1:7788, 60'tan fazla uç</td></tr>
+    <tr><td>Arayüz dili</td><td>Türkçe; açık ve koyu tema</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================ 2. MİMARİ ============================ -->
+<h1 class="sec" id="s3"><span class="n">2</span>Mimari</h1>
+
+<p>Mivelo üç katmandan oluşur: <b>çekirdek</b> (Node.js süreci; bağlantılar, veritabanı, yerel API), <b>web arayüzü</b> (React tek sayfa uygulaması) ve <b>masaüstü kabuğu</b> (Tauri; pencere, tepsi, kısayol, bildirim ve çekirdeğin yaşam döngüsü). Monorepo npm çalışma alanlarıyla yönetilir: <code>packages/core</code>, <code>apps/web</code>, <code>apps/desktop</code>, <code>apps/landing</code>.</p>
+
+<h2 id="s3-1">Genel şema</h2>
+<figure>
+<svg viewBox="0 0 700 470" width="100%" role="img" aria-label="Mivelo mimari şeması">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#6c47ff"/></marker>
+    <marker id="arg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#8a8598"/></marker>
+  </defs>
+  <!-- Kabuk + arayüz -->
+  <rect x="20" y="10" width="440" height="84" rx="10" fill="#f7f6fb" stroke="#cfc9e0"/>
+  <text x="34" y="30" font-size="12" font-weight="700" fill="#17151f">Masaüstü kabuğu · Tauri 2 (Rust)</text>
+  <text x="34" y="45" font-size="9.5" fill="#625d72">tepsi, Dock rozeti, ⌘⇧K, bildirim, çekirdek bekçisi, lisans ortamı</text>
+  <rect x="40" y="52" width="400" height="32" rx="7" fill="#fff" stroke="#6c47ff"/>
+  <text x="240" y="72" font-size="11" text-anchor="middle" fill="#17151f"><tspan font-weight="700">Web arayüzü</tspan> · React 19 + Vite (WKWebView / WebView2)</text>
+  <!-- Diğer istemciler -->
+  <rect x="480" y="10" width="200" height="84" rx="10" fill="#fff" stroke="#cfc9e0" stroke-dasharray="4 3"/>
+  <text x="580" y="34" font-size="11" font-weight="700" text-anchor="middle" fill="#17151f">Diğer istemciler</text>
+  <text x="580" y="52" font-size="9.5" text-anchor="middle" fill="#625d72">tarayıcıda localhost:5173</text>
+  <text x="580" y="66" font-size="9.5" text-anchor="middle" fill="#625d72">telefondan erişim (aynı Wi-Fi)</text>
+  <text x="580" y="80" font-size="9.5" text-anchor="middle" fill="#625d72">yalnız belirteçle</text>
+  <!-- oklar -->
+  <line x1="240" y1="96" x2="240" y2="128" stroke="#6c47ff" stroke-width="1.6" marker-end="url(#ar)" marker-start="url(#ar)"/>
+  <text x="250" y="116" font-size="9.5" fill="#4b2fd1">REST + WebSocket /ws · 127.0.0.1:7788</text>
+  <line x1="580" y1="96" x2="500" y2="128" stroke="#8a8598" stroke-width="1.2" marker-end="url(#arg)"/>
+  <!-- Çekirdek -->
+  <rect x="20" y="132" width="660" height="150" rx="12" fill="#f1edff" stroke="#6c47ff" stroke-width="1.4"/>
+  <text x="34" y="152" font-size="12.5" font-weight="700" fill="#17151f">Çekirdek · Node 22 + TypeScript (packages/core)</text>
+  <g font-size="10" fill="#17151f">
+    <rect x="34" y="162" width="148" height="46" rx="7" fill="#fff" stroke="#cfc6f5"/>
+    <text x="108" y="181" text-anchor="middle" font-weight="700">server.ts</text>
+    <text x="108" y="196" text-anchor="middle" font-size="9" fill="#625d72">REST, WS demetleri, CORS/Host</text>
+    <rect x="192" y="162" width="148" height="46" rx="7" fill="#fff" stroke="#cfc6f5"/>
+    <text x="266" y="181" text-anchor="middle" font-weight="700">registry.ts</text>
+    <text x="266" y="196" text-anchor="middle" font-size="9" fill="#625d72">hesap ↔ connector, iyileşme</text>
+    <rect x="350" y="162" width="148" height="46" rx="7" fill="#fff" stroke="#cfc6f5"/>
+    <text x="424" y="181" text-anchor="middle" font-weight="700">store.ts</text>
+    <text x="424" y="196" text-anchor="middle" font-size="9" fill="#625d72">SQLite · SQLCipher · FTS5</text>
+    <rect x="508" y="162" width="158" height="46" rx="7" fill="#fff" stroke="#cfc6f5"/>
+    <text x="587" y="181" text-anchor="middle" font-weight="700">ai.ts · style.ts</text>
+    <text x="587" y="196" text-anchor="middle" font-size="9" fill="#625d72">taslak, özet, üslup profili</text>
+    <rect x="34" y="218" width="148" height="50" rx="7" fill="#fff" stroke="#cfc6f5"/>
+    <text x="108" y="238" text-anchor="middle" font-weight="700">scheduled · calendar</text>
+    <text x="108" y="253" text-anchor="middle" font-size="9" fill="#625d72">zamanlanmış gönderim, etkinlik</text>
+    <rect x="192" y="218" width="148" height="50" rx="7" fill="#fff" stroke="#cfc6f5"/>
+    <text x="266" y="238" text-anchor="middle" font-weight="700">send-guard · activity</text>
+    <text x="266" y="253" text-anchor="middle" font-size="9" fill="#625d72">gönderim sınırları, yoklama</text>
+    <rect x="350" y="218" width="148" height="50" rx="7" fill="#fff" stroke="#cfc6f5"/>
+    <text x="424" y="238" text-anchor="middle" font-weight="700">license · updater</text>
+    <text x="424" y="253" text-anchor="middle" font-size="9" fill="#625d72">anahtar denetimi, güncelleme</text>
+    <rect x="508" y="218" width="158" height="50" rx="7" fill="#fff" stroke="#cfc6f5"/>
+    <text x="587" y="238" text-anchor="middle" font-weight="700">stall-watch · boot-plan</text>
+    <text x="587" y="253" text-anchor="middle" font-size="9" fill="#625d72">kilit bekçisi, açılış sırası</text>
+  </g>
+  <!-- Connector katmanı -->
+  <line x1="350" y1="284" x2="350" y2="306" stroke="#6c47ff" stroke-width="1.6" marker-end="url(#ar)"/>
+  <text x="360" y="300" font-size="9.5" fill="#4b2fd1">Connector arayüzü (connectors/base.ts)</text>
+  <g font-size="10">
+    <rect x="20" y="310" width="158" height="74" rx="9" fill="#fff" stroke="#9a86ff"/>
+    <text x="99" y="329" text-anchor="middle" font-weight="700" fill="#17151f">Protokol kütüphanesi</text>
+    <text x="99" y="345" text-anchor="middle" font-size="9" fill="#625d72">WhatsApp (Baileys)</text>
+    <text x="99" y="358" text-anchor="middle" font-size="9" fill="#625d72">Telegram (teleproto)</text>
+    <text x="99" y="371" text-anchor="middle" font-size="9" fill="#625d72">IMAP/SMTP (eski hesaplar)</text>
+    <rect x="186" y="310" width="158" height="74" rx="9" fill="#fff" stroke="#9a86ff"/>
+    <text x="265" y="329" text-anchor="middle" font-weight="700" fill="#17151f">Tarayıcı köprüsü</text>
+    <text x="265" y="345" text-anchor="middle" font-size="9" fill="#625d72">Playwright + Chromium profili</text>
+    <text x="265" y="358" text-anchor="middle" font-size="9" fill="#625d72">IG, Messenger, X, LinkedIn,</text>
+    <text x="265" y="371" text-anchor="middle" font-size="9" fill="#625d72">TikTok, Slack, web e-posta</text>
+    <rect x="352" y="310" width="158" height="74" rx="9" fill="#fff" stroke="#9a86ff"/>
+    <text x="431" y="329" text-anchor="middle" font-weight="700" fill="#17151f">Yerel veritabanı</text>
+    <text x="431" y="345" text-anchor="middle" font-size="9" fill="#625d72">iMessage chat.db (salt okunur)</text>
+    <text x="431" y="358" text-anchor="middle" font-size="9" fill="#625d72">+ AppleScript gönderim</text>
+    <text x="431" y="371" text-anchor="middle" font-size="9" fill="#625d72">macOS Kişiler (yedek adlar)</text>
+    <rect x="518" y="310" width="162" height="74" rx="9" fill="#fff" stroke="#9a86ff"/>
+    <text x="599" y="329" text-anchor="middle" font-weight="700" fill="#17151f">Resmi API</text>
+    <text x="599" y="345" text-anchor="middle" font-size="9" fill="#625d72">Pazaryerleri (REST/SOAP)</text>
+    <text x="599" y="358" text-anchor="middle" font-size="9" fill="#625d72">Slack xoxp (eski yol)</text>
+    <text x="599" y="371" text-anchor="middle" font-size="9" fill="#625d72">Anthropic (isteğe bağlı AI)</text>
+  </g>
+  <!-- Disk ve dış servisler -->
+  <rect x="20" y="400" width="320" height="58" rx="9" fill="#f8ffe2" stroke="#9dbd1f"/>
+  <text x="34" y="419" font-size="11" font-weight="700" fill="#17151f">~/.mivelo (yalnız bu cihaz)</text>
+  <text x="34" y="434" font-size="9" fill="#625d72">mivelo.db (şifreli), sessions/&lt;hesap&gt;/ (oturum, profil, medya),</text>
+  <text x="34" y="447" font-size="9" fill="#625d72">license.json, scheduled.json, send-guard.json, günlükler</text>
+  <rect x="360" y="400" width="320" height="58" rx="9" fill="#fff" stroke="#cfc9e0" stroke-dasharray="4 3"/>
+  <text x="374" y="419" font-size="11" font-weight="700" fill="#17151f">mivelo.app (yalnız meta veri)</text>
+  <text x="374" y="434" font-size="9" fill="#625d72">license.php (etkinleştir / denetle / bırak),</text>
+  <text x="374" y="447" font-size="9" fill="#625d72">indir/files/latest.json (güncelleme), geri bildirim</text>
+</svg>
+<figcaption>Şekil 1. Katmanlar ve veri akışı. Mesaj içeriği yalnız cihazda kalır; mivelo.app'e yalnız lisans, güncelleme denetimi ve kullanıcının gönderdiği geri bildirim gider.</figcaption>
+</figure>
+
+<h2 id="s3-2">Çekirdek (packages/core)</h2>
+<ul>
+  <li><b>Çalışma ortamı:</b> Node.js 22, TypeScript (ESM), <code>tsc</code> ile derlenir; geliştirmede <code>tsx watch</code>. Paketli uygulamada Node ikilisi pakete gömülüdür.</li>
+  <li><b>Veritabanı:</b> SQLite (<code>better-sqlite3-multiple-ciphers</code>, SQLCipher şifrelemesi, WAL günlüğü) + FTS5 tam metin arama. Hazır sorgu önbelleği, gönderen/uzak kimlik indeksleri, toplu yazımlar tek işlem içinde.</li>
+  <li><b>Sunucu:</b> <code>server.ts</code> saf Node <code>http</code> + <code>ws</code>; yalnız 127.0.0.1:7788'de dinler (telefondan erişim açılırsa LAN adresi de eklenir). Derlenmiş arayüz varsa onu da sunar.</li>
+  <li><b>Kayıt defteri:</b> <code>registry.ts</code> her hesap için bir connector örneği tutar; başlatma, durdurma, yeniden bağlanma, kaldırma, kendiliğinden iyileşme ve açılış sırası burada yönetilir.</li>
+  <li><b>Ortak model:</b> <code>model.ts</code> Account / Chat / Message / Participant / Attachment. Connector arayüzü <code>connectors/base.ts</code>: <code>start/stop/sendText</code> zorunlu; <code>fetchMedia, openDirect, logout, action, loadHistory, deleteMessage, editMessage, markRead, watch</code> isteğe bağlı.</li>
+  <li><b>Yardımcı modüller:</b> <code>scheduled.ts</code> (zamanlanmış gönderim), <code>calendar.ts / calendar-device.ts</code> (Mivelo takvimi, macOS Takvim / Outlook), <code>ai.ts, style.ts</code>, <code>send-guard.ts</code>, <code>activity.ts</code> (arayüz etkinliğine göre yoklama), <code>permissions.ts</code> (macOS izin durumu), <code>link-preview.ts</code> (güvenli Open Graph getirici), <code>media-prune.ts</code>, <code>profile.ts</code>, <code>platform.ts</code> (işletim sistemi farkları).</li>
+</ul>
+
+<h2 id="s3-3">Web arayüzü (apps/web)</h2>
+<ul>
+  <li>Vite 6 + React 19 tek sayfa uygulaması; harici bileşen kütüphanesi yok, tüm bileşenler projede yazılmıştır.</li>
+  <li>Başlıca dosyalar: <code>App.tsx</code> (liste, filtreler, kanallar, ayarlar), <code>Conversation.tsx</code> (mesajlar, arama, medya penceresi, sağ ayrıntı paneli), <code>Connect.tsx</code> (kanal bağlama), <code>Focus.tsx</code> (Odak), <code>CalendarView.tsx</code>, <code>SearchPalette.tsx</code> (⌘K), <code>Settings.tsx</code>, <code>Onboarding.tsx</code>, <code>LicenseGate.tsx</code>, <code>UpdateBanner.tsx</code>, <code>MailFrame.tsx</code>, <code>Feedback.tsx</code>.</li>
+  <li>Tema: açık ve koyu mod; renkler yalnız CSS değişkenleriyle (<code>styles.css</code>), mor <code>#6c47ff</code> vurgu, lime <code>#d4ff3f</code> ikincil vurgu.</li>
+  <li>Aynı kod üç biçimde derlenir: yerel/masaüstü arayüzü, herkese açık statik demo (<code>VITE_STATIC_DEMO=1</code>, sahte çekirdek <code>static-demo.ts</code>) ve tek dosyalık çevrimdışı demo (<code>npm run demo:html</code>).</li>
+</ul>
+
+<h2 id="s3-4">Masaüstü kabuğu (apps/desktop)</h2>
+<ul>
+  <li>Tauri 2 (Rust). <code>src-tauri/src/lib.rs</code>: tepsi simgesi ve menüsü, macOS Dock rozeti (Windows'ta okunmamış sayısı tepsi ipucunda), küresel kısayol ⌘⇧K / Ctrl+Shift+K, tek örnek kilidi, sistem bildirimleri.</li>
+  <li>Çekirdeği gömülü <code>node</code> ile başlatır ve bekçiyle izler: 150 sn açılış payı, HTTP sağlık denetimi, çökmede üstel bekleme (en çok 5 dk), kapanışta önce <code>/api/shutdown</code> ile nazik kapatma. 7788 portundaki yabancı bir süreci benimsemez.</li>
+  <li>Paketleme: <code>scripts/bundle-core.mjs</code> çekirdeği kendi <code>node_modules</code>'üyle <code>core-bundle/</code> klasörüne koyar (uygulama içinde <code>Resources/core</code>). Chromium ve ffmpeg pakette yoktur; Chromium ilk tarayıcı kanalında indirilir.</li>
+  <li>macOS: ad-hoc imza, <code>Entitlements.plist</code> (mikrofon, Apple Events, Kişiler, Takvim), App Nap kapalı, arka planda arayüz kısıtlaması kapalı. Windows: NSIS kurulum (kullanıcı başına), yerel başlık çubuğu.</li>
+</ul>
+
+<h2 id="s3-5">Veri klasörü</h2>
+<p>Tüm kullanıcı verisi <code>~/.mivelo</code> altındadır (ayrıntılı liste Ek B'de). Eski adı <code>~/.kavsak</code>; ilk açılışta öğe öğe taşınır ve eski yol yeni klasöre sembolik bağ olur. <code>MIVELO_DATA_DIR</code> ile değiştirilebilir. Uygulamayı çöp kutusuna atmak bu klasörü silmez (macOS'ta olağan davranış); tüm veriyi silmek için Ayarlar'daki "Tüm verileri sil" kullanılır.</p>
+
+<h2 id="s3-6">Olay akışı</h2>
+<p>Connector'lar mesajları <code>store</code>'a yazar ve olay veri yolu (<code>bus.ts</code>) üzerinden yayınlar. Sunucu olayları WebSocket <code>/ws</code> üzerinden arayüze iletir. Büyük eşitlemelerde arayüzün boğulmaması için <code>ws-batch.ts</code> <b>EventBatcher</b> kullanılır:</p>
+<ul>
+  <li>Yaklaşık 40 ms'lik pencerede olaylar tek bir <code>{type:'batch', chats, deletes, events, refetch}</code> demetinde toplanır.</li>
+  <li>Her sohbet demette bir kez gönderilir (en güncel hali yayın anında okunur); mesaj olayları sohbeti tekrar taşımaz.</li>
+  <li>Hesap durumu, ilerleme ve "yazıyor" olayları birleştirilir; bir demette en çok 150 geçmiş mesajı taşınır, fazlası için arayüz açık sohbeti depodan yeniden okur (<code>refetch</code>).</li>
+  <li>Arayüz (<code>api.ts unpackBatch</code>) demeti eski tekil olaylara açar ve ayrıca 150 ms'lik pencerede toplulaştırır.</li>
+</ul>
+<p class="small muted">Olay türleri: account.status, account.qr, account.prompt, account.sync, account.removed, account.login-cancelled, chat.upsert, chat.delete, chat.typing, chat.followup, message.upsert, message.delete, messages.read, scheduled.update, scheduled.missed, events.update, event.reminder, license.update, login.start / login.frame / login.end, log.</p>
+
+<h2 id="s3-7">Lisans</h2>
+<p>Lisans yalnız paketli masaüstü sürümünde istenir (kabuk çekirdeği <code>MIVELO_REQUIRE_LICENSE=1</code> ile başlatır; geliştirme ve demo lisans istemez).</p>
+<ul>
+  <li>Anahtar biçimi <code>MVL-XXXX-XXXX-XXXX-XXXX</code> (karışmayan harf/rakam, 80 bit). Anahtar, indirme sayfasında kayıt olurken verilen e-postaya gönderilir.</li>
+  <li>Çekirdek <code>license.ts</code>: etkinleştirme bilgisi <code>~/.mivelo/license.json</code> (0600). Cihaz kimliği donanım kimliğinden türetilir (macOS IOPlatformUUID, Windows MachineGuid, Linux machine-id).</li>
+  <li>Lisans geçerli değilken kanallar başlamaz ve <code>/api</code> 402 döner (sağlık, lisans ve güncelleme uçları hariç).</li>
+  <li>Denetim: açılışta, 30 dakikada bir ve arayüz öne gelince. Sunucu anahtarı geçersiz sayarsa (iptal, süre bitimi, cihaz kaldırıldı) uygulama kilitlenir; ağ hatasında 14 gün çevrimdışı çalışma payı vardır.</li>
+  <li>Sunucu tarafı <code>apps/landing/api/license.php</code> (etkinleştir / denetle / bırak); anahtar üretimi ve yönetimi yönetim panelindedir. Varsayılan süre 30 gün, cihaz sınırı 1-10 (varsayılan 2).</li>
+  <li>İstemci tarafı bir denetimdir; amaç anahtarsız dağıtımı engellemektir, kararlı bir kopya korumasıdır iddiası yoktur.</li>
+</ul>
+
+<h2 id="s3-8">Uygulama içi güncelleyici</h2>
+<ul>
+  <li>Arayüz 6 saatte bir <code>mivelo.app/indir/files/latest.json</code> dosyasını okur; yeni sürüm varsa kart gösterir ("Sonra" o sürümü atlar).</li>
+  <li>"Güncelle": çekirdek <code>updater.ts</code> işletim sistemi ve işlemciye uygun paketi (Mac arm64/Intel DMG, Windows kurulum) yalnız mivelo.app/indir/files adresinden <code>~/.mivelo/update/</code> klasörüne akışla indirir; boyut ve SHA-256 özeti (CI tarafından <code>latest.json</code>'a yazılır) doğrulanır.</li>
+  <li>Kurulum kopuk bir betikle yapılır: macOS'ta <code>kur.sh</code> uygulamayı kapatır, DMG'den yeni paketi eskisinin yerine koyar (hata olursa eskisi geri gelir), karantina özniteliğini siler ve yeniden açar; Windows'ta <code>kur.ps1</code> NSIS kurulumunu sessiz çalıştırır.</li>
+  <li>Tauri'nin kendi güncelleyicisi kullanılmadı (imza anahtarı gizlisi gerektirir). Geliştirme ya da elle taşınmış kurulumda özellik kapalıdır ve kullanıcı indirme sayfasına yönlendirilir.</li>
+</ul>
+
+<!-- ============================ 3. TEKNOLOJİ ============================ -->
+<h1 class="sec" id="s4"><span class="n">3</span>Teknoloji yığını ve araçlar</h1>
+
+<h2 id="s4-1">Diller ve çerçeveler</h2>
+<table>
+  <thead><tr><th class="w-name">Katman</th><th>Teknoloji</th><th>Not</th></tr></thead>
+  <tbody>
+    <tr><td>Çekirdek</td><td>TypeScript 5.9, Node.js 22 (ESM)</td><td><code>tsc</code> ile derleme, <code>tsx</code> ile geliştirme ve test</td></tr>
+    <tr><td>Arayüz</td><td>React 19, Vite 6, TypeScript</td><td>Durum yönetimi React kancalarıyla; CSS değişkenli tek stil dosyası</td></tr>
+    <tr><td>Masaüstü</td><td>Rust (2021), Tauri 2.11</td><td>macOS WKWebView, Windows WebView2</td></tr>
+    <tr><td>Veritabanı</td><td>SQLite + SQLCipher + FTS5</td><td>better-sqlite3-multiple-ciphers</td></tr>
+    <tr><td>Tarayıcı otomasyonu</td><td>Playwright 1.63 + Chromium</td><td>Kalıcı profil, görünmez (headless) yoklama</td></tr>
+    <tr><td>Web sitesi / sunucu</td><td>Statik HTML/CSS/JS + PHP (bağımlılıksız)</td><td>Landing, indirme sayfası, yönetim paneli, lisans ve kayıt uçları</td></tr>
+    <tr><td>Betikler</td><td>Node.js (.mjs), Python (az sayıda), Bash/PowerShell</td><td>Paketleme, test, izleme, tanıtım videosu</td></tr>
+  </tbody>
+</table>
+
+<h2 id="s4-2">Test ve doğrulama</h2>
+<table>
+  <thead><tr><th class="w-name">Araç</th><th>Kapsam</th></tr></thead>
+  <tbody>
+    <tr><td>node:test + tsx</td><td><code>npm test -w packages/core</code>: 63 test dosyası; strateji birim testleri sahte sayfa nesnesiyle (Slack, Instagram, TikTok DOM vb.), depo, eşitleme performansı, lisans, güncelleyici, gönderim sınırları, kendiliğinden iyileşme, açılış planı, tepki önizlemesi, tek seferlik medya, düzenle/sil. <code>--test-force-exit --test-timeout=120000</code>.</td></tr>
+    <tr><td>TypeScript</td><td><code>npm run typecheck</code> (çekirdek + arayüz)</td></tr>
+    <tr><td>Playwright</td><td>Demo modunda görsel doğrulama; TikTok DOM testleri gerçek Chromium ile (yoksa atlanır); <code>e2e.mjs --ui</code> duman testi.</td></tr>
+    <tr><td>Canlı E2E</td><td><code>npm run e2e</code>: gerçek hesaplar arasında gidiş-dönüş gecikmesi, kopya, Türkçe/emoji bütünlüğü, günlük sınıflandırma; rapor <code>~/.mivelo/e2e/</code>.</td></tr>
+    <tr><td>Masaüstü duman testi</td><td>GitHub'ın Apple Silicon Mac'inde gerçek DMG kurulumu ve ~250 bin mesajlık şifreli veritabanıyla yanıt süresi ölçümü.</td></tr>
+    <tr><td>Strateji doğrulama</td><td><code>verify-strategy.mjs</code>: canlı oturum profilinin kopyasıyla sohbet/mesaj okuma denetimi (uygulamaya dokunmadan).</td></tr>
+  </tbody>
+</table>
+
+<h2 id="s4-3">CI/CD (GitHub Actions)</h2>
+<p>Depo herkese açıktır; standart GitHub Actions makineleri ücretsiz ve kotasız kullanılır.</p>
+<table>
+  <thead><tr><th class="w-name">İş akışı</th><th>Tetik</th><th>Ne yapar</th></tr></thead>
+  <tbody>
+    <tr><td><code>build-desktop.yml</code></td><td>Elle (workflow_dispatch) ya da <code>v*</code> etiketi</td><td>Sürüm numarası 0.1.&lt;çalışma no&gt;. Ayrı <code>test</code> işi (ubuntu, ≤10 dk). <code>build</code> matrisi (≤30 dk): mac-arm64 (macos-14), mac-intel (x64 Node + Rosetta, x86_64-apple-darwin), windows-x64 (NSIS). Node pakete gömülür, DMG'den gizli dosyalar temizlenir. Hepsi başarılıysa <code>publish</code>: DMG/EXE ve <code>latest.json</code> (sürüm, tarih, boyut, SHA-256) FTP ile mivelo.app/indir/files/ klasörüne.</td></tr>
+    <tr><td><code>desktop-smoke.yml</code></td><td>build-desktop bitince (workflow_run) ya da elle</td><td>macos-14'te gerçek DMG kurulur, karantina kaldırılır; (1) uygulama açılır, 60 sn çekirdek yanıt süreleri ölçülür ve ekran görüntüsü alınır, (2) paketin kendi Node'uyla ~250 bin yer tutucu mesajlı şifreli veritabanı ve 100 bin mesajlık silinmekte olan hesap oluşturulup 120 sn ölçülür.</td></tr>
+    <tr><td><code>deploy-demo.yml</code></td><td>main'e her itme</td><td><code>landing</code> işi: apps/landing (tanıtım, indir, admin, api) → mivelo.app. <code>demo</code> işi: statik demo derlemesi → demo.mivelo.app. İkisi de FTP ile.</td></tr>
+  </tbody>
+</table>
+<p class="small muted">Kullanılan eylemler: actions/checkout@v4, actions/setup-node@v4, dtolnay/rust-toolchain@stable, Swatinem/rust-cache@v2, actions/upload-artifact@v4, actions/download-artifact@v4, SamKirkland/FTP-Deploy-Action@v4.3.5. Gizli değerler (FTP bilgileri, Sentry DSN vb.) yalnız GitHub Secrets'ta tutulur.</p>
+
+<h2 id="s4-4">Barındırma</h2>
+<ul>
+  <li><b>mivelo.app:</b> tanıtım (bekleme listesi) sayfası, gizlilik ve koşullar, indirme/kayıt sayfası (<code>/indir</code>), yönetim paneli (<code>/admin</code>), PHP uçları (<code>/api</code>: lisans, kayıt, bekleme listesi, geri bildirim, çerezsiz trafik sayacı). Paylaşımlı cPanel barındırma; dağıtım FTP ile.</li>
+  <li><b>demo.mivelo.app:</b> herkese açık statik demo (örnek veri, gerçek hesap bağlantısı yok).</li>
+  <li><b>mivelo.app/indir/files:</b> masaüstü paketleri ve <code>latest.json</code>; <code>.htaccess</code> ile JSON'a CORS, indirme başlığı, dizin listeleme kapalı.</li>
+  <li>Sunucu tarafı veriler (üyeler, lisanslar, bekleme listesi, geri bildirim) web kökünün dışındaki bir veri klasöründe JSON dosyalarında; yazımlar kilitli ve atomik (geçici dosya + yeniden adlandırma).</li>
+</ul>
+
+<h2 id="s4-5">Betikler (scripts/)</h2>
+<table>
+  <thead><tr><th class="w-name">Betik</th><th>Amaç</th></tr></thead>
+  <tbody>
+    <tr><td><code>e2e.mjs</code></td><td>Canlı uçtan uca test: <code>setup</code> (ana ⇄ test hesap eşleştirme), <code>run [--ui] [wa ig …]</code> gidiş/dönüş turu, <code>watch</code> yalnız izleme. Markdown rapor üretir.</td></tr>
+    <tr><td><code>ci-watch.mjs</code></td><td><code>npm run ci</code>: GitHub Actions çalışmalarını terminalde canlı izler (iş, adım, süre, başarısız adım); başlayınca/bitince macOS bildirimi. <code>--once</code>, <code>--logs</code>.</td></tr>
+    <tr><td><code>auto-deploy.mjs</code></td><td><code>npm run autodeploy -- install</code>: macOS'ta iki LaunchAgent. Güncelleyici 2 dakikada bir main'i çeker (yalnız temiz ağaç, ff-only), gerekirse npm install ve çekirdek derlemesi yapar; web servisi <code>npm run dev</code>'i arka planda tutar. <code>status | restart | run | uninstall</code>.</td></tr>
+    <tr><td><code>verify-strategy.mjs</code></td><td>Tarayıcı stratejisini (slack, instagram, linkedin, x, messenger, tiktok) canlı oturumun profil kopyasıyla doğrular.</td></tr>
+    <tr><td><code>imessage-probe.mjs</code></td><td>chat.db ile Mivelo'daki sayıları karşılaştırır (içerik yazdırmaz).</td></tr>
+    <tr><td><code>trendyol-probe.mjs</code></td><td>Trendyol soru API'sinin alan adlarını ve uç durumlarını tanılar (değer yazdırmaz).</td></tr>
+    <tr><td><code>bundle-core.mjs</code></td><td>Çekirdeği üretim bağımlılıklarıyla masaüstü paketine hazırlar.</td></tr>
+    <tr><td><code>open-app.mjs</code></td><td><code>npm run app</code>: paketlenen uygulamayı açar.</td></tr>
+    <tr><td><code>demo-html.mjs</code></td><td>Arayüzü çevrimdışı demo kipinde tek HTML dosyasına gömer.</td></tr>
+    <tr><td><code>smoke/probe.mjs</code>, <code>smoke/seed.mjs</code></td><td>Duman testi: yanıt süresi ölçümü ve büyük yer tutucu veritabanı üretimi.</td></tr>
+    <tr><td><code>promo/</code></td><td>Tanıtım videosu (1080×1920 reels): gerçek tek dosya demo Playwright sanal saatiyle sürülür (<code>render.mjs</code>), müzik ve efektler kodla üretilir (<code>audio.mjs</code>), kompozisyon <code>reel.html</code>.</td></tr>
+    <tr><td><code>design/appstore/</code></td><td>Gelecekteki mobil uygulama için App Store ekran tasarımları (Liquid Glass dili, 1290×2796 PNG).</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================ 4. KÜTÜPHANELER ============================ -->
+<h1 class="sec" id="s5"><span class="n">4</span>Kütüphaneler</h1>
+<p>Sürümler <code>package-lock.json</code> ve <code>Cargo.lock</code>'taki çözülmüş değerlerdir; lisanslar paketlerin kendi bildirdiği alandır. Mivelo hiçbir ücretli SDK ya da servis kullanmaz.</p>
+
+<h2 id="s5-1">Çekirdek (packages/core)</h2>
+<table>
+  <thead><tr><th class="w-name">Paket</th><th class="nowrap">Sürüm</th><th class="nowrap">Lisans</th><th>Kullanım</th></tr></thead>
+  <tbody>
+    <tr><td><code>@whiskeysockets/baileys</code></td><td>7.0.0-rc14</td><td>MIT</td><td>WhatsApp Web çoklu cihaz protokolü (QR eşleşme, mesaj, medya, alındı, tepki)</td></tr>
+    <tr><td><code>teleproto</code></td><td>1.229.0</td><td>MIT</td><td>Telegram MTProto istemcisi (bakımı süren GramJS çatalı); QR giriş, 2FA</td></tr>
+    <tr><td><code>big-integer</code></td><td>1.6.52</td><td>Unlicense</td><td>Telegram kimlikleri için büyük tamsayı</td></tr>
+    <tr><td><code>playwright</code></td><td>1.63.0</td><td>Apache-2.0</td><td>Tarayıcı köprüsü: kalıcı Chromium profili, giriş penceresi, görünmez yoklama</td></tr>
+    <tr><td><code>better-sqlite3-multiple-ciphers</code></td><td>13.0.3</td><td>MIT</td><td>Ana veritabanı (SQLCipher şifreleme, FTS5)</td></tr>
+    <tr><td><code>better-sqlite3</code></td><td>11.10.0</td><td>MIT</td><td>Şifresiz yabancı veritabanlarını salt okuma: iMessage chat.db, macOS Kişiler, X yerel yedeği</td></tr>
+    <tr><td><code>imapflow</code></td><td>2.0.6</td><td>MIT</td><td>IMAP (IDLE, \Seen eşitleme) — şifreyle bağlanmış eski e-posta hesapları</td></tr>
+    <tr><td><code>nodemailer</code></td><td>10.0.10</td><td>MIT-0</td><td>SMTP ile e-posta gönderimi (eski IMAP hesapları)</td></tr>
+    <tr><td><code>mailparser</code></td><td>3.9.28</td><td>MIT</td><td>MIME çözümleme, HTML gövde, gömülü görseller</td></tr>
+    <tr><td><code>@slack/web-api</code></td><td>7.19.0</td><td>MIT</td><td>Slack resmi Web API istemcisi (xoxp belirteçli eski yol)</td></tr>
+    <tr><td><code>@anthropic-ai/sdk</code></td><td>0.128.0</td><td>MIT</td><td>İsteğe bağlı AI: yapılandırılmış çıktıyla taslak, özet, aksiyon, olay</td></tr>
+    <tr><td><code>ws</code></td><td>8.21.3</td><td>MIT</td><td>Yerel WebSocket sunucusu (<code>/ws</code>)</td></tr>
+    <tr><td><code>qrcode</code></td><td>1.5.4</td><td>MIT</td><td>WhatsApp/Telegram eşleşme QR'ları, telefondan erişim QR'ı</td></tr>
+    <tr><td><code>pino</code></td><td>9.14.0</td><td>MIT</td><td>Baileys'in günlükleyicisi (sessiz düzeyde)</td></tr>
+  </tbody>
+</table>
+<table>
+  <thead><tr><th class="w-name">Geliştirme bağımlılığı</th><th class="nowrap">Sürüm</th><th class="nowrap">Lisans</th><th>Kullanım</th></tr></thead>
+  <tbody>
+    <tr><td><code>typescript</code></td><td>5.9.3</td><td>Apache-2.0</td><td>Derleyici, tür denetimi</td></tr>
+    <tr><td><code>tsx</code></td><td>4.23.15</td><td>MIT</td><td>Geliştirmede izleyerek çalıştırma, test koşucusu</td></tr>
+    <tr><td><code>@types/node</code></td><td>22.20.4</td><td>MIT</td><td>Node tür tanımları</td></tr>
+    <tr><td><code>@types/better-sqlite3</code>, <code>@types/mailparser</code>, <code>@types/nodemailer</code>, <code>@types/qrcode</code>, <code>@types/ws</code></td><td>7.6.13 · 3.4.6 · 8.0.2 · 1.5.6 · 8.18.1</td><td>MIT</td><td>Tür tanımları</td></tr>
+    <tr><td><code>concurrently</code> (kök)</td><td>9.2.4</td><td>MIT</td><td><code>npm run dev / demo / desktop</code>: çekirdek ve arayüzü birlikte çalıştırma</td></tr>
+  </tbody>
+</table>
+
+<h2 id="s5-2">Web arayüzü (apps/web)</h2>
+<table>
+  <thead><tr><th class="w-name">Paket</th><th class="nowrap">Sürüm</th><th class="nowrap">Lisans</th><th>Kullanım</th></tr></thead>
+  <tbody>
+    <tr><td><code>react</code>, <code>react-dom</code></td><td>19.3.0</td><td>MIT</td><td>Arayüz</td></tr>
+    <tr><td><code>@tauri-apps/api</code></td><td>2.11.1</td><td>Apache-2.0 OR MIT</td><td>Masaüstü köprüsü (çekirdek belirteci, pencere, tema, rozet)</td></tr>
+    <tr><td><code>@tauri-apps/plugin-notification</code></td><td>2.4.0</td><td>MIT OR Apache-2.0</td><td>Sistem bildirimleri ve bildirim izni</td></tr>
+    <tr><td><code>simple-icons</code></td><td>16.32.0</td><td>CC0-1.0</td><td>Platform marka simgeleri</td></tr>
+    <tr><td><code>@fortawesome/free-brands-svg-icons</code></td><td>7.3.1</td><td>CC-BY-4.0 AND MIT</td><td>Slack ve LinkedIn marka glifleri</td></tr>
+    <tr><td><code>@sentry/react</code></td><td>10.75.3</td><td>MIT</td><td>Hata izleme — yalnız herkese açık demoda; PII kapalı, e-posta/numara/belirteç temizlenir, oturum kaydı yok</td></tr>
+  </tbody>
+</table>
+<table>
+  <thead><tr><th class="w-name">Geliştirme bağımlılığı</th><th class="nowrap">Sürüm</th><th class="nowrap">Lisans</th><th>Kullanım</th></tr></thead>
+  <tbody>
+    <tr><td><code>vite</code></td><td>6.4.3</td><td>MIT</td><td>Geliştirme sunucusu (5173) ve üretim derlemesi</td></tr>
+    <tr><td><code>@vitejs/plugin-react</code></td><td>4.7.0</td><td>MIT</td><td>React/JSX dönüşümü, hızlı yenileme</td></tr>
+    <tr><td><code>typescript</code></td><td>5.9.3</td><td>Apache-2.0</td><td>Tür denetimi</td></tr>
+    <tr><td><code>@types/react</code>, <code>@types/react-dom</code></td><td>19.3.0</td><td>MIT</td><td>Tür tanımları</td></tr>
+  </tbody>
+</table>
+
+<h2 id="s5-3">Masaüstü (apps/desktop)</h2>
+<table>
+  <thead><tr><th class="w-name">Crate / paket</th><th class="nowrap">Sürüm</th><th class="nowrap">Lisans</th><th>Kullanım</th></tr></thead>
+  <tbody>
+    <tr><td><code>tauri</code></td><td>2.11.6</td><td>Apache-2.0 OR MIT</td><td>Uygulama çerçevesi; özellikler: tray-icon, image-png, devtools</td></tr>
+    <tr><td><code>tauri-build</code></td><td>2.6.3</td><td>Apache-2.0 OR MIT</td><td>Derleme betiği</td></tr>
+    <tr><td><code>tauri-plugin-notification</code></td><td>2.4.0</td><td>Apache-2.0 OR MIT</td><td>Sistem bildirimleri</td></tr>
+    <tr><td><code>tauri-plugin-global-shortcut</code></td><td>2.3.2</td><td>Apache-2.0 OR MIT</td><td>⌘⇧K / Ctrl+Shift+K</td></tr>
+    <tr><td><code>tauri-plugin-single-instance</code></td><td>2.4.5</td><td>Apache-2.0 OR MIT</td><td>Tek örnek; ikinci açılış mevcut pencereyi öne getirir</td></tr>
+    <tr><td><code>tauri-plugin-opener</code></td><td>2.5.5</td><td>Apache-2.0 OR MIT</td><td>Bağlantı ve dosyaları sistemde açma</td></tr>
+    <tr><td><code>serde</code>, <code>serde_json</code></td><td>1.0.229 · 1.0.151</td><td>MIT OR Apache-2.0</td><td>JSON (sağlık yanıtı, yapılandırma)</td></tr>
+    <tr><td><code>@tauri-apps/cli</code> (npm)</td><td>2.11.5</td><td>Apache-2.0 OR MIT</td><td><code>tauri dev / build</code>, simge üretimi</td></tr>
+  </tbody>
+</table>
+
+<h2 id="s5-4">Sunucu tarafı ve harici bileşenler</h2>
+<table>
+  <thead><tr><th class="w-name">Bileşen</th><th>Kullanım</th></tr></thead>
+  <tbody>
+    <tr><td>Chromium (Playwright)</td><td>Pakette yok; ilk tarayıcı kanalında <code>playwright install --no-shell chromium</code> ile indirilir (ilerleme hesap satırında).</td></tr>
+    <tr><td>Node.js 22 ikilisi</td><td>Masaüstü paketine gömülü; <code>node-abi.json</code> ile yerel modüllerle uyumlu Node seçilir.</td></tr>
+    <tr><td>ffmpeg (isteğe bağlı)</td><td>Sistemde kuruluysa WhatsApp sesli mesajları mp3'e çevrilir; yoksa ogg.</td></tr>
+    <tr><td>PHP uçları</td><td>Bağımlılıksız: <code>lib-smtp.php</code> (kimlik doğrulamalı SMTP, gömülü logo), <code>lib-members.php</code>, <code>lib-feedback.php</code>, <code>license.php</code>, <code>register.php</code>, <code>waitlist.php</code>, <code>track.php</code>.</td></tr>
+    <tr><td>İşletim sistemi araçları</td><td>macOS: <code>security</code> (Anahtar Zinciri), <code>osascript</code> (iMessage, Takvim), <code>hdiutil</code> (güncelleme). Windows: PowerShell (DPAPI, Outlook COM).</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================ 5. KANALLAR ============================ -->
+<h1 class="sec" id="s6"><span class="n">5</span>Kanallar ve bağlantı yöntemleri</h1>
+
+<h2 id="s6-1">Yöntem türleri</h2>
+<table>
+  <thead><tr><th class="w-name">Yöntem</th><th>Nasıl çalışır</th><th>Kullanan kanallar</th></tr></thead>
+  <tbody>
+    <tr><td><b>Protokol kütüphanesi</b></td><td>Platformun kendi istemci protokolü açık kaynak bir kütüphaneyle konuşulur; Mivelo "bağlı cihaz" olarak görünür.</td><td>WhatsApp, Telegram</td></tr>
+    <tr><td><b>Tarayıcı köprüsü</b></td><td>Mivelo'ya özel kalıcı Chromium profilinde kullanıcı bir kez giriş yapar; sonra aynı profil görünmez modda arka planda yoklanır. Sitenin kendi web uçları (Instagram direct_v2, LinkedIn Voyager/GraphQL, X DM) ya da sayfa yapısı (DOM) okunur; sayfanın kendi WebSocket çerçeveleri pasif dinlenir.</td><td>Instagram, Messenger, X, LinkedIn, TikTok, Slack, Gmail, Outlook, Yahoo, iCloud, Yandex</td></tr>
+    <tr><td><b>Yerel veritabanı</b></td><td>İşletim sisteminin kendi uygulamasının veritabanı salt okunur açılır; gönderim sistem otomasyonuyla.</td><td>iMessage (yalnız macOS)</td></tr>
+    <tr><td><b>Resmi API</b></td><td>Platformun belgelenmiş API'si, satıcı panelinden alınan entegrasyon bilgileriyle.</td><td>Trendyol, Hepsiburada, n11, ePttAVM, Amazon, Etsy, Shopify, Shopier; Slack (eski xoxp yolu)</td></tr>
+  </tbody>
+</table>
+<div class="callout"><b>Bağlanma ilkesi (30.09 itibarıyla).</b> Uygulamada kullanıcı adı/şifre formu yoktur. Mesajlaşma ve e-postada kullanıcı platformun kendi giriş penceresinde ya da QR ile giriş yapar; şifre Mivelo'dan geçmez. Kalan tek formlar pazaryeri API anahtarları ve Telegram'ın istediği iki adımlı doğrulama parolasıdır.</div>
+
+<h2 id="s6-2">Yetenek matrisi</h2>
+<p class="small muted"><span class="dot"></span> destekleniyor · <span class="dot half"></span> kısmen · <span class="none">–</span> yok. "Geçmiş" = yukarı kaydırınca eski mesaj yükleme.</p>
+<table class="matrix">
+  <thead><tr><th>Kanal</th><th>Yöntem</th><th>Okuma</th><th>Gönderme</th><th>Dosya</th><th>Tepki</th><th>Yanıt</th><th>Düzenle / sil</th><th>Okundu</th><th>Geçmiş</th><th>Durum</th></tr></thead>
+  <tbody>
+    <tr><td>WhatsApp</td><td>Protokol</td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="badge b-ok">Kararlı</span></td></tr>
+    <tr><td>Telegram</td><td>Protokol</td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="badge b-ok">Kararlı</span></td></tr>
+    <tr><td>iMessage</td><td>Yerel DB</td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot half"></span></td><td><span class="none">–</span></td><td><span class="none">–</span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="badge b-ok">Kararlı</span></td></tr>
+    <tr><td>Slack</td><td>Tarayıcı</td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="badge b-warn">İzleniyor</span></td></tr>
+    <tr><td>Instagram</td><td>Tarayıcı</td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot half"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="badge b-ok">Kararlı</span></td></tr>
+    <tr><td>Messenger</td><td>Tarayıcı</td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot half"></span></td><td><span class="none">–</span></td><td><span class="none">–</span></td><td><span class="none">–</span></td><td><span class="dot"></span></td><td><span class="dot half"></span></td><td><span class="badge b-warn">Kısmen doğrulandı</span></td></tr>
+    <tr><td>X</td><td>Tarayıcı</td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot half"></span></td><td><span class="none">–</span></td><td><span class="none">–</span></td><td><span class="none">–</span></td><td><span class="dot"></span></td><td><span class="dot half"></span></td><td><span class="badge b-ok">Kararlı</span></td></tr>
+    <tr><td>LinkedIn</td><td>Tarayıcı</td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot half"></span></td><td><span class="dot"></span></td><td><span class="none">–</span></td><td><span class="none">–</span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="badge b-ok">Kararlı</span></td></tr>
+    <tr><td>TikTok</td><td>Tarayıcı</td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="none">–</span></td><td><span class="none">–</span></td><td><span class="none">–</span></td><td><span class="none">–</span></td><td><span class="dot half"></span></td><td><span class="none">–</span></td><td><span class="badge b-warn">Doğrulanmadı</span></td></tr>
+    <tr><td>E-posta (5 sağlayıcı)</td><td>Tarayıcı</td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot half"></span></td><td><span class="none">–</span></td><td><span class="dot"></span></td><td><span class="none">–</span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="badge b-ok">Kararlı</span>*</td></tr>
+    <tr><td>Pazaryerleri</td><td>Resmi API</td><td><span class="dot"></span></td><td><span class="dot half"></span></td><td><span class="none">–</span></td><td><span class="none">–</span></td><td><span class="none">–</span></td><td><span class="none">–</span></td><td><span class="none">–</span></td><td><span class="dot"></span></td><td>Kanala göre</td></tr>
+  </tbody>
+</table>
+<p class="small muted">* Yahoo tarayıcı yolu gerçek hesapla doğrulanmadı. iMessage tapback tepkileri gösterilir, gönderilemez. Instagram'da yalnız geri alma (düzenleme ucu yok). Pazaryerlerinde gönderme = müşteri sorusuna metin yanıtı (sipariş sayfasında yazma alanı yok).</p>
+
+<h2 id="s6-3">Mesajlaşma kanalları</h2>
+
+<div class="plat"><div class="plat-h"><h4><span class="sw" style="background:#0E8A45"></span>WhatsApp</h4><span class="badge b-ok">Kararlı</span></div><dl>
+  <dt>Yöntem</dt><dd>WhatsApp Web çoklu cihaz protokolü, Baileys 7.0.0-rc14 (resmi olmayan). Cihaz telefonda "Mivelo (Mac)" olarak görünür; tam geçmiş istenir.</dd>
+  <dt>Bağlanma</dt><dd>Bağlan → QR kodu → telefonda Ayarlar › Bağlı cihazlar › Cihaz bağla → okut → "Kodu okuttum". Kaldırınca telefondaki bağlı cihaz da düşer.</dd>
+  <dt>Destek</dt><dd>Metin, dosya, fotoğraf/video/belge/sesli mesaj (istek üzerine indirme; ffmpeg varsa mp3), tepki, alıntılı yanıt, düzenleme (15 dk), herkesten silme (48 sa), tek/çift/mavi tik (grup alındıları dahil), arşiv sekmesi, yazıyor bilgisi. Tek seferlik medya görüntülenmez, yer tutucuyla gösterilir. LID ile numara aynı kişiyse sohbetler birleşir; rehber adları gecikirse macOS Kişiler yedeği.</dd>
+  <dt>Sınırlar</dt><dd>Gönderimler arası 0,8-2 sn, dakikada en çok 20; ilk temas günde 100 sohbet, toplam 2500 gönderim. Düzenli çevrimiçi (presence) bildirimi yok; yalnız gönderim/okundu sonrası "çevrimdışı". 402/403/406'da durur, oturumu silmez. Arka plan geçmiş boşluğu doldurma varsayılan kapalı (telefonda bildirim çıkarıyordu).</dd>
+</dl></div>
+
+<div class="plat"><div class="plat-h"><h4><span class="sw" style="background:#1B7FB8"></span>Telegram</h4><span class="badge b-ok">Kararlı</span></div><dl>
+  <dt>Yöntem</dt><dd>MTProto, teleproto (GramJS'in bakımı süren çatalı; GramJS Temmuz 2026'da arşivlendi). Mivelo'nun kendi uygulama kimliğiyle.</dd>
+  <dt>Bağlanma</dt><dd>Bağlan → QR (<code>tg://login</code>) → telefonda Ayarlar › Cihazlar › Masaüstü Cihazı Bağla. İki adımlı doğrulama varsa parola sorulur.</dd>
+  <dt>Destek</dt><dd>Metin, dosya, medya, tepki, yanıt, düzenleme (48 sa), herkesten silme, okundu (karşı tarafın okuma noktası), canlı düzenleme/silme olayları, kopmada kaçan güncellemelerin telafisi (getDifference).</dd>
+  <dt>Sınırlar</dt><dd>Bekçi 60 sn; tam sohbet taraması 10 dakikada bir; ilk temas günde 50, toplam 2500.</dd>
+</dl></div>
+
+<div class="plat"><div class="plat-h"><h4><span class="sw" style="background:#1C8C3A"></span>iMessage (yalnız macOS)</h4><span class="badge b-ok">Kararlı</span></div><dl>
+  <dt>Yöntem</dt><dd><code>~/Library/Messages/chat.db</code> salt okunur + AppleScript ile Mesajlar uygulaması üzerinden gönderim.</dd>
+  <dt>Bağlanma</dt><dd>Tam Disk Erişimi (Sistem Ayarları › Gizlilik ve Güvenlik) ve Mesajlar otomasyon izni. İlk kurulum ekranı ikisini de adım adım ister.</dd>
+  <dt>Destek</dt><dd>Tüm geçmiş (açılışta en çok 60 bin mesaj), ekler, iletildi/okundu, tapback tepkilerinin gösterimi, Bilinmeyen gönderenler ve Son Silinenler klasörleri, 36 saattir yeni mesaj yoksa eşitleme uyarısı. Değişiklik izleyici 150 ms + 15 sn yedek.</dd>
+  <dt>Sınırlar</dt><dd>Tepki gönderme, düzenleme ve alıntılı yanıt yok. İlk temas 150, toplam 1500/gün. Ad-hoc imzalı pakette Tam Disk Erişimi her yeni derlemede düşebilir.</dd>
+</dl></div>
+
+<div class="plat"><div class="plat-h"><h4><span class="sw" style="background:#4A154B"></span>Slack</h4><span class="badge b-warn">İzleniyor</span></div><dl>
+  <dt>Yöntem</dt><dd>Tarayıcı köprüsü: web istemcisinin oturum anahtarı (xoxc) + çerez ile Slack Web API'si; sayfanın RTM soketi pasif dinlenir. Eski kurulumlarda xoxp belirteçli resmi yol (Socket Mode ile) sürer.</dd>
+  <dt>Bağlanma</dt><dd>Bağlan → Slack giriş penceresi → kullanıcı listeden çalışma alanını açar (oturum çerezi ancak o zaman yazılır).</dd>
+  <dt>Destek</dt><dd>Kanallar, DM'ler, iş parçacığı yanıtları, dosya gönder/indir, tepki, düzenle/sil, okundu (conversations.mark), eski mesajlar.</dd>
+  <dt>Sınırlar</dt><dd>Yoklama 30 sn; sayfa yalnız Mivelo öndeyken açık tutulur. İlk temas 300, toplam 5000/gün. 30.09'da "kişiler geliyor, mesaj gelmiyor" sorunu için beş düzeltme yapıldı; kök neden kesinleşmedi.</dd>
+</dl></div>
+
+<div class="plat"><div class="plat-h"><h4><span class="sw" style="background:#C13584"></span>Instagram</h4><span class="badge b-ok">Kararlı</span></div><dl>
+  <dt>Yöntem</dt><dd>Tarayıcı köprüsü; web istemcisinin <code>direct_v2</code> uçları. Anlık sinyal: sayfanın kendi lightspeed WebSocket'i pasif dinlenir.</dd>
+  <dt>Bağlanma</dt><dd>Bağlan → Instagram giriş penceresi (2FA dahil) → giriş algılanınca pencere kapanır, arka planda görünmez devam eder.</dd>
+  <dt>Destek</dt><dd>Metin, fotoğraf/video (çerezli vekil + önbellek), paylaşılan gönderi/reel/hikaye önizlemesi, tepki, alıntılı yanıt, geri alma (unsend), görüldü bilgisi.</dd>
+  <dt>Sınırlar</dt><dd>Odakta 30 sn, boşta 120 sn; anlık sinyal canlıysa seyrekleşir (yedek 5 dk). İlk temas 80, toplam 600/gün.</dd>
+</dl></div>
+
+<div class="plat"><div class="plat-h"><h4><span class="sw" style="background:#0866FF"></span>Messenger</h4><span class="badge b-warn">Kısmen doğrulandı</span></div><dl>
+  <dt>Yöntem</dt><dd>Tarayıcı köprüsü, sayfa yapısı (DOM) okuma: önce facebook.com/messages, olmazsa messenger.com. Lightspeed soketi anlık sinyal için pasif dinlenir. En kırılgan kanal.</dd>
+  <dt>Bağlanma</dt><dd>Bağlan → Facebook giriş penceresi. Şifreli sohbet PIN'i istenirse kanal satırında "PIN'i gir" uyarısı.</dd>
+  <dt>Destek</dt><dd>Metin okuma/gönderme, görüldü, tepki rozetlerinin gösterimi. Tepki gönderme yok.</dd>
+  <dt>Sınırlar</dt><dd>30 sn yoklama. İlk temas 80, toplam 600/gün. facebook.com düzeni gerçek hesapla henüz doğrulanmadı.</dd>
+</dl></div>
+
+<div class="plat"><div class="plat-h"><h4><span class="sw" style="background:#2B2833"></span>X</h4><span class="badge b-ok">Kararlı</span></div><dl>
+  <dt>Yöntem</dt><dd>Tarayıcı köprüsü. Kasım 2025 sonrası uçtan uca şifreli XChat sohbetleri <code>/i/chat</code> sayfasından okunur, eski 1.1 DM uçlarıyla birleştirilir; sayfanın yerel yedeği okunur. <code>chat-ws.x.com</code> çerçeveleri anlık sinyal.</dd>
+  <dt>Bağlanma</dt><dd>Bağlan → X giriş penceresi; XChat PIN'i istenirse uyarı ve "PIN'i gir".</dd>
+  <dt>Destek</dt><dd>Metin okuma/gönderme, video (mp4), görüldü. Tepki yok.</dd>
+  <dt>Sınırlar</dt><dd>60 sn yoklama; sayfa her turda yeniden yüklenmez (liste değişince ya da 20-30 dk'da bir). İlk temas 80, toplam 450/gün (X tavanı 500). Otomasyon algılamasına karşı giriş kısıtlaması yaşanabilir.</dd>
+</dl></div>
+
+<div class="plat"><div class="plat-h"><h4><span class="sw" style="background:#0A66C2"></span>LinkedIn</h4><span class="badge b-ok">Kararlı</span></div><dl>
+  <dt>Yöntem</dt><dd>Tarayıcı köprüsü; sayfanın yaptığı GraphQL/Voyager isteklerini yakalayıp yeniden kullanır (sorgu kimlikleri sabit yazılmaz). Gerçek zamanlı akışın kopyası okunur (kendi bağlantımız yok).</dd>
+  <dt>Bağlanma</dt><dd>Bağlan → LinkedIn giriş penceresi.</dd>
+  <dt>Destek</dt><dd>Metin okuma/gönderme, tepki gönderme ve gösterme, okundu.</dd>
+  <dt>Sınırlar</dt><dd>Tüm istekler sıralı, aralarında 400-1500 ms; 60 sn yoklama (akış canlıyken 180 sn). İlk temas 50, toplam 350/gün. Ban riski en yüksek kanal.</dd>
+</dl></div>
+
+<div class="plat"><div class="plat-h"><h4><span class="sw" style="background:#111111"></span>TikTok</h4><span class="badge b-warn">Doğrulanmadı</span></div><dl>
+  <dt>Yöntem</dt><dd>Herkese açık DM API'si yok; tiktok.com/messages (ve Business Suite mesajları) sayfa yapısı okunur. 2026 web DM düzeninin <code>dm-new-*</code> seçicileri + düzenden bağımsız yapısal yedek.</dd>
+  <dt>Bağlanma</dt><dd>Bağlan → TikTok giriş penceresi; captcha çıkarsa kanal "eşleşme bekliyor" durumuna geçer.</dd>
+  <dt>Destek</dt><dd>Metin okuma/gönderme, paylaşılan video kapak + bağlantı, grup gönderen adı. Aynı adlı sohbetlerde yanlış kişiye göndermemek için seçili satır doğrulanır.</dd>
+  <dt>Sınırlar</dt><dd>60 sn yoklama; günlük 300, ilk temas 40. Okumak için sohbet açıldığından karşı tarafa "görüldü" gidebilir. Gerçek TikTok hesabıyla doğrulanmadı.</dd>
+</dl></div>
+
+<h2 id="s6-4">E-posta</h2>
+<p>Her e-posta dizisi (thread) bir sohbettir. 30.09'dan itibaren tüm sağlayıcılar tarayıcı girişiyle bağlanır; şifreyle bağlanmış eski IMAP hesapları çalışmaya devam eder ve istenirse "&lt;Sağlayıcı&gt; ile giriş yap" ile tarayıcı yoluna geçirilir. Özgün HTML gövde güvenli biçimde (betiksiz sandbox, CSP) gösterilir.</p>
+<table>
+  <thead><tr><th class="w-name">Sağlayıcı</th><th>Yöntem</th><th>Yoklama / açık tutma</th><th>Durum</th></tr></thead>
+  <tbody>
+    <tr><td>Gmail</td><td>Tarayıcı: Google girişi, Gmail web sayfası okunur, yanıt Gmail düzenleyicisiyle. Eski hesaplarda IMAP/OAuth.</td><td>Odakta 30 sn, boşta 90 sn; sayfa yalnız odaktayken açık</td><td><span class="badge b-ok">Kararlı</span></td></tr>
+    <tr><td>Outlook</td><td>Tarayıcı: Microsoft girişi, Outlook web.</td><td>90 sn; sayfa sürekli açık, canlı liste izleyici ile 270 sn</td><td><span class="badge b-ok">Kararlı</span></td></tr>
+    <tr><td>Yahoo Mail</td><td>Tarayıcı (mail.yahoo.com); Yahoo birçok hesapta uygulama şifresini kapattı.</td><td>Odak durumuna göre</td><td><span class="badge b-warn">Doğrulanmadı</span></td></tr>
+    <tr><td>iCloud Mail</td><td>Tarayıcı: Apple girişi, icloud.com/mail.</td><td>Odakta 30 sn, boşta 90 sn</td><td><span class="badge b-ok">Kararlı</span></td></tr>
+    <tr><td>Yandex Mail</td><td>Tarayıcı: passport.yandex girişi, mail.yandex.com.</td><td>Odak durumuna göre</td><td><span class="badge b-ok">Kararlı</span></td></tr>
+    <tr><td>Diğer IMAP</td><td>Yalnız mevcut eski hesaplar (yeni eklenemez): imapflow + IDLE, nodemailer SMTP, otomatik sunucu bulma.</td><td>IDLE ile anlık; yedek 10 dk</td><td><span class="badge b-plan">Eski yol</span></td></tr>
+  </tbody>
+</table>
+
+<h2 id="s6-5">Pazaryerleri</h2>
+<p>Pazaryerleri yalnız resmi API ile, satıcı panelinin verdiği entegrasyon bilgileri (mağaza şifresi değil) girilerek bağlanır. Trendyol, Hepsiburada, n11, ePttAVM ve Shopier'de sipariş bir sohbet değil, orta alanda <b>sipariş sayfası</b> olarak açılır (özet + durum geçmişi; bu API'lerde alıcıya mesaj ucu yoktur). Müşteri soruları yazılı yanıtlanabilir.</p>
+<table>
+  <thead><tr><th style="width:15%">Pazaryeri</th><th style="width:27%">Bağlantı bilgileri</th><th>Kapsam</th><th style="width:15%">Yoklama</th><th style="width:13%">Durum</th></tr></thead>
+  <tbody>
+    <tr><td>Trendyol</td><td>Satıcı ID, API Key, API Secret</td><td>Siparişler (önce sipariş API v2; olmazsa v1 — v1 15 Ekim 2026'da kapanıyor) + ürün soruları ve yanıtı. İlk eşitleme: sorular ≈6 ay, siparişler 2×2 hafta (v2). Sipariş soruları için API yok.</td><td>30 sn / boşta 60 sn</td><td><span class="badge b-ok">Kararlı</span></td></tr>
+    <tr><td>Hepsiburada</td><td>Merchant ID, servis anahtarı, kullanıcı adı (User-Agent)</td><td>OMS siparişleri + Satıcıya Sor soruları (sayfalı, bekleyen ≤500) ve yanıtı; sipariş bağlantılı sorular.</td><td>30 / 60 sn</td><td><span class="badge b-ok">Kararlı</span></td></tr>
+    <tr><td>n11</td><td>App Key, App Secret</td><td>REST siparişler (6×14 gün) + SOAP müşteri soruları.</td><td>45 / 90 sn</td><td><span class="badge b-ok">Kararlı</span></td></tr>
+    <tr><td>ePttAVM</td><td>Entegrasyon kullanıcı adı ve anahtarı</td><td>Yalnız siparişler (SOAP, WS-Security). API'de soru/mesaj yok.</td><td>90 sn / boşta 3 dk</td><td><span class="badge b-warn">Doğrulanmadı</span></td></tr>
+    <tr><td>Amazon</td><td>LWA Client ID, Client Secret, Refresh Token</td><td>SP-API Orders v2026-01-01 (olmazsa v0) + şablonlu alıcı mesajları. Alıcı mesajlarını okuma API'si yok; tarayıcı yolu Amazon politikası gereği kaldırıldı.</td><td>200 sn (v0 120 sn)</td><td><span class="badge b-warn">Doğrulanmadı</span></td></tr>
+    <tr><td>Etsy</td><td>Keystring, Shared secret</td><td>Siparişler (resmi API). Mesajlaşma ucu yok.</td><td>60 / 90 sn</td><td><span class="badge b-warn">Doğrulanmadı</span></td></tr>
+    <tr><td>Shopify</td><td>Mağaza adı + Dev Dashboard istemci kimliği/gizli anahtarı (eski shpat_ anahtarı da olur)</td><td>Siparişler (Admin API 2026-07, 24 saatlik belirteç yenilemesi).</td><td>30 / 60 sn</td><td><span class="badge b-warn">Doğrulanmadı</span></td></tr>
+    <tr><td>Shopier</td><td>Kişisel erişim anahtarı (PAT)</td><td>Siparişler, sipariş/kargo olayları, "Kargoya verildi / Teslim edildi" işlemi. Arayüzde "Yakında".</td><td>60 sn</td><td><span class="badge b-plan">Yakında</span></td></tr>
+  </tbody>
+</table>
+<p class="small muted">Pazaryeri sekmeleri: Tümü · Siparişler · Ürün soruları · Sipariş soruları (yalnız bu tür içeriği olan pazaryerlerinde). 429 yanıtında sunucunun istediği süre kadar beklenir, art arda gelirse en çok 30 dk'ya kadar katlanır.</p>
+
+<h2 id="s6-6">Yoklama aralıkları (özet)</h2>
+<table>
+  <thead><tr><th class="w-name">Kanal</th><th>Normal</th><th>Anlık sinyal</th><th>Not</th></tr></thead>
+  <tbody>
+    <tr><td>WhatsApp, Telegram</td><td>Sürekli bağlantı (itme)</td><td>Protokolün kendisi</td><td>Telegram bekçisi 60 sn</td></tr>
+    <tr><td>iMessage</td><td>Dosya izleyici + 15 sn yedek</td><td>fs.watch</td><td>—</td></tr>
+    <tr><td>Instagram</td><td>Odakta 30 sn, boşta 120 sn</td><td>lightspeed WS</td><td>Sinyal canlıyken ×10 seyrek</td></tr>
+    <tr><td>Messenger</td><td>30 sn</td><td>lightspeed WS</td><td>×5 seyrek</td></tr>
+    <tr><td>X</td><td>60 sn</td><td>chat-ws</td><td>×3 seyrek; tam yenileme 20-30 dk</td></tr>
+    <tr><td>LinkedIn</td><td>60 sn</td><td>realtime akış kopyası</td><td>Akış canlıyken 180 sn</td></tr>
+    <tr><td>Slack (tarayıcı)</td><td>30 sn</td><td>RTM WS</td><td>Sayfa yalnız öndeyken açık</td></tr>
+    <tr><td>TikTok</td><td>60 sn</td><td>—</td><td>captcha → bekler</td></tr>
+    <tr><td>E-posta (tarayıcı)</td><td>30-90 sn</td><td>DOM liste izleyici</td><td>Outlook sürekli açık</td></tr>
+    <tr><td>Pazaryerleri</td><td>30-200 sn</td><td>—</td><td>Odak/boşta farklı</td></tr>
+  </tbody>
+</table>
+<p class="small muted">Tarayıcı köprüsünde sabit zamanlayıcı kullanılmaz: her tur ±%30 sapmalı yeniden zamanlanır; anlık sinyal gelince tur 1,5-4 sn içinde öne çekilir (iki tur başlangıcı arası en az 10 sn).</p>
+
+<!-- ============================ 6. ÖZELLİKLER ============================ -->
+<h1 class="sec" id="s7"><span class="n">6</span>Aktif özellikler</h1>
+
+<h2 id="s7-1">Gelen kutusu ve düzen</h2>
+<ul>
+  <li><b>Birleşik liste:</b> tüm kanalların sohbetleri tek listede, en yeni üstte; hesap başına en yeni 3000 sohbet + okunmamış/bayraklı/takipteki her zaman. Liste 300'lük parçalarla çizilir.</li>
+  <li><b>Sekmeler:</b> Tümü · Okunmamış · Bekleyen (yanıt bekleyenler; birebirler önde) · Takip. Başlıktaki "N yeni" ve sayaçlar o an listelenen kümeden hesaplanır.</li>
+  <li><b>Kenar çubuğu:</b> kanallar (sürükleyerek sıralanır), e-posta ve pazaryeri grupları, etiketler (görünümler), Takvim, Odak, Ayarlar. Her kanal satırında hesap tanıtıcısı ve durum noktası; sorun varsa yanıp sönen uyarı işareti ve üzerine gelince "ne oldu, ne yapmalı" kartı (PIN'i gir, Yeniden bağlan, QR'ı göster).</li>
+  <li><b>Etiketler ve görünümler:</b> sohbetlere etiket; ⌘1 Tümü, ⌘2… etiket görünümleri.</li>
+  <li><b>Yerel bayraklar:</b> sabitle, arşivle, sessize al, gizle (platforma yansımaz). WhatsApp ve Telegram'da platformun kendi arşivi "Sohbetler · Arşiv" sekmeleriyle.</li>
+  <li><b>iMessage klasörleri</b>, <b>e-posta klasörleri</b> ve <b>pazaryeri sekmeleri</b> kendi kanallarında.</li>
+  <li><b>Listede son mesaj durumu:</b> son mesaj benimse tik simgesi; tepkiler mesaj gibi görünmez ("Ayşe mesajına tepki verdi", okunmamış sayısını değiştirmez).</li>
+  <li><b>Gezinme hafızası:</b> sayfa yenilenince aynı görünüm, kanal, sekme ve açık sohbet geri gelir.</li>
+</ul>
+
+<h2 id="s7-2">Odak</h2>
+<ul>
+  <li>Yanıt bekleyen önemli sohbetleri kart olarak sıralayan günlük çalışma ekranı; kişiye ilk adıyla hitap eder.</li>
+  <li>"Yanıtla" ile satır içi yanıt kutusu (Enter gönderir; kart listeden çıkar, "X ile gönderildi").</li>
+  <li>"Taslak yaz" ile AI taslağı yalnız istenince; Ayarlar'da açılırsa ilk 3 kart için önceden hazırlanır (varsayılan kapalı).</li>
+  <li>Konuşmalardan çıkarılan sözler (verilen vaatler) onaylanıp kapatılabilir.</li>
+</ul>
+
+<h2 id="s7-3">AI özellikleri (isteğe bağlı)</h2>
+<table>
+  <thead><tr><th class="w-name">Özellik</th><th>Açıklama</th></tr></thead>
+  <tbody>
+    <tr><td>Senin tarzında taslak</td><td>Kullanıcının kendi mesajlarından yerelde çıkarılan üslup profili (uzunluk, sen/siz, emoji, açılış/kapanış) + gerçek "gelen mesaj → benim yanıtım" örnek çiftleri modele verilir. Ton seçilebilir.</td></tr>
+    <tr><td>Özet</td><td>Sağ paneldeki "Özetle": uzun sohbetin kısa özeti.</td></tr>
+    <tr><td>Aksiyon çıkarma</td><td>Yapılacaklar ve takvim olayları (tarih/saat tahminiyle) çıkarılır; olay tek tıkla takvime eklenir.</td></tr>
+    <tr><td>Anahtar yönetimi</td><td>Ayarlar › AI özellikleri › Anthropic anahtarı. Anahtar macOS Anahtar Zinciri'nde, Windows'ta DPAPI ile, Linux'ta 0600 dosyada; arayüze asla geri döndürülmez (yalnız maske). Ortam değişkeni yedek.</td></tr>
+    <tr><td>Ayrı anahtarlar</td><td>Özetler, Taslaklar, Aksiyon çıkarma ayrı ayrı açılıp kapatılır.</td></tr>
+    <tr><td>Teknik</td><td>@anthropic-ai/sdk, JSON şemalı yapılandırılmış çıktı; model ortam değişkeniyle değiştirilebilir. Demoda model çağrısı olmadan örnek AI yanıtları.</td></tr>
+  </tbody>
+</table>
+
+<h2 id="s7-4">Üretkenlik</h2>
+<div class="grid2">
+  <div class="card"><h4>Takip hatırlatıcısı</h4><p>Sohbete tarih konur; karşı taraf o sürede yazarsa hatırlatma kendiliğinden kapanır, yazmazsa bildirim gelir. Sağ panel, sohbet üstü şerit ve "Takip" sekmesi. Mesaj üstünden tek tıkla 2 günlük takip.</p></div>
+  <div class="card"><h4>Zamanlanmış gönderim</h4><p>Çekirdekte tutulur; arayüz kapalıyken de gider. Çekirdek kapalıyken 15 dk'dan fazla kaçırılan gönderilmez, "kaçırıldı" olarak 7 gün listede kalır (Düzenle/Kaldır). Geçici hatada en çok 3 yeniden deneme.</p></div>
+  <div class="card"><h4>Mivelo takvimi</h4><p>Ay görünümü, seçili günün ajandası, yaklaşanlar. Mesajdan eklenen etkinlik o mesaja bağlıdır ("Sohbete git"). Hatırlatma bildirimi. Türkçe tarih/saat tahmini ile ön doldurma; .ics dışa aktarma.</p></div>
+  <div class="card"><h4>Cihaz takvimi</h4><p>macOS Takvim (Apple Events) ya da Windows klasik Outlook'a doğrudan ekleme; ilk seferde onay ve izin, yazılabilir takvim seçimi. İzin reddinde Sistem Ayarları kısayolu, diğer hatalarda .ics.</p></div>
+  <div class="card"><h4>Genel arama (⌘K)</h4><p>Görünüm ve filtreden bağımsız; sohbet adları, FTS5 mesaj metni ve ek adları. "N uygulamada M sonuç", uygulama çipleriyle süzme; sonuca tıklayınca sohbet açılır, gerekirse eski mesajlar yüklenir ve mesaj vurgulanır.</p></div>
+  <div class="card"><h4>Yeni e-posta</h4><p>E-posta hesaplarında Kime / Konu / Metin ile yeni dizi başlatma (⌘Enter gönderir).</p></div>
+</div>
+
+<h2 id="s7-5">Mesajlaşma</h2>
+<ul>
+  <li><b>İyimser gönderim:</b> Enter'a basınca balon hemen "Gönderiliyor" olarak görünür; gerçek kayıt gelince yer değiştirir, hata olursa metin kutuya döner. Ardışık gönderimler sıralıdır; gönderim yoklama turunu beklemez.</li>
+  <li><b>Mesaj durum tikleri:</b> gönderiliyor (saat), gönderildi (tek tik), iletildi (çift tik), okundu (yeşil çift tik), başarısız (kırmızı). Durum hiçbir zaman geri gitmez.</li>
+  <li><b>Tepkiler:</b> mesaj üstündeki düğmeyle emoji tepkisi (WhatsApp, Telegram, Slack, Instagram, LinkedIn); aynı emoji ikinci kez kaldırır. Tepki metinleri Türkçeleştirilir.</li>
+  <li><b>Alıntılı yanıt:</b> balonu sağa kaydırma (fare, dokunma ya da trackpad; yaylı animasyon ve titreşim) veya "Yanıtla"; alıntıya tıklayınca asıl mesaja gider.</li>
+  <li><b>Düzenle / herkesten sil:</b> yalnız kendi mesajında, platformun süre sınırlarıyla; "düzenlendi" etiketi, silinen mesaj soluk italik.</li>
+  <li><b>Kendi mesajının yankısı</b> gelen mesaj sayılmaz; aynı gönderimin ikizleri tek balonda birleşir.</li>
+  <li><b>Sistem mesajları</b> ve bağlayıcı işaretleri emoji yerine arayüz simgeleriyle gösterilir.</li>
+</ul>
+
+<h2 id="s7-6">Medya ve e-posta</h2>
+<ul>
+  <li><b>Albüm:</b> aynı kişiden art arda gelen 3+ metinsiz görsel/video tek balonda 2 sütunlu ızgara ("+N").</li>
+  <li><b>Medya penceresi:</b> sohbetteki tüm medya arasında ←/→ gezinme ve "i / n" sayacı; video için tam ekran (olmazsa uygulama içi tam pencere).</li>
+  <li><b>Uygulama içi bağlantılar:</b> bağlantı, ek ve paylaşım kartları yeni sekme açmaz; görsel/video/ses/PDF doğrudan, Instagram/X/YouTube/TikTok/Vimeo gömülü oynatıcıyla, gömülemeyen sayfalar önizleme kartıyla açılır. Dışarı yalnız "Tarayıcıda aç"/"İndir" ile.</li>
+  <li><b>E-posta HTML'i:</b> özgün gövde betiksiz sandbox çerçevesinde, CSP ve "kağıt" zeminle (koyu temada da okunur); gömülü görseller yerel adreslere çevrilir, betik/form/olay öznitelikleri temizlenir.</li>
+  <li><b>Medya önbelleği:</b> hesap başına yerel; günde bir kez eşzamansız budama (e-posta ekleri ve medya dizini korunur).</li>
+</ul>
+
+<h2 id="s7-7">Pazaryeri</h2>
+<ul>
+  <li>Sipariş sayfası: özet, kalemler, tutar, adres, kargo takibi, durum geçmişi; Türkçe durum rozetleri.</li>
+  <li>Soru paneli: ürün bilgisi, müşteri sorusu, yanıt (yalnız metin); bağlı sipariş varsa "Soruyu aç".</li>
+  <li>Sekmeler ve sayaçlar: açık sipariş ve cevap bekleyen soru sayısı.</li>
+</ul>
+
+<h2 id="s7-8">Ayarlar ve kişiselleştirme</h2>
+<table>
+  <thead><tr><th class="w-name">Bölüm</th><th>İçerik</th></tr></thead>
+  <tbody>
+    <tr><td>Profil</td><td>Fotoğraf (256 px kare), ad soyad, kullanıcı adı, e-posta, telefon; yalnız bu bilgisayarda. Ad yoksa lisans sahibinin ya da işletim sistemi kullanıcısının adı.</td></tr>
+    <tr><td>Bildirimler</td><td>Tüm sesler, ses düzeyi, sistem bildirim kartları, grup ve kanal bildirimleri; tarayıcıda izin durumu ve deneme bildirimi.</td></tr>
+    <tr><td>Uygulama sesleri</td><td>Platform başına zil sesi, ses düzeyi, açık/kapalı.</td></tr>
+    <tr><td>AI özellikleri</td><td>Anthropic anahtarı; Özet / Taslak / Aksiyon anahtarları; Odak'ta önceden taslak.</td></tr>
+    <tr><td>İzinler (masaüstü)</td><td>Bildirim, mikrofon, Tam Disk Erişimi, Mesajlar ve Takvim otomasyonu; canlı durum ve "Yeniden iste".</td></tr>
+    <tr><td>Telefondan erişim</td><td>Aynı Wi-Fi'daki telefondan Mivelo'yu açma; bağlantı QR'ı, belirteçle korunur, tek düğmeyle kapatılır.</td></tr>
+    <tr><td>Hesap ve veriler</td><td>Ad, e-posta, maskeli lisans anahtarı + kalan gün, sürüm. "Tüm verileri sil": her kanaldan platform çıkışı + veritabanı, oturumlar, zamanlanmışlar, AI anahtarı ve profil silinir (lisans kalır).</td></tr>
+    <tr><td>Tema</td><td>Kenar çubuğundaki ay/güneş düğmesi; seçim yoksa sistem teması.</td></tr>
+    <tr><td>Çıkış yap</td><td>Masaüstünde lisansın cihaz hakkını boşaltır ve kanalları durdurur.</td></tr>
+  </tbody>
+</table>
+
+<h2 id="s7-9">Masaüstü deneyimi</h2>
+<ul>
+  <li><b>Açılış sırası:</b> kısa açılış animasyonu → lisans ekranı → ilk kurulum (izinler, bir kez) → uzun açılış animasyonu (≈3,8 sn; sonraki açılışlarda ≈1,8 sn) → uygulama. Animasyonlar yalnız transform/opacity ile; azaltılmış hareket tercihine uyar.</li>
+  <li><b>İlk kurulum:</b> iki bölmeli izin ekranı; durumlar tahmin değil, 2 saniyede bir sistemden canlı okunur ("Açık", "Bekleniyor", "Ayarları aç"). Yalnız sıradaki adım vurgulanır; "Tümüne izin ver".</li>
+  <li><b>İzin uyarısı:</b> eksik izin (bildirim, Tam Disk Erişimi, mikrofon, Mesajlar otomasyonu) için sağ üstte tek kart; ✕ ile 3 gün gizlenir.</li>
+  <li><b>Tepsi ve rozet:</b> okunmamış sayısı, göster/gizle, Odak; ⌘⇧K pencereyi getirir/gizler; kapatma pencereyi gizler, uygulama arka planda çalışır.</li>
+  <li><b>Güncelleme kartı</b> ve uygulama içi kurulum (bkz. Mimari › Uygulama içi güncelleyici).</li>
+  <li><b>Bağlanma deneyimi:</b> "giriş penceresi açılıyor" hapı; giriş penceresi girişsiz kapatılırsa bağlanma iptal edilir ve kart "Bağlan"a döner; sahte ilerleme yüzdesi yok.</li>
+</ul>
+
+<h2 id="s7-10">Web varlıkları</h2>
+<table>
+  <thead><tr><th class="w-name">Varlık</th><th>Özellikler</th></tr></thead>
+  <tbody>
+    <tr><td>Tanıtım sayfası (mivelo.app)</td><td>Bekleme listesi (davet kodu, bot tuzağı, IP sınırı), hero'da görünüm sekmeleri ve imleçle oynatılan küçük görevler, "21 uygulama" bölümü, gizlilik ve koşullar sayfaları.</td></tr>
+    <tr><td>İndirme sayfası (/indir)</td><td>Sürüm kartları (Mac Apple Silicon, Mac Intel, Windows); "İndir" → kayıt penceresi (ad, soyad, e-posta, gizlilik onayı) → dosya iner ve lisans anahtarı e-postayla gelir. Mac/Windows sekmeli kurulum adımları; macOS "Yine de Aç" akışını gösteren ≈10 sn'lik animasyonlu sahne. Kayıt denetimi: harf kuralları, geçici e-posta servisi listesi, alan adında MX/A kaydı.</td></tr>
+    <tr><td>Demo (demo.mivelo.app)</td><td>Örnek veriyle çalışan tam arayüz; üyelik kapalı, yalnız yönetici girişi. Gerçek akışı taklit eden bağlanma (QR ve ayrı giriş penceresi, bilgi gönderilmez), örnek AI, sipariş kartları. Tek dosya çevrimdışı demo da üretilebilir.</td></tr>
+    <tr><td>Geri bildirim</td><td>Sağ alttaki düğme: Hata / Öneri / Talep / Diğer + fotoğraf/video eki (≤5 dosya, 40 MB/dosya); içerik türü sunucuda doğrulanır, IP başına saatte 10.</td></tr>
+    <tr><td>Yönetim paneli (/admin)</td><td>Bekleme listesi (durum, not, toplu işlem, CSV), Üyeler (kaynak, indirme geçmişi, anahtar durumu, aynı ad soyad tespiti), Lisanslar (üretme, süre, cihaz sınırı, iptal, cihaz sıfırlama, logolu HTML e-posta taslağı ve önizleme), trafik, geri bildirim kutusu, SMTP ayarları, JSON yedek. 5 hatalı girişte IP 15 dk kilitlenir.</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================ 7. GÜVENLİK ============================ -->
+<h1 class="sec" id="s8"><span class="n">7</span>Güvenlik ve gizlilik</h1>
+
+<h2 id="s8-1">Yerel veri ve şifreleme</h2>
+<ul>
+  <li>Mesajlar, oturumlar ve medya yalnız <code>~/.mivelo</code> altında; mesaj içeriği hiçbir Mivelo sunucusuna gitmez.</li>
+  <li>Veritabanı SQLCipher ile şifreli. Anahtar (32 bayt) macOS'ta Anahtar Zinciri'nde, Windows'ta DPAPI ile (yalnız aynı Windows kullanıcısı çözebilir), Linux'ta 0600 izinli dosyada. Anahtar Zinciri çağrılarında zaman aşımı vardır; ilk açılışta izin penceresi arkada kalırsa uygulama takılmaz.</li>
+  <li>Hassas dosyalar (lisans, profil, ayarlar, zamanlanmışlar, oturum belirteçleri) 0600 izinleriyle yazılır.</li>
+  <li>Hata izleme (Sentry) yalnız herkese açık demoda çalışır; yerel ve masaüstü sürümde yüklenmez. Demoda da kişisel veri kapalı, adres ve mesajlardaki e-posta/numara/belirteç temizlenir.</li>
+  <li>Web sitesindeki trafik sayacı çerezsizdir.</li>
+</ul>
+
+<h2 id="s8-2">Yerel API güvenliği</h2>
+<ul>
+  <li>Sunucu yalnız loopback'te dinler. <b>Host başlığı izin listesi</b> (DNS rebinding'e karşı), <b>CORS</b> yalnız localhost, 127.0.0.1, Tauri kaynakları ve paketli uygulamanın <code>null</code> kaynağı için.</li>
+  <li><b>Yerel belirteç</b> <code>~/.mivelo/token</code>: Tauri <code>core_token</code> komutuyla alınır, <code>x-kavsak-token</code> başlığı / WS <code>?token=</code> ile gönderilir. Yabancı ve <code>null</code> kaynaklar belirteç ister; 403'te arayüz belirteci yeniden okur.</li>
+  <li>Hassas uçlar (<code>/api/ai/key</code>, <code>/api/profile</code>, <code>/api/lan</code>, güncelleme) yalnız yerelden; <code>/api/shutdown</code> yalnız loopback + Origin'siz + belirteçli.</li>
+  <li><b>SSRF engeli:</b> bağlantı önizlemesi özel/yerel adreslere (IPv6 içine gömülü IPv4 dahil) istek atmaz, her yönlendirmeyi yeniden denetler ve özel istemci başlığı ister; medya vekili bir hesabın çerezleriyle yalnız o platformun kendi CDN alan adlarından indirir.</li>
+  <li>E-posta HTML'i betiksiz sandbox'ta; Tauri'de <code>confirm/alert</code> yerine uygulama içi onaylar.</li>
+</ul>
+
+<h2 id="s8-3">Ban önleme</h2>
+<p>Resmi kişisel DM API'si olmayan kanallarda (WhatsApp, Instagram, Messenger, X, LinkedIn, TikTok) hesabın kısıtlanma riski ürün tasarımının merkezindedir. Temel önlemler:</p>
+<ul>
+  <li><b>Kullanıcının kendi cihazı ve IP'si:</b> bağlantılar veri merkezinden değil, kullanıcının bilgisayarından yapılır.</li>
+  <li><b>İnsan benzeri zamanlama:</b> sapmalı yoklama, sıralı istekler (LinkedIn 400-1500 ms), anlık sinyal varken seyrekleşme, uygulama boştayken daha seyrek yoklama.</li>
+  <li><b>Pasif dinleme:</b> platformun kendi WebSocket'i yalnız dinlenir; yeni soket açılmaz, yazılmaz.</li>
+  <li><b>Hata sınıfları:</b> checkpoint/captcha/doğrulama → yoklama durur, kullanıcı beklenir (otomatik deneme yok); 429/hız sınırı → üstel bekleme 5 → 10 → 20 … en çok 120 dk.</li>
+  <li><b>"Görüldü" sızmasını önleme:</b> okundu işaretinden sonra görünür sayfa terk edilir.</li>
+  <li><b>Gönderim koruması</b> (<code>send-guard.ts</code>): aynı metin (≥16 karakter) 30 dk içinde 5'ten fazla farklı sohbete gönderilemez (429); günlük sınırlar yerel gece yarısında sıfırlanır, sayaçlar kalıcıdır. E-posta ve pazaryeri muaftır.</li>
+</ul>
+<table>
+  <thead><tr><th class="w-name">Kanal</th><th>İlk temas / gün (farklı sohbet)</th><th>Tüm gönderimler / gün</th></tr></thead>
+  <tbody>
+    <tr><td>LinkedIn</td><td>50</td><td>350</td></tr>
+    <tr><td>Telegram</td><td>50</td><td>2500</td></tr>
+    <tr><td>X</td><td>80</td><td>450</td></tr>
+    <tr><td>Instagram, Messenger</td><td>80</td><td>600</td></tr>
+    <tr><td>WhatsApp</td><td>100</td><td>2500</td></tr>
+    <tr><td>iMessage</td><td>150</td><td>1500</td></tr>
+    <tr><td>Slack</td><td>300</td><td>5000</td></tr>
+    <tr><td>TikTok</td><td>40</td><td>300</td></tr>
+  </tbody>
+</table>
+
+<h2 id="s8-4">Sunucu çekirdeği neden kaldırıldı</h2>
+<p>28 Eylül'de demo üyeleri için sanal sunucuda kullanıcı başına çekirdek çalıştıran bir mimari denendi ve tamamen kaldırıldı:</p>
+<ul>
+  <li>Veri merkezi IP'si ve aynı IP'de çok sayıda hesap Instagram, Meta, LinkedIn ve X'te ban riskini ciddi biçimde artırır.</li>
+  <li>Tüm oturumların tek sunucuda toplanması güvenlik ve KVKK açısından büyük bir sorumluluk ve saldırı yüzeyi oluşturur.</li>
+  <li>Gerçek giriş sayfası kullanıcının tarayıcısında açılamaz; çerezler sunucuya güvenli biçimde taşınamaz.</li>
+</ul>
+<p>Sonuç: gerçek kullanım yalnız masaüstü paketleriyle (kullanıcının kendi cihazı ve IP'si); demo sitesi yalnız tanıtım amaçlı örnek veri gösterir.</p>
+
+<h2 id="s8-5">KVKK notu</h2>
+<ul>
+  <li>Mesaj içerikleri Mivelo tarafından işlenmez ve saklanmaz; veri sorumluluğu fiilen kullanıcının kendi cihazındadır.</li>
+  <li>Mivelo sunucusunda tutulanlar: indirme kaydı (ad, soyad, e-posta, indirme geçmişi), lisans kayıtları (anahtar, cihaz kimlikleri, son denetim), bekleme listesi e-postaları, kullanıcının gönderdiği geri bildirimler. Kayıt sırasında gizlilik metni onayı alınır.</li>
+  <li>AI açıksa yalnız kullanıcının istediği sohbet içeriği Anthropic API'sine, kullanıcının kendi anahtarıyla gönderilir.</li>
+  <li>Depo herkese açıktır; depoya ve commit mesajlarına hiçbir gizli bilgi ya da kişisel veri yazılmaz. Testlerde yalnız yer tutucu değerler kullanılır.</li>
+</ul>
+
+<!-- ============================ 8. PERFORMANS ============================ -->
+<h1 class="sec" id="s9"><span class="n">8</span>Performans ve dayanıklılık</h1>
+
+<h2 id="s9-1">Eşitleme mimarisi</h2>
+<ul>
+  <li><b>WS demetleri:</b> eskiden her mesaj olayı sohbetin tamamını taşıyordu (300 üyeli grupta 20 bin mesajda ≈877 MB); demetlemeyle aynı iş ≈1,8 MB.</li>
+  <li><b>WhatsApp geçmiş paketi:</b> sohbetler hemen, mesajlar arka plan kuyruğunda ≈25 ms'lik tek işlemli dilimlerle yazılır; olay döngüsü kilitlenmez, canlı mesajlar ve keep-alive beklemez. Kimlik deposu atomik yazım; fsync yalnız ana kimlik dosyasında. Kayıtlı protokol sürümü 3 günden yeniyse ağ beklenmez.</li>
+  <li><b>Depo:</b> hazır sorgu önbelleği, hafif sohbet okuma (katılımcı sütunsuz), indeksli kopya/ikiz arama (O(n²) yok), FTS tetikleyicisi yalnız metin değişince.</li>
+  <li><b>Tarayıcı köprüsü:</b> değişen sohbetler okunmamış → en yeni sırasıyla; önemli sohbetlerin mesajı eksikse sonraki tur kısa aralıkla (Instagram/Slack 8 sn … LinkedIn 25 sn). Geriye sayfalama ile boşluk telafisi.</li>
+  <li><b>IMAP:</b> IDLE bağlantısında yoklama aynı oturumda; biriken e-postalar 100'lük parçalarla, ilerleme kaydıyla.</li>
+  <li><b>Eşitleme yüzdesi tek kaynaklı:</b> çekirdeğin ilerleme olayı; geri gitmez, bir kez eşitlenen kanalda kopmada yeniden gösterilmez.</li>
+  <li><b>Masaüstü:</b> pencere gizliyken arayüz askıya alınmaz (arka plan kısıtlaması ve App Nap kapalı), iş parçacığı havuzu 16.</li>
+</ul>
+
+<h2 id="s9-2">Kendiliğinden iyileşme</h2>
+<p>Geçici düşüşlerde (ağ, zaman aşımı, tarayıcı çökmesi, tarayıcı kanalında oturum düşmesi) kullanıcıya uyarı gösterilmeden arka planda 15 sn / 45 sn / 2 dk (±%20) sonra penceresiz yeniden başlatma denenir; bu sürede kanal "bağlanıyor" görünür. Üç deneme tutmazsa uyarı çıkar. Şifre/anahtar reddi, 401-406, kısıtlama, başka yerde açıldı, captcha, kullanıcı iptali ve QR/PIN eşleşmesi denenmez. Sayaç ≈2 dk kararlı bağlantıdan sonra sıfırlanır; sağlayıcının istediği bekleme (ör. IMAP 15 dk) uygulanır.</p>
+
+<h2 id="s9-3">Açılış planı</h2>
+<ul>
+  <li>Hafif kanallar (WhatsApp, Telegram, iMessage, IMAP, pazaryerleri) hemen ve birlikte başlar.</li>
+  <li>Tarayıcı kanalları ağırlıklı "en kısa iş önce": puan = (1 + okunmamış/10) · (0,3 + yakınlık) / beklenen süre; beklenen süre hesabın ölçülen açılış süresinin üstel ortalaması.</li>
+  <li>Aynı anda açılan tarayıcı sayısı makineden hesaplanır (çekirdek sayısı/3 ve bellek; 1-4). Kullanıcının "Bağlan"ı sıraya girmez.</li>
+  <li>Arayüz önce yalnız sağlık ucunu bekler, sonra tek bir veri isteği yapar (tek uçuş; açılış ve WS aynı isteği paylaşır).</li>
+</ul>
+
+<h2 id="s9-4">Kilit bekçisi (stall-watch)</h2>
+<p>Ayrı bir Worker iş parçacığı ana döngünün ortak sayacını 250 ms'de bir izler. Sayaç 5 / 20 / 60 sn artmazsa inspector ile ana iş parçacığını duraklatır ve o an çalışan JS yığınını (yalnız işlev ve dosya:satır; içerik yok) doğrudan günlüğe yazar; yerel kodda bekleniyorsa bunu belirtir, çözülünce "yeniden yanıt veriyor (N sn kilitliydi)". Masaüstü bekçisi ise çekirdeği HTTP sağlık denetimiyle izler ve ilk açılışta 150 sn pay tanır.</p>
+
+<h2 id="s9-5">Ölçümler</h2>
+<table>
+  <thead><tr><th class="w-name">Senaryo</th><th>Sonuç</th></tr></thead>
+  <tbody>
+    <tr><td>250 bin mesajlı şifreli veritabanı (Linux duman testi)</td><td>En uzun API yanıtı 0,48 sn</td></tr>
+    <tr><td>100 bin mesajlık hesabı kaldırma</td><td>5 sn (hesap anında gizlenir, silme arka planda 2000'lik dilimlerle)</td></tr>
+    <tr><td>5222 sohbet / 280 bin mesaj</td><td>Sohbet listesi sorgusu 0,25 sn; JSON 1,3 MB, 26 ms; ikiz birleştirme 136 ms</td></tr>
+    <tr><td>Büyük grup eşitlemesi WS trafiği</td><td>≈877 MB → ≈1,8 MB</td></tr>
+    <tr><td>Kapsamlı denetim (29.09)</td><td>12 alanda 95 bulgu, 94'ü doğrulanıp düzeltildi; testler 213 → 317</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================ 9. YOL HARİTASI ============================ -->
+<h1 class="sec" id="s10"><span class="n">9</span>Yol haritası</h1>
+
+<h2 id="s10-1">Yeni eklenenler (30.09)</h2>
+<p>Aşağıdaki sekiz özellik 30 Eylül 2026 turunda eklendi ve demo sitesinde çalışıyor. Gerçek hesaplar, gerçek AI modelleri ve gerçek Mac/Windows cihazlarla doğrulama sürüyor.</p>
+<table>
+  <thead><tr><th style="width:26%">Özellik</th><th>Açıklama</th><th style="width:14%">Durum</th></tr></thead>
+  <tbody>
+    <tr><td><b>Mivelo Wrapped</b></td><td>"Raporum" görünümü: bu ay / geçen ay / bu yıl / tüm zamanlar; toplam mesaj, platform dağılımı, en çok yazışılan kişiler, 7×24 saat ısı haritası, yanıt süresi, en uzun seri, emojiler, önceki döneme göre değişim. Tam ekran hikâye modu ve mesaj içeriği içermeyen paylaşılabilir PNG kart (1080×1920 / 1080×1080, isimleri gizle varsayılan açık). Yalnız yerel veritabanından hesaplanır (300 bin mesajda ≈0,6 sn).</td><td><span class="badge b-ok">Yeni</span></td></tr>
+    <tr><td><b>Sesli mesajı yazıya dökme</b></td><td>Whisper (small, q8 ≈250 MB) cihazda, arka iş parçacığında çalışır; metin balonun altında görünür ve aramaya girer. Otomatik mod ya da balondaki "Yazıya dök". Model ve çalışma zamanı yalnız Ayarlar → Yerel AI modelleri'nde onayla iner; ses hiçbir yere gönderilmez.</td><td><span class="badge b-ok">Yeni</span></td></tr>
+    <tr><td><b>Kişi birleştirme</b></td><td>Aynı telefon/e-posta (güçlü) ya da aynı ad/@kullanıcı adı (orta) ile öneri; kullanıcı onaylar. Sağ panelde "Kişi" bölümü, "Tüm kanallar" birleşik zaman çizelgesi ve gönderim kanalı seçimi; listede ek platform logoları.</td><td><span class="badge b-ok">Yeni</span></td></tr>
+    <tr><td><b>Medya ve dosya kütüphanesi</b></td><td>"Medya" görünümü: tüm kanallardan fotoğraf, video, dosya, ses ve bağlantılar; tür, platform, kişi ve ada göre süzme, tarih grupları, medya penceresi, "Sohbette göster", indirme.</td><td><span class="badge b-ok">Yeni</span></td></tr>
+    <tr><td><b>Anlamsal (doğal dil) arama</b></td><td>⌘K içinde "Anlamsal" anahtarı: çok dilli e5-small gömmeleri (int8, yerel), anahtar kelime aramasıyla birleşik sıralama, "geçen ay", "dün", kişi adı gibi ipuçları.</td><td><span class="badge b-ok">Yeni</span></td></tr>
+    <tr><td><b>Anlık çeviri</b></td><td>Mesaj üstünde "Çevir", yazma alanında "Çevir ve gönder" (karşı tarafın dili algılanır), sohbet başına "Otomatik çevir". Anthropic anahtarı varsa Claude, yoksa yerel NLLB modeli.</td><td><span class="badge b-ok">Yeni</span></td></tr>
+    <tr><td><b>Bildirimden yanıt + ⌘⇧K hızlı gönder</b></td><td>⌘⇧K / Ctrl+Shift+K her yerden hızlı gönder paleti (kişi ara → yaz → gönder). Yeni mesajlarda uygulama içi hızlı yanıt kartı; arka planda gelenler pencere öne gelince karta dönüşür. (macOS bildiriminin içinde satır içi yanıt: Tauri eklentisi masaüstünde desteklemiyor.)</td><td><span class="badge b-ok">Yeni</span></td></tr>
+    <tr><td><b>Pazaryeri gün sonu özeti + AI soru yanıtı</b></td><td>Pazaryeri listesinin üstünde "Bugün" kartı ve gün sonu paneli (sipariş, ciro, iptal/iade, bekleyen kargo ve soru, en çok satanlar, 7 günlük eğilim); seçilen saatte (vars. 21:00) bildirim. Ürün sorularına kurallara uygun (iletişim bilgisi/bağlantı içermeyen) AI yanıt taslağı; otomatik gönderim yok.</td><td><span class="badge b-ok">Yeni</span></td></tr>
+  </tbody>
+</table>
+
+<h2 id="s10-2">Planlanan ve değerlendirilen</h2>
+<table>
+  <thead><tr><th style="width:30%">Madde</th><th>Not</th><th style="width:14%">Durum</th></tr></thead>
+  <tbody>
+    <tr><td>Node'suz tek dosya paketleme</td><td>Çekirdeğin sidecar olarak tek ikiliye derlenmesi; paket boyutu ve açılış süresi düşer.</td><td><span class="badge b-plan">Planlanıyor</span></td></tr>
+    <tr><td>Apple imzası ve notarization</td><td>Apple Developer hesabıyla imza; "Mivelo açılmadı" uyarısını ve Tam Disk Erişimi'nin her derlemede düşmesini ortadan kaldırır.</td><td><span class="badge b-plan">Planlanıyor</span></td></tr>
+    <tr><td>Mobil uygulama</td><td>iOS tasarımları hazır (design/appstore); uygulama henüz yok.</td><td><span class="badge b-plan">Tasarım</span></td></tr>
+    <tr><td>Yerel AI (Ollama / llama.cpp / MLX)</td><td>Anthropic anahtarı olmadan, tamamen cihazda taslak ve özet.</td><td><span class="badge b-plan">Değerlendiriliyor</span></td></tr>
+    <tr><td>Hazır yanıtlar</td><td>Sık kullanılan yanıt şablonları (özellikle pazaryeri soruları için).</td><td><span class="badge b-plan">Planlanıyor</span></td></tr>
+    <tr><td>Mini CRM</td><td>Kişi notları, etiketler, son temas, satış geçmişi.</td><td><span class="badge b-plan">Değerlendiriliyor</span></td></tr>
+    <tr><td>Pazarama</td><td>Yeni pazaryeri bağlantısı (resmi API).</td><td><span class="badge b-plan">Planlanıyor</span></td></tr>
+    <tr><td>Shopier panel mesajları</td><td>API'de mesaj ucu olmadığından panel üzerinden; Shopier kanalı şu an "Yakında".</td><td><span class="badge b-plan">Planlanıyor</span></td></tr>
+    <tr><td>İşletme modu: resmi WhatsApp API</td><td>WhatsApp Cloud API yalnız işletme hesapları için ve bir webhook aktarma sunucusu gerektirir; yerel öncelikli mimariyle uyumu değerlendiriliyor.</td><td><span class="badge b-plan">Değerlendiriliyor</span></td></tr>
+    <tr><td>İlişki hatırlatıcısı</td><td>Uzun süredir yazışılmayan önemli kişiler için hatırlatma.</td><td><span class="badge b-plan">Değerlendiriliyor</span></td></tr>
+    <tr><td>Akıllı öncelik</td><td>Gelen kutusunun önem sırasına göre otomatik düzenlenmesi.</td><td><span class="badge b-plan">Değerlendiriliyor</span></td></tr>
+    <tr><td>Abonelik temizliği</td><td>E-postada bülten ve abonelikleri toplu bulma ve temizleme.</td><td><span class="badge b-plan">Değerlendiriliyor</span></td></tr>
+    <tr><td>Kural motoru ve MCP sunucusu</td><td>Kullanıcı tanımlı kurallar; Mivelo verisinin yerel MCP sunucusuyla AI araçlarına açılması.</td><td><span class="badge b-plan">Değerlendiriliyor</span></td></tr>
+  </tbody>
+</table>
+
+<h2 id="s10-3">Eski yol haritasından tamamlananlar</h2>
+<ul>
+  <li><b>SQLCipher şifreleme:</b> tamamlandı; veritabanı SQLCipher ile şifreli, anahtar Anahtar Zinciri/DPAPI'de.</li>
+  <li><b>⌘K:</b> genel arama penceresi olarak tamamlandı (tam bir komut paleti ayrıca genişletilebilir).</li>
+  <li><b>Trendyol, Hepsiburada, Etsy, Shopify bağlantıları:</b> resmi API ile eklendi (Etsy ve Shopify siparişleri gerçek hesapla henüz doğrulanmadı).</li>
+  <li><b>Telegram'ın teleproto çatalına geçişi</b> ve <b>tarayıcı köprüsünün görünmez mod + ağ yakalama ile sağlamlaştırılması</b> tamamlandı.</li>
+</ul>
+
+<!-- ============================ 10. SINIRLAMALAR ============================ -->
+<h1 class="sec" id="s11"><span class="n">10</span>Bilinen sınırlamalar ve doğrulanmamış alanlar</h1>
+
+<h2>Gerçek hesap ya da cihazla doğrulanmayanlar</h2>
+<table>
+  <thead><tr><th class="w-name">Alan</th><th>Durum</th></tr></thead>
+  <tbody>
+    <tr><td>TikTok</td><td>Seçiciler açık kaynak kazıyıcılardan ve sahte sayfalardan; gerçek hesapla doğrulanmadı.</td></tr>
+    <tr><td>Messenger (facebook.com)</td><td>messenger.com Nisan 2026'da kapandı; facebook.com/messages düzeni gerçek hesapla doğrulanmadı.</td></tr>
+    <tr><td>Yahoo Mail (tarayıcı)</td><td>İlk girişte günlükle ayarlanacak.</td></tr>
+    <tr><td>Düzenle / herkesten sil</td><td>Birim testleri ve demoda sınandı; gerçek hesaplarla doğrulanmadı.</td></tr>
+    <tr><td>Uygulama içi güncelleme</td><td>Betik sözdizimi, indirme, SHA-256 ve sürüm testleri var; gerçek Mac/Windows'ta uçtan uca denenmedi. Bu özelliğe sahip ilk sürüm elle kurulmalı.</td></tr>
+    <tr><td>İlk kurulum / izin ekranı</td><td>Playwright ve sahte Tauri API'siyle sınandı; gerçek Mac'te doğrulanmadı.</td></tr>
+    <tr><td>Windows</td><td>Paket yalnız CI'da üretiliyor; gerçek Windows cihazında test yapılmadı (SmartScreen uyarısı beklenir).</td></tr>
+    <tr><td>ePttAVM, Amazon, Etsy, Shopify</td><td>Resmi API belgelerine göre yazıldı; gerçek satıcı hesabıyla doğrulanmadı.</td></tr>
+    <tr><td>Slack</td><td>Mesaj/önizleme gelmeme sorununun kök nedeni kesinleşmedi; düzeltmeler günlükle izleniyor.</td></tr>
+  </tbody>
+</table>
+
+<h2>Platform ve dağıtım kısıtları</h2>
+<ul>
+  <li><b>macOS Gatekeeper:</b> Apple Developer imzası yok (ad-hoc). macOS 15+/26'da ilk açılışta Sistem Ayarları › Gizlilik ve Güvenlik › "Yine de Aç" + parola gerekir; sağ tık › Aç artık yetmiyor.</li>
+  <li><b>iMessage Tam Disk Erişimi</b> ad-hoc imzada her yeni derlemede düşebilir (kalıcı çözüm sabit imza kimliği).</li>
+  <li><b>WhatsApp:</b> rehberde olmayan LID kişileri ancak canlı mesaj gelince ad kazanır; ayrılınmış bazı grupların adları gelmez; sesli mesaj ffmpeg yoksa ogg (WebKit oynatmayabilir); tek seferlik medya bağlı cihazlarda görüntülenemez.</li>
+  <li><b>X:</b> XChat PIN'i gerekir; otomasyon algılaması nedeniyle giriş kısıtlaması yaşanabilir.</li>
+  <li><b>Slack:</b> girişte çalışma alanının listeden açılması gerekir.</li>
+  <li><b>Trendyol:</b> sipariş soruları için API yok; tüm sorular ürün sorusu olarak gelir.</li>
+  <li><b>Amazon:</b> alıcı mesajlarını okuma API'si yok; yalnız siparişler ve şablonlu mesajlar.</li>
+  <li><b>Pazaryeri yanıtları</b> yalnız metin; sipariş üzerinden alıcıya mesaj ucu yok.</li>
+  <li><b>TikTok:</b> okumak için sohbet açıldığından karşı tarafa "görüldü" gidebilir.</li>
+  <li><b>Chromium</b> pakette yok, ilk tarayıcı kanalında indirilir (internet gerekir).</li>
+  <li><b>Lisans e-postası:</b> barındırmanın giden SMTP kısıtı nedeniyle lisans anahtarı e-postası gidemeyebilir; anahtar yine üretilir ve panelden kopyalanabilir.</li>
+  <li><b>Lisans denetimi</b> istemci tarafındadır; paket değiştirilerek aşılabilir.</li>
+</ul>
+
+<!-- ============================ 11. EKLER ============================ -->
+<h1 class="sec" id="s12"><span class="n">11</span>Ekler</h1>
+
+<h2 id="s12-1">Ek A · Yerel API uç noktaları</h2>
+<p class="small muted">Taban adres <code>http://127.0.0.1:7788</code>. <code>:id</code> değerleri URL kodlanır. Lisans geçersizken sağlık, lisans, kapatma ve güncelleme dışındaki uçlar 402 döner.</p>
+<table>
+  <thead><tr><th style="width:13%">Yöntem</th><th style="width:34%">Yol</th><th>Açıklama</th></tr></thead>
+  <tbody>
+    <tr><td>GET</td><td><code>/api/health</code></td><td>Durum, AI açık mı, sayılar, işletim sistemi, kullanıcı adı, sürüm, bellek</td></tr>
+    <tr><td>POST</td><td><code>/api/shutdown</code></td><td>Masaüstü kabuğunun nazik kapatma isteği (yalnız loopback + belirteç)</td></tr>
+    <tr><td>GET / POST / DELETE</td><td><code>/api/license</code></td><td>Lisans durumu (<code>?check=1</code> sunucuya sorar) / anahtar etkinleştir / cihazdan çıkış</td></tr>
+    <tr><td>GET / POST</td><td><code>/api/update</code></td><td>Güncelleme durumu / paketi arka planda indir</td></tr>
+    <tr><td>POST</td><td><code>/api/update/install</code></td><td>İndirilen paketi kur (uygulama kapanıp yenisi açılır)</td></tr>
+    <tr><td>GET / POST</td><td><code>/api/profile</code></td><td>Mivelo profili (yalnız yerel)</td></tr>
+    <tr><td>POST</td><td><code>/api/reset</code></td><td>Tüm verileri sil (<code>{confirm:'SIL'}</code>)</td></tr>
+    <tr><td>GET / POST</td><td><code>/api/accounts</code></td><td>Hesap listesi (bekleyen QR dahil) / yeni hesap ekle</td></tr>
+    <tr><td>DELETE</td><td><code>/api/accounts/:id</code></td><td>Hesabı kaldır (anında gizlenir, temizlik arka planda)</td></tr>
+    <tr><td>POST</td><td><code>/api/accounts/:id/restart</code></td><td>Yeniden bağlan (giriş penceresi, tarayıcı girişine geçiş seçenekleri)</td></tr>
+    <tr><td>POST</td><td><code>/api/accounts/:id/input</code></td><td>Kullanıcı girdisi (ör. Telegram 2FA parolası)</td></tr>
+    <tr><td>POST</td><td><code>/api/accounts/:id/cancel-login</code></td><td>Bağlanmayı iptal et (hiç bağlanmamış yeni hesap kaldırılır)</td></tr>
+    <tr><td>POST</td><td><code>/api/accounts/:id/login-input</code>, <code>/login-cancel</code>, <code>/login-window</code></td><td>Mivelo içi giriş ekranı (varsayılan kapalı): fare/klavye olayları, iptal, ayrı pencereye geçiş</td></tr>
+    <tr><td>POST</td><td><code>/api/accounts/:id/more</code></td><td>Sohbet listesinin sonraki sayfası</td></tr>
+    <tr><td>POST</td><td><code>/api/accounts/:id/compose</code></td><td>Yeni e-posta (Kime, Konu, Metin)</td></tr>
+    <tr><td>GET</td><td><code>/api/chats</code></td><td>Sohbet listesi</td></tr>
+    <tr><td>POST</td><td><code>/api/chats/open</code></td><td>Kişiyle birebir sohbet aç</td></tr>
+    <tr><td>GET</td><td><code>/api/chats/:id/messages</code></td><td>Mesajlar (<code>?limit=&amp;before=</code>)</td></tr>
+    <tr><td>POST</td><td><code>/api/chats/:id/send</code></td><td>Metin gönder (<code>threadId</code>, <code>replyTo</code>); gönderim sınırlarından geçer</td></tr>
+    <tr><td>POST</td><td><code>/api/chats/:id/send-file</code></td><td>Dosya gönder (akışla diske)</td></tr>
+    <tr><td>POST</td><td><code>/api/chats/:id/read</code></td><td>Okundu işaretle (platformda da), sohbeti izle</td></tr>
+    <tr><td>POST</td><td><code>/api/chats/:id/react</code></td><td>Emoji tepkisi (aç/kapa)</td></tr>
+    <tr><td>POST</td><td><code>/api/chats/:id/tags</code></td><td>Etiketleri ayarla</td></tr>
+    <tr><td>POST</td><td><code>/api/chats/:id/flags</code></td><td>Sabitle / arşivle / sessize al / gizle (yerel)</td></tr>
+    <tr><td>POST</td><td><code>/api/chats/:id/history</code></td><td>Eski mesajları platformdan yükle</td></tr>
+    <tr><td>POST</td><td><code>/api/chats/:id/action</code></td><td>Platform işlemi (ör. sipariş durumu güncelleme)</td></tr>
+    <tr><td>POST</td><td><code>/api/chats/:id/draft</code></td><td>AI taslak / özet / aksiyon (<code>tone</code>)</td></tr>
+    <tr><td>POST</td><td><code>/api/chats/:id/followup</code></td><td>Takip hatırlatıcısı kur/kaldır (<code>{at|null}</code>)</td></tr>
+    <tr><td>POST</td><td><code>/api/messages/:id/edit</code>, <code>/delete</code></td><td>Kendi mesajını düzenle / herkesten sil</td></tr>
+    <tr><td>GET</td><td><code>/api/messages/:id/html</code></td><td>E-postanın özgün HTML gövdesi</td></tr>
+    <tr><td>GET</td><td><code>/api/media/:hesap?u=…</code></td><td>Medya vekili ve önbelleği</td></tr>
+    <tr><td>GET</td><td><code>/api/preview?url=</code></td><td>Bağlantı önizlemesi (Open Graph; güvenli getirici)</td></tr>
+    <tr><td>GET / POST / DELETE</td><td><code>/api/scheduled</code>, <code>/api/scheduled/:sid</code></td><td>Zamanlanmış gönderimler</td></tr>
+    <tr><td>GET / POST / DELETE</td><td><code>/api/events</code>, <code>/api/events/:eid</code></td><td>Mivelo takvimi etkinlikleri</td></tr>
+    <tr><td>GET</td><td><code>/api/calendars</code></td><td>Cihaz takvimleri (<code>?probe=1</code> izin penceresini tetikler)</td></tr>
+    <tr><td>POST</td><td><code>/api/calendar</code>, <code>/api/calendars/permission</code></td><td>Cihaz takvimine ekle (olmazsa .ics) / izin bölmesini aç</td></tr>
+    <tr><td>GET</td><td><code>/api/permissions</code></td><td>macOS izin durumu (Tam Disk Erişimi, TCC kayıtları)</td></tr>
+    <tr><td>POST</td><td><code>/api/permissions/open</code>, <code>/api/permissions/messages</code></td><td>Sistem Ayarları bölmesini aç / Mesajlar otomasyon iznini iste</td></tr>
+    <tr><td>GET / POST</td><td><code>/api/ai/key</code></td><td>AI anahtarı durumu (maskeli) / kaydet-sil (yalnız yerel)</td></tr>
+    <tr><td>GET</td><td><code>/api/style</code></td><td>Yerel üslup profili</td></tr>
+    <tr><td>POST</td><td><code>/api/activity</code></td><td>Arayüz etkin/boşta bildirimi (uyarlamalı yoklama)</td></tr>
+    <tr><td>GET</td><td><code>/api/search?q=&amp;limit=</code></td><td>Genel arama (≤200 sonuç)</td></tr>
+    <tr><td>GET / POST</td><td><code>/api/lan</code></td><td>Telefondan erişim bilgisi / aç-kapa</td></tr>
+    <tr><td>GET</td><td><code>/api/logs</code></td><td>Son 200 günlük satırı</td></tr>
+    <tr><td>GET</td><td><code>/oauth/callback</code></td><td>Eski Gmail OAuth dönüş adresi</td></tr>
+    <tr><td>WS</td><td><code>/ws</code></td><td>Canlı olay demetleri (bkz. Mimari › Olay akışı)</td></tr>
+  </tbody>
+</table>
+
+<h2 id="s12-2">Ek B · Veri dosyaları (~/.mivelo)</h2>
+<table>
+  <thead><tr><th style="width:32%">Yol</th><th>İçerik</th></tr></thead>
+  <tbody>
+    <tr><td><code>mivelo.db</code> (+ -wal, -shm)</td><td>Şifreli ana veritabanı: hesaplar, sohbetler, mesajlar, FTS dizini, etkinlikler, meta</td></tr>
+    <tr><td><code>db.key</code> / <code>db.key.dpapi</code></td><td>Veritabanı anahtarı yedeği (Linux 0600) / Windows DPAPI ile şifreli anahtar; macOS'ta Anahtar Zinciri</td></tr>
+    <tr><td><code>token</code></td><td>Yerel API belirteci</td></tr>
+    <tr><td><code>sessions/&lt;hesap&gt;/</code></td><td>Hesap oturumu: WhatsApp kimlik deposu, Chromium profili, medya önbelleği, ad eşlemeleri, durum dosyaları, pazaryeri belirteci</td></tr>
+    <tr><td><code>license.json</code></td><td>Lisans anahtarı, etkinleştirme, cihaz, son denetim, bitiş, sahip (0600)</td></tr>
+    <tr><td><code>profile.json</code></td><td>Mivelo profili (0600)</td></tr>
+    <tr><td><code>settings.json</code></td><td>Yerel ayarlar (ör. telefondan erişim)</td></tr>
+    <tr><td><code>scheduled.json</code></td><td>Zamanlanmış gönderimler</td></tr>
+    <tr><td><code>send-guard.json</code></td><td>Günlük gönderim sayaçları</td></tr>
+    <tr><td><code>outbox/</code>, <code>calendar/</code></td><td>Geçici gönderim dosyaları, dışa aktarılan .ics</td></tr>
+    <tr><td><code>update/</code>, <code>update.log</code></td><td>İndirilen güncelleme paketi, kurulum betiği günlüğü</td></tr>
+    <tr><td><code>core.log</code>, <code>desktop.log</code>, <code>web.log</code>, <code>autodeploy.log</code></td><td>Çekirdek, masaüstü kabuğu, yerel web servisi ve otomatik güncelleyici günlükleri</td></tr>
+    <tr><td><code>e2e.json</code>, <code>e2e/</code></td><td>Canlı E2E eşleştirmesi ve raporları (geliştirici aracı)</td></tr>
+  </tbody>
+</table>
+
+<h2 id="s12-3">Ek C · Ortam değişkenleri</h2>
+<table>
+  <thead><tr><th style="width:32%">Değişken</th><th>Etki</th></tr></thead>
+  <tbody>
+    <tr><td><code>MIVELO_DATA_DIR</code> (eski <code>KAVSAK_DATA_DIR</code>)</td><td>Veri klasörü</td></tr>
+    <tr><td><code>KAVSAK_PORT</code></td><td>Yerel API portu (varsayılan 7788)</td></tr>
+    <tr><td><code>KAVSAK_DEMO</code></td><td><code>1</code> ise demo modu (<code>--demo</code> ile aynı)</td></tr>
+    <tr><td><code>KAVSAK_DB_KEY</code></td><td>Veritabanı anahtarını dışarıdan ver (test/duman testi)</td></tr>
+    <tr><td><code>MIVELO_REQUIRE_LICENSE</code></td><td><code>1</code> ise lisans zorunlu (paketli sürümde kabuk ayarlar)</td></tr>
+    <tr><td><code>MIVELO_APP_VERSION</code></td><td>Masaüstü sürümü (lisans, güncelleyici, sağlık ucu)</td></tr>
+    <tr><td><code>MIVELO_LICENSE_API</code></td><td>Lisans sunucusu adresi (test için)</td></tr>
+    <tr><td><code>MIVELO_BOOT_SLOTS</code></td><td>Aynı anda açılacak tarayıcı sayısını elle belirle</td></tr>
+    <tr><td><code>MIVELO_STALL_WATCH</code></td><td><code>0</code> ise kilit bekçisi kapalı</td></tr>
+    <tr><td><code>MIVELO_WA_GAPFILL</code></td><td><code>1</code> ise WhatsApp arka plan geçmiş boşluğu doldurma açık</td></tr>
+    <tr><td><code>MIVELO_LOGIN_EMBED</code></td><td><code>1</code> ise Mivelo içi giriş ekranı (varsayılan ayrı pencere)</td></tr>
+    <tr><td><code>MIVELO_PTTAVM_URL</code></td><td>ePttAVM servis adresi (test için)</td></tr>
+    <tr><td><code>KAVSAK_CHROMIUM</code>, <code>KAVSAK_HEADLESS</code></td><td>Tarayıcı köprüsü için Chromium yolu / görünmez mod ayarı</td></tr>
+    <tr><td><code>ANTHROPIC_API_KEY</code>, <code>ANTHROPIC_MODEL</code></td><td>AI anahtarı yedeği (Ayarlar'daki anahtar önceliklidir) ve model seçimi</td></tr>
+    <tr><td><code>TELEGRAM_API_ID</code>, <code>TELEGRAM_API_HASH</code></td><td>Kendi Telegram uygulama kimliğini kullan</td></tr>
+    <tr><td><code>KAVSAK_NODE</code>, <code>KAVSAK_CORE</code>, <code>KAVSAK_BUNDLE_NODE</code></td><td>Masaüstü kabuğu: Node yolu, çekirdek yolu, Node'u pakete gömme (CI)</td></tr>
+    <tr><td><code>VITE_STATIC_DEMO</code>, <code>VITE_DEMO_OFFLINE</code></td><td>Arayüz derlemesi: statik demo / tek dosya çevrimdışı demo</td></tr>
+    <tr><td><code>VITE_APP_VERSION</code>, <code>VITE_COMMIT</code></td><td>Arayüzdeki sürüm bilgisi (güncelleme kartı), commit</td></tr>
+    <tr><td><code>VITE_FEEDBACK_URL</code>, <code>VITE_SENTRY_DSN</code></td><td>Geri bildirim adresi; demo hata izleme (yalnız CI gizlisinden)</td></tr>
+  </tbody>
+</table>
+
+<h2 id="s12-4">Ek D · Klavye kısayolları</h2>
+<p class="small muted">Windows'ta ⌘ yerine Ctrl kullanılır.</p>
+<table>
+  <thead><tr><th style="width:32%">Kısayol</th><th>İşlev</th></tr></thead>
+  <tbody>
+    <tr><td><span class="kbd">⌘</span> <span class="kbd">⇧</span> <span class="kbd">K</span></td><td>Mivelo penceresini her yerden getir / gizle (küresel)</td></tr>
+    <tr><td><span class="kbd">⌘</span> <span class="kbd">K</span></td><td>Genel arama penceresi</td></tr>
+    <tr><td><span class="kbd">⌘</span> <span class="kbd">1</span> … <span class="kbd">⌘</span> <span class="kbd">9</span></td><td>Tümü (1) ve etiket görünümleri (2…)</td></tr>
+    <tr><td><span class="kbd">J</span> / <span class="kbd">↓</span>, <span class="kbd">K</span> / <span class="kbd">↑</span></td><td>Listede sonraki / önceki sohbet</td></tr>
+    <tr><td><span class="kbd">Enter</span>, <span class="kbd">⇧</span> <span class="kbd">Enter</span></td><td>Gönder, yeni satır</td></tr>
+    <tr><td><span class="kbd">⌘</span> <span class="kbd">Enter</span></td><td>Yeni e-postayı gönder</td></tr>
+    <tr><td><span class="kbd">Esc</span></td><td>Üstteki pencereyi/menüyü kapat; yanıt veya düzenlemeyi iptal et; sohbeti kapat</td></tr>
+    <tr><td><span class="kbd">←</span> / <span class="kbd">→</span></td><td>Medya penceresinde önceki / sonraki; Takvim'de önceki / sonraki ay</td></tr>
+    <tr><td><span class="kbd">T</span>, <span class="kbd">N</span></td><td>Takvim: bugün, yeni etkinlik (günde çift tık da yeni etkinlik)</td></tr>
+    <tr><td><span class="kbd">↑</span> / <span class="kbd">↓</span> / <span class="kbd">Enter</span></td><td>Arama penceresinde sonuçlar arasında gezinme ve açma</td></tr>
+  </tbody>
+</table>
+
+<p class="small muted" style="margin-top:18pt">Bu belge <code>docs/dokumantasyon.html</code> kaynağından <code>node docs/build-pdf.mjs</code> ile üretilmiştir.</p>
+
+</div>
+</body>
+</html>

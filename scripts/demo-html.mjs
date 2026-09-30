@@ -47,7 +47,7 @@ html = html.replace(/<script type="module"[^>]*src="([^"]+)"[^>]*><\/script>/g, 
 if (!scripts.length) throw new Error('JS paketi bulunamadı');
 
 // public/demo/** ve public/brands → { "demo/avatars/ayse.jpg": { t: "image/jpeg", d: "<base64>" }, "brands/n11.png": … }
-const TYPES = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', svg: 'image/svg+xml', mp4: 'video/mp4', pdf: 'application/pdf', csv: 'text/csv' };
+const TYPES = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', svg: 'image/svg+xml', mp4: 'video/mp4', pdf: 'application/pdf', csv: 'text/csv', wav: 'audio/wav' };
 const assets = {};
 const pub = path.join(web, 'public');
 const walk = (rel) => {
