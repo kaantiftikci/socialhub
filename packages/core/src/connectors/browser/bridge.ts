@@ -112,6 +112,8 @@ export interface Strategy {
   pageless?: boolean;
   /** Görünmez sekme "arka planda" tanıtılmasın (site gizli sekmede içerik yüklemiyorsa) */
   keepVisible?: boolean;
+  /** Görünmez tarayıcının görünüm boyutu (varsayılan 1180×820): masaüstü düzeni geniş ekranda açılan siteler (TikTok) için */
+  viewport?: { width: number; height: number };
   /** Yoklama bitince sayfayı about:blank'e al (ağır siteler boşta bellek tutmasın); strateji her çağrıda kendi sayfasına döner */
   unloadWhenIdle?: boolean;
   /** send() opts.replyTo ile alıntılı yanıt gönderebilir (Instagram) */
@@ -685,7 +687,7 @@ export class BrowserConnector extends BaseConnector {
         executablePath: process.env.KAVSAK_CHROMIUM || undefined,
         // Görünür giriş penceresi: tam tarayıcı yerine sekmesiz/adres çubuksuz küçük uygulama penceresi (--app) — kullanıcının
         // kendi tarayıcısında açılamaz (oturum çerezleri Mivelo'nun profilinde olmalı), ama giriş iletişim kutusu gibi görünür
-        viewport: hidden ? (this.embedOn ? EMBED_SIZE : { width: 1180, height: 820 }) : null,
+        viewport: hidden ? (this.embedOn ? EMBED_SIZE : (this.strategy.viewport ?? { width: 1180, height: 820 })) : null,
         deviceScaleFactor: hidden && this.embedOn ? 2 : undefined,
         // boşta boşaltılan kanallarda service worker sekme kapansa da render sürecini (Outlook 470 MB) hayatta tutuyor: engelle
         serviceWorkers: this.strategy.unloadWhenIdle ? 'block' : 'allow',

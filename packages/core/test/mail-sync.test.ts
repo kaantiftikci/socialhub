@@ -243,3 +243,21 @@ test('tarayıcı e-posta: "ben" adresi hesap (bağlam) başına tutulur', () => 
   assert.equal(folderDue({ context: () => ctxA2 } as never), false);
   assert.equal(folderDue(pb), true);
 });
+
+test('Outlook.com kişisel hesap SMTP: smtp-mail.outlook.com:587; iş/okul hesabı smtp.office365.com; elle girilen sunucuya dokunulmaz', async () => {
+  const { fixOutlookSmtp, isOutlookPersonal } = await import('../src/connectors/mail.js');
+  const { discoverMail } = await import('../src/connectors/mail-discover.js');
+  for (const u of ['ornek@outlook.com', 'ornek@hotmail.com', 'ornek@live.com', 'ornek@msn.com', 'ornek@outlook.com.tr', 'ornek@hotmail.co.uk']) assert.ok(isOutlookPersonal(u), u);
+  assert.equal(isOutlookPersonal('ornek@example.com'), false);
+  assert.deepEqual(fixOutlookSmtp({ user: 'ornek@hotmail.com', smtpHost: 'smtp.office365.com', smtpPort: 587, smtpSecure: false }), { user: 'ornek@hotmail.com', smtpHost: 'smtp-mail.outlook.com', smtpPort: 587, smtpSecure: false });
+  assert.equal(fixOutlookSmtp({ user: 'ornek@example.com', smtpHost: 'smtp.office365.com' }).smtpHost, 'smtp.office365.com', 'Microsoft 365 iş hesabı');
+  assert.equal(fixOutlookSmtp({ user: 'ornek@outlook.com', smtpHost: 'smtp.ozel.example.com' }).smtpHost, 'smtp.ozel.example.com', 'elle girilen korunur');
+  assert.equal((await discoverMail('ornek@outlook.com')).smtpHost, 'smtp-mail.outlook.com');
+  // bağlayıcı: outlook ön ayarı ve eski kayıttaki office365 kişisel hesapta düzeltilir
+  const store = new Store(path.join(tmp, 'outlook-smtp.db'));
+  const mk = (id: string, platform: 'outlook' | 'imap') => ({ id, platform, label: 'x', status: 'disconnected' as const, createdAt: Date.now() });
+  const cfgOf = (c: unknown) => (c as { cfg: { smtpHost?: string; smtpPort?: number } }).cfg;
+  assert.equal(cfgOf(new MailConnector(mk('outlook:p', 'outlook'), store, { user: 'ornek@outlook.com' })).smtpHost, 'smtp-mail.outlook.com');
+  assert.equal(cfgOf(new MailConnector(mk('outlook:w', 'outlook'), store, { user: 'ornek@example.com' })).smtpHost, 'smtp.office365.com');
+  assert.equal(cfgOf(new MailConnector(mk('imap:p', 'imap'), store, { user: 'ornek@live.com', host: 'outlook.office365.com', smtpHost: 'smtp.office365.com', smtpPort: 587 })).smtpHost, 'smtp-mail.outlook.com');
+});

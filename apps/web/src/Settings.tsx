@@ -260,7 +260,7 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
           {tab === 'profile' && <ProfilePane notify={notify} />}
 
           {(tab === 'account' || tab === 'logout' || tab === 'reset') && (
-            <AccountPane mode={tab === 'logout' ? 'logout' : tab === 'reset' ? 'reset' : 'view'} onLogout={() => setTab('logout')} onReset={() => setTab('reset')} onCancel={() => setTab('account')} notify={notify} />
+            <AccountPane mode={tab === 'logout' ? 'logout' : tab === 'reset' ? 'reset' : 'view'} onReset={() => setTab('reset')} onCancel={() => setTab('account')} notify={notify} />
           )}
 
           {tab === 'phone' && (
@@ -357,9 +357,10 @@ function licenseLeft(exp?: string | null): string {
 
 /**
  * Ayarlar → Hesap (yerel / masaüstü): profil adı (lisans sahibi ya da bilgisayardaki ad), lisans anahtarı (maskeli) ve süresi,
- * sürüm; altta kırmızı "Çıkış yap". logout=true: çıkışın ne yapacağını anlatan onay (Tauri'de confirm() çalışmaz).
+ * sürüm, "Tüm verileri sil". Çıkış yalnız menünün altındaki "Çıkış yap"tan (Kaan, 29.09: bu bölümdeki satır kaldırıldı);
+ * mode 'logout': çıkışın ne yapacağını anlatan onay (Tauri'de confirm() çalışmaz).
  */
-function AccountPane({ mode, onLogout, onReset, onCancel, notify }: { mode: 'view' | 'logout' | 'reset'; onLogout: () => void; onReset: () => void; onCancel: () => void; notify: (t: string, err?: boolean) => void }) {
+function AccountPane({ mode, onReset, onCancel, notify }: { mode: 'view' | 'logout' | 'reset'; onReset: () => void; onCancel: () => void; notify: (t: string, err?: boolean) => void }) {
   const logout = mode === 'logout';
   const [lic, setLic] = useState<LicenseStatus | null>(null);
   const [busy, setBusy] = useState(false);
@@ -470,13 +471,6 @@ function AccountPane({ mode, onLogout, onReset, onCancel, notify }: { mode: 'vie
             <span className="set-val">{APP_VERSION}</span>
           </Row>
         )}
-      </div>
-      <div className="set-group">
-        <Row title="Çıkış yap" hint={required ? 'Lisans bu bilgisayardan kaldırılır; anahtarınla yeniden girebilirsin' : 'Arayüzden çık; veriler bu bilgisayarda kalır'}>
-          <button type="button" className="btn danger-solid xs b" onClick={onLogout}>
-            Çıkış yap
-          </button>
-        </Row>
       </div>
       <div className="set-group">
         <Row title="Tüm verileri sil" hint="Her uygulamadan çıkış yapar; mesajlar, oturumlar, profil ve ayarlar bu bilgisayardan silinir">

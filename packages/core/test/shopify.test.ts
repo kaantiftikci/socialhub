@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { Page } from 'playwright';
 
 // Oturum klasörleri (shopify-state.json) gerçek ~/.kavsak'a yazılmasın: config içe aktarılmadan önce ayarlanmalı
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kavsak-shopify-test-'));
@@ -11,13 +10,12 @@ process.env.KAVSAK_DATA_DIR = tmp;
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
 const { Store } = await import('../src/store.js');
-const { ShopifyConnector, combineStatus, nextLink, parseShopifyConfig } = await import('../src/connectors/shopify.js');
-const { makeShopifyInbox, parseWhen, toMessages, _resetShopifyInboxState } = await import('../src/connectors/browser/shopify.js');
+const { ShopifyConnector, nextLink, parseShopifyConfig } = await import('../src/connectors/shopify.js');
 
 type J = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 let n = 0;
-function setup(config: J = { shop: 'mivelo-test', accessToken: 'shpat_x', inbox: false }) {
+function setup(config: J = { shop: 'mivelo-test', accessToken: 'shpat_x' }) {
   const store = new Store(path.join(tmp, `t${++n}.db`));
   const account = { id: `shopify:t${n}`, platform: 'shopify' as const, label: 'x', status: 'disconnected' as const, createdAt: Date.now() };
   store.upsertAccount(account);
@@ -68,12 +66,11 @@ function fakeFetch(handler: (url: string) => { status?: number; body?: unknown; 
   return urls;
 }
 
-const ORDERS = 'https://mivelo-test.myshopify.com/admin/api/2025-07/orders.json';
+const ORDERS = 'https://mivelo-test.myshopify.com/admin/api/2026-07/orders.json';
 
 test('parseShopifyConfig: mağaza tanıtıcısı ve ana bilgisayar türetilir', () => {
-  assert.deepEqual(parseShopifyConfig('{"shop":"Magaza.myshopify.com","accessToken":" shpat_1 "}'), { handle: 'magaza', host: 'magaza.myshopify.com', token: 'shpat_1', inbox: false }); // Inbox köprüsü varsayılan kapalı
-  assert.equal(parseShopifyConfig('{"shop":"m","accessToken":"t","inbox":true}').inbox, true);
-  assert.equal(parseShopifyConfig('{"shop":"https://magaza.myshopify.com/admin","accessToken":"t","inbox":false}').inbox, false);
+  assert.deepEqual(parseShopifyConfig('{"shop":"Magaza.myshopify.com","accessToken":" shpat_1 "}'), { handle: 'magaza', host: 'magaza.myshopify.com', token: 'shpat_1', clientId: '', clientSecret: '' });
+  assert.deepEqual(parseShopifyConfig('{"shop":"https://magaza.myshopify.com/admin","clientId":" cid ","clientSecret":"csec","inbox":true}'), { handle: 'magaza', host: 'magaza.myshopify.com', token: '', clientId: 'cid', clientSecret: 'csec' }, 'eski inbox alanı yok sayılır');
   assert.equal(parseShopifyConfig('{"shop":"magaza","accessToken":"t"}').host, 'magaza.myshopify.com');
   assert.equal(parseShopifyConfig('bozuk').host, '');
 });
@@ -88,7 +85,7 @@ test('eksik yapılandırma → error durumu', async () => {
   const { c, account } = setup({ shop: 'magaza' });
   await c.start({ interactive: false });
   assert.equal(account.status, 'error');
-  assert.match(account.detail ?? '', /erişim belirteci girilmedi/);
+  assert.match(account.detail ?? '', /erişim belirteci\) girilmedi/);
 });
 
 test('siparişler: sayfalama (Link), sipariş sohbeti + mesajı, fulfillment mesajı; değişmeyen sipariş tekrar mesaj üretmez', async () => {
@@ -163,7 +160,7 @@ test('siparişler: sayfalama (Link), sipariş sohbeti + mesajı, fulfillment mes
   assert.equal((store.getChat(cid)!.meta?.order as J).status, 'cancelled');
 
   // durum dosyası: yeni bağlayıcı aynı siparişleri yeniden mesajlamaz
-  const c2 = new ShopifyConnector(account, store, JSON.stringify({ orders: true, shop: 'mivelo-test', accessToken: 'shpat_x', inbox: false }));
+  const c2 = new ShopifyConnector(account, store, JSON.stringify({ orders: true, shop: 'mivelo-test', accessToken: 'shpat_x' }));
   await c2.start({ interactive: false });
   assert.equal(store.listMessages(cid).length, 3);
   await c2.stop();
@@ -196,125 +193,67 @@ test('401 → "erişim belirteci reddedildi" hatası; 429 → Retry-After sonra 
   await s2.c.stop();
 });
 
-test('combineStatus: API baskın; Inbox durumu ayrıntıda', () => {
-  assert.deepEqual(combineStatus({ status: 'error', detail: 'x' }, { status: 'connected' }), { status: 'error', detail: 'x' });
-  assert.deepEqual(combineStatus({ status: 'connected', detail: 'a@b' }, undefined), { status: 'connected', detail: 'a@b' });
-  assert.deepEqual(combineStatus({ status: 'connected' }, { status: 'pairing', detail: 'Giriş gerekli' }), { status: 'connected', detail: 'Inbox için Shopify\'a giriş gerekli (Yeniden bağlan)' });
-  assert.deepEqual(combineStatus({ status: 'connected', detail: 'a@b' }, { status: 'connected' }), { status: 'connected', detail: 'a@b' });
-  assert.equal(combineStatus({ status: 'connected' }, { status: 'error', detail: 'Chromium açılamadı' }).detail, 'Inbox: Chromium açılamadı');
+test('Dev Dashboard uygulaması: client_credentials belirteci (form gövdesi), API 2026-07; süresi dolunca ve 401\'de yenilenir; red → hata', async () => {
+  const hits: Array<{ url: string; method: string; headers: Record<string, string>; body?: string }> = [];
+  let issued = 0;
+  let rejectOnce = false;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input instanceof Request ? input.url : input);
+    const headers = Object.fromEntries(Object.entries((init?.headers as Record<string, string>) ?? {}).map(([k, v]) => [k.toLowerCase(), String(v)]));
+    hits.push({ url, method: init?.method ?? 'GET', headers, body: typeof init?.body === 'string' ? init.body : undefined });
+    const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+    if (url === 'https://mivelo-test.myshopify.com/admin/oauth/access_token') return json(200, { access_token: `tok${++issued}`, scope: 'read_orders', expires_in: 86_399 });
+    if (rejectOnce && headers['x-shopify-access-token'] === `tok${issued}` && issued === 2) {
+      rejectOnce = false;
+      return json(401, { errors: '[API] Invalid API key or access token' });
+    }
+    if (url.endsWith('/shop.json')) return json(200, { shop: { name: 'Mivelo Test', email: 'ornek@example.com' } });
+    if (url.includes('/orders.json')) return json(200, { orders: [] });
+    return json(404, {});
+  }) as typeof fetch;
+  const { c, account, priv } = setup({ shop: 'mivelo-test', clientId: 'cid', clientSecret: 'csec' });
+  await c.start({ interactive: false });
+  assert.equal(account.status, 'connected', account.detail);
+  const tokenReq = hits.filter((h) => h.url.endsWith('/admin/oauth/access_token'));
+  assert.equal(tokenReq.length, 1, 'belirteç bir kez alındı, bellekte');
+  assert.equal(tokenReq[0].method, 'POST');
+  assert.equal(tokenReq[0].headers['content-type'], 'application/x-www-form-urlencoded');
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(tokenReq[0].body)), { grant_type: 'client_credentials', client_id: 'cid', client_secret: 'csec' });
+  const api = hits.filter((h) => h.url.includes('/admin/api/'));
+  assert.ok(api.length > 0 && api.every((h) => h.url.includes('/admin/api/2026-07/')), 'API sürümü 2026-07');
+  assert.ok(api.every((h) => h.headers['x-shopify-access-token'] === 'tok1'));
+  assert.ok(hits.every((h) => !h.url.includes('csec')), 'gizli anahtar URL\'de değil');
+
+  // süre dolmak üzere (10 dk payı) → yoklama öncesi yenilenir
+  (c as unknown as { issued: { token: string; expiresAt: number } }).issued.expiresAt = Date.now() + 5 * 60_000;
+  hits.length = 0;
+  await priv.poll(false);
+  assert.equal(hits.filter((h) => h.url.endsWith('/access_token')).length, 1, 'bitmeden önce yenilendi');
+  assert.ok(hits.filter((h) => h.url.includes('/orders.json')).every((h) => h.headers['x-shopify-access-token'] === 'tok2'));
+
+  // 401 → bir kez yeniden alınır, istek yinelenir
+  rejectOnce = true;
+  hits.length = 0;
+  await priv.poll(false);
+  assert.equal(hits.filter((h) => h.url.endsWith('/access_token')).length, 1, '401 sonrası yenilendi');
+  assert.equal(hits.filter((h) => h.url.includes('/orders.json')).at(-1)!.headers['x-shopify-access-token'], 'tok3');
+  await c.stop();
+
+  // istemci kimliği reddi
+  globalThis.fetch = (async () => new Response(JSON.stringify({ error: 'invalid_client' }), { status: 400, headers: { 'content-type': 'application/json' } })) as typeof fetch;
+  const s2 = setup({ shop: 'mivelo-test', clientId: 'cid', clientSecret: 'yanlis' });
+  await s2.c.start({ interactive: false });
+  assert.equal(s2.account.status, 'error');
+  assert.match(s2.account.detail ?? '', /istemci kimliği \/ gizli anahtarı reddedildi \(invalid_client\)/);
+
+  // eksik yapılandırma
+  const s3 = setup({ shop: 'mivelo-test' });
+  await s3.c.start({ interactive: false });
+  assert.equal(s3.account.status, 'error');
+  assert.match(s3.account.detail ?? '', /istemci kimliği \+ gizli anahtar/);
 });
 
-// ───────────── Inbox stratejisi (sahte sayfa) ─────────────
-
-test('parseWhen: göreli ve kısa zamanlar', () => {
-  const now = new Date(2026, 8, 25, 15, 0).getTime();
-  assert.equal(parseWhen('14:32', now), new Date(2026, 8, 25, 14, 32).getTime());
-  assert.equal(parseWhen('Dün 09:05', now), new Date(2026, 8, 24, 9, 5).getTime());
-  assert.equal(parseWhen('5 dk', now), now - 5 * 60_000);
-  assert.equal(parseWhen('2 sa', now), now - 2 * 3_600_000);
-  assert.equal(parseWhen('3 Eyl', now), new Date(2026, 8, 3, 12, 0).getTime());
-  assert.equal(parseWhen('Sep 3', now), new Date(2026, 8, 3, 12, 0).getTime());
-  assert.equal(parseWhen('2026-09-24T11:20:00Z', now), Date.parse('2026-09-24T11:20:00Z'));
-  assert.equal(parseWhen('', now), undefined);
-  assert.equal(parseWhen('Ayşe', now), undefined);
-});
-
-/** Sahte Inbox sayfası: evaluate çağrılarını etiketli argümanın `op` alanına göre yanıtlar */
-function inboxPage(handle: string, threadId: string | undefined, data: { threads?: unknown[]; messages?: unknown[] }, ops: string[] = []): Page {
-  const url = `https://admin.shopify.com/store/${handle}/apps/inbox${threadId ? `/conversations/${threadId}` : ''}`;
-  return {
-    url: () => url,
-    goto: async () => undefined,
-    waitForTimeout: async () => undefined,
-    frames: () => [],
-    mainFrame: () => undefined,
-    keyboard: { type: async () => undefined, press: async () => undefined },
-    evaluate: async (_fn: unknown, arg?: { op?: string }) => {
-      ops.push(arg?.op ?? '?');
-      switch (arg?.op) {
-        case 'probe':
-          return true;
-        case 'threads':
-          return data.threads ?? [];
-        case 'messages':
-          return data.messages ?? [];
-        case 'open':
-        case 'focusComposer':
-        case 'clickSend':
-          return true;
-        default:
-          return false;
-      }
-    },
-  } as unknown as Page;
-}
-
-test('shopify inbox: loggedIn URL\'ye bakar (admin/store → evet, accounts.shopify.com → hayır)', async () => {
-  const s = makeShopifyInbox('mivelo-test', () => 'Mivelo Test');
-  assert.equal(s.home, 'https://admin.shopify.com/store/mivelo-test/apps/inbox');
-  assert.equal(await s.loggedIn({ url: () => 'https://admin.shopify.com/store/mivelo-test/apps/inbox' } as unknown as Page, {}, true), true);
-  assert.equal(await s.loggedIn({ url: () => 'https://accounts.shopify.com/lookup?rid=1' } as unknown as Page, {}, true), false);
-  assert.equal(await s.loggedIn({ url: () => 'about:blank' } as unknown as Page, {}, true), false, 'pasif: yönlendirme yok');
-  assert.deepEqual(await s.me({} as Page, {}), { id: 'mivelo-test', label: 'Mivelo Test' });
-});
-
-test('shopify inbox threads: satırlar sohbete çevrilir; zaman çözülemezse lastTs=0, okunmamış 1', async () => {
-  _resetShopifyInboxState();
-  const s = makeShopifyInbox('mivelo-test');
-  const now = Date.now();
-  const page = inboxPage('mivelo-test', undefined, {
-    threads: [
-      { id: '123', href: '/store/mivelo-test/apps/inbox/conversations/123', name: 'Ayşe Yılmaz', preview: 'Kargom nerede?', when: '5 dk', unread: true },
-      { id: 'h99', name: 'Ziyaretçi', preview: 'Merhaba', when: 'bilinmiyor', unread: false },
-    ],
-  });
-  const th = await s.threads(page, {});
-  assert.equal(th.length, 2);
-  assert.equal(th[0].id, '123');
-  assert.equal(th[0].name, 'Ayşe Yılmaz');
-  assert.equal(th[0].preview, 'Kargom nerede?');
-  assert.equal(th[0].unread, 1);
-  assert.ok(Math.abs(th[0].lastTs - (now - 5 * 60_000)) < 5000);
-  assert.equal(th[0].link, 'https://admin.shopify.com/store/mivelo-test/apps/inbox/conversations/123');
-  assert.equal(th[1].lastTs, 0);
-  assert.equal(th[1].unread, 0);
-  assert.deepEqual(await s.threads(inboxPage('mivelo-test', undefined, { threads: [] }), {}), [], 'liste okunamazsa boş (uyarı bir kez)');
-});
-
-test('shopify inbox messages: açık sohbet okunur, sıra/gönderen/kimlik kararlı; send yerel kimlik bırakır', async () => {
-  _resetShopifyInboxState();
-  const s = makeShopifyInbox('mivelo-test');
-  await s.threads(inboxPage('mivelo-test', undefined, { threads: [{ id: '123', name: 'Ayşe Yılmaz', preview: 'x', when: '', unread: false }] }), {});
-  const rows = [
-    { text: 'Kargom nerede?', when: '2026-09-24T11:20:00Z', me: false },
-    { text: 'Bugün çıkıyor', when: '', me: true },
-    { text: 'Teşekkürler', when: '2026-09-24T11:25:00Z', me: false },
-    { text: 'Teşekkürler', when: '2026-09-24T11:25:00Z', me: false },
-  ];
-  const ops: string[] = [];
-  const page = inboxPage('mivelo-test', '123', { messages: rows }, ops);
-  const msgs = await s.messages(page, {}, '123', 20);
-  assert.ok(!ops.includes('open'), 'sohbet zaten açık: tıklama yok');
-  assert.deepEqual(
-    msgs.map((m) => [m.fromMe, m.senderName, m.text]),
-    [
-      [false, 'Ayşe Yılmaz', 'Kargom nerede?'],
-      [true, 'Ben', 'Bugün çıkıyor'],
-      [false, 'Ayşe Yılmaz', 'Teşekkürler'],
-      [false, 'Ayşe Yılmaz', 'Teşekkürler'],
-    ],
-  );
-  assert.equal(msgs[1].ts, Date.parse('2026-09-24T11:20:00Z') + 1, 'zamanı çözülemeyen mesaj öncekinin +1 ms');
-  assert.equal(new Set(msgs.map((m) => m.id)).size, 4, 'özdeş iki mesaj ayrı kimlik alır');
-  assert.deepEqual(toMessages('123', 'Ayşe Yılmaz', rows).map((m) => m.id), msgs.map((m) => m.id), 'kimlikler yeniden okumada aynı');
-  assert.equal((await s.messages(page, {}, '123', 2)).length, 2, 'limit');
-
-  // başka sohbet açıkken: satıra tıklanır
-  const ops2: string[] = [];
-  await s.messages(inboxPage('mivelo-test', '999', { messages: rows }, ops2), {}, '123', 20);
-  assert.ok(ops2.includes('open'));
-
-  const ops3: string[] = [];
-  assert.equal(await s.send(inboxPage('mivelo-test', '123', { messages: rows }, ops3), {}, '123', 'Selam'), undefined);
-  assert.ok(ops3.includes('focusComposer') && ops3.includes('clickSend'));
+test('Inbox köprüsü yok: sipariş dışı sohbete gönderim açık hata', async () => {
+  const { c } = setup();
+  await assert.rejects(c.sendText('conv-1', 'selam'), /Shopify Inbox desteklenmiyor/);
 });

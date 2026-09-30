@@ -1578,10 +1578,8 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 /* Demo: tarayıcı girişi yerine geçen form (Connect.tsx DemoLogin) */
 .demo-login { display: flex; flex-direction: column; gap: 8px; max-width: 340px; margin: 10px 0 6px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); }
 .demo-login-head { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-bottom: 2px; }
-.demo-login input { height: 38px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--field); color: var(--text); font-size: 14px; outline: none; width: 100%; }
-.demo-login input:focus { border-color: var(--v); }
 .demo-login .btn { height: 38px; justify-content: center; }
-.demo-login-note { margin: 2px 0 0; font-size: 11.5px; color: var(--text3); }
+.demo-login-note { margin: 2px 0 0; font-size: 12px; line-height: 1.5; color: var(--text3); }
 .demo-qr-done { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 4px 0 8px; font-size: 12px; color: var(--text3); }
 .login-opening .btn { margin-left: 6px; }
 
@@ -1731,3 +1729,48 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
   .set-profile .set-ctl { width: 100%; }
   .set-inp { width: 100%; max-width: none; font-size: 16px; }
 }
+
+/* ── Medya penceresi: uygulama içi görüntüleyici, tam ekran (gerçek API ya da tam pencere yedeği), sayfa önizlemesi ── */
+.lightbox .bar .lb-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-grow: 1; min-width: 0; }
+.lightbox .bar .lb-act { color: #fff; font: inherit; font-weight: 500; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 8px; border: 0; background: rgba(255,255,255,.1); cursor: pointer; flex: none; }
+.lightbox .bar .lb-act:hover { background: rgba(255,255,255,.18); }
+.lightbox .bar .lb-act.icon { padding: 5px 7px; }
+.lightbox .box .vp { display: block; }
+.lightbox .box .vp video { cursor: pointer; }
+.lb-audio { padding: 28px; display: flex; flex-direction: column; gap: 12px; align-items: center; }
+.lightbox .box iframe.lb-doc { width: min(92vw, 900px); height: min(82vh, 1000px); background: #fff; }
+.lb-file { padding: 34px 40px; display: flex; flex-direction: column; gap: 8px; align-items: center; text-align: center; color: #d9d6e4; font-size: 13px; max-width: 420px; }
+.lb-file b { color: #fff; font-size: 14px; overflow-wrap: anywhere; }
+.lb-page { width: min(92vw, 520px); display: flex; flex-direction: column; color: #d9d6e4; }
+.lightbox .box .lb-page img { width: 100%; max-width: 100%; max-height: 52vh; object-fit: cover; }
+.lb-page-ic { display: flex; align-items: center; justify-content: center; aspect-ratio: 16 / 9; background: #2a2833; }
+.lb-page-body { display: flex; flex-direction: column; gap: 5px; padding: 14px 16px 16px; font-size: 13px; line-height: 1.45; }
+.lb-page-body b { color: #fff; font-size: 15px; line-height: 1.35; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.lb-page-site { font-size: 11.5px; color: #a9a5b8; }
+.lb-page-desc { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.lb-page-note { margin-top: 4px; font-size: 12px; color: #a9a5b8; }
+/* uygulama içi tam pencere (gerçek tam ekran açılamayınca, ör. Tauri'de öğe tam ekranı kapalıysa) */
+.lightbox.full { padding: 0; }
+.lightbox.full .box { width: 100vw; height: 100vh; max-width: none; max-height: none; border-radius: 0; background: #000; }
+.lightbox.full .box > :first-child { flex: 1; min-height: 0; }
+.lightbox.full .box img, .lightbox.full .box video, .lightbox.full .box iframe { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain; }
+.lightbox.full .box .vp { display: flex; align-items: center; justify-content: center; }
+/* gerçek tam ekran: pencere kutusu (görsel/gömülü) ya da video oynatıcı */
+.lightbox .box:fullscreen { width: 100%; height: 100%; max-width: none; max-height: none; border-radius: 0; background: #000; }
+.lightbox .box:fullscreen > :first-child { flex: 1; min-height: 0; }
+.lightbox .box:fullscreen img, .lightbox .box:fullscreen iframe { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain; }
+.lightbox .box:-webkit-full-screen { width: 100%; height: 100%; max-width: none; max-height: none; border-radius: 0; background: #000; }
+.lightbox .box:-webkit-full-screen > :first-child { flex: 1; min-height: 0; }
+.lightbox .box:-webkit-full-screen img, .lightbox .box:-webkit-full-screen iframe { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain; }
+.vp:fullscreen { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: #000; }
+.vp:fullscreen video { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain; }
+.vp:-webkit-full-screen { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: #000; }
+.vp:-webkit-full-screen video { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain; }
+/* balondaki ekler: sayfa/gönderi küçük resmi üstünde oynat işareti, video altlığında indirme */
+.att-thumb { position: relative; display: block; }
+.att-card .att-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.att-card .att-dl { margin-left: auto; display: inline-flex; color: inherit; padding: 2px; border-radius: 6px; opacity: .7; }
+.att-card .att-dl:hover { opacity: 1; background: var(--bg2); }
+.att-card .att-dl svg:last-child { margin-left: 0; opacity: 1; }
+button.att-card.xpost, button.att-card:has(.att-thumb), button.att-card:has(.att-blank) { cursor: pointer; }
+button.att-card.xpost img, button.att-card .att-thumb img { cursor: pointer; }

@@ -322,8 +322,7 @@ Dil: arayüz ve yorumlar Türkçe.
 - **iMessage**: `~/Library/Messages/chat.db` salt okunur + AppleScript gönderim; Tam Disk Erişimi yoksa Sistem Ayarları bölmesini açar.
 - **E-posta** (`connectors/mail.ts`): imapflow + nodemailer + mailparser; thread = sohbet. Gmail: uygulama şifresi ya da
   Google OAuth (Desktop client id+secret, `/oauth/callback`); Outlook: Azure client id + cihaz kodu (pencere otomatik açılır/kapanır).
-- **Gmail/iCloud Bağlan**: önce uygulama şifresi formu (IMAP + IDLE, anlık; `MAIL_FORM_FIRST` Connect.tsx), tarayıcı girişi formdaki yedek
-  bağlantı. **Gmail (tarayıcı)** (`connectors/browser/gmail.ts`): yedek yol; görünür pencerede Google girişi, sonra Gmail web DOM'u (tr.zA satırları,
+- **Gmail/iCloud Bağlan** (30.09 itibarıyla ESKİ: artık uygulamada şifre formu YOK, bkz. "Bağlan arayüzü 30.09"): eskiden önce uygulama şifresi formu, tarayıcı girişi yedek. **Gmail (tarayıcı)** (`connectors/browser/gmail.ts`): yedek yol; görünür pencerede Google girişi, sonra Gmail web DOM'u (tr.zA satırları,
   div.adn iletileri, span.aZo ekleri) okunur; yanıt Gmail düzenleyicisiyle. IMAP/uygulama şifresi yalnızca token dosyası varsa (registry).
 - **Shopier** (`connectors/shopier.ts`): resmi API `https://api.shopier.com/v1`, `Authorization: Bearer <PAT>`, 200 istek/dk.
   Sipariş = sohbet; olaylar mesaj; `action('fulfill')` → `PUT /orders/{id}`. API'de mesajlaşma ucu YOK.
@@ -551,7 +550,7 @@ Dil: arayüz ve yorumlar Türkçe.
   Seyrekleşme (`rtSlowdown`) ancak en az bir 'event' görüldükten sonra: Instagram ×10 (yedek 5 dk; sayfa `keepOpen:'always'`),
   LinkedIn ×5, Messenger ×5, X ×3. X tam yeniden yükleme 20–30 dk. LinkedIn `tabBadgeUpdateTopic` yalnız MESSAGING ise olay.
 - Pazaryerleri `PollTimer` + `marketDelay` (poll-timer.ts): Trendyol/Hepsiburada/Shopify odakta 30 sn / boşta 60 sn, n11 45/90, Etsy 60/90,
-  Amazon 120 sn (getOrders 1/dk). Belgeli sınırlar çok üstte (Trendyol soru/sipariş 1000/dk, HB OMS ~240/dk); webhook'lar genel HTTPS ister.
+  Amazon v2026 200 sn / v0 yedeği 120 sn. Belgeli sınırlar çok üstte (Trendyol soru/sipariş 1000/dk, HB OMS ~240/dk); webhook'lar genel HTTPS ister.
 - 429'da `PollTimer.backoff(retryAfterSec(Retry-After|X-RateLimit-Reset))`: sunucunun istediği süre, art arda gelirse katlanarak ≤30 dk.
   Açık tutulan sayfalar `softReloadHours` (varsayılan 6–10 sa, Instagram 12–20) aralığında bir kez yenilenir (SPA bellek sızıntısı).
   LinkedIn: akışın ClientConnection kimliği değişince (yeniden bağlandı) eşitleme olayı.
@@ -569,7 +568,7 @@ Dil: arayüz ve yorumlar Türkçe.
 - E-posta: IDLE bağlantısı açıkken yoklama AYNI bağlantıda (getMailboxLock; yeni oturum yok) — yedek 10 dk, IDLE yoksa 2 dk.
   `uidValidity` durum dosyasında; değişince imleç sıfırlanır. `classify`: authenticationFailed → dur (otomatik deneme yok), ETHROTTLE →
   throttleReset, [ALERT]/[LIMIT]/çok bağlantı → 15 dk. `missingIdleCommand: 'STATUS'`.
-- Amazon Seller Central / Etsy Mesajları / Shopify Inbox tarayıcı köprüleri varsayılan KAPALI (yapılandırmada messaging/inbox:true ile açılır).
+- Amazon Seller Central / Etsy Mesajları / Shopify Inbox tarayıcı köprüleri KALDIRILDI (30.09; Amazon BSA §19/Agent Policy tarayıcı otomasyonunu yasaklıyor; yalnız resmi API).
 - Yeniden bağlan hızı: hesap 'pairing' iken (oturum düştüğü biliniyor) `restartNow` → `start({login:true})` görünmez denetim turu
   OLMADAN giriş penceresi (eski çerez "giriş var" sanılmasın diye visibleLogin(false)); diğer durumlarda denetim en çok 12 sn. Eşitleme
   yüzdesi oturum doğrulanmadan başlamaz (eskiden %20 "tarayıcı açıldı" pencereden önce çıkıyordu). Arayüz: `login-opening.ts` —
@@ -684,6 +683,42 @@ Dil: arayüz ve yorumlar Türkçe.
   telafi penceresi (son başarılı turdan beri), durum dosyası yalnız değişince; arayüz: balonlar memo, Intl biçimleyici önbelleği, markRead kısıtı,
   refresh WS'den gelen tazeyi ezmez, "daha eski" aynı saniyedeki mesajı atlamaz, msgCache sınırlı.
   Test dosyaları `test/<grup>-*.test.ts`. Denetim çıktısı yalnız oturumda (depoda yok).
+
+## 30.09 turu (Kaan'ın 11 maddesi + TikTok)
+- **Bağlan arayüzü (30.09)**: "deneysel" etiketleri ve TÜM "Gelişmiş" bağlantıları kaldırıldı; uygulama içinde kullanıcı adı/şifre formu YOK
+  (e-posta uygulama şifresi/IMAP/OAuth istemci formları, Slack belirteç formu + manifest kopyası, Telegram api_id formu silindi). E-posta
+  (Gmail/Outlook/Yahoo/Yandex/iCloud) Bağlan → doğrudan sağlayıcının giriş penceresi; "Diğer e-posta" yeni eklenemez (yalnız eski hesap
+  kaldırılır). Şifreyle bağlanmış eski e-posta hesapları `restart(id, {browserLogin:true})` (registry/server/api) ile token'ı bırakıp giriş
+  penceresine geçer ("Giriş ekranını aç" / uyarıdaki "<Sağlayıcı> ile giriş yap"). Kalan tek formlar: pazaryeri API anahtarları ("API anahtarı",
+  "şifre" değil) + Telegram 2FA parolası (QR sonrası Telegram istiyor). Orijinal logolar: `apps/web/src/brand-icons.ts` (landing dock SVG'leri,
+  19 platform; Trendyol/n11/Shopier PNG) → `Chip` her yerde. Ayarlar → Hesap ve veriler'deki Çıkış yap satırı kaldırıldı (menüdeki kalır).
+- **Medya (30.09)**: video tam ekran düğmesi requestFullscreen → webkitRequestFullscreen → video.webkitEnterFullscreen → olmazsa uygulama içi
+  Lightbox (`.lightbox.full`, Esc önce tam ekrandan çıkar); simgeler `maximize`/`minimize`. Bağlantı/medya/ek/paylaşım kartı/MsgLink/e-posta
+  gövdesi bağlantıları YENİ SEKME AÇMAZ: uygulama içi pencere (görsel/video/ses/PDF doğrudan; IG/X/YouTube/TikTok/Vimeo gömülü oynatıcı;
+  gömülemeyen sayfa `/api/preview` kartı); dışarı yalnız "Tarayıcıda aç"/"İndir".
+- **Resmi API denetimi (30.09)**: Amazon KALDI (SP-API sipariş + şablonlu mesaj; alıcı mesajı okuma API'si YOK, Seller Central köprüsü silindi),
+  siparişler Orders API v2026-01-01 (searchOrders, kalemler yanıtta; 404/403'te tek uyarıyla v0), şablon adları `_embedded/_links`, digitalAccessKey ≤400.
+  Trendyol soru sayfa boyu 50 (doc üst sınırı). Hepsiburada Basic `merchantId:servisAnahtarı` + User-Agent entegratör adı (eski username/password
+  sürer). Etsy `x-api-key: keystring:shared_secret` zorunlu (9.02.2026). Shopify API 2026-07 + Dev Dashboard client_credentials (24 sa belirteç,
+  401'de yenileme; eski shpat_ sürer). Outlook.com kişisel SMTP smtp-mail.outlook.com:587. Etsy/Shopify tarayıcı köprüleri silindi.
+  Resmi kişisel DM API'si olmayanlar: WhatsApp, Instagram, Messenger, X, LinkedIn, TikTok (ban riski; LinkedIn en yüksek). Slack: tek ortak
+  "Mivelo" Slack uygulaması DAĞITILMAMALI (pazaryeri dışı uygulamalarda history 1/dk).
+- **Slack (30.09, Kaan: kişiler geliyor, önizleme/mesaj yok)**: kesin tek neden bulunamadı; 5 düzeltme: kalıcı `sameOriginOnly` → 10 dk
+  `sameOriginUntil` + iki adres sırayla (not_authed/invalid_auth/non_json'da ötekisi); xoxc `teams:{}` iken `prevTeams` ve istemcinin kendi
+  isteklerinden (`learnFromRequest`); replies hız sınırı geçmişi atmaz (Retry-After bekler, 25 sn bütçe); önizleme `threads()` son üst düzey
+  mesajdan; yalnız blocks/attachments'lı mesaj metni `blocksText`. xoxp: sohbet başına ayrı hata. Hatalar kodla günlükte (içerik yok).
+  Kaan'dan: `grep -E "slack( mesajlar alınamadı| yoklama|: (tanı|conversations\.|users\.info|oturum anahtarı|çalışma alanı|hız sınırı|sayfasız))" ~/.mivelo/web.log ~/.mivelo/core.log | tail -60`.
+- **TikTok (30.09)**: gerçek 2026 web DM düzeni (8+ açık kaynak kazıyıcıdan) `dm-new-*` data-e2e ailesi: liste `dm-new-conversation-item`
+  (data-conv-id, aria-selected), ad `dm-new-conversation-nickname`, mesaj alanı `dm-new-chatbox`/`dm-new-message-list`, mesaj `dm-new-chat-item`,
+  metin `dm-new-message-text`, ayırıcı `dm-new-time-separator`, yazma `dm-new-input-editor` (Draft.js), gönder `dm-new-send-btn`; sınıflar
+  `css-<hash>-<build>--Label` (yalnız etiket kararlı, hash durumla değişir). tagLayout yedeği: satırlar hash'e göre bölünmez, sol menü/"Mesaj
+  istekleri"/açık grubun üye mesajları sohbet sayılmaz; gerçek fare tıklaması; aynı adlı sohbette yanlış kişiye GÖNDERMEZ (seçili satır
+  doğrulanamazsa hata); column-reverse, sanal liste, grup gönderen adı, emoji-only, ayırıcı tarihleri (`sepTime`, ABD/TR). Test: tiktok-dom.test.ts
+  (Chromium yoksa atlanır; "Bugün" saatleri şimdiden geride `hm()`, gece yarısından sonraki 30 dk'da iki test atlanır). Gerçek TikTok'ta DOĞRULANMADI.
+- **Rakip: HeloRobo (30.09 araştırma)**: B2B (T-Soft), resmi WhatsApp Cloud API (Embedded Signup, coexistence), IG/Messenger resmi (yalnız
+  profesyonel), Telegram kullanıcı girişi, IMAP, Trendyol/HB/n11/Pazarama, Shopify/T-Soft, Thinker bot, HeloBot AI, çok operatör, mobil (500+),
+  $29-99/ay + Meta ücretleri. Öneri: kısa vadede resmi WA yok (webhook relay sunucusu gerekir); Pazarama + hazır yanıtlar + mini CRM eklenebilir.
+- **X giriş kısıtlaması (30.09)**: köprü `ignoreDefaultArgs: ['--enable-automation']`; sürerse giriş penceresini sistem Chrome'uyla açmak gerekebilir.
 
 ## Sunucu/arayüz sözleşmesi
 - CORS: localhost/127.0.0.1/tauri.localhost/tauri://localhost ve WKWebView'ın `null` kaynağı (paketli uygulama!).

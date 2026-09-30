@@ -42,6 +42,21 @@ const PRESETS: Partial<Record<Platform, Required<Pick<MailConfig, 'host' | 'port
   icloud: { host: 'imap.mail.me.com', port: 993, secure: true, smtpHost: 'smtp.mail.me.com', smtpPort: 587, smtpSecure: false },
 };
 
+/** Kişisel Microsoft hesabı (Outlook.com) alan adları: SMTP smtp-mail.outlook.com:587; iş/okul (Microsoft 365) smtp.office365.com */
+const MS_PERSONAL = /@(outlook|hotmail|live|msn)\.[a-z.]+$/i;
+export const OUTLOOK_PERSONAL_SMTP = 'smtp-mail.outlook.com';
+export function isOutlookPersonal(user: string | undefined): boolean {
+  return MS_PERSONAL.test(String(user ?? '').trim());
+}
+/**
+ * Outlook.com kişisel hesaplarında SMTP sunucusunu düzelt: ön ayar ya da eski kayıt smtp.office365.com diyorsa
+ * smtp-mail.outlook.com:587 (STARTTLS). Kullanıcının elle girdiği başka sunucuya dokunulmaz.
+ */
+export function fixOutlookSmtp<T extends Pick<MailConfig, 'user' | 'smtpHost' | 'smtpPort' | 'smtpSecure'>>(cfg: T): T {
+  if (isOutlookPersonal(cfg.user) && (!cfg.smtpHost || cfg.smtpHost === 'smtp.office365.com')) return { ...cfg, smtpHost: OUTLOOK_PERSONAL_SMTP, smtpPort: 587, smtpSecure: false };
+  return cfg;
+}
+
 const MS_SCOPES = 'https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access';
 const GOOGLE_AUTH = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN = 'https://oauth2.googleapis.com/token';
@@ -147,7 +162,7 @@ export class MailConnector extends BaseConnector {
 
   constructor(account: BaseConnector['account'], store: BaseConnector['store'], cfg: MailConfig) {
     super(account, store);
-    this.cfg = { ...PRESETS[account.platform], ...cfg };
+    this.cfg = fixOutlookSmtp({ ...PRESETS[account.platform], ...cfg });
     this.stateFile = path.join(sessionDir(account.id), 'mail-state.json');
     try {
       const st = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) as {

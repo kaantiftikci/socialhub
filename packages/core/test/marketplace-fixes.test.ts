@@ -15,9 +15,6 @@ const { PollTimer } = await import('../src/connectors/poll-timer.js');
 const { TrendyolConnector, mergePackages } = await import('../src/connectors/trendyol.js');
 const { HepsiburadaConnector } = await import('../src/connectors/hepsiburada.js');
 const { EtsyConnector, apiKeyHeader } = await import('../src/connectors/etsy.js');
-const { toMessages: shopifyToMessages } = await import('../src/connectors/browser/shopify.js');
-const { toMessages: amazonToMessages } = await import('../src/connectors/browser/amazon.js');
-const { rowsToMessages } = await import('../src/connectors/browser/etsy.js');
 
 type Call = { url: string; method: string; headers: Record<string, string>; body?: unknown };
 function fakeFetch(handler: (url: string, init: RequestInit) => { status?: number; body?: unknown } | undefined) {
@@ -329,10 +326,10 @@ test('Hepsiburada: gönderilen cevap yoklamadaki gerçek yazışmayla tek balon;
 
 // ───────────── Etsy ─────────────
 
-test('Etsy x-api-key: shared secret varsa keystring:secret, yoksa keystring', () => {
+test('Etsy x-api-key: her zaman keystring:shared_secret; secret yoksa açık hata', () => {
   assert.equal(apiKeyHeader({ keystring: 'K', sharedSecret: 'S' }), 'K:S');
-  assert.equal(apiKeyHeader({ keystring: 'K' }), 'K');
-  assert.equal(apiKeyHeader({ keystring: 'K', sharedSecret: '  ' }), 'K');
+  assert.throws(() => apiKeyHeader({ keystring: 'K' }), /Etsy paylaşılan gizli anahtar \(shared secret\) gerekli/);
+  assert.throws(() => apiKeyHeader({ keystring: 'K', sharedSecret: '  ' }), /shared secret/);
 });
 
 test('Etsy: sonraki yoklamalar min_last_modified + sort_on=updated ile değişenleri ister; başlıkta keystring:secret', async () => {
@@ -361,31 +358,4 @@ test('Etsy: sonraki yoklamalar min_last_modified + sort_on=updated ile değişen
   } finally {
     restore();
   }
-});
-
-// ───────────── Köprüler: göreli zamanla kararlı kimlik ─────────────
-
-test('Shopify/Amazon toMessages: "5 dk"/"şimdi" gibi göreli zamanda kimlik yoklamalar arası değişmez; mutlak zamanda eskisi gibi', () => {
-  const rows = [
-    { text: 'Merhaba', when: '5 dk', me: false },
-    { text: 'Selam', when: 'şimdi', me: true },
-    { text: 'Eski', when: '2026-09-24T11:20:00Z', me: false },
-  ];
-  const t = Date.parse('2026-09-28T12:00:00Z');
-  for (const fn of [shopifyToMessages, amazonToMessages]) {
-    const a = fn('th1', 'Ayşe', rows, t);
-    const b = fn('th1', 'Ayşe', rows, t + 7 * 60_000);
-    assert.deepEqual(a.map((m) => m.id), b.map((m) => m.id));
-    assert.equal(a[2].ts, Date.parse('2026-09-24T11:20:00Z'));
-  }
-});
-
-test('Etsy rowsToMessages: "3h" ve zamansız ilk satırda kimlik kararlı', () => {
-  const rows = [
-    { id: '', sender: 'Jane', text: 'Zamansız', time: '', images: [] },
-    { id: '', sender: 'Jane', text: 'Göreli', time: '3h', images: [] },
-  ];
-  const a = rowsToMessages('c1', rows, 'Me', new Date('2026-09-28T12:00:00Z'));
-  const b = rowsToMessages('c1', rows, 'Me', new Date('2026-09-28T12:09:00Z'));
-  assert.deepEqual(a.map((m) => m.id), b.map((m) => m.id));
 });

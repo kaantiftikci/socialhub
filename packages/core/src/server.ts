@@ -337,10 +337,11 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     if (gone.size) bus.emit({ type: 'scheduled.update' });
     return { ok: true };
   });
-  route('POST', '/api/accounts/:id/restart', async (r, _s, p) => {
+  route('POST', '/api/accounts/:id/restart', async (r, _s, p, body) => {
     localOnly(r);
     if (!store.getAccount(dec(p.id))) throw new HttpError(404, 'Hesap yok');
-    await registry.restart(dec(p.id));
+    // browserLogin: e-posta hesabı sağlayıcının giriş penceresiyle yeniden bağlanır (uygulama şifreli eski hesap da)
+    await registry.restart(dec(p.id), { browserLogin: (body as { browserLogin?: unknown } | undefined)?.browserLogin === true });
     return { ok: true };
   });
   // Mivelo içi giriş ekranı: fare/klavye girdisi, iptal, ayrı pencereye geçiş

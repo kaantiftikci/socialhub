@@ -4,19 +4,17 @@ import { createHash, randomBytes } from 'node:crypto';
 import { ordersFlag, BaseConnector, type StartOptions } from './base.js';
 import { PollTimer, marketDelay, retryAfterSec } from './poll-timer.js';
 import { ingestChunked, writeJsonAtomic } from './market-state.js';
-import { BrowserConnector } from './browser/bridge.js';
-import { etsy as etsyStrategy } from './browser/etsy.js';
 import { OAUTH_CALLBACK, waitOAuth, withAuthWindow } from './mail.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
 import type { AccountStatus, Participant } from '../model.js';
 
 /**
- * Etsy: iki parça tek hesapta.
- *  1) Siparişler — resmi Open API v3 (OAuth2 PKCE, `x-api-key` = uygulama keystring'i). Her sipariş (receipt) bir
- *     sohbet; sipariş/ödeme/kargo olayları mesaj olarak akar. Sohbete yazılan metin yerel not olur (API'de alıcıya
- *     mesaj ucu yok).
- *  2) Mesajlar — Etsy Conversations API'de olmadığı için tarayıcı köprüsü (`browser/etsy.ts`, etsy.com/messages DOM'u).
+ * Etsy: yalnız resmi Open API v3 siparişleri (OAuth2 PKCE). 9 Şubat 2026'dan beri her v3 isteği
+ * `x-api-key: <keystring>:<shared_secret>` başlığı ister → paylaşılan gizli anahtar ZORUNLU. Her sipariş (receipt) bir
+ * sohbet; sipariş/ödeme/kargo olayları mesaj olarak akar. Sohbete yazılan metin yerel not olur (API'de alıcıya mesaj ucu yok).
+ * Etsy Mesajları tarayıcı köprüsü KALDIRILDI (Etsy API kullanım koşulları kazımayı/otomasyonu yasaklıyor; resmi Conversations
+ * API'si yok).
  *
  * OAuth: kullanıcı etsy.com/developers'da uygulama açar, geri dönüş adresi olarak OAUTH_CALLBACK'i
  * (http://127.0.0.1:7788/oauth/callback) kaydeder; keystring Bağlan formundan gelir. Token'lar
@@ -60,8 +58,14 @@ export const money = (m: EtsyMoney | undefined): string => {
   const cur = m.currency_code ?? '';
   return `${v} ${SYMBOL[cur] ?? cur}`.trim();
 };
-/** Etsy 2026: x-api-key = `keystring:shared_secret` (secret varsa); yoksa yalnız keystring (eski uygulamalar) */
-export const apiKeyHeader = (c: Pick<EtsyConfig, 'keystring' | 'sharedSecret'>): string => (c.sharedSecret?.trim() ? `${c.keystring}:${c.sharedSecret.trim()}` : c.keystring);
+/** Etsy paylaşılan gizli anahtar eksik (9 Şubat 2026'dan beri zorunlu) */
+export const ETSY_SECRET_REQUIRED = 'Etsy paylaşılan gizli anahtar (shared secret) gerekli';
+/** Etsy 2026: x-api-key = `keystring:shared_secret` (zorunlu; yoksa hata) */
+export const apiKeyHeader = (c: Pick<EtsyConfig, 'keystring' | 'sharedSecret'>): string => {
+  const secret = c.sharedSecret?.trim();
+  if (!secret) throw new Error(ETSY_SECRET_REQUIRED);
+  return `${c.keystring.trim()}:${secret}`;
+};
 const sec = (v: unknown): number | undefined => (typeof v === 'number' && v > 0 ? v * 1000 : undefined);
 
 /** PKCE çifti: 32 baytlık rastgele verifier (base64url) ve S256 challenge'ı */
@@ -78,22 +82,8 @@ export function authorizeUrl(keystring: string, state: string, challenge: string
   return `${AUTH_URL}?${q.toString()}`;
 }
 
-/**
- * Köprünün durum bildirimlerini bileşik connector'a yönlendiren alt sınıf. BrowserConnector `setStatus`'u aynı
- * account nesnesi üzerinde çağırır ve API tarafının durumunu ezerdi; burada araya girilip iki durum tek yerde
- * (EtsyConnector.publish) birleştirilir. Depo/olay yayını yalnızca bileşik tarafta yapılır.
- */
-class EtsyBridge extends BrowserConnector {
-  constructor(account: BaseConnector['account'], store: BaseConnector['store'], private readonly onStatus: (s: AccountStatus, detail?: string) => void) {
-    super(account, store, etsyStrategy, 30_000);
-  }
-  protected override setStatus(status: AccountStatus, detail?: string): void {
-    this.onStatus(status, detail);
-  }
-}
-
 export class EtsyConnector extends BaseConnector {
-  /** sipariş sohbetleri açık mı (token JSON orders:true); kapalıysa yalnız müşteri soruları/mesajları */
+  /** sipariş sohbetleri açık mı (token JSON; varsayılan açık, ordersOff:true kapatır) */
   private ordersOn = false;
   private cfg: EtsyConfig;
   private timer?: PollTimer;
@@ -104,20 +94,14 @@ export class EtsyConnector extends BaseConnector {
   private since?: number;
   private stateFile: string;
   private tokenFile: string;
-  private bridge?: EtsyBridge;
-  /** alt bileşen durumları (publish() birleştirir) */
-  private apiStatus: AccountStatus = 'disconnected';
-  private apiDetail?: string;
-  private bridgeStatus: AccountStatus = 'disconnected';
-  private bridgeDetail?: string;
   /** testlerde/isteğe bağlı: giriş penceresi yerine kullanılacak akış */
   protected authWindow: <T>(url: string, done: Promise<T>) => Promise<T> = withAuthWindow;
 
   /**
-   * @param config Bağlan formunun yazdığı JSON (EtsyConfig); keystring zorunlu.
-   * @param messaging false: tarayıcı köprüsü (Etsy Mesajları) başlatılmaz — yalnızca siparişler (testler de bunu kullanır).
+   * @param config Bağlan formunun yazdığı JSON (EtsyConfig); keystring + sharedSecret zorunlu.
+   * @param _messaging kullanılmıyor (Etsy Mesajları köprüsü kaldırıldı); eski çağıranlar derlensin diye duruyor.
    */
-  constructor(account: BaseConnector['account'], store: BaseConnector['store'], config: string, private readonly messaging = true) {
+  constructor(account: BaseConnector['account'], store: BaseConnector['store'], config: string, _messaging?: boolean) {
     super(account, store);
     let cfg: EtsyConfig = { keystring: '' };
     try {
@@ -142,39 +126,9 @@ export class EtsyConnector extends BaseConnector {
     }
   }
 
-  // ───────────── durum birleştirme ─────────────
-
-  /** API + köprü durumlarını tek account.status'a indir ve yayınla */
-  private publish(): void {
-    if (this.stopping) return;
-    const a = this.apiStatus;
-    const b = this.bridgeStatus;
-    const bridgeNote = !this.messaging
-      ? undefined
-      : b === 'pairing'
-        ? 'Mesajlar için Etsy\'ye giriş gerekli (Yeniden bağlan)'
-        : b === 'error' || b === 'disconnected'
-          ? this.bridgeDetail
-            ? `Mesajlar: ${this.bridgeDetail}`
-            : undefined
-          : undefined;
-    if (a === 'connected') return super.setStatus('connected', [this.apiDetail, bridgeNote].filter(Boolean).join(' · ') || undefined);
-    if (a === 'error' || a === 'pairing') return super.setStatus(a, [this.apiDetail, bridgeNote].filter(Boolean).join(' · ') || undefined);
-    if (a === 'connecting') return super.setStatus('connecting', this.apiDetail);
-    // API kapalı (disconnected): köprü ne diyorsa o
-    super.setStatus(b, this.bridgeDetail);
-  }
-
   private setApi(status: AccountStatus, detail?: string): void {
-    this.apiStatus = status;
-    this.apiDetail = detail;
-    this.publish();
-  }
-
-  private setBridge(status: AccountStatus, detail?: string): void {
-    this.bridgeStatus = status;
-    this.bridgeDetail = detail;
-    this.publish();
+    if (this.stopping && status !== 'disconnected') return;
+    this.setStatus(status, detail);
   }
 
   // ───────────── OAuth / belirteç ─────────────
@@ -251,12 +205,12 @@ export class EtsyConnector extends BaseConnector {
     this.stopping = false;
     const interactive = opts.interactive !== false;
     if (!this.cfg.keystring) return this.setApi('error', 'Etsy uygulama anahtarı (keystring) girilmedi');
+    if (!this.cfg.sharedSecret?.trim()) return this.setApi('error', ETSY_SECRET_REQUIRED);
     this.setApi('connecting');
     try {
       if (!(await this.ensureToken())) {
         if (!interactive) {
           this.setApi('pairing', 'Etsy izni gerekli — kanala sağ tıklayıp "Yeniden bağlan" de');
-          this.startBridge(opts);
           return;
         }
         await this.authorize();
@@ -284,24 +238,13 @@ export class EtsyConnector extends BaseConnector {
     } catch (e) {
       this.setApi('error', (e as Error).message.split('\n')[0]);
     }
-    this.startBridge(opts);
-  }
-
-  /** Mesaj köprüsünü arka planda başlat (etkileşimli girişte kullanıcıyı bekler; bileşik start'ı bloklamaz) */
-  private startBridge(opts: StartOptions): void {
-    if (!this.messaging || this.stopping) return;
-    this.bridge ??= new EtsyBridge(this.account, this.store, (s, d) => this.setBridge(s, d));
-    void this.bridge.start(opts).catch((e) => this.setBridge('error', (e as Error).message.split('\n')[0]));
   }
 
   async stop(): Promise<void> {
     this.stopping = true;
     this.timer?.stop();
     this.timer = undefined;
-    await this.bridge?.stop().catch(() => undefined);
-    this.apiStatus = 'disconnected';
-    this.bridgeStatus = 'disconnected';
-    super.setStatus('disconnected');
+    this.setStatus('disconnected');
   }
 
   // ───────────── siparişler ─────────────
@@ -311,7 +254,7 @@ export class EtsyConnector extends BaseConnector {
     this.polling = true;
     if (!this.ordersOn) {
       this.polling = false;
-      return; // sipariş sohbetleri kapalı: yalnız mesajlaşma köprüsü çalışır
+      return; // sipariş sohbetleri kapalı
     }
     const startedAt = Date.now();
     try {
@@ -480,30 +423,13 @@ export class EtsyConnector extends BaseConnector {
     return true;
   }
 
-  // ───────────── mesajlaşma (köprüye devir) ─────────────
+  // ───────────── gönderim ─────────────
 
-  /** Sipariş sohbetine yazılan metin yerel not; diğer sohbetler Etsy Mesajları köprüsüne gider */
+  /** Sipariş sohbetine yazılan metin yerel not (Etsy API'de alıcıya mesaj ucu yok) */
   async sendText(remoteChatId: string, text: string): Promise<{ remoteId: string }> {
-    if (remoteChatId.startsWith('order-')) {
-      const id = `note-${Date.now()}`;
-      this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben (yerel not)', fromMe: true, text: `📝 ${text}`, ts: Date.now(), status: 'sent' });
-      return { remoteId: id };
-    }
-    if (!this.bridge) throw new Error('Etsy Mesajları bağlı değil');
-    return this.bridge.sendText(remoteChatId, text);
-  }
-
-  async markRead(remoteChatId: string): Promise<void> {
-    if (remoteChatId.startsWith('order-') || !this.bridge) return;
-    await this.bridge.markRead(remoteChatId);
-  }
-
-  async loadHistory(remoteChatId: string, limit = 50, before?: number): Promise<void> {
-    if (remoteChatId.startsWith('order-') || !this.bridge) return;
-    await this.bridge.loadHistory(remoteChatId, limit, before);
-  }
-
-  async fetchMedia(url: string): Promise<{ body: Buffer; type: string } | undefined> {
-    return this.bridge?.fetchMedia(url);
+    if (!remoteChatId.startsWith('order-')) throw new Error('Etsy Mesajları desteklenmiyor (resmi API yok)');
+    const id = `note-${Date.now()}`;
+    this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben (yerel not)', fromMe: true, text: `📝 ${text}`, ts: Date.now(), status: 'sent' });
+    return { remoteId: id };
   }
 }

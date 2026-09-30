@@ -2,6 +2,7 @@ import type { CalendarResult, DeviceCalendars } from './api';
 import type { CalEvent } from './types';
 import type { Account, Attachment, CalendarDraft, Chat, ChatFlags, CoreEvent, CoreOs, DraftResult, LinkPreview, Message, Platform } from './types';
 import { DELETED_TEXT, PLATFORMS } from './types';
+import { brandSvgMarkup } from './brand-icons';
 import { authSaveAccounts } from './auth-api';
 import { demoAsset } from './demo-asset';
 import { DEMO_OFFLINE } from './profile';
@@ -110,6 +111,9 @@ async function completeDemoLogin(id: string): Promise<void> {
 export function openDemoLoginWindow(a: Account): boolean {
   const p = PLATFORMS[a.platform];
   const q = new URLSearchParams({ id: a.id, n: p.name, code: p.code, c: p.color, mail: p.category === 'mail' ? '1' : '0' });
+  // pencerenin başında markanın orijinal simgesi (arayüzdeki Chip ile aynı SVG)
+  const logo = brandSvgMarkup(a.platform);
+  if (logo) q.set('logo', logo);
   const w = 460;
   const h = 640;
   const left = Math.max(0, Math.round((window.screenX || 0) + ((window.outerWidth || w) - w) / 2));
@@ -545,7 +549,7 @@ export const staticApi = {
     await new Promise((r) => setTimeout(r, 900));
     await completeDemoLogin(id);
   },
-  restartAccount: async (id: string) => {
+  restartAccount: async (id: string, _opts?: { browserLogin?: boolean }) => {
     // X'in PIN uyarısı: gerçek uygulamada görünür pencere açılır, kullanıcı PIN'i girer; demoda 2 sn sonra girilmiş sayılır
     const a = accounts.find((x) => x.id === id);
     if (a?.platform === 'x' && !demoPinDone) {

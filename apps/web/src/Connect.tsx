@@ -3,58 +3,19 @@ import { clearOpening, markOpening } from './login-opening';
 import { api, USE_STATIC } from './api';
 import { DEMO_OFFLINE, STATIC_DEMO } from './profile';
 import { openDemoLoginWindow, staticApi } from './static-demo';
-import { MAC_ONLY, PLATFORMS, type Account, type CoreOs, type Platform } from './types';
+import { MAC_ONLY, MAIL_LOGIN_WHO, PLATFORMS, type Account, type CoreOs, type Platform } from './types';
 import { Chip, Icon, PasswordInput, SyncBar, syncPercent } from './ui';
 
 const ORDER: Platform[] = ['whatsapp', 'telegram', 'slack', 'imessage', 'linkedin', 'x', 'instagram', 'messenger', 'tiktok'];
 const MAIL_ORDER: Platform[] = ['gmail', 'outlook', 'yahoo', 'yandex', 'icloud', 'imap'];
-// Alışveriş kanalları yalnızca müşteri sorularını/mesajlarını görmek ve yanıtlamak için; Shopier'de mesajlaşma ucu olmadığından listede yok
-/** Resmi (kişisel hesaba açık) API'si olmayan, web oturumu/bağlı cihazla çalışan kanallar: kartta şeffaflık etiketi */
 /**
- * Slack uygulama bildirimi (çekirdekteki connectors/slack.ts SLACK_MANIFEST ile aynı tutulmalı): yalnız kullanıcı kapsamları
- * (xoxp), kullanıcı olayları Socket Mode ile. "Create app from manifest" bağlantısı formu hazır doldurur.
+ * Bağlan akışı: uygulamaya kullanıcı adı / şifre YAZILMAZ (Kaan, 29.09). Sosyal medya ve e-posta kendi giriş penceresinde
+ * (tarayıcı girişi) ya da QR ile bağlanır; ara form, seçim kutusu ve "Gelişmiş" yollar yok. Yalnız pazaryerlerinin API'si
+ * satıcı panelindeki entegrasyon bilgileriyle (API anahtarı) çalışır: o formlar kalır.
  */
-const SLACK_MANIFEST = {
-  display_information: { name: 'Mivelo', description: 'Mivelo birleşik gelen kutusu — yalnız bu bilgisayarda, kişisel kullanım', background_color: '#6c47ff' },
-  oauth_config: {
-    scopes: {
-      user: [
-        'channels:history', 'groups:history', 'im:history', 'mpim:history',
-        'channels:read', 'groups:read', 'im:read', 'mpim:read', 'users:read', 'chat:write',
-        'reactions:read', 'reactions:write', 'files:read', 'files:write', 'channels:write', 'groups:write', 'im:write', 'mpim:write',
-      ],
-    },
-  },
-  settings: {
-    event_subscriptions: { user_events: ['message.channels', 'message.groups', 'message.im', 'message.mpim', 'reaction_added', 'reaction_removed'] },
-    socket_mode_enabled: true,
-    org_deploy_enabled: false,
-    token_rotation_enabled: false,
-  },
-};
-const SLACK_APP_URL = `https://api.slack.com/apps?new_app=1&manifest_json=${encodeURIComponent(JSON.stringify(SLACK_MANIFEST))}`;
-
-/** Tarayıcı yolu olsa da önce uygulama şifresi (IMAP + anlık IDLE) formu açılan e-posta sağlayıcıları; tarayıcı girişi formda yedek */
-const MAIL_FORM_FIRST = new Set<Platform>(['gmail', 'icloud', 'yahoo']);
-const usesMailForm = (p: Platform) => PLATFORMS[p]?.mode === 'mail' || MAIL_FORM_FIRST.has(p);
-
 const SHOP_ORDER: Platform[] = ['trendyol', 'hepsiburada', 'n11', 'pttavm', 'etsy', 'shopify', 'amazon'];
-
-interface MailForm {
-  /** Diğer e-posta: sunucuyu elle gir (varsayılan: adresten otomatik bulunur) */
-  manual: boolean;
-  user: string;
-  pass: string;
-  clientId: string;
-  clientSecret: string;
-  useOAuth: boolean;
-  host: string;
-  port: string;
-  smtpHost: string;
-  smtpPort: string;
-  smtpSecure: boolean;
-}
-const EMPTY_MAIL: MailForm = { user: '', pass: '', clientId: '', clientSecret: '', useOAuth: false, host: '', port: '993', smtpHost: '', smtpPort: '465', smtpSecure: true, manual: false };
+/** Pazaryeri formlarının zorunlu alanları (satıcı panelindeki entegrasyon bilgileri) */
+const SHOP_FIELDS: Partial<Record<Platform, string[]>> = { trendyol: ['sellerId', 'apiKey', 'apiSecret'], hepsiburada: ['merchantId', 'serviceKey', 'userAgent'], etsy: ['keystring', 'sharedSecret'], shopify: ['shop'], n11: ['appKey', 'appSecret'], pttavm: ['username', 'password'], amazon: ['clientId', 'clientSecret', 'refreshToken'] };
 
 export function ConnectModal({
   accounts,
@@ -82,24 +43,16 @@ export function ConnectModal({
   notify: (t: string, err?: boolean) => void;
   onChanged: () => Promise<void>;
 }) {
-  // focus "edit:<hesap>" → o hesabın bilgi formu (şifre/API anahtarı yenileme); e-posta adresi önceden doldurulur
-  const editOf = focus?.startsWith('edit:') ? accounts.find((a) => a.id === focus.slice(5)) : undefined;
-  const [active, setActive] = useState<string | null>(editOf ? `${editOf.platform}:new` : (focus ?? null)); // account id
-  const prefill = useRef<{ active: string; user: string } | null>(editOf ? { active: `${editOf.platform}:new`, user: editOf.label && editOf.label.includes('@') ? editOf.label : '' } : null);
-  /** hesabın bilgilerini yeniden gir: yeni hesap formu açılır (kaydedince çekirdek var olan hesabı günceller) */
-  const editCredentials = (a: Account) => {
-    prefill.current = { active: `${a.platform}:new`, user: a.label && a.label.includes('@') ? a.label : '' };
-    setActive(`${a.platform}:new`);
-  };
-  const [tg, setTg] = useState({ apiId: '', apiHash: '' });
-  /** Slack resmi uygulama: User OAuth Token (xoxp) + isteğe bağlı App-Level Token (xapp, Socket Mode) */
-  const [slackTok, setSlackTok] = useState({ user: '', app: '' });
+  // focus "edit:<hesap>" → pazaryeri hesabının entegrasyon bilgileri formu (API anahtarı yenileme)
+  const editOf = focus?.startsWith('edit:') ? accounts.find((a) => a.id === focus.slice(5) && PLATFORMS[a.platform].category === 'shop') : undefined;
+  const [active, setActive] = useState<string | null>(editOf ? `${editOf.platform}:new` : focus?.startsWith('edit:') ? focus.slice(5) : (focus ?? null)); // account id
+  /** pazaryeri hesabının API bilgilerini yeniden gir: yeni hesap formu açılır (kaydedince çekirdek var olan hesabı günceller) */
+  const editCredentials = (a: Account) => setActive(`${a.platform}:new`);
   const [pat, setPat] = useState('');
   /** Pazar yeri formları (Trendyol/Hepsiburada/Etsy/Shopify): alan adı → değer */
   const [shop, setShop] = useState<Record<string, string>>({});
   const sf = (k: string) => shop[k] ?? '';
   const setSf = (k: string, v: string) => setShop((p) => ({ ...p, [k]: v }));
-  const [mail, setMail] = useState<MailForm>(EMPTY_MAIL);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -123,15 +76,10 @@ export function ConnectModal({
     },
     [],
   );
-  // Başka bir sağlayıcının formuna geçince alanlar sıfırlansın (Yahoo'ya yazılan adres/şifre "Diğer e-posta"da görünmesin)
-  // ve açılan panel görünür alana kaydırılsın
+  // Başka bir pazaryerinin formuna geçince alanlar sıfırlansın ve açılan panel görünür alana kaydırılsın
   useEffect(() => {
-    const pf = prefill.current;
-    prefill.current = null;
-    setMail(pf && pf.active === active ? { ...EMPTY_MAIL, user: pf.user } : EMPTY_MAIL);
     setShop({});
     setPat('');
-    setSlackTok({ user: '', app: '' });
     if (!active) return;
     requestAnimationFrame(() => document.querySelector('.overlay .pairbox')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
   }, [active]);
@@ -142,43 +90,30 @@ export function ConnectModal({
   }, []);
   const macOnlyOff = (p: Platform) => MAC_ONLY.has(p) && !!coreOs && coreOs !== 'darwin';
 
-  /** Slack varsayılanı kullanıcı adı + şifreyle tarayıcı girişi (Kaan'ın isteği); opts.token: Slack uygulama belirteci yolu ("Gelişmiş") */
-  async function add(platform: Platform, opts: { browser?: boolean; form?: boolean; token?: boolean; advanced?: boolean } = {}) {
+  /**
+   * Bağlan: WhatsApp/Telegram QR, sosyal medya ve e-posta sağlayıcıları kendi giriş penceresi (hemen açılır), iMessage bu Mac.
+   * Pazaryerleri: önce entegrasyon bilgileri formu, doldurulunca bağlanır.
+   */
+  async function add(platform: Platform) {
     setBusy(true);
     try {
-      if (platform === 'slack' && opts.token && (active !== 'slack:new' || !slackTok.user.trim())) {
-        setActive('slack:new');
-        return;
-      }
-      // Telegram WhatsApp gibi: Bağlan'a basınca doğrudan QR (ara form yok); kendi api_id'si yalnız "Gelişmiş"ten
-      if (platform === 'telegram' && opts.advanced && active !== 'telegram:new') {
-        setActive('telegram:new');
-        return;
-      }
       if (platform === 'shopier' && (active !== 'shopier:new' || !pat.trim())) {
         setActive('shopier:new');
         return;
       }
-      const SHOP_FIELDS: Partial<Record<Platform, string[]>> = { trendyol: ['sellerId', 'apiKey', 'apiSecret'], hepsiburada: ['merchantId', 'username', 'password'], etsy: ['keystring'], shopify: ['shop', 'accessToken'], n11: ['appKey', 'appSecret'], pttavm: ['username', 'password'], amazon: ['clientId', 'clientSecret', 'refreshToken'] };
       const shopFields = SHOP_FIELDS[platform];
+      // Shopify: yeni Dev Dashboard uygulaması (istemci kimliği + gizli anahtar) ya da eski shpat_ erişim anahtarı
+      if (platform === 'shopify' && active === 'shopify:new' && sf('shop').trim() && !sf('accessToken').trim() && !(sf('clientId').trim() && sf('clientSecret').trim())) {
+        notify('İstemci kimliği + gizli anahtar ya da erişim anahtarı gir', true);
+        return;
+      }
       if (shopFields && (active !== `${platform}:new` || shopFields.some((k) => !sf(k).trim()))) {
         setActive(`${platform}:new`);
         return;
       }
-      // Gmail / iCloud: varsayılan yol kendi giriş sayfasında normal e-posta + şifre (tarayıcı); uygulama şifresi isteğe bağlı
-      if (MAIL_FORM_FIRST.has(platform) && !opts.browser && !opts.form && active !== `${platform}:new`) {
-        setActive(`${platform}:choose`);
-        return;
-      }
-      const isMail = usesMailForm(platform) && !opts.browser;
-      if (isMail && (active !== `${platform}:new` || !mail.user.trim())) {
-        setActive(`${platform}:new`);
-        return;
-      }
-      // Demo sitesi: formlar gerçek uygulamadaki gibi açılır, doldurulunca hesap örnek veriyle bağlanır (girilenler saklanmaz)
+      // Demo sitesi: pazaryeri formu doldurulunca hesap örnek veriyle bağlanır (girilenler saklanmaz); diğerlerinde QR / giriş penceresi
       if (USE_STATIC) {
-        // form doldurulduysa (e-posta uygulama şifresi, pazaryeri, Slack belirteci) doğrudan bağlanır; yoksa QR / giriş formu gösterilir
-        const filled = isMail || !!shopFields || platform === 'shopier' || (platform === 'slack' && !!opts.token);
+        const filled = !!shopFields || platform === 'shopier';
         const a = await api.addAccount(platform, filled ? 'demo-form' : undefined);
         if (a.status !== 'connected') startedHere.current.add(a.id);
         setActive(a.id);
@@ -190,27 +125,17 @@ export function ConnectModal({
         return;
       }
       let token: string | undefined;
-      if (platform === 'telegram' && tg.apiId.trim() && tg.apiHash.trim()) token = JSON.stringify({ apiId: Number(tg.apiId.trim()), apiHash: tg.apiHash.trim() });
       if (platform === 'shopier') token = pat.trim();
-      if (platform === 'slack' && opts.token) token = JSON.stringify({ token: slackTok.user.trim(), appToken: slackTok.app.trim() || undefined });
       if (shopFields) {
         const cfg: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(shop)) if (v.trim()) cfg[k] = v.trim();
         if (shop.ordersOff === 'true') cfg.ordersOff = true; // varsayılan: siparişler + müşteri soruları
         token = JSON.stringify(cfg);
       }
-      if (isMail) {
-        const oauth = platform === 'outlook' || (platform === 'gmail' && mail.useOAuth);
-        const cfg: Record<string, unknown> = { user: mail.user.trim(), pass: oauth ? undefined : mail.pass || undefined, clientId: oauth ? mail.clientId.trim() || undefined : undefined, clientSecret: oauth ? mail.clientSecret.trim() || undefined : undefined };
-        if (platform === 'imap' && mail.manual && mail.host.trim()) {
-          Object.assign(cfg, { host: mail.host.trim(), port: Number(mail.port) || 993, secure: (Number(mail.port) || 993) === 993, smtpHost: mail.smtpHost.trim() || mail.host.trim().replace(/^imap\./, 'smtp.'), smtpPort: Number(mail.smtpPort) || 465, smtpSecure: mail.smtpSecure });
-        }
-        token = JSON.stringify(cfg);
-      }
+      // token'sız e-posta/sosyal medya: çekirdek sağlayıcının kendi giriş penceresini hemen açar (tarayıcı girişi)
       const a = await api.addAccount(platform, token);
       if (a.status !== 'connected') startedHere.current.add(a.id);
       setActive(a.id);
-      setMail(EMPTY_MAIL);
       await onChanged();
     } catch (e) {
       notify((e as Error).message, true);
@@ -258,121 +183,6 @@ export function ConnectModal({
   // Etkin kartın hemen altında açılan panel (form / QR / durum) — kullanıcı aşağı kaydırmak zorunda kalmasın
   const panel = (
     <>
-        {active?.endsWith(':choose') && (() => {
-          const p = active.split(':')[0] as Platform;
-          const who = p === 'gmail' ? 'Google' : p === 'yahoo' ? 'Yahoo' : 'Apple';
-          return (
-            <div className="pairbox">
-              <div style={{ flexGrow: 1 }}>
-                <h3>{PLATFORMS[p].name} hesabını bağla</h3>
-                <p style={{ margin: '0 0 12px', fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.5 }}>
-                  {who} giriş sayfası açılır. E-posta adresin ve şifrenle giriş yap; pencere kendiliğinden kapanır.
-                </p>
-                <div className="field" style={{ gap: 8, flexWrap: 'wrap' }}>
-                  <button className="btn lime b" onClick={() => void add(p, { browser: true })} disabled={busy}>
-                    {who} ile giriş yap
-                  </button>
-                </div>
-                <p style={{ margin: '10px 0 0', fontSize: 12.5, color: 'var(--text3, var(--text2))', lineHeight: 1.5 }}>
-                  Ya da{' '}
-                  <a href="#form" onClick={(e) => (e.preventDefault(), setActive(`${p}:new`))} style={{ color: 'var(--v-txt)', fontWeight: 600 }}>
-                    uygulama şifresiyle bağlan
-                  </a>
-                  .
-                </p>
-              </div>
-            </div>
-          );
-        })()}
-        {active?.endsWith(':new') && usesMailForm(active.split(':')[0] as Platform) && (() => {
-          const p = active.split(':')[0] as Platform;
-          const isOutlook = p === 'outlook';
-          const isImap = p === 'imap';
-          return (
-            <div className="pairbox">
-              <div style={{ flexGrow: 1 }}>
-                <h3>{PLATFORMS[p].name} hesabını bağla</h3>
-                <p style={{ margin: '0 0 10px', fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.5 }}>
-                  {p === 'gmail' && !mail.useOAuth && (
-                    <>
-                      <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer" style={{ color: 'var(--v-txt)' }}><b>Google uygulama şifresi oluştur</b></a> ve buraya yapıştır.
-                    </>
-                  )}
-                  {p === 'gmail' && mail.useOAuth && (
-                    <>
-                      Client ID ve Client secret'ı gir; Bağlan deyince Google penceresi açılır.{' '}
-                      <a href="#pass" onClick={(e) => (e.preventDefault(), setMail({ ...mail, useOAuth: false }))} style={{ color: 'var(--v-txt)', fontWeight: 600 }}>
-                        Uygulama şifresiyle bağlan →
-                      </a>
-                    </>
-                  )}
-                  {isOutlook && (
-                    <>
-                      E-posta adresini ve uygulama kimliğini gir.
-                    </>
-                  )}
-                  {p === 'yahoo' && (
-                    <>
-                      <a href="https://login.yahoo.com/myaccount/security/app-password/" target="_blank" rel="noreferrer" style={{ color: 'var(--v-txt)' }}><b>Yahoo uygulama şifresi oluştur</b></a> ve buraya yapıştır.
-                    </>
-                  )}
-                  {p === 'icloud' && (
-                    <>
-                      <a href="https://account.apple.com/account/manage" target="_blank" rel="noreferrer" style={{ color: 'var(--v-txt)' }}><b>Apple hesabında</b></a> Oturum açma ve güvenlik → <b>Uygulamaya özel şifreler</b>'den bir şifre oluştur ve buraya yapıştır.
-                    </>
-                  )}
-                  {p === 'yandex' && (
-                    <>
-                      <a href="https://id.yandex.com/security/app-passwords" target="_blank" rel="noreferrer" style={{ color: 'var(--v-txt)' }}><b>Yandex uygulama şifresi oluştur</b></a> ve buraya yapıştır.
-                    </>
-                  )}
-                  {isImap && <>E-posta adresini ve şifreni gir.</>}
-                </p>
-                <div className="field" style={{ marginTop: 6, flexWrap: 'wrap', gap: 8 }}>
-                  <input value={mail.user} onChange={(e) => setMail({ ...mail, user: e.target.value })} placeholder="e-posta adresi" type="email" autoComplete="off" style={{ flex: '1 1 220px' }} />
-                  {isOutlook ? (
-                    <input value={mail.clientId} onChange={(e) => setMail({ ...mail, clientId: e.target.value })} placeholder="Uygulama kimliği" style={{ flex: '1 1 260px' }} />
-                  ) : p === 'gmail' && mail.useOAuth ? (
-                    <>
-                      <input value={mail.clientId} onChange={(e) => setMail({ ...mail, clientId: e.target.value })} placeholder="Client ID" style={{ flex: '1 1 260px' }} />
-                      <PasswordInput value={mail.clientSecret} onChange={(e) => setMail({ ...mail, clientSecret: e.target.value })} placeholder="Client secret" autoComplete="off" style={{ flex: '1 1 200px' }} />
-                    </>
-                  ) : (
-                    <PasswordInput value={mail.pass} onChange={(e) => setMail({ ...mail, pass: e.target.value })} placeholder={isImap ? 'şifre' : 'uygulama şifresi'} autoComplete="new-password" style={{ flex: '1 1 200px' }} />
-                  )}
-                  {isImap && mail.manual && (
-                    <>
-                      <input value={mail.host} onChange={(e) => setMail({ ...mail, host: e.target.value })} placeholder="IMAP sunucusu (imap.…)" style={{ flex: '1 1 200px' }} />
-                      <input value={mail.port} onChange={(e) => setMail({ ...mail, port: e.target.value })} placeholder="993" style={{ flex: '0 0 70px' }} />
-                      <input value={mail.smtpHost} onChange={(e) => setMail({ ...mail, smtpHost: e.target.value })} placeholder="SMTP sunucusu (smtp.…)" style={{ flex: '1 1 200px' }} />
-                      <input value={mail.smtpPort} onChange={(e) => setMail({ ...mail, smtpPort: e.target.value, smtpSecure: e.target.value === '465' })} placeholder="465" style={{ flex: '0 0 70px' }} />
-                    </>
-                  )}
-                  <button className="btn lime b" onClick={() => add(p)} disabled={busy || !mail.user.trim() || (isOutlook ? !mail.clientId.trim() : p === 'gmail' && mail.useOAuth ? !mail.clientId.trim() || !mail.clientSecret.trim() : !mail.pass) || (isImap && mail.manual && !mail.host.trim())}>
-                    Bağlan
-                  </button>
-                </div>
-                {isImap && (
-                  <p style={{ margin: '8px 0 0', fontSize: 12.5, color: 'var(--text3, var(--text2))' }}>
-                    <a href="#manual" onClick={(e) => (e.preventDefault(), setMail({ ...mail, manual: !mail.manual }))} style={{ color: 'var(--v-txt)', fontWeight: 600 }}>
-                      {mail.manual ? 'Sunucuyu otomatik bul' : 'Sunucuyu elle gir (gelişmiş)'}
-                    </a>
-                  </p>
-                )}
-                {MAIL_FORM_FIRST.has(p) && (
-                  <p style={{ margin: '10px 0 0', fontSize: 12.5, color: 'var(--text3, var(--text2))', lineHeight: 1.5 }}>
-                    Şifre oluşturmak istemiyorsan{' '}
-                    <a href="#browser" onClick={(e) => (e.preventDefault(), void add(p, { browser: true }))} style={{ color: 'var(--v-txt)', fontWeight: 600 }}>
-                      hesabınla giriş yap
-                    </a>
-                    .
-                  </p>
-                )}
-              </div>
-            </div>
-          );
-        })()}
-
         {active === 'shopier:new' && (
           <div className="pairbox">
             <div style={{ flexGrow: 1 }}>
@@ -381,7 +191,7 @@ export function ConnectModal({
                 Shopier panelinde <b>Hesap Yönetimi → Kişisel Erişim Anahtarı</b>'ndan bir anahtar oluştur ve buraya yapıştır.
               </p>
               <div className="field" style={{ marginTop: 12 }}>
-                <PasswordInput value={pat} onChange={(e) => setPat(e.target.value)} placeholder="Erişim anahtarı" autoComplete="off" />
+                <PasswordInput value={pat} onChange={(e) => setPat(e.target.value)} placeholder="API erişim anahtarı" autoComplete="off" />
                 <button className="btn lime b" onClick={() => add('shopier')} disabled={busy || !pat.trim()}>
                   Bağlan
                 </button>
@@ -398,12 +208,12 @@ export function ConnectModal({
                 <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.5 }}>
                   {p === 'trendyol' && (
                     <>
-                      Trendyol Satıcı Paneli → <b>Hesap Bilgilerim → Entegrasyon Bilgileri</b>'ndeki üç bilgiyi gir.
+                      Trendyol Satıcı Paneli → <b>Hesap Bilgilerim → Entegrasyon Bilgileri</b>'ndeki üç API bilgisini gir.
                     </>
                   )}
                   {p === 'hepsiburada' && (
                     <>
-                      Hepsiburada Satıcı Paneli → <b>Entegrasyon</b> sayfasındaki bilgileri gir.
+                      Hepsiburada Satıcı Paneli → <b>Entegrasyon → Entegrasyon bilgileri</b>'ndeki Merchant ID, servis anahtarı ve kullanıcı adını gir.
                     </>
                   )}
                   {p === 'etsy' && (
@@ -413,22 +223,22 @@ export function ConnectModal({
                   )}
                   {p === 'pttavm' && (
                     <>
-                      ePttAVM Satıcı Paneli → <b>Hesap Yönetimi → Entegrasyon Bilgileri</b>'ndeki kullanıcı adı ve şifreyi gir. Siparişlerin burada görünür.
+                      ePttAVM Satıcı Paneli → <b>Hesap Yönetimi → Entegrasyon Bilgileri</b>'ndeki iki API bilgisini gir. Siparişlerin burada görünür.
                     </>
                   )}
                   {p === 'n11' && (
                     <>
-                      n11 Mağaza Paneli → <b>Ayarlar → API Bilgileri</b>'ndeki iki bilgiyi gir.
+                      n11 Mağaza Paneli → <b>Ayarlar → API Bilgileri</b>'ndeki iki API bilgisini gir.
                     </>
                   )}
                   {p === 'amazon' && (
                     <>
-                      Seller Central → <b>Uygulamalar ve Hizmetler → Uygulama geliştir</b>'den aldığın bilgileri gir. Alıcı mesajları için Amazon e-posta adresini de bağla.
+                      Seller Central → <b>Uygulamalar ve Hizmetler → Uygulama geliştir</b>'den aldığın API bilgilerini gir.
                     </>
                   )}
                   {p === 'shopify' && (
                     <>
-                      Shopify yönetici → <b>Ayarlar → Uygulamalar → Uygulama geliştir</b>'den bir erişim anahtarı oluştur ve gir.
+                      Shopify <b>Dev Dashboard</b>'da uygulama oluştur, mağazana kur; istemci kimliği ve gizli anahtarı gir (eski özel uygulaman varsa shpat_ anahtarı da olur).
                     </>
                   )}
                 </p>
@@ -443,20 +253,21 @@ export function ConnectModal({
                   {p === 'hepsiburada' && (
                     <>
                       <input value={sf('merchantId')} onChange={(e) => setSf('merchantId', e.target.value)} placeholder="Merchant ID" autoComplete="off" />
-                      <input value={sf('username')} onChange={(e) => setSf('username', e.target.value)} placeholder="Entegrasyon kullanıcı adı" autoComplete="off" />
-                      <PasswordInput value={sf('password')} onChange={(e) => setSf('password', e.target.value)} placeholder="Şifre" autoComplete="off" />
+                      <PasswordInput value={sf('serviceKey')} onChange={(e) => setSf('serviceKey', e.target.value)} placeholder="Servis anahtarı" autoComplete="off" />
+                      <input value={sf('userAgent')} onChange={(e) => setSf('userAgent', e.target.value)} placeholder="Entegratör kullanıcı adı" autoComplete="off" />
                     </>
                   )}
                   {p === 'etsy' && (
                     <>
                       <input value={sf('keystring')} onChange={(e) => setSf('keystring', e.target.value)} placeholder="Uygulama anahtarı (Keystring)" autoComplete="off" />
+                      <PasswordInput value={sf('sharedSecret')} onChange={(e) => setSf('sharedSecret', e.target.value)} placeholder="Paylaşılan gizli anahtar (Shared secret)" autoComplete="off" />
                       <input value={sf('shopId')} onChange={(e) => setSf('shopId', e.target.value)} placeholder="Shop ID (isteğe bağlı)" autoComplete="off" />
                     </>
                   )}
                   {p === 'pttavm' && (
                     <>
                       <input value={sf('username')} onChange={(e) => setSf('username', e.target.value)} placeholder="Entegrasyon kullanıcı adı" autoComplete="off" />
-                      <PasswordInput value={sf('password')} onChange={(e) => setSf('password', e.target.value)} placeholder="Şifre" autoComplete="off" />
+                      <PasswordInput value={sf('password')} onChange={(e) => setSf('password', e.target.value)} placeholder="Entegrasyon anahtarı" autoComplete="off" />
                     </>
                   )}
                   {p === 'n11' && (
@@ -476,13 +287,18 @@ export function ConnectModal({
                   {p === 'shopify' && (
                     <>
                       <input value={sf('shop')} onChange={(e) => setSf('shop', e.target.value)} placeholder="magaza.myshopify.com" autoComplete="off" />
-                      <PasswordInput value={sf('accessToken')} onChange={(e) => setSf('accessToken', e.target.value)} placeholder="Erişim anahtarı (shpat_…)" autoComplete="off" />
+                      <input value={sf('clientId')} onChange={(e) => setSf('clientId', e.target.value)} placeholder="İstemci kimliği (Client ID)" autoComplete="off" />
+                      <PasswordInput value={sf('clientSecret')} onChange={(e) => setSf('clientSecret', e.target.value)} placeholder="Gizli anahtar (Client secret)" autoComplete="off" />
+                      <PasswordInput value={sf('accessToken')} onChange={(e) => setSf('accessToken', e.target.value)} placeholder="ya da eski erişim anahtarı (shpat_…)" autoComplete="off" />
                     </>
                   )}
                   <button className="btn lime b" onClick={() => add(p)} disabled={busy}>
                     Bağlan
                   </button>
                 </div>
+                <p style={{ margin: '8px 0 0', fontSize: 12.5, color: 'var(--text3)', lineHeight: 1.5 }}>
+                  Bunlar mağaza hesabının giriş bilgileri değil; satıcı panelinin API için verdiği entegrasyon bilgileri. Yalnız bu bilgisayarda saklanır.
+                </p>
                 {/* yalnız soru-cevap kanalı olan pazaryerlerinde: Etsy/Shopify/Amazon'da siparişler kapanırsa hesap boş kalır */}
                 {(p === 'trendyol' || p === 'hepsiburada' || p === 'n11') && (
                   <label className="row-toggle" style={{ marginTop: 10, gap: 8 }}>
@@ -494,77 +310,6 @@ export function ConnectModal({
             </div>
           ) : null,
         )}
-
-        {active === 'slack:new' && (
-          <div className="pairbox">
-            <div style={{ flexGrow: 1 }}>
-              <h3>Slack’i bağla</h3>
-              <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.5 }}>
-                Slack'te sana özel küçük bir uygulama oluşturup bağlanırsın (yaklaşık 1 dakika).
-              </p>
-              <ol style={{ margin: '10px 0 0', paddingLeft: 20, fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.6 }}>
-                <li>
-                  <span>
-                    <a href={SLACK_APP_URL} target="_blank" rel="noreferrer" style={{ color: 'var(--v-txt)' }}>
-                      <b>Slack’te Mivelo uygulamasını oluştur</b>
-                    </a>{' '}
-                    → çalışma alanını seç → <b>Next</b> → <b>Create</b>
-                  </span>
-                </li>
-                <li>
-                  <span>
-                    Sol menüde <b>Install App → Install to Workspace</b> → İzin ver
-                  </span>
-                </li>
-                <li>
-                  <span>
-                    Çıkan <b>User OAuth Token</b>’ı aşağıya yapıştır
-                  </span>
-                </li>
-                <li>
-                  <span>
-                    İsteğe bağlı, mesajların anında gelmesi için: <b>Basic Information → App-Level Tokens → Generate</b>
-                  </span>
-                </li>
-              </ol>
-              <div className="field" style={{ marginTop: 12, gap: 8 }}>
-                <PasswordInput value={slackTok.user} onChange={(e) => setSlackTok({ ...slackTok, user: e.target.value })} placeholder="User OAuth Token" autoComplete="off" />
-                <PasswordInput value={slackTok.app} onChange={(e) => setSlackTok({ ...slackTok, app: e.target.value })} placeholder="App-Level Token (isteğe bağlı)" autoComplete="off" />
-                <button className="btn lime b" onClick={() => add('slack', { token: true })} disabled={busy || !slackTok.user.trim().startsWith('xoxp-') || (!!slackTok.app.trim() && !slackTok.app.trim().startsWith('xapp-'))}>
-                  Bağlan
-                </button>
-              </div>
-              <p style={{ margin: '10px 0 0', fontSize: 12.5, color: 'var(--text3, var(--text2))', lineHeight: 1.5 }}>
-                Olmuyorsa{' '}
-                <a href="#browser" onClick={(e) => (e.preventDefault(), void add('slack', { browser: true }))} style={{ color: 'var(--v-txt)', fontWeight: 600 }}>
-                  Slack hesabınla giriş yap
-                </a>
-                .
-              </p>
-            </div>
-          </div>
-        )}
-
-        {active === 'telegram:new' && (
-          <div className="pairbox">
-            <div style={{ flexGrow: 1 }}>
-              <h3>Telegram’ı bağla</h3>
-              <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.5 }}>
-                Bağlan deyince çıkan kodu telefondaki Telegram → <b>Ayarlar → Cihazlar → Masaüstü Cihazı Bağla</b> ile okut.
-              </p>
-              <div className="field" style={{ marginTop: 12, gap: 8 }}>
-                {<>
-                <input value={tg.apiId} onChange={(e) => setTg({ ...tg, apiId: e.target.value })} placeholder="api_id (isteğe bağlı)" style={{ flex: '0 0 160px' }} />
-                <PasswordInput value={tg.apiHash} onChange={(e) => setTg({ ...tg, apiHash: e.target.value })} placeholder="api_hash (isteğe bağlı)" autoComplete="off" />
-                </>}
-                <button className="btn lime b" onClick={() => add('telegram', { advanced: true })} disabled={busy}>
-                  Bağlan
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
 
         {activeAccount && (
           <div className="pairbox">
@@ -607,13 +352,6 @@ export function ConnectModal({
                   <li>Kamerayı bu koda tut</li>
                 </ol>
               )}
-              {!USE_STATIC && activeAccount.platform === 'telegram' && activeAccount.status === 'pairing' && !prompts[activeAccount.id] && (
-                <p style={{ margin: '4px 0 0', fontSize: 12.5 }}>
-                  <a href="#tg-adv" onClick={(e) => (e.preventDefault(), setActive('telegram:new'))} style={{ color: 'var(--text3)' }}>
-                    Gelişmiş: kendi uygulama kimliğinle bağlan
-                  </a>
-                </p>
-              )}
 
               {DEMO_OFFLINE && PLATFORMS[activeAccount.platform].mode === 'browser' && activeAccount.status === 'pairing' && <DemoLogin account={activeAccount} onDone={onChanged} />}
               {!DEMO_OFFLINE && PLATFORMS[activeAccount.platform].mode === 'browser' && activeAccount.status !== 'connected' && (
@@ -634,7 +372,8 @@ export function ConnectModal({
                       }
                       setBusy(true);
                       markOpening(activeAccount.id, 'Giriş penceresi açılıyor');
-                      api.restartAccount(activeAccount.id).catch((e) => (clearOpening(activeAccount.id), notify(e.message, true), onChanged())).finally(() => setBusy(false));
+                      // e-posta: uygulama şifreli eski hesap da sağlayıcının giriş penceresine geçer
+                      api.restartAccount(activeAccount.id, MAIL_LOGIN_WHO[activeAccount.platform] ? { browserLogin: true } : undefined).catch((e) => (clearOpening(activeAccount.id), notify(e.message, true), onChanged())).finally(() => setBusy(false));
                     }}
                   >
                     <Icon name="refresh" size={14} sw={2} color="#fff" /> Giriş ekranını aç
@@ -643,13 +382,6 @@ export function ConnectModal({
                     <li>Açılan giriş ekranında {PLATFORMS[activeAccount.platform].name} hesabına giriş yap</li>
                     <li>Giriş tamamlanınca ekran kendiliğinden kapanır</li>
                   </ol>
-                  {activeAccount.platform === 'slack' && (
-                    <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--text3)' }}>
-                      <a href="#slack-token" onClick={(e) => (e.preventDefault(), setActive('slack:new'))} style={{ color: 'var(--text3)' }}>
-                        Gelişmiş: Slack uygulama belirteciyle bağlan
-                      </a>
-                    </p>
-                  )}
                 </>
               )}
               {activeAccount.platform === 'imessage' && activeAccount.status === 'error' && !macOnlyOff('imessage') && (
@@ -680,14 +412,9 @@ export function ConnectModal({
 
               {(activeAccount.status === 'error' || activeAccount.status === 'disconnected') && (
                 <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  {(activeAccount.platform === 'yahoo' || activeAccount.platform === 'yandex') && (
-                    <button className="btn lime b" onClick={() => void add(activeAccount.platform, { browser: true })} disabled={busy}>
-                      {activeAccount.platform === 'yahoo' ? 'Yahoo' : 'Yandex'} ile giriş yap
-                    </button>
-                  )}
-                  {activeAccount.platform !== 'yandex' && (PLATFORMS[activeAccount.platform].mode === 'mail' || PLATFORMS[activeAccount.platform].category === 'shop' || /uygulama şifresi|giriş reddedildi/i.test(activeAccount.detail ?? '')) && (
+                  {PLATFORMS[activeAccount.platform].category === 'shop' && (
                     <button className="btn primary b" onClick={() => editCredentials(activeAccount)}>
-                      <Icon name="lock" size={14} sw={2} /> {PLATFORMS[activeAccount.platform].category === 'shop' ? 'Bilgileri güncelle' : 'Şifreyi güncelle'}
+                      <Icon name="lock" size={14} sw={2} /> API bilgilerini güncelle
                     </button>
                   )}
                   <button className="btn darksec b" onClick={() => api.restartAccount(activeAccount.id).catch((e) => notify(e.message, true))}>
@@ -729,9 +456,10 @@ export function ConnectModal({
             const meta = PLATFORMS[p];
             // kartın durumu en iyi durumdaki hesaptan (bağlı olan önde); ilk kaydı göstermek bağlı hesabın yanında "Bağlı değil" yazıyordu
             const acc = accounts.filter((a) => a.platform === p).sort((x, y) => STATUS_RANK[x.status] - STATUS_RANK[y.status]);
+            // Diğer e-posta (IMAP): web girişi yok, şifre uygulamaya yazılmaz → yeni bağlantı yok; eskiden kalan hesap kaldırılabilsin
+            if (p === 'imap' && acc.length === 0) return null;
             const isConn = connected.includes(p);
-            // ':choose' (Gmail/iCloud giriş yolu seçimi) de bu kartın panelini açar
-            const isActive = acc.some((a) => a.id === active) || active === `${p}:new` || active === `${p}:choose`;
+            const isActive = acc.some((a) => a.id === active) || active === `${p}:new`;
             const macOnly = macOnlyOff(p);
             // yalnız Mac kanalı: yeni bağlantı kapalı; eskiden kalan hesap varsa kaldırılabilsin
             const available = meta.available && (!macOnly || acc.length > 0);
@@ -761,10 +489,7 @@ export function ConnectModal({
                 <div className="top">
                   <Chip platform={p} size={44} />
                   <div style={{ minWidth: 0 }}>
-                    <div className="nm" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      {meta.name}
-                      {meta.experimental && <span className="pill" style={{ background: 'var(--amber-bg)', color: 'var(--amber-txt)' }}>deneysel</span>}
-                    </div>
+                    <div className="nm">{meta.name}</div>
                     <div className="mt" title={meta.method}>{macOnly ? 'Yalnız macOS · Mesajlar uygulaması' : accountLabel(acc[0]) ?? meta.method}</div>
                   </div>
                 </div>
@@ -857,41 +582,32 @@ function InputOrPassword({ password, ...rest }: { password: boolean } & Omit<Inp
 }
 
 /**
- * Demo: tarayıcıyla girilen uygulamalarda gerçek uygulamanın açtığı giriş penceresinin yerine geçen form. Girilen bilgiler
- * HİÇBİR YERE gönderilmez ve saklanmaz; "Giriş yap" hesabı örnek veriyle bağlar.
+ * Tek dosya demo (açılır giriş penceresi yok): gerçek uygulamada sağlayıcının KENDİ giriş penceresi açılır ve giriş orada yapılır.
+ * Mivelo içinde kullanıcı adı / şifre alanı YOK (Kaan, 29.09); düğme girişi tamamlanmış sayıp hesabı örnek veriyle bağlar.
  */
 function DemoLogin({ account, onDone }: { account: Account; onDone: () => Promise<void> | void }) {
-  const [user, setUser] = useState('');
-  const [pass, setPass] = useState('');
   const [busy, setBusy] = useState(false);
   const name = PLATFORMS[account.platform].name;
-  const mail = PLATFORMS[account.platform].category === 'mail';
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user.trim() || !pass) return;
+  const finish = async () => {
     setBusy(true);
     try {
       await (staticApi as { demoLogin: (id: string) => Promise<void> }).demoLogin(account.id);
-      setUser('');
-      setPass('');
       await onDone();
     } finally {
       setBusy(false);
     }
   };
   return (
-    <form className="demo-login" onSubmit={(e) => void submit(e)}>
+    <div className="demo-login">
       <div className="demo-login-head">
         <Chip platform={account.platform} size={22} />
-        <b>{name} girişi</b>
+        <b>{name} giriş penceresi</b>
       </div>
-      <input value={user} onChange={(e) => setUser(e.target.value)} placeholder={mail ? 'E-posta adresi' : 'Kullanıcı adı, e-posta ya da telefon'} autoComplete="off" autoFocus />
-      <PasswordInput value={pass} onChange={(e) => setPass(e.target.value)} placeholder="Şifre" autoComplete="off" />
-      <button className="btn primary sm b" type="submit" disabled={busy || !user.trim() || !pass}>
-        {busy ? <span className="spin" /> : 'Giriş yap'}
+      <p className="demo-login-note">Uygulamada {name}’in kendi giriş penceresi açılır; giriş orada yapılır, şifren Mivelo’ya yazılmaz.</p>
+      <button className="btn primary sm b" type="button" disabled={busy} onClick={() => void finish()}>
+        {busy ? <span className="spin" /> : 'Girişi tamamla (demo)'}
       </button>
-      <p className="demo-login-note">Demo: girdiğin bilgiler hiçbir yere gönderilmez ve saklanmaz.</p>
-    </form>
+    </div>
   );
 }
 

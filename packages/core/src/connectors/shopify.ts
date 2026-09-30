@@ -3,37 +3,41 @@ import path from 'node:path';
 import { ordersFlag, BaseConnector, type StartOptions } from './base.js';
 import { PollTimer, marketDelay } from './poll-timer.js';
 import { ingestChunked, writeJsonAtomic } from './market-state.js';
-import { BrowserConnector } from './browser/bridge.js';
-import { makeShopifyInbox } from './browser/shopify.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
-import type { AccountStatus, Participant } from '../model.js';
+import type { Participant } from '../model.js';
 import type { Store } from '../store.js';
 
 /**
- * Shopify: siparişler Admin REST API (özel uygulama erişim belirteci, `X-Shopify-Access-Token`),
- * müşteri sohbetleri Shopify Inbox'tan tarayıcı köprüsüyle (Inbox'ın açık API'si yok).
+ * Shopify: siparişler Admin REST API (`X-Shopify-Access-Token`). Yalnız resmi API; Shopify Inbox tarayıcı köprüsü KALDIRILDI
+ * (Inbox'ın açık API'si yok, otomasyon resmi değil).
  *
  * - Her sipariş bir "sohbet"tir (remoteId `order-<id>`); sipariş olayları (oluşturma, kargo, iade, iptal)
  *   mesaj olarak akar. Sohbete yazılan metin yerel not olarak tutulur.
- * - Inbox sohbetleri aynı hesapta, köprünün verdiği kimliklerle yer alır; gönderim köprüye devredilir.
  *
- * Yapılandırma (token dosyası JSON): { shop: "magaza.myshopify.com" | "magaza", accessToken: "shpat_…", inbox?: boolean }
- * Belirteç: Shopify yönetici → Ayarlar → Uygulamalar ve satış kanalları → Uygulama geliştir → Admin API erişim belirteci;
- * kapsamlar read_orders, read_customers, read_fulfillments.
+ * Kimlik (token dosyası JSON), iki yol:
+ *  1) Yeni (Dev Dashboard uygulaması, 2026): { shop, clientId, clientSecret } → `POST https://{shop}/admin/oauth/access_token`
+ *     (grant_type=client_credentials) ile 24 saatlik erişim belirteci; bellekte tutulur, bitmeden 10 dk önce ve 401'de bir kez
+ *     yenilenir. Uygulama mağazaya kurulu olmalı; kapsamlar read_orders, read_customers, read_fulfillments.
+ *  2) Eski (mağaza içi özel uygulama): { shop, accessToken: "shpat_…" } — süresiz belirteç, olduğu gibi kullanılır.
+ * İkisi birden varsa istemci kimliği yolu önce gelir.
  */
 type J = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
-const API_VERSION = '2025-07';
+const API_VERSION = '2026-07';
+/** client_credentials belirtecinin bitişinden bu kadar önce yenilenir */
+const TOKEN_SKEW_MS = 10 * 60_000;
 
 export interface ShopifyConfig {
   shop: string;
-  accessToken: string;
-  /** Inbox köprüsünü (Chromium) başlat; varsayılan true */
-  inbox?: boolean;
+  /** Eski özel uygulama belirteci (shpat_…) */
+  accessToken?: string;
+  /** Dev Dashboard uygulaması: istemci kimliği + gizli anahtar (client_credentials) */
+  clientId?: string;
+  clientSecret?: string;
 }
 
 /** Yapılandırma metnini çöz; mağaza tanıtıcısı ve API ana bilgisayarı türetilir */
-export function parseShopifyConfig(config: string): { handle: string; host: string; token: string; inbox: boolean } {
+export function parseShopifyConfig(config: string): { handle: string; host: string; token: string; clientId: string; clientSecret: string } {
   let cfg: Partial<ShopifyConfig> = {};
   try {
     cfg = JSON.parse(config || '{}') as Partial<ShopifyConfig>;
@@ -45,7 +49,13 @@ export function parseShopifyConfig(config: string): { handle: string; host: stri
     .replace(/^https?:\/\//, '')
     .replace(/\/.*$/, '');
   const handle = raw.replace(/\.myshopify\.com$/i, '').toLowerCase();
-  return { handle, host: handle ? `${handle}.myshopify.com` : '', token: String(cfg.accessToken ?? '').trim(), inbox: cfg.inbox === true }; // Inbox tarayıcı köprüsü varsayılan kapalı (ban önleme); açıkça true ile açılır
+  return {
+    handle,
+    host: handle ? `${handle}.myshopify.com` : '',
+    token: String(cfg.accessToken ?? '').trim(),
+    clientId: String(cfg.clientId ?? '').trim(),
+    clientSecret: String(cfg.clientSecret ?? '').trim(),
+  };
 }
 
 /** Belirteç reddi (401/403): yoklama durdurulur, durum error */
@@ -80,55 +90,20 @@ export function nextLink(link: string | null | undefined): string | undefined {
   return undefined;
 }
 
-/**
- * Bileşik durum: API bağlıysa hesap 'connected'; Inbox köprüsünün durumu ayrıntıya yazılır.
- * API hatası her zaman baskın (siparişler asıl kaynak). API 'connected' değilse köprü durumu görünmez.
- */
-export function combineStatus(api: { status: AccountStatus; detail?: string }, inbox?: { status: AccountStatus; detail?: string }): { status: AccountStatus; detail?: string } {
-  if (api.status !== 'connected' || !inbox) return api;
-  switch (inbox.status) {
-    case 'pairing':
-      return { status: 'connected', detail: 'Inbox için Shopify\'a giriş gerekli (Yeniden bağlan)' };
-    case 'error':
-      return { status: 'connected', detail: `Inbox: ${inbox.detail ?? 'hata'}` };
-    case 'connecting':
-      return { status: 'connected', detail: 'Inbox bağlanıyor…' };
-    case 'disconnected':
-      return { status: 'connected', detail: `Inbox kapalı${inbox.detail ? ` — ${inbox.detail}` : ''}` };
-    default:
-      return { status: 'connected', detail: api.detail };
-  }
-}
-
-/** Köprü alt bileşeni: durumunu hesaba yazmak yerine bileşik connector'a bildirir (aynı Account nesnesi paylaşılır) */
-class InboxBridge extends BrowserConnector {
-  constructor(
-    account: BaseConnector['account'],
-    store: Store,
-    handle: string,
-    getLabel: () => string | undefined,
-    private readonly onStatus: (status: AccountStatus, detail?: string) => void,
-  ) {
-    super(account, store, makeShopifyInbox(handle, getLabel), 30_000);
-  }
-  protected override setStatus(status: AccountStatus, detail?: string): void {
-    this.onStatus(status, detail);
-  }
-}
-
 export class ShopifyConnector extends BaseConnector {
-  /** sipariş sohbetleri açık mı (token JSON orders:true); kapalıysa yalnız müşteri soruları/mesajları */
+  /** sipariş sohbetleri açık mı (token JSON; varsayılan açık, ordersOff:true kapatır) */
   private ordersOn = false;
   private timer?: PollTimer;
   private polling = false;
   private stopping = false;
   private readonly handle: string;
   private readonly host: string;
-  private readonly token: string;
-  private readonly inboxEnabled: boolean;
-  private inbox?: InboxBridge;
-  private apiState: { status: AccountStatus; detail?: string } = { status: 'disconnected' };
-  private inboxState?: { status: AccountStatus; detail?: string };
+  /** eski süresiz shpat_ belirteci */
+  private readonly staticToken: string;
+  private readonly clientId: string;
+  private readonly clientSecret: string;
+  /** client_credentials ile alınan belirteç (bellekte) */
+  private issued?: { token: string; expiresAt: number };
   /** sipariş id → son görülen durum imzası */
   private seen = new Map<string, string>();
   /** son başarılı yoklamanın başlangıcı (ISO): sonraki yoklama updated_at_min ile yalnız değişenleri alır */
@@ -137,7 +112,7 @@ export class ShopifyConnector extends BaseConnector {
 
   constructor(account: BaseConnector['account'], store: Store, config: string) {
     super(account, store);
-    ({ handle: this.handle, host: this.host, token: this.token, inbox: this.inboxEnabled } = parseShopifyConfig(config));
+    ({ handle: this.handle, host: this.host, token: this.staticToken, clientId: this.clientId, clientSecret: this.clientSecret } = parseShopifyConfig(config));
     this.ordersOn = ordersFlag(config);
     this.stateFile = path.join(sessionDir(account.id), 'shopify-state.json');
     try {
@@ -149,19 +124,52 @@ export class ShopifyConnector extends BaseConnector {
     }
   }
 
+  private get usesClientCredentials(): boolean {
+    return !!(this.clientId && this.clientSecret);
+  }
+
+  /** Dev Dashboard uygulaması: client_credentials ile 24 saatlik belirteç (bitmeden 10 dk önce ya da `force` ile yenilenir) */
+  private async accessToken(force = false): Promise<string> {
+    if (!this.usesClientCredentials) return this.staticToken;
+    if (!force && this.issued && this.issued.expiresAt - TOKEN_SKEW_MS > Date.now()) return this.issued.token;
+    const r = await fetch(`https://${this.host}/admin/oauth/access_token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+      body: new URLSearchParams({ grant_type: 'client_credentials', client_id: this.clientId, client_secret: this.clientSecret }).toString(),
+    });
+    const text = await r.text();
+    let j: J = {};
+    try {
+      j = text ? (JSON.parse(text) as J) : {};
+    } catch {
+      /* JSON değil */
+    }
+    if (!r.ok || !j.access_token) {
+      if (r.status === 400 || r.status === 401 || r.status === 403) throw new AuthError(`Shopify istemci kimliği / gizli anahtarı reddedildi (${String(j.error ?? r.status)}) — uygulama mağazaya kurulu mu?`);
+      throw new Error(`Shopify belirteç ${r.status}: ${String(j.error_description ?? text).slice(0, 160)}`);
+    }
+    this.issued = { token: String(j.access_token), expiresAt: Date.now() + (Number(j.expires_in) || 86_399) * 1000 };
+    return this.issued.token;
+  }
+
   // ─────────── Admin REST API ───────────
   /** `p`: `/orders.json?…` biçiminde yol ya da Link başlığından gelen tam adres */
-  private async api(p: string, retried = false): Promise<{ data: J; headers: Headers }> {
+  private async api(p: string, retried = false, renewed = false): Promise<{ data: J; headers: Headers }> {
     const url = /^https?:\/\//.test(p) ? p : `https://${this.host}/admin/api/${API_VERSION}${p}`;
-    const r = await fetch(url, { headers: { 'X-Shopify-Access-Token': this.token, accept: 'application/json' } });
+    const r = await fetch(url, { headers: { 'X-Shopify-Access-Token': await this.accessToken(), accept: 'application/json' } });
     const text = await r.text();
+    // client_credentials belirteci süresinden önce düşmüş olabilir: bir kez yenile
+    if (r.status === 401 && this.usesClientCredentials && !renewed) {
+      await this.accessToken(true);
+      return this.api(p, retried, true);
+    }
     if (r.status === 401 || r.status === 403) throw new AuthError('Shopify erişim belirteci reddedildi');
     if (r.status === 429) {
       const wait = Math.min(Math.max(Number(r.headers.get('retry-after') ?? '2') || 2, 1), 60);
       if (!retried) {
         bus.log('warn', `Shopify istek limiti (429); ${wait} sn bekleniyor`);
         await new Promise((res) => setTimeout(res, wait * 1000));
-        return this.api(p, true);
+        return this.api(p, true, renewed);
       }
       this.timer?.backoff(wait);
       throw new Error(`Shopify istek limiti; ${wait} sn sonra yeniden dene`);
@@ -170,27 +178,12 @@ export class ShopifyConnector extends BaseConnector {
     return { data: text ? (JSON.parse(text) as J) : {}, headers: r.headers };
   }
 
-  // ─────────── Durum birleştirme ───────────
-  private publish(): void {
-    if (this.stopping) return;
-    const { status, detail } = combineStatus(this.apiState, this.inboxState);
-    super.setStatus(status, detail);
-  }
-  private setApiStatus(status: AccountStatus, detail?: string): void {
-    this.apiState = { status, detail };
-    this.publish();
-  }
-  private setInboxStatus(status: AccountStatus, detail?: string): void {
-    this.inboxState = { status, detail };
-    bus.log(status === 'error' ? 'warn' : 'info', `shopify/inbox: ${status}${detail ? ' — ' + detail : ''}`);
-    this.publish();
-  }
-
-  async start(opts: StartOptions = {}): Promise<void> {
+  async start(_opts: StartOptions = {}): Promise<void> {
     this.stopping = false;
-    if (!this.host || !this.token) return this.setApiStatus('error', 'Shopify mağaza adresi / Admin API erişim belirteci girilmedi');
-    this.setApiStatus('connecting');
+    if (!this.host || (!this.staticToken && !this.usesClientCredentials)) return this.setStatus('error', 'Shopify mağaza adresi / istemci kimliği + gizli anahtar (ya da Admin API erişim belirteci) girilmedi');
+    this.setStatus('connecting');
     try {
+      await this.accessToken();
       const { data } = await this.api('/shop.json').catch((e) => {
         if (e instanceof AuthError) throw e;
         return { data: {} as J, headers: new Headers() };
@@ -198,18 +191,11 @@ export class ShopifyConnector extends BaseConnector {
       const shop: J = data.shop ?? {};
       this.account.label = shop.name ?? this.handle;
       await this.poll(true);
-      this.setApiStatus('connected', shop.email ?? undefined);
-      this.timer?.stop();
+      this.setStatus('connected', shop.email ?? undefined);
       this.timer?.stop();
       this.timer = new PollTimer(() => this.poll(false), () => marketDelay()).start();
     } catch (e) {
-      this.setApiStatus('error', (e as Error).message.split('\n')[0]);
-      return;
-    }
-    // Inbox köprüsü: kullanıcı girişi (interactive) dakikalar sürebilir, start'ı bekletmesin
-    if (this.inboxEnabled && !this.stopping) {
-      this.inbox ??= new InboxBridge(this.account, this.store, this.handle, () => this.account.label, (s, d) => this.setInboxStatus(s, d));
-      void this.inbox.start(opts).catch((e) => this.setInboxStatus('error', (e as Error).message.split('\n')[0]));
+      this.setStatus('error', (e as Error).message.split('\n')[0]);
     }
   }
 
@@ -217,9 +203,6 @@ export class ShopifyConnector extends BaseConnector {
     this.stopping = true;
     this.timer?.stop();
     this.timer = undefined;
-    await this.inbox?.stop().catch(() => undefined);
-    this.inboxState = undefined;
-    this.apiState = { status: 'disconnected' };
     this.setStatus('disconnected');
   }
 
@@ -229,7 +212,7 @@ export class ShopifyConnector extends BaseConnector {
     this.polling = true;
     if (!this.ordersOn) {
       this.polling = false;
-      return; // sipariş sohbetleri kapalı: yalnız mesajlaşma köprüsü çalışır
+      return; // sipariş sohbetleri kapalı
     }
     const startedAt = new Date(Date.now() - 2 * 60_000).toISOString(); // saat kayması payı
     try {
@@ -274,7 +257,7 @@ export class ShopifyConnector extends BaseConnector {
       if (e instanceof AuthError) {
         this.timer?.stop();
         this.timer = undefined;
-        if (!first) this.setApiStatus('error', e.message);
+        if (!first) this.setStatus('error', e.message);
         throw e;
       }
       bus.log('warn', `Shopify yoklama: ${(e as Error).message}`);
@@ -414,33 +397,11 @@ export class ShopifyConnector extends BaseConnector {
     return remoteChatId.startsWith('order-');
   }
 
-  /** Sipariş sohbetine yazılan metin yerel not; Inbox sohbeti köprüye gider */
+  /** Sipariş sohbetine yazılan metin yerel not (Admin API'de alıcıya mesaj ucu yok) */
   async sendText(remoteChatId: string, text: string): Promise<{ remoteId: string }> {
-    if (this.isOrder(remoteChatId)) {
-      const id = `note-${Date.now()}`;
-      this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben (yerel not)', fromMe: true, text: `📝 ${text}`, ts: Date.now(), status: 'sent' });
-      return { remoteId: id };
-    }
-    if (!this.inbox) throw new Error('Shopify Inbox köprüsü kapalı (yapılandırmada inbox: false)');
-    return this.inbox.sendText(remoteChatId, text);
-  }
-
-  async sendMedia(remoteChatId: string, file: { path: string; name: string; mime: string; size: number }, caption?: string): Promise<{ remoteId: string }> {
-    if (this.isOrder(remoteChatId) || !this.inbox) throw new Error('Bu sohbette dosya gönderme desteklenmiyor');
-    return this.inbox.sendMedia(remoteChatId, file, caption);
-  }
-
-  async markRead(remoteChatId: string): Promise<void> {
-    if (this.isOrder(remoteChatId) || !this.inbox) return;
-    await this.inbox.markRead(remoteChatId);
-  }
-
-  async loadHistory(remoteChatId: string, limit = 50, before?: number): Promise<void> {
-    if (this.isOrder(remoteChatId) || !this.inbox) return;
-    await this.inbox.loadHistory(remoteChatId, limit, before);
-  }
-
-  async fetchMedia(url: string): Promise<{ body: Buffer; type: string } | undefined> {
-    return this.inbox?.fetchMedia(url);
+    if (!this.isOrder(remoteChatId)) throw new Error('Shopify Inbox desteklenmiyor (resmi API yok)');
+    const id = `note-${Date.now()}`;
+    this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben (yerel not)', fromMe: true, text: `📝 ${text}`, ts: Date.now(), status: 'sent' });
+    return { remoteId: id };
   }
 }

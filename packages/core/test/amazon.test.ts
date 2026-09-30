@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { Page } from 'playwright';
 
 // Oturum klasörleri (amazon-state.json) gerçek ~/.kavsak'a yazılmasın: config içe aktarılmadan önce ayarlanmalı
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kavsak-amazon-test-'));
@@ -11,13 +10,13 @@ process.env.KAVSAK_DATA_DIR = tmp;
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
 const { Store } = await import('../src/store.js');
-const { AmazonConnector, combineStatus, parseAmazonConfig } = await import('../src/connectors/amazon.js');
-const { makeAmazonMessaging, sellerCentralHost, toMessages, _resetAmazonMessagingState } = await import('../src/connectors/browser/amazon.js');
+const { AmazonConnector, parseAmazonConfig, marketplaceOf, fromOrderV2, messagingActionNames, MESSAGE_TEMPLATES } = await import('../src/connectors/amazon.js');
+const { bus } = await import('../src/bus.js');
 
 type J = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 let n = 0;
-const CFG = { orders: true, clientId: 'amzn1.application-oa2-client.x', clientSecret: 'sec', refreshToken: 'Atzr|x', messaging: false };
+const CFG = { orders: true, clientId: 'amzn1.application-oa2-client.x', clientSecret: 'sec', refreshToken: 'Atzr|x' };
 function setup(config: J = CFG) {
   const store = new Store(path.join(tmp, `t${++n}.db`));
   const account = { id: `amazon:t${n}`, platform: 'amazon' as const, label: 'Amazon', status: 'disconnected' as const, createdAt: Date.now() };
@@ -73,14 +72,12 @@ test('parseAmazonConfig: varsayılan Türkiye pazar yeri, bölge pazar yerinden 
   assert.equal(p.marketplace.id, 'A33AVAJ2PDY3EV');
   assert.equal(p.marketplace.host, 'sellercentral.amazon.com.tr');
   assert.equal(p.region, 'eu');
-  assert.equal(p.messaging, false);
+  assert.equal('messaging' in p, false, 'Seller Central köprüsü kaldırıldı');
   assert.equal(parseAmazonConfig(JSON.stringify({ orders: true, ...CFG, marketplaceId: 'ATVPDKIKX0DER' })).region, 'na');
   assert.equal(parseAmazonConfig(JSON.stringify({ orders: true, ...CFG, marketplaceId: 'A1VC38T7YXB528', region: 'eu' })).region, 'eu', 'açık bölge baskın');
-  assert.equal(parseAmazonConfig('{}').messaging, false); // köprü varsayılan kapalı (Amazon ajan politikası)
-  assert.equal(parseAmazonConfig('{"messaging":true}').messaging, true);
   assert.equal(parseAmazonConfig('bozuk').clientId, '');
-  assert.equal(sellerCentralHost('A1PA6795UKMFR9'), 'sellercentral-europe.amazon.com');
-  assert.equal(sellerCentralHost('bilinmiyor'), 'sellercentral.amazon.com.tr');
+  assert.equal(marketplaceOf('A1PA6795UKMFR9').host, 'sellercentral-europe.amazon.com');
+  assert.equal(marketplaceOf('bilinmiyor').host, 'sellercentral.amazon.com.tr');
 });
 
 test('eksik yapılandırma → error durumu', async () => {
@@ -90,7 +87,9 @@ test('eksik yapılandırma → error durumu', async () => {
   assert.match(account.detail ?? '', /Client ID \/ Client Secret \/ Refresh Token girilmedi/);
 });
 
-test('siparişler: LWA belirteci, NextToken sayfalama, kalemler, sipariş sohbeti + mesajı; değişmeyen sipariş tekrar mesaj üretmez; durum olayları; şablonlu gönderim', async () => {
+const V2_PATH = `${EU}/orders/2026-01-01/orders`;
+
+test('siparişler (v0 yedeği: v2026 ucu 404): LWA belirteci, NextToken sayfalama, kalemler, sipariş sohbeti + mesajı; değişmeyen sipariş tekrar mesaj üretmez; durum olayları; şablonlu gönderim', async () => {
   const { c, store, account, priv } = setup();
   const second = order({ AmazonOrderId: '403-0000001-0000001', PurchaseDate: '2026-09-21T06:00:00Z', LastUpdateDate: '2026-09-21T09:00:00Z', OrderStatus: 'Shipped', FulfillmentChannel: 'AFN', NumberOfItemsShipped: 2, NumberOfItemsUnshipped: 0 });
   const hits = fakeFetch((url, hit) => {
@@ -155,8 +154,10 @@ test('siparişler: LWA belirteci, NextToken sayfalama, kalemler, sipariş sohbet
   assert.equal(store.listMessages(cid2)[1].ts, Date.parse('2026-09-21T09:00:00Z'), 'durum mesajı LastUpdateDate zamanında');
 
   // ikinci yoklama: LastUpdatedAfter ile; aynı siparişler yeni mesaj/kalem isteği üretmez
+  assert.equal(hits.filter((h) => h.url.startsWith(V2_PATH)).length, 1, 'v2026 bir kez denendi, 404 → v0');
   hits.length = 0;
   await priv.poll(false);
+  assert.ok(!hits.some((h) => h.url.startsWith(V2_PATH)), 'v0\'a dönüldükten sonra v2026 yeniden denenmez');
   assert.match(hits[0].url, /LastUpdatedAfter=\d{4}-/, 'değişenler için LastUpdatedAfter');
   assert.ok(!hits[0].url.includes('CreatedAfter'));
   assert.equal(hits.filter((h) => h.url.includes('/orderItems')).length, 0, 'görülmüş siparişler için kalem isteği yok');
@@ -229,6 +230,7 @@ test('401 → belirteç yenilenir, yine 401 → error; LWA invalid_grant → err
     if (url === LWA) return lwaOk;
     if (url.includes('/sellers/')) return { body: { payload: [] } };
     if (url.includes('/orderItems')) return { body: { payload: { OrderItems: ITEMS } } };
+    if (url.startsWith(V2_PATH)) return { status: 404, body: { errors: [{ code: 'NotFound', message: 'x' }] } };
     return ++orderHits === 1 ? { status: 429, body: { errors: [{ code: 'QuotaExceeded', message: 'You exceeded your quota' }] }, headers: { 'retry-after': '1', 'x-amzn-ratelimit-limit': '0.0167' } } : { body: { payload: { Orders: [order()] } } };
   });
   await s2.c.start({ interactive: false });
@@ -238,113 +240,191 @@ test('401 → belirteç yenilenir, yine 401 → error; LWA invalid_grant → err
   await s2.c.stop();
 });
 
-test('combineStatus: API baskın; köprü durumu ayrıntıda', () => {
-  assert.deepEqual(combineStatus({ status: 'error', detail: 'x' }, { status: 'connected' }), { status: 'error', detail: 'x' });
-  assert.deepEqual(combineStatus({ status: 'connected', detail: 'Türkiye' }, undefined), { status: 'connected', detail: 'Türkiye' });
-  assert.deepEqual(combineStatus({ status: 'connected' }, { status: 'pairing' }), { status: 'connected', detail: 'Alıcı mesajları için Seller Central girişi gerekli (Yeniden bağlan)' });
-  assert.deepEqual(combineStatus({ status: 'connected', detail: 'Türkiye' }, { status: 'connected' }), { status: 'connected', detail: 'Türkiye' });
-  assert.equal(combineStatus({ status: 'connected' }, { status: 'error', detail: 'Chromium açılamadı' }).detail, 'Mesajlar: Chromium açılamadı');
-});
+// ───────────── Orders API v2026-01-01 ─────────────
 
-// ───────────── Mesajlaşma stratejisi (sahte sayfa) ─────────────
-
-const HOST = 'sellercentral.amazon.com.tr';
-
-/** Sahte Seller Central sayfası: evaluate çağrılarını etiketli argümanın `op` alanına göre yanıtlar */
-function scPage(threadId: string | undefined, data: { threads?: unknown[]; messages?: unknown[] }, ops: string[] = []): Page {
-  const url = `https://${HOST}/messaging/${threadId ? `thread/${threadId}` : 'inbox'}`;
+/** orders_2026-01-01.json örneğine benzer sipariş */
+function orderV2(over: J = {}): J {
   return {
-    url: () => url,
-    goto: async () => undefined,
-    waitForTimeout: async () => undefined,
-    keyboard: { type: async () => undefined, press: async () => undefined },
-    evaluate: async (_fn: unknown, arg?: { op?: string }) => {
-      ops.push(arg?.op ?? '?');
-      switch (arg?.op) {
-        case 'probe':
-          return true;
-        case 'threads':
-          return data.threads ?? [];
-        case 'messages':
-          return data.messages ?? [];
-        case 'open':
-        case 'focusComposer':
-        case 'clickSend':
-          return true;
-        default:
-          return false;
-      }
-    },
-  } as unknown as Page;
+    orderId: '403-1234567-7654321',
+    createdTime: '2026-09-20T07:15:00Z',
+    lastUpdatedTime: '2026-09-20T07:15:00Z',
+    programs: ['PRIME'],
+    salesChannel: { channelName: 'AMAZON', marketplaceId: 'A33AVAJ2PDY3EV', marketplaceName: 'Amazon.com.tr' },
+    buyer: { buyerName: 'Bob Norman', buyerEmail: 'abc123@marketplace.amazon.com.tr' },
+    recipient: { deliveryAddress: { name: 'Bob Norman', addressLine1: 'Bağdat Cad. 12', city: 'İstanbul', stateOrRegion: 'İstanbul', postalCode: '34000', countryCode: 'TR', phone: '+905000000099' } },
+    proceeds: { grandTotal: { amount: '1234.50', currencyCode: 'TRY' } },
+    fulfillment: { fulfillmentStatus: 'UNSHIPPED', fulfilledBy: 'MERCHANT', fulfillmentServiceLevel: 'STANDARD', shipByWindow: { latestDateTime: '2026-09-22T20:59:59Z' } },
+    orderItems: [
+      {
+        orderItemId: '1',
+        quantityOrdered: 2,
+        product: { asin: 'B0001', title: 'Keten Gömlek', sellerSku: 'GOM-M-BEJ', price: { unitPrice: { amount: '600.00', currencyCode: 'TRY' } } },
+        fulfillment: { quantityFulfilled: 0, quantityUnfulfilled: 2 },
+      },
+    ],
+    ...over,
+  };
 }
 
-test('amazon mesajları: loggedIn URL\'ye bakar (Seller Central → evet, /ap/signin → hayır)', async () => {
-  const s = makeAmazonMessaging(HOST, () => 'Amazon.com.tr');
-  assert.equal(s.home, `https://${HOST}/messaging/inbox`);
-  assert.equal(await s.loggedIn({ url: () => `https://${HOST}/messaging/inbox?ref=x` } as unknown as Page, {}, true), true);
-  assert.equal(await s.loggedIn({ url: () => `https://${HOST}/ap/signin?openid.return_to=x` } as unknown as Page, {}, true), false);
-  assert.equal(await s.loggedIn({ url: () => `https://${HOST}/ap/mfa?x=1` } as unknown as Page, {}, true), false);
-  assert.equal(await s.loggedIn({ url: () => 'about:blank' } as unknown as Page, {}, true), false, 'pasif: yönlendirme yok');
-  assert.deepEqual(await s.me({} as Page, {}), { id: HOST, label: 'Amazon.com.tr' });
+test('fromOrderV2: v0 biçimine çevirir; durum eşlemesi, tüm paketler teslimse Delivered, satır toplamı', () => {
+  const { order: o, items } = fromOrderV2(orderV2());
+  assert.equal(o.AmazonOrderId, '403-1234567-7654321');
+  assert.equal(o.OrderStatus, 'Unshipped');
+  assert.equal(o.FulfillmentChannel, 'MFN');
+  assert.equal(o.IsPrime, true);
+  assert.deepEqual(o.OrderTotal, { CurrencyCode: 'TRY', Amount: '1234.50' });
+  assert.equal(o.ShippingAddress.City, 'İstanbul');
+  assert.equal(o.BuyerInfo.BuyerName, 'Bob Norman');
+  assert.equal(o.NumberOfItemsUnshipped, 2);
+  assert.equal(o.LatestShipDate, '2026-09-22T20:59:59Z');
+  assert.deepEqual(items, [{ OrderItemId: '1', Title: 'Keten Gömlek', ASIN: 'B0001', SellerSKU: 'GOM-M-BEJ', QuantityOrdered: 2, ItemPrice: { CurrencyCode: 'TRY', Amount: '1200.00' } }]);
+  assert.equal(fromOrderV2(orderV2({ fulfillment: { fulfillmentStatus: 'CANCELLED', fulfilledBy: 'AMAZON' } })).order.OrderStatus, 'Canceled');
+  assert.equal(fromOrderV2(orderV2({ fulfillment: { fulfillmentStatus: 'CANCELLED', fulfilledBy: 'AMAZON' } })).order.FulfillmentChannel, 'AFN');
+  const delivered = fromOrderV2(orderV2({ fulfillment: { fulfillmentStatus: 'SHIPPED' }, packages: [{ packageReferenceId: '1', packageStatus: { status: 'DELIVERED' }, carrier: 'Yurtiçi', trackingNumber: 'TR1' }] }));
+  assert.equal(delivered.order.OrderStatus, 'Delivered');
+  const partial = fromOrderV2(orderV2({ fulfillment: { fulfillmentStatus: 'SHIPPED' }, packages: [{ packageStatus: { status: 'DELIVERED' } }, { packageStatus: { status: 'IN_TRANSIT' } }] }));
+  assert.equal(partial.order.OrderStatus, 'Shipped');
+  // ITEM kırılımı birim fiyattan önce gelir; kalemsiz sipariş → items undefined
+  const withProceeds = fromOrderV2(orderV2({ orderItems: [{ orderItemId: '2', quantityOrdered: 1, product: { title: 'X' }, proceeds: { breakdowns: [{ type: 'ITEM', subtotal: { amount: '99.90', currencyCode: 'TRY' } }] } }] }));
+  assert.equal(withProceeds.items![0].ItemPrice.Amount, '99.90');
+  assert.equal(fromOrderV2(orderV2({ orderItems: undefined })).items, undefined);
+  // PII yoksa alıcı/adres yok → ingest "Amazon alıcısı" der
+  const noPii = fromOrderV2(orderV2({ buyer: undefined, recipient: undefined }));
+  assert.equal(noPii.order.BuyerInfo, undefined);
+  assert.equal(noPii.order.ShippingAddress, undefined);
 });
 
-test('amazon mesajları threads: satırlar sohbete çevrilir; sipariş no handle; zaman çözülemezse lastTs=0', async () => {
-  _resetAmazonMessagingState();
-  const s = makeAmazonMessaging(HOST);
-  const now = Date.now();
-  const page = scPage(undefined, {
-    threads: [
-      { id: 'T1', href: '/messaging/thread/T1', name: 'Ayşe Yılmaz', preview: 'Kargom nerede? · Sipariş 403-1234567-7654321', when: '5 dk', unread: true, orderId: '403-1234567-7654321' },
-      { id: 'h99', name: 'Alıcı', preview: 'Merhaba', when: 'bilinmiyor', unread: false },
-    ],
+test('siparişler v2026: searchOrders (createdAfter, includedData, paginationToken), kalemler yanıttan (ayrı istek yok), v0 hiç çağrılmaz; paket takibi', async () => {
+  const { c, store, account, priv } = setup();
+  const second = orderV2({ orderId: '403-0000001-0000001', createdTime: '2026-09-21T06:00:00Z', lastUpdatedTime: '2026-09-21T09:00:00Z', fulfillment: { fulfillmentStatus: 'SHIPPED', fulfilledBy: 'AMAZON' }, packages: [{ packageReferenceId: '1', packageStatus: { status: 'IN_TRANSIT' }, carrier: 'Aras', trackingNumber: 'AR123', shipTime: '2026-09-21T09:00:00Z' }] });
+  const hits = fakeFetch((url) => {
+    if (url === LWA) return lwaOk;
+    if (url.startsWith(`${EU}/sellers/`)) return { body: { payload: [] } };
+    if (url.startsWith(`${V2_PATH}?`)) {
+      const u = new URL(url);
+      if (u.searchParams.get('paginationToken') === 'P2') return { body: { orders: [second] } };
+      return { body: { orders: [orderV2()], pagination: { nextToken: 'P2' } } };
+    }
+    return { status: 404, body: { errors: [{ code: 'NotFound', message: 'x' }] } };
   });
-  const th = await s.threads(page, {});
-  assert.equal(th.length, 2);
-  assert.equal(th[0].id, 'T1');
-  assert.equal(th[0].name, 'Ayşe Yılmaz');
-  assert.equal(th[0].unread, 1);
-  assert.equal(th[0].handle, '403-1234567-7654321');
-  assert.ok(Math.abs(th[0].lastTs - (now - 5 * 60_000)) < 5000);
-  assert.equal(th[0].link, `https://${HOST}/messaging/thread/T1`);
-  assert.equal(th[1].lastTs, 0);
-  assert.equal(th[1].unread, 0);
-  assert.equal(th[1].link, `https://${HOST}/messaging/inbox`);
-  assert.deepEqual(await s.threads(scPage(undefined, { threads: [] }), {}), [], 'liste okunamazsa boş (uyarı bir kez)');
+  await c.start({ interactive: false });
+  assert.equal(account.status, 'connected', account.detail);
+  const v2 = hits.filter((h) => h.url.startsWith(V2_PATH));
+  assert.equal(v2.length, 2);
+  const u1 = new URL(v2[0].url);
+  assert.equal(u1.searchParams.get('marketplaceIds'), 'A33AVAJ2PDY3EV');
+  assert.match(u1.searchParams.get('createdAfter') ?? '', /^\d{4}-/);
+  assert.equal(u1.searchParams.get('lastUpdatedAfter'), null, 'createdAfter ile lastUpdatedAfter birlikte olmaz');
+  assert.equal(u1.searchParams.get('maxResultsPerPage'), '100');
+  assert.equal(u1.searchParams.get('includedData'), 'BUYER,RECIPIENT,PROCEEDS,FULFILLMENT,PACKAGES');
+  const u2 = new URL(v2[1].url);
+  assert.equal(u2.searchParams.get('paginationToken'), 'P2');
+  assert.ok(u2.searchParams.get('createdAfter'), 'sonraki sayfada da aynı süzgeç');
+  assert.ok(!hits.some((h) => h.url.includes('/orders/v0/')), 'v0 çağrılmadı');
+
+  const cid = `${account.id}/order-403-1234567-7654321`;
+  const meta = store.getChat(cid)!.meta?.order as J;
+  assert.equal(store.getChat(cid)!.name, '#403-1234567-7654321 · Bob Norman');
+  assert.equal(meta.status, 'Unshipped');
+  assert.deepEqual(meta.items[0], { title: 'Keten Gömlek', quantity: 2, total: '1200.00', sku: 'GOM-M-BEJ', asin: 'B0001', selection: [] });
+  assert.equal(meta.isPrime, true);
+  const cid2 = `${account.id}/order-403-0000001-0000001`;
+  const meta2 = store.getChat(cid2)!.meta?.order as J;
+  assert.deepEqual(meta2.fulfillments[0], { status: 'yolda', company: 'Aras', trackingNumber: 'AR123', date: '2026-09-21T09:00:00Z' });
+  assert.deepEqual(store.listMessages(cid2).map((m) => m.text.split('\n')[0]), ['🛍️ Yeni sipariş #403-0000001-0000001 — 1.234,50 ₺ (kargolandı)', '📦 Kargoya verildi']);
+
+  // sonraki yoklama: lastUpdatedAfter; paketler teslim edildi → Delivered olayı
+  const later = fakeFetch((url) => {
+    if (url === LWA) return lwaOk;
+    if (url.startsWith(`${V2_PATH}?`)) return { body: { orders: [{ ...second, lastUpdatedTime: '2026-09-23T10:00:00Z', packages: [{ ...second.packages[0], packageStatus: { status: 'DELIVERED' } }] }] } };
+    return { status: 404, body: {} };
+  });
+  await priv.poll(false);
+  const u3 = new URL(later.find((h) => h.url.startsWith(V2_PATH))!.url);
+  assert.ok(u3.searchParams.get('lastUpdatedAfter'));
+  assert.equal(u3.searchParams.get('createdAfter'), null);
+  assert.equal(store.listMessages(cid2).at(-1)!.text, '📦 Teslim edildi');
+  assert.equal((store.getChat(cid2)!.meta?.order as J).statusLabel, 'teslim edildi');
+  await c.stop();
 });
 
-test('amazon mesajları messages: açık sohbet okunur, sıra/gönderen/kimlik kararlı; send yerel kimlik bırakır', async () => {
-  _resetAmazonMessagingState();
-  const s = makeAmazonMessaging(HOST);
-  await s.threads(scPage(undefined, { threads: [{ id: 'T1', name: 'Ayşe Yılmaz', preview: 'x', when: '', unread: false }] }), {});
-  const rows = [
-    { text: 'Kargom nerede?', when: '2026-09-24T11:20:00Z', me: false },
-    { text: 'Bugün çıkıyor', when: '', me: true },
-    { text: 'Teşekkürler', when: '2026-09-24T11:25:00Z', me: false },
-    { text: 'Teşekkürler', when: '2026-09-24T11:25:00Z', me: false },
-  ];
-  const ops: string[] = [];
-  const msgs = await s.messages(scPage('T1', { messages: rows }, ops), {}, 'T1', 20);
-  assert.ok(!ops.includes('open'), 'sohbet zaten açık: tıklama yok');
+test('v2026: PII rolü yoksa (403) bir kez PII\'siz yeniden; yanıtta kalem yoksa getOrder (kalemler dahil)', async () => {
+  const { c, store, account } = setup();
+  const hits = fakeFetch((url) => {
+    if (url === LWA) return lwaOk;
+    if (url.startsWith(`${EU}/sellers/`)) return { body: { payload: [] } };
+    if (url.startsWith(`${V2_PATH}?`)) {
+      if (new URL(url).searchParams.get('includedData')!.includes('BUYER')) return { status: 403, body: { errors: [{ code: 'Unauthorized', message: 'Access to requested resource is denied.' }] } };
+      return { body: { orders: [orderV2({ buyer: undefined, recipient: undefined, orderItems: undefined })] } };
+    }
+    if (url.startsWith(`${V2_PATH}/403-1234567-7654321?`)) return { body: { order: orderV2({ buyer: undefined, recipient: undefined }) } };
+    return { status: 404, body: {} };
+  });
+  await c.start({ interactive: false });
+  assert.equal(account.status, 'connected', account.detail);
+  const v2 = hits.filter((h) => h.url.startsWith(`${V2_PATH}?`));
+  assert.equal(v2.length, 2, 'önce PII ile, sonra PII\'siz');
+  assert.equal(new URL(v2[1].url).searchParams.get('includedData'), 'PROCEEDS,FULFILLMENT,PACKAGES');
+  const get = hits.find((h) => h.url.startsWith(`${V2_PATH}/403-1234567-7654321`))!;
+  assert.equal(new URL(get.url).searchParams.get('includedData'), 'PROCEEDS,FULFILLMENT,PACKAGES');
+  const chat = store.getChat(`${account.id}/order-403-1234567-7654321`)!;
+  assert.equal(chat.name, '#403-1234567-7654321 · Amazon alıcısı');
+  assert.equal((chat.meta?.order as J).items[0].title, 'Keten Gömlek');
+  assert.ok(!hits.some((h) => h.url.includes('/orders/v0/')));
+  await c.stop();
+});
+
+test('v2026 ucu 403 (PII\'siz de) → tek uyarıyla v0; v0 da 403 → hata', async () => {
+  const warns: string[] = [];
+  const off = bus.on((ev) => {
+    if (ev.type === 'log' && ev.level === 'warn') warns.push(ev.text);
+  });
+  try {
+    const { c, account, store } = setup();
+    fakeFetch((url) => {
+      if (url === LWA) return lwaOk;
+      if (url.startsWith(`${EU}/sellers/`)) return { body: { payload: [] } };
+      if (url.startsWith(V2_PATH)) return { status: 403, body: { errors: [{ code: 'Unauthorized', message: 'denied' }] } };
+      if (url.includes('/orderItems')) return { body: { payload: { OrderItems: ITEMS } } };
+      if (url.includes('/orders/v0/orders?')) return { body: { payload: { Orders: [order()] } } };
+      return { status: 404, body: {} };
+    });
+    await c.start({ interactive: false });
+    assert.equal(account.status, 'connected', account.detail);
+    assert.ok(store.getChat(`${account.id}/order-403-1234567-7654321`));
+    await (c as unknown as { poll(first: boolean): Promise<void> }).poll(false);
+    assert.equal(warns.filter((w) => /Orders API 2026-01-01 kullanılamadı/.test(w)).length, 1, 'tek uyarı');
+    await c.stop();
+
+    const s2 = setup();
+    fakeFetch((url) => (url === LWA ? lwaOk : url.startsWith(`${EU}/sellers/`) ? { body: { payload: [] } } : { status: 403, body: { errors: [{ code: 'Unauthorized', message: 'denied' }] } }));
+    await s2.c.start({ interactive: false });
+    assert.equal(s2.account.status, 'error');
+    assert.match(s2.account.detail ?? '', /yetkisi yok \(403\)/);
+  } finally {
+    off();
+  }
+});
+
+test('Messaging API: şablon adları _embedded.actions[].payload.name / _links.actions[].name; digitalAccessKey ≤400; serbest metin yalnız sipariş sohbetinde', async () => {
   assert.deepEqual(
-    msgs.map((m) => [m.fromMe, m.senderName, m.text]),
-    [
-      [false, 'Ayşe Yılmaz', 'Kargom nerede?'],
-      [true, 'Ben', 'Bugün çıkıyor'],
-      [false, 'Ayşe Yılmaz', 'Teşekkürler'],
-      [false, 'Ayşe Yılmaz', 'Teşekkürler'],
-    ],
+    messagingActionNames({
+      _links: { self: { href: '/x' }, actions: [{ href: '/a', name: 'confirmDeliveryDetails' }, { href: '/b', name: 'unexpectedProblem' }] },
+      _embedded: { actions: [{ _links: { self: { href: '/a' }, schema: { href: '/s', name: 'confirmDeliveryDetails' } }, payload: { name: 'confirmDeliveryDetails' } }, { _links: { self: { href: '/c', name: 'warranty' }, schema: { href: '/s' } } }] },
+    }),
+    ['confirmDeliveryDetails', 'warranty', 'unexpectedProblem'],
   );
-  assert.equal(msgs[1].ts, Date.parse('2026-09-24T11:20:00Z') + 1, 'zamanı çözülemeyen mesaj öncekinin +1 ms');
-  assert.equal(new Set(msgs.map((m) => m.id)).size, 4, 'özdeş iki mesaj ayrı kimlik alır');
-  assert.deepEqual(toMessages('T1', 'Ayşe Yılmaz', rows).map((m) => m.id), msgs.map((m) => m.id), 'kimlikler yeniden okumada aynı');
-  assert.equal((await s.messages(scPage('T1', { messages: rows }), {}, 'T1', 2)).length, 2, 'limit');
+  assert.deepEqual(messagingActionNames({}), []);
+  assert.equal(MESSAGE_TEMPLATES.digitalAccessKey.max, 400);
 
-  // başka sohbet açıkken: satıra tıklanır
-  const ops2: string[] = [];
-  await s.messages(scPage('T9', { messages: rows }, ops2), {}, 'T1', 20);
-  assert.ok(ops2.includes('open'));
-
-  const ops3: string[] = [];
-  assert.equal(await s.send(scPage('T1', { messages: rows }, ops3), {}, 'T1', 'Selam'), undefined);
-  assert.ok(ops3.includes('focusComposer') && ops3.includes('clickSend'));
+  const { c, store, account } = setup();
+  fakeFetch((url) => {
+    if (url === LWA) return lwaOk;
+    if (url.includes('/messaging/v1/orders/403-1234567-7654321?')) return { body: { _links: { self: { href: '/x' }, actions: [{ href: '/a', name: 'confirmOrderDetails' }] }, _embedded: { actions: [{ _links: { self: { href: '/a' }, schema: { href: '/s' } }, payload: { name: 'confirmOrderDetails' } }] } } };
+    return { status: 404, body: {} };
+  });
+  await c.action('order-403-1234567-7654321', { kind: 'actions' });
+  assert.deepEqual((store.getChat(`${account.id}/order-403-1234567-7654321`)!.meta?.order as J).messagingActions, ['confirmOrderDetails']);
+  await assert.rejects(c.action('order-403-1234567-7654321', { kind: 'message', type: 'digitalAccessKey', text: 'x'.repeat(401) }), /en fazla 400/);
+  await assert.rejects(c.sendText('thread-1', 'selam'), /desteklenmiyor/);
 });

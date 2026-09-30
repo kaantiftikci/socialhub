@@ -195,7 +195,7 @@ export interface CalEvent {
   createdAt: number;
 }
 
-export const PLATFORMS: Record<Platform, { name: string; code: string; color: string; method: string; available: boolean; mode: 'native' | 'browser' | 'token' | 'mail' | 'demo'; experimental?: boolean; category?: Category }> = {
+export const PLATFORMS: Record<Platform, { name: string; code: string; color: string; method: string; available: boolean; mode: 'native' | 'browser' | 'token' | 'mail' | 'demo'; category?: Category }> = {
   whatsapp: { name: 'WhatsApp', code: 'WA', color: '#0E8A45', method: 'QR ile bağlı cihaz', available: true, mode: 'native' },
   telegram: { name: 'Telegram', code: 'TG', color: '#1B7FB8', method: 'QR ile giriş', available: true, mode: 'token' },
   slack: { name: 'Slack', code: 'SL', color: '#4A154B', method: 'Slack hesabınla', available: true, mode: 'browser' },
@@ -204,23 +204,29 @@ export const PLATFORMS: Record<Platform, { name: string; code: string; color: st
   x: { name: 'X', code: 'X', color: '#2B2833', method: 'Hesabınla giriş', available: true, mode: 'browser' },
   instagram: { name: 'Instagram', code: 'IG', color: '#C13584', method: 'Hesabınla giriş', available: true, mode: 'browser' },
   messenger: { name: 'Messenger', code: 'MS', color: '#0866FF', method: 'Hesabınla giriş', available: true, mode: 'browser' },
-  tiktok: { name: 'TikTok', code: 'TT', color: '#111111', method: 'Hesabınla giriş', available: true, mode: 'browser', experimental: true },
+  tiktok: { name: 'TikTok', code: 'TT', color: '#111111', method: 'Hesabınla giriş', available: true, mode: 'browser' },
   gmail: { name: 'Gmail', code: 'GM', color: '#EA4335', method: 'Google hesabınla giriş', available: true, mode: 'browser', category: 'mail' },
   outlook: { name: 'Outlook', code: 'OL', color: '#0F6CBD', method: 'Microsoft hesabınla giriş', available: true, mode: 'browser', category: 'mail' },
   yahoo: { name: 'Yahoo Mail', code: 'YH', color: '#6001D2', method: 'Yahoo hesabınla giriş', available: true, mode: 'browser', category: 'mail' },
   yandex: { name: 'Yandex Mail', code: 'YA', color: '#FC3F1D', method: 'Yandex hesabınla giriş', available: true, mode: 'browser', category: 'mail' },
   icloud: { name: 'iCloud Mail', code: 'IC', color: '#3693F3', method: 'Apple hesabınla giriş', available: true, mode: 'browser', category: 'mail' },
-  imap: { name: 'Diğer e-posta', code: '@', color: '#4A4757', method: 'E-posta ve şifreyle', available: true, mode: 'mail', category: 'mail' },
+  imap: { name: 'Diğer e-posta', code: '@', color: '#4A4757', method: 'IMAP hesabı', available: true, mode: 'mail', category: 'mail' },
   pttavm: { name: 'ePttAVM', code: 'PT', color: '#FFC20E', method: 'Siparişler', available: true, mode: 'token', category: 'shop' },
   shopier: { name: 'Shopier', code: 'SH', color: '#1F2A44', method: 'Siparişler', available: false, mode: 'token', category: 'shop' },
   trendyol: { name: 'Trendyol', code: 'TY', color: '#F27A1A', method: 'Siparişler ve müşteri soruları', available: true, mode: 'token', category: 'shop' },
   hepsiburada: { name: 'Hepsiburada', code: 'HB', color: '#FF6000', method: 'Siparişler ve müşteri soruları', available: true, mode: 'token', category: 'shop' },
-  etsy: { name: 'Etsy', code: 'ET', color: '#F1641E', method: 'Siparişler', available: true, mode: 'token', category: 'shop', experimental: true },
-  shopify: { name: 'Shopify', code: 'SP', color: '#5E8E3E', method: 'Siparişler', available: true, mode: 'token', category: 'shop', experimental: true },
+  etsy: { name: 'Etsy', code: 'ET', color: '#F1641E', method: 'Siparişler', available: true, mode: 'token', category: 'shop' },
+  shopify: { name: 'Shopify', code: 'SP', color: '#5E8E3E', method: 'Siparişler', available: true, mode: 'token', category: 'shop' },
   n11: { name: 'n11', code: 'N11', color: '#5D3EBC', method: 'Siparişler ve müşteri soruları', available: true, mode: 'token', category: 'shop' },
-  amazon: { name: 'Amazon', code: 'AMZ', color: '#FF9900', method: 'Siparişler', available: true, mode: 'token', category: 'shop', experimental: true },
+  amazon: { name: 'Amazon', code: 'AMZ', color: '#FF9900', method: 'Siparişler', available: true, mode: 'token', category: 'shop' },
   demo: { name: 'Demo', code: 'DM', color: '#8C889B', method: 'Örnek veri', available: true, mode: 'demo' },
 };
+
+/**
+ * E-posta sağlayıcılarının kendi giriş penceresi (tarayıcı girişi): Bağlan'a basınca doğrudan açılır, şifre Mivelo'ya yazılmaz.
+ * Değer: giriş düğmesinde/uyarıda geçen hesap sahibi ("Google ile giriş yap").
+ */
+export const MAIL_LOGIN_WHO: Partial<Record<Platform, string>> = { gmail: 'Google', outlook: 'Microsoft', yahoo: 'Yahoo', yandex: 'Yandex', icloud: 'Apple' };
 
 export const TAG_COLORS: Record<string, [string, string]> = {
   // renkler styles.css'te (gece modunda koyu karşılıkları)

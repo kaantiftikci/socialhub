@@ -1,33 +1,34 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ordersFlag, BaseConnector, type StartOptions } from './base.js';
-import { BrowserConnector } from './browser/bridge.js';
-import { makeAmazonMessaging, marketplaceOf, DEFAULT_MARKETPLACE, type Marketplace } from './browser/amazon.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
 import { writeJsonAtomic } from './market-state.js';
-import { chatId, type AccountStatus, type Participant } from '../model.js';
+import { chatId, type Participant } from '../model.js';
 import type { Store } from '../store.js';
 
 /**
- * Amazon: iki parça tek hesapta.
- *  1) Siparişler — Selling Partner API (SP-API). Kimlik: Login with Amazon (LWA) refresh token; erişim belirteci
+ * Amazon: yalnız resmi Selling Partner API (SP-API).
+ *  1) Siparişler — Kimlik: Login with Amazon (LWA) refresh token; erişim belirteci
  *     `POST https://api.amazon.com/auth/o2/token` ile (1 saat, 5 dk önce yenilenir, bellekte). İstekler
  *     `x-amz-access-token` başlığıyla; 2023 sonrası AWS SigV4 imzası GEREKMEZ. Uç bölgeye göre
  *     sellingpartnerapi-{eu|na|fe}.amazon.com.
- *       - GET /orders/v0/orders?MarketplaceIds=…&CreatedAfter=… | LastUpdatedAfter=… (ikisi birlikte olmaz), sayfalama NextToken;
- *         getOrders hız sınırı 0.0167/sn (patlama 20) → yoklama 2 dk.
- *       - GET /orders/v0/orders/{orderId}/orderItems (0.5/sn, patlama 30) → ilk yoklamada en fazla 30 sipariş, sonra yalnız yeniler.
- *       - Alıcı adı / teslimat adresi (PII) yalnızca uygulamada "Direct-to-Consumer Shipping" rolü varsa gelir; yoksa "Amazon alıcısı".
- *     Her sipariş bir sohbet (`order-<AmazonOrderId>`); durum değişimleri mesaj olarak akar.
- *  2) Alıcı mesajları — SP-API Messaging API (/messaging/v1) YALNIZCA satıcıdan alıcıya şablonlu mesaj gönderir
- *     (confirmDeliveryDetails, unexpectedProblem…); alıcıdan gelen mesajları OKUYAN bir uç YOKTUR. Gelen kutusu bu yüzden
- *     Seller Central mesajlaşma sayfasından tarayıcı köprüsüyle (`browser/amazon.ts`) okunur; oradaki yanıt kutusuyla yanıtlanır.
- *     Şablonlu gönderim `action(remoteChatId, { kind: 'message', type: '<şablon>', text })` ile.
+ *       - Orders API v2026-01-01 (models/orders-api-model/orders_2026-01-01.json):
+ *         GET /orders/2026-01-01/orders (searchOrders; createdAfter | lastUpdatedAfter — tam biri; marketplaceIds; maxResultsPerPage ≤100;
+ *         sonraki sayfa `pagination.nextToken` → `paginationToken`; includedData=BUYER,RECIPIENT,PROCEEDS,FULFILLMENT,PACKAGES).
+ *         Hız sınırı 0.0056/sn (patlama 20) → yoklama ≈3,3 dk. Kalemler (orderItems) yanıtın içinde gelir; ayrı istek yok.
+ *         Yanıtta kalem yoksa GET /orders/2026-01-01/orders/{orderId} (getOrder, 0.5/sn, kalemler dahil).
+ *         BUYER/RECIPIENT (PII) rolü yoksa 403 → bir kez PII'siz yeniden istenir ("Amazon alıcısı").
+ *       - Eski v0 (GET /orders/v0/orders + /orderItems; 27 Mart 2027'de kapanıyor) yalnız yedek: v2026 ucu 404/403 verirse
+ *         bir kez uyarı yazılır ve o çalışmada v0 kullanılır (getOrders 0.0167/sn → yoklama 2 dk).
+ *     Her sipariş bir sohbet (`order-<siparişNo>`); durum değişimleri mesaj olarak akar. v2026 yanıtı v0 biçimine çevrilir
+ *     (`fromOrderV2`) — durum imzaları ve sohbet meta'sı iki sürümde aynı kalır.
+ *  2) Satıcıdan alıcıya şablonlu mesaj — Messaging API (/messaging/v1): `action(remoteChatId, { kind: 'message', type, text })`.
+ *     Alıcıdan gelen mesajları OKUYAN resmi uç yoktur. Seller Central tarayıcı köprüsü KALDIRILDI: Amazon Business Solutions
+ *     Agreement §19 ve Agent Policy (4 Mart 2026'dan beri) tarayıcı otomasyonunu/kazımayı yasaklıyor.
  *
  * Yapılandırma (token dosyası JSON): { clientId, clientSecret, refreshToken, marketplaceId?: 'A33AVAJ2PDY3EV' (Türkiye),
- *   region?: 'eu'|'na'|'fe' (varsayılan pazar yerinden türetilir), messaging?: boolean (Seller Central köprüsü; varsayılan KAPALI —
- *   Amazon'un 4 Mart 2026 ajan/otomasyon politikası; açıkça true verilirse başlar) }
+ *   region?: 'eu'|'na'|'fe' (varsayılan pazar yerinden türetilir) }. Eski `messaging` alanı yok sayılır.
  * Client ID/Secret: Seller Central → Uygulamalar ve Hizmetler → Geliştirici Merkezi (özel uygulama); Refresh Token: uygulamayı
  * yetkilendirince ("Self authorization").
  */
@@ -38,8 +39,13 @@ const ENDPOINTS: Record<'eu' | 'na' | 'fe', string> = {
   na: 'https://sellingpartnerapi-na.amazon.com',
   fe: 'https://sellingpartnerapi-fe.amazon.com',
 };
-const POLL_MS = 120_000;
+/** v0 getOrders 0.0167/sn → 2 dk; v2026 searchOrders 0.0056/sn (≈178 sn'de bir jeton) → 200 sn (patlama payı tükenmesin) */
+const POLL_MS_V0 = 120_000;
+const POLL_MS_V2 = 200_000;
 const FIRST_WINDOW_MS = 90 * 86_400_000;
+const ORDERS_V2 = '/orders/2026-01-01/orders';
+const INCLUDED_V2 = ['BUYER', 'RECIPIENT', 'PROCEEDS', 'FULFILLMENT', 'PACKAGES'];
+const INCLUDED_V2_NO_PII = ['PROCEEDS', 'FULFILLMENT', 'PACKAGES'];
 const ITEMS_FIRST_MAX = 30;
 const USER_AGENT = 'Mivelo/1.0 (Language=TypeScript; Platform=Node)';
 
@@ -49,12 +55,58 @@ export interface AmazonConfig {
   refreshToken: string;
   marketplaceId?: string;
   region?: 'eu' | 'na' | 'fe';
-  /** Seller Central mesajlaşma köprüsünü (Chromium) başlat; varsayılan true */
-  messaging?: boolean;
+}
+
+/** Pazar yeri tablosu: SP-API MarketplaceId → ülke, Amazon alan adı, Seller Central ana bilgisayarı, SP-API bölgesi (docs: marketplace-ids, seller-central-urls) */
+export interface Marketplace {
+  id: string;
+  country: string;
+  /** Mağaza alan adı (amazon.com.tr gibi); hesap etiketi ve sipariş bağlantısı için */
+  domain: string;
+  /** Seller Central ana bilgisayarı (sipariş bağlantısı) */
+  host: string;
+  region: 'eu' | 'na' | 'fe';
+}
+
+const EU = 'sellercentral-europe.amazon.com';
+export const MARKETPLACES: Record<string, Marketplace> = {
+  // Avrupa / Orta Doğu / Hindistan / Afrika (uç: sellingpartnerapi-eu)
+  A33AVAJ2PDY3EV: { id: 'A33AVAJ2PDY3EV', country: 'Türkiye', domain: 'amazon.com.tr', host: 'sellercentral.amazon.com.tr', region: 'eu' },
+  A1PA6795UKMFR9: { id: 'A1PA6795UKMFR9', country: 'Almanya', domain: 'amazon.de', host: EU, region: 'eu' },
+  A1F83G8C2ARO7P: { id: 'A1F83G8C2ARO7P', country: 'Birleşik Krallık', domain: 'amazon.co.uk', host: EU, region: 'eu' },
+  A13V1IB3VIYZZH: { id: 'A13V1IB3VIYZZH', country: 'Fransa', domain: 'amazon.fr', host: EU, region: 'eu' },
+  APJ6JRA9NG5V4: { id: 'APJ6JRA9NG5V4', country: 'İtalya', domain: 'amazon.it', host: EU, region: 'eu' },
+  A1RKKUPIHCS9HS: { id: 'A1RKKUPIHCS9HS', country: 'İspanya', domain: 'amazon.es', host: EU, region: 'eu' },
+  A1805IZSGTT6HS: { id: 'A1805IZSGTT6HS', country: 'Hollanda', domain: 'amazon.nl', host: 'sellercentral.amazon.nl', region: 'eu' },
+  A2NODRKZP88ZB9: { id: 'A2NODRKZP88ZB9', country: 'İsveç', domain: 'amazon.se', host: 'sellercentral.amazon.se', region: 'eu' },
+  A1C3SOZRARQ6R3: { id: 'A1C3SOZRARQ6R3', country: 'Polonya', domain: 'amazon.pl', host: 'sellercentral.amazon.pl', region: 'eu' },
+  AMEN7PMS3EDWL: { id: 'AMEN7PMS3EDWL', country: 'Belçika', domain: 'amazon.com.be', host: 'sellercentral.amazon.com.be', region: 'eu' },
+  A28R8C7NBKEWEA: { id: 'A28R8C7NBKEWEA', country: 'İrlanda', domain: 'amazon.ie', host: 'sellercentral.amazon.ie', region: 'eu' },
+  AE08WJ6YKNBMC: { id: 'AE08WJ6YKNBMC', country: 'Güney Afrika', domain: 'amazon.co.za', host: 'sellercentral.amazon.co.za', region: 'eu' },
+  ARBP9OOSHTCHU: { id: 'ARBP9OOSHTCHU', country: 'Mısır', domain: 'amazon.eg', host: 'sellercentral.amazon.eg', region: 'eu' },
+  A17E79C6D8DWNP: { id: 'A17E79C6D8DWNP', country: 'Suudi Arabistan', domain: 'amazon.sa', host: 'sellercentral.amazon.sa', region: 'eu' },
+  A2VIGQ35RCS4UG: { id: 'A2VIGQ35RCS4UG', country: 'BAE', domain: 'amazon.ae', host: 'sellercentral.amazon.ae', region: 'eu' },
+  A21TJRUUN4KGV: { id: 'A21TJRUUN4KGV', country: 'Hindistan', domain: 'amazon.in', host: 'sellercentral.amazon.in', region: 'eu' },
+  // Kuzey Amerika / Brezilya (uç: sellingpartnerapi-na)
+  ATVPDKIKX0DER: { id: 'ATVPDKIKX0DER', country: 'ABD', domain: 'amazon.com', host: 'sellercentral.amazon.com', region: 'na' },
+  A2EUQ1WTGCTBG2: { id: 'A2EUQ1WTGCTBG2', country: 'Kanada', domain: 'amazon.ca', host: 'sellercentral.amazon.ca', region: 'na' },
+  A1AM78C64UM0Y8: { id: 'A1AM78C64UM0Y8', country: 'Meksika', domain: 'amazon.com.mx', host: 'sellercentral.amazon.com.mx', region: 'na' },
+  A2Q3Y263D00KWC: { id: 'A2Q3Y263D00KWC', country: 'Brezilya', domain: 'amazon.com.br', host: 'sellercentral.amazon.com.br', region: 'na' },
+  // Uzak Doğu (uç: sellingpartnerapi-fe)
+  A1VC38T7YXB528: { id: 'A1VC38T7YXB528', country: 'Japonya', domain: 'amazon.co.jp', host: 'sellercentral.amazon.co.jp', region: 'fe' },
+  A39IBJ37TRP1C6: { id: 'A39IBJ37TRP1C6', country: 'Avustralya', domain: 'amazon.com.au', host: 'sellercentral.amazon.com.au', region: 'fe' },
+  A19VAU5U5O7RUS: { id: 'A19VAU5U5O7RUS', country: 'Singapur', domain: 'amazon.sg', host: 'sellercentral.amazon.sg', region: 'fe' },
+};
+
+export const DEFAULT_MARKETPLACE = 'A33AVAJ2PDY3EV'; // Türkiye
+
+/** Pazar yeri kaydı; bilinmeyen kimlikte Türkiye */
+export function marketplaceOf(id?: string): Marketplace {
+  return MARKETPLACES[(id ?? '').trim()] ?? MARKETPLACES[DEFAULT_MARKETPLACE];
 }
 
 /** Yapılandırma metnini çöz; pazar yeri ve bölge türetilir */
-export function parseAmazonConfig(config: string): { clientId: string; clientSecret: string; refreshToken: string; marketplace: Marketplace; region: 'eu' | 'na' | 'fe'; messaging: boolean } {
+export function parseAmazonConfig(config: string): { clientId: string; clientSecret: string; refreshToken: string; marketplace: Marketplace; region: 'eu' | 'na' | 'fe' } {
   let cfg: Partial<AmazonConfig> = {};
   try {
     cfg = JSON.parse(config || '{}') as Partial<AmazonConfig>;
@@ -69,12 +121,30 @@ export function parseAmazonConfig(config: string): { clientId: string; clientSec
     refreshToken: String(cfg.refreshToken ?? '').trim(),
     marketplace,
     region,
-    messaging: cfg.messaging === true,
   };
 }
 
 /** Kimlik reddi (LWA invalid_grant, 401 yenileme sonrası, 403): yoklama durdurulur, durum error */
-class AuthError extends Error {}
+class AuthError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+  }
+}
+/** Diğer HTTP hataları (404 vb.): durum kodu yedeğe geçiş kararı için taşınır */
+class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+/** v2026 Orders API bu uygulama/hesap için yok (404/403): v0'a dönülür */
+class V2Unavailable extends Error {}
+const statusOf = (e: unknown): number | undefined => (e instanceof AuthError || e instanceof ApiError ? e.status : undefined);
 
 const money = (v: unknown, cur: string): string => {
   const n = Number(v ?? 0);
@@ -112,51 +182,119 @@ export const MESSAGE_TEMPLATES: Record<string, { label: string; text: boolean; m
   confirmDeliveryDetails: { label: 'Teslimat ayrıntılarını onayla', text: true, max: 2000 },
   confirmOrderDetails: { label: 'Sipariş ayrıntılarını onayla', text: true, max: 2000 },
   confirmServiceDetails: { label: 'Hizmet ayrıntılarını onayla', text: true, max: 2000 },
-  digitalAccessKey: { label: 'Dijital erişim anahtarı', text: true, max: 800 },
+  digitalAccessKey: { label: 'Dijital erişim anahtarı', text: true, max: 400 }, // CreateDigitalAccessKeyRequest.text maxLength 400
   unexpectedProblem: { label: 'Beklenmeyen sorun', text: true, max: 2000 },
   legalDisclosure: { label: 'Yasal bildirim (yalnız ek)', text: false },
   warranty: { label: 'Garanti (yalnız ek)', text: false },
   invoice: { label: 'Fatura gönder (yalnız ek)', text: false },
 };
 
+/** v2026 FulfillmentStatus → v0 OrderStatus adı (durum imzaları ve etiketler sürümler arasında aynı kalsın) */
+const V2_STATUS: Record<string, string> = {
+  PENDING_AVAILABILITY: 'PendingAvailability',
+  PENDING: 'Pending',
+  UNSHIPPED: 'Unshipped',
+  PARTIALLY_SHIPPED: 'PartiallyShipped',
+  SHIPPED: 'Shipped',
+  CANCELLED: 'Canceled',
+  UNFULFILLABLE: 'Unfulfillable',
+};
+/** Paket durumu (v2026 PackageStatus.status) → Türkçe */
+const PACKAGE_LABEL: Record<string, string> = {
+  PENDING: 'hazırlanıyor',
+  IN_TRANSIT: 'yolda',
+  SHIPPED: 'kargolandı',
+  DELIVERED: 'teslim edildi',
+  CANCELLED: 'iptal edildi',
+  UNDELIVERABLE: 'teslim edilemedi',
+};
+
 /**
- * Bileşik durum: API bağlıysa hesap 'connected'; mesajlaşma köprüsünün durumu ayrıntıya yazılır.
- * API hatası her zaman baskın (siparişler asıl kaynak). API 'connected' değilse köprü durumu görünmez.
+ * getMessagingActionsForOrder yanıtından kullanılabilir şablon adları (messaging.json): `_embedded.actions[].payload.name`,
+ * yoksa eylemin `_links.self|schema.name`'i, ayrıca `_links.actions[].name`. Sıra korunur, tekrarsız.
  */
-export function combineStatus(api: { status: AccountStatus; detail?: string }, bridge?: { status: AccountStatus; detail?: string }): { status: AccountStatus; detail?: string } {
-  if (api.status !== 'connected' || !bridge) return api;
-  switch (bridge.status) {
-    case 'pairing':
-      return { status: 'connected', detail: 'Alıcı mesajları için Seller Central girişi gerekli (Yeniden bağlan)' };
-    case 'error':
-      return { status: 'connected', detail: `Mesajlar: ${bridge.detail ?? 'hata'}` };
-    case 'connecting':
-      return { status: 'connected', detail: 'Mesajlar bağlanıyor…' };
-    case 'disconnected':
-      return { status: 'connected', detail: `Mesajlar kapalı${bridge.detail ? ` — ${bridge.detail}` : ''}` };
-    default:
-      return { status: 'connected', detail: api.detail };
+export function messagingActionNames(data: J): string[] {
+  const out = new Set<string>();
+  for (const a of Array.isArray(data?._embedded?.actions) ? (data._embedded.actions as J[]) : []) {
+    const n = a?.payload?.name ?? a?._links?.self?.name ?? a?._links?.schema?.name;
+    if (n) out.add(String(n));
   }
+  for (const l of Array.isArray(data?._links?.actions) ? (data._links.actions as J[]) : []) if (l?.name) out.add(String(l.name));
+  return [...out];
 }
 
-/** Köprü alt bileşeni: durumunu hesaba yazmak yerine bileşik connector'a bildirir (aynı Account nesnesi paylaşılır) */
-class MessagingBridge extends BrowserConnector {
-  constructor(
-    account: BaseConnector['account'],
-    store: Store,
-    host: string,
-    getLabel: () => string | undefined,
-    private readonly onStatus: (status: AccountStatus, detail?: string) => void,
-  ) {
-    super(account, store, makeAmazonMessaging(host, getLabel), 30_000);
-  }
-  protected override setStatus(status: AccountStatus, detail?: string): void {
-    this.onStatus(status, detail);
-  }
+const fixed2 = (n: number): string => (Math.round(n * 100) / 100).toFixed(2);
+
+/**
+ * Orders API v2026-01-01 sipariş nesnesi → v0 biçimi (AmazonOrderId, OrderStatus, OrderTotal, BuyerInfo, ShippingAddress…) +
+ * v0 biçiminde kalemler (Title, ASIN, SellerSKU, QuantityOrdered, ItemPrice = satır toplamı). `items` undefined: yanıtta kalem yok.
+ * Tüm paketler DELIVERED ise durum 'Delivered' (v2026'da sipariş düzeyinde teslim durumu yok).
+ */
+export function fromOrderV2(o: J): { order: J; items?: J[] } {
+  const f: J = o.fulfillment ?? {};
+  const list: J[] | undefined = Array.isArray(o.orderItems) ? o.orderItems : undefined;
+  const pkgs: J[] = Array.isArray(o.packages) ? o.packages : [];
+  let status = V2_STATUS[String(f.fulfillmentStatus ?? '')] ?? (f.fulfillmentStatus ? String(f.fulfillmentStatus) : 'Pending');
+  if (status === 'Shipped' && pkgs.length && pkgs.every((p) => p.packageStatus?.status === 'DELIVERED')) status = 'Delivered';
+  const sum = (k: 'quantityFulfilled' | 'quantityUnfulfilled'): number | undefined =>
+    list?.some((i) => i.fulfillment?.[k] != null) ? list.reduce((s, i) => s + (Number(i.fulfillment?.[k]) || 0), 0) : undefined;
+  const addr: J = o.recipient?.deliveryAddress ?? {};
+  const total: J | undefined = o.proceeds?.grandTotal;
+  const programs: string[] = Array.isArray(o.programs) ? o.programs : [];
+  const order: J = {
+    AmazonOrderId: o.orderId,
+    PurchaseDate: o.createdTime,
+    LastUpdateDate: o.lastUpdatedTime,
+    OrderStatus: status,
+    FulfillmentChannel: f.fulfilledBy === 'AMAZON' ? 'AFN' : f.fulfilledBy === 'MERCHANT' ? 'MFN' : undefined,
+    SalesChannel: o.salesChannel?.marketplaceName ?? o.salesChannel?.channelName,
+    MarketplaceId: o.salesChannel?.marketplaceId,
+    // v2026'da sipariş toplamı satıcı gelirinin toplamı (proceeds.grandTotal)
+    OrderTotal: total ? { CurrencyCode: total.currencyCode, Amount: total.amount } : undefined,
+    NumberOfItemsShipped: sum('quantityFulfilled'),
+    NumberOfItemsUnshipped: sum('quantityUnfulfilled'),
+    BuyerInfo: o.buyer ? { BuyerName: o.buyer.buyerName, BuyerEmail: o.buyer.buyerEmail } : undefined,
+    ShippingAddress: o.recipient?.deliveryAddress
+      ? {
+          Name: addr.name,
+          Phone: addr.phone,
+          AddressLine1: addr.addressLine1,
+          AddressLine2: addr.addressLine2,
+          AddressLine3: addr.addressLine3,
+          District: addr.districtOrCounty,
+          City: addr.city,
+          StateOrRegion: addr.stateOrRegion,
+          PostalCode: addr.postalCode,
+          CountryCode: addr.countryCode,
+        }
+      : undefined,
+    ShipmentServiceLevelCategory: f.fulfillmentServiceLevel,
+    IsPrime: programs.includes('PRIME'),
+    IsBusinessOrder: programs.includes('AMAZON_BUSINESS'),
+    LatestShipDate: f.shipByWindow?.latestDateTime,
+    EarliestDeliveryDate: f.deliverByWindow?.earliestDateTime,
+    LatestDeliveryDate: f.deliverByWindow?.latestDateTime,
+    Packages: pkgs.map((p) => ({ status: p.packageStatus?.status, carrier: p.carrier, trackingNumber: p.trackingNumber, shipTime: p.shipTime })),
+  };
+  const items = list?.map((i) => {
+    const qty = Number(i.quantityOrdered ?? 1) || 1;
+    const itemRow = (Array.isArray(i.proceeds?.breakdowns) ? i.proceeds.breakdowns : []).find((b: J) => b.type === 'ITEM')?.subtotal as J | undefined;
+    const unit: J | undefined = i.product?.price?.unitPrice;
+    const price: J | undefined = itemRow ?? (unit?.amount != null ? { amount: fixed2(Number(unit.amount) * qty), currencyCode: unit.currencyCode } : i.proceeds?.proceedsTotal);
+    return {
+      OrderItemId: i.orderItemId,
+      Title: i.product?.title,
+      ASIN: i.product?.asin,
+      SellerSKU: i.product?.sellerSku,
+      QuantityOrdered: qty,
+      ItemPrice: price ? { CurrencyCode: price.currencyCode, Amount: price.amount } : undefined,
+    };
+  });
+  return { order, items };
 }
 
 export class AmazonConnector extends BaseConnector {
-  /** sipariş sohbetleri açık mı (token JSON orders:true); kapalıysa yalnız müşteri soruları/mesajları */
+  /** sipariş sohbetleri açık mı (token JSON; varsayılan açık, ordersOff:true kapatır) */
   private ordersOn = false;
   private timer?: NodeJS.Timeout;
   private polling = false;
@@ -166,10 +304,12 @@ export class AmazonConnector extends BaseConnector {
   private readonly refreshToken: string;
   private readonly marketplace: Marketplace;
   private readonly endpoint: string;
-  private readonly messagingEnabled: boolean;
-  private bridge?: MessagingBridge;
-  private apiState: { status: AccountStatus; detail?: string } = { status: 'disconnected' };
-  private bridgeState?: { status: AccountStatus; detail?: string };
+  /** Eski yapılandırmada Seller Central köprüsü istenmişti (artık yok; bir kez bilgi yazılır) */
+  private readonly legacyMessaging: boolean;
+  /** Kullanılan Orders API sürümü: v2026-01-01; uç 404/403 verirse bu çalışmada v0 */
+  private ordersApi: 'v2026' | 'v0' = 'v2026';
+  /** v2026: BUYER/RECIPIENT (PII) istemek 403 verdi → PII'siz iste */
+  private noPii = false;
   /** LWA erişim belirteci (bellekte; 1 saat) */
   private token?: { access: string; expiresAt: number };
   /** sipariş id → son görülen durum imzası */
@@ -187,7 +327,11 @@ export class AmazonConnector extends BaseConnector {
     this.refreshToken = cfg.refreshToken;
     this.marketplace = cfg.marketplace;
     this.endpoint = ENDPOINTS[cfg.region];
-    this.messagingEnabled = cfg.messaging;
+    try {
+      this.legacyMessaging = (JSON.parse(config || '{}') as { messaging?: unknown }).messaging === true;
+    } catch {
+      this.legacyMessaging = false;
+    }
     this.stateFile = path.join(sessionDir(account.id), 'amazon-state.json');
     try {
       const st = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) as { seen?: Record<string, string>; since?: string };
@@ -247,7 +391,7 @@ export class AmazonConnector extends BaseConnector {
       }
       throw new AuthError('Amazon SP-API erişimi reddedildi (401) — Refresh Token geçersiz ya da uygulama yetkisi düşmüş');
     }
-    if (r.status === 403) throw new AuthError(`Amazon SP-API yetkisi yok (403): ${errMsg}`);
+    if (r.status === 403) throw new AuthError(`Amazon SP-API yetkisi yok (403): ${errMsg}`, 403);
     if (r.status === 429) {
       // Retry-After yoksa x-amzn-RateLimit-Limit (istek/sn) tersinden bekleme türet; 1–60 sn
       const rate = Number(r.headers.get('x-amzn-ratelimit-limit') ?? '') || 0;
@@ -259,30 +403,15 @@ export class AmazonConnector extends BaseConnector {
       }
       throw new Error(`Amazon istek limiti; ${wait} sn sonra yeniden dene`);
     }
-    if (!r.ok) throw new Error(`Amazon ${r.status} ${p.split('?')[0]}: ${errMsg}`);
+    if (!r.ok) throw new ApiError(`Amazon ${r.status} ${p.split('?')[0]}: ${errMsg}`, r.status);
     return { data, headers: r.headers };
   }
 
-  // ─────────── Durum birleştirme ───────────
-  private publish(): void {
-    if (this.stopping) return;
-    const { status, detail } = combineStatus(this.apiState, this.bridgeState);
-    super.setStatus(status, detail);
-  }
-  private setApiStatus(status: AccountStatus, detail?: string): void {
-    this.apiState = { status, detail };
-    this.publish();
-  }
-  private setBridgeStatus(status: AccountStatus, detail?: string): void {
-    this.bridgeState = { status, detail };
-    bus.log(status === 'error' ? 'warn' : 'info', `amazon/mesajlar: ${status}${detail ? ' — ' + detail : ''}`);
-    this.publish();
-  }
-
-  async start(opts: StartOptions = {}): Promise<void> {
+  async start(_opts: StartOptions = {}): Promise<void> {
     this.stopping = false;
-    if (!this.clientId || !this.clientSecret || !this.refreshToken) return this.setApiStatus('error', 'Amazon LWA Client ID / Client Secret / Refresh Token girilmedi');
-    this.setApiStatus('connecting');
+    if (!this.clientId || !this.clientSecret || !this.refreshToken) return this.setStatus('error', 'Amazon LWA Client ID / Client Secret / Refresh Token girilmedi');
+    if (this.legacyMessaging) bus.log('info', 'Amazon: Seller Central mesaj köprüsü kaldırıldı (Amazon ajan politikası); yalnız siparişler ve şablonlu mesajlar');
+    this.setStatus('connecting');
     try {
       await this.ensureToken();
       // Pazar yeri katılımları: kimliği doğrular, seçili pazar yeri hesapta yoksa uyarır (rol yoksa sessizce geç)
@@ -296,18 +425,13 @@ export class AmazonConnector extends BaseConnector {
       }
       if (!this.account.label || /^amazon$/i.test(this.account.label)) this.account.label = `Amazon.${this.marketplace.domain.replace(/^amazon\./, '')}`;
       await this.poll(true);
-      this.setApiStatus('connected', this.marketplace.country);
+      this.setStatus('connected', this.marketplace.country);
       if (this.timer) clearInterval(this.timer);
       // poll AuthError'u yeniden fırlatır (durumu zaten 'error' yapıp zamanlayıcıyı durdurur): burada yutulur, söz reddi yakalanmamış kalmasın
-      this.timer = setInterval(() => void this.poll(false).catch(() => undefined), POLL_MS);
+      // aralık ilk yoklamada seçilen sürümün hız sınırına göre
+      this.timer = setInterval(() => void this.poll(false).catch(() => undefined), this.ordersApi === 'v0' ? POLL_MS_V0 : POLL_MS_V2);
     } catch (e) {
-      this.setApiStatus('error', (e as Error).message.split('\n')[0]);
-      return;
-    }
-    // Mesajlaşma köprüsü: kullanıcı girişi (interactive) dakikalar sürebilir, start'ı bekletmesin
-    if (this.messagingEnabled && !this.stopping) {
-      this.bridge ??= new MessagingBridge(this.account, this.store, this.marketplace.host, () => this.account.label, (s, d) => this.setBridgeStatus(s, d));
-      void this.bridge.start(opts).catch((e) => this.setBridgeStatus('error', (e as Error).message.split('\n')[0]));
+      this.setStatus('error', (e as Error).message.split('\n')[0]);
     }
   }
 
@@ -315,22 +439,39 @@ export class AmazonConnector extends BaseConnector {
     this.stopping = true;
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
-    await this.bridge?.stop().catch(() => undefined);
-    this.bridgeState = undefined;
-    this.apiState = { status: 'disconnected' };
     this.setStatus('disconnected');
   }
 
   // ─────────── Sipariş yoklama ───────────
-  private ordersQuery(first: boolean): string {
+  /** İlk yoklama (ya da imleç yoksa) oluşturma zamanına göre 90 gün; sonra son yoklama − 5 dk'dan beri değişenler */
+  private window(first: boolean): { created?: string; updated?: string } {
+    if (first || !this.since) return { created: new Date(Date.now() - FIRST_WINDOW_MS).toISOString() };
+    return { updated: new Date((Date.parse(this.since) || Date.now()) - 5 * 60_000).toISOString() };
+  }
+
+  // v0 (yedek) — CreatedAfter ve LastUpdatedAfter birlikte verilemez
+  private ordersQueryV0(first: boolean): string {
     const q = new URLSearchParams({ MarketplaceIds: this.marketplace.id, MaxResultsPerPage: '100' });
-    // CreatedAfter ve LastUpdatedAfter birlikte verilemez; ilk yoklama 14 gün, sonra son yoklama − 5 dk
-    if (first || !this.since) q.set('CreatedAfter', new Date(Date.now() - FIRST_WINDOW_MS).toISOString());
-    else q.set('LastUpdatedAfter', new Date((Date.parse(this.since) || Date.now()) - 5 * 60_000).toISOString());
+    const w = this.window(first);
+    if (w.created) q.set('CreatedAfter', w.created);
+    else q.set('LastUpdatedAfter', w.updated!);
     return `/orders/v0/orders?${q.toString()}`;
   }
 
-  private async fetchItems(orderId: string): Promise<J[]> {
+  private async searchV0(first: boolean): Promise<J[]> {
+    const orders: J[] = [];
+    let url: string | undefined = this.ordersQueryV0(first);
+    for (let page = 0; url && page < 10; page++) {
+      const { data } = await this.api('GET', url);
+      const list: J[] = Array.isArray(data.payload?.Orders) ? data.payload.Orders : [];
+      orders.push(...list);
+      const next: string | undefined = data.payload?.NextToken || undefined;
+      url = next && list.length ? `/orders/v0/orders?MarketplaceIds=${encodeURIComponent(this.marketplace.id)}&NextToken=${encodeURIComponent(next)}` : undefined;
+    }
+    return orders;
+  }
+
+  private async fetchItemsV0(orderId: string): Promise<J[]> {
     const items: J[] = [];
     let next: string | undefined;
     for (let page = 0; page < 3; page++) {
@@ -344,36 +485,88 @@ export class AmazonConnector extends BaseConnector {
     return items;
   }
 
+  private includedV2(): string {
+    return (this.noPii ? INCLUDED_V2_NO_PII : INCLUDED_V2).join(',');
+  }
+
+  /**
+   * v2026 searchOrders: aynı süzgeç + paginationToken ile sayfalar (≤10). İlk sayfada 403 → önce PII'siz bir kez; yine 403
+   * ya da 404 → V2Unavailable (çağıran v0'a döner).
+   */
+  private async searchV2(first: boolean): Promise<Array<{ order: J; items?: J[] }>> {
+    const w = this.window(first);
+    const out: Array<{ order: J; items?: J[] }> = [];
+    let token: string | undefined;
+    for (let page = 0; page < 10; ) {
+      const q = new URLSearchParams({ marketplaceIds: this.marketplace.id, maxResultsPerPage: '100' });
+      if (w.created) q.set('createdAfter', w.created);
+      else q.set('lastUpdatedAfter', w.updated!);
+      q.set('includedData', this.includedV2());
+      if (token) q.set('paginationToken', token);
+      let data: J;
+      try {
+        ({ data } = await this.api('GET', `${ORDERS_V2}?${q.toString()}`));
+      } catch (e) {
+        const st = statusOf(e);
+        if (st === 403 && !this.noPii) {
+          this.noPii = true;
+          bus.log('info', 'Amazon: alıcı/teslimat bilgisi (PII) rolü yok; siparişler alıcı bilgisi olmadan alınıyor');
+          continue; // aynı sayfa PII'siz
+        }
+        if (page === 0 && !token && (st === 403 || st === 404)) throw new V2Unavailable((e as Error).message);
+        throw e;
+      }
+      const list: J[] = Array.isArray(data.orders) ? data.orders : [];
+      for (const o of list) out.push(fromOrderV2(o));
+      token = data.pagination?.nextToken || undefined;
+      page++;
+      if (!token || !list.length) break;
+    }
+    return out;
+  }
+
+  /** v2026 getOrder: kalemler dahil tek sipariş (arama yanıtında kalem yoksa) */
+  private async getOrderV2(orderId: string): Promise<J[] | undefined> {
+    const { data } = await this.api('GET', `${ORDERS_V2}/${encodeURIComponent(orderId)}?includedData=${encodeURIComponent(this.includedV2())}`);
+    return data.order ? fromOrderV2(data.order).items : undefined;
+  }
+
+  /** Sürüme göre siparişleri (v0 biçiminde) ve varsa kalemlerini getir */
+  private async fetchOrders(first: boolean): Promise<Array<{ order: J; items?: J[] }>> {
+    if (this.ordersApi === 'v2026') {
+      try {
+        return await this.searchV2(first);
+      } catch (e) {
+        if (!(e instanceof V2Unavailable)) throw e;
+        this.ordersApi = 'v0';
+        bus.log('warn', `Amazon Orders API 2026-01-01 kullanılamadı (${e.message.slice(0, 120)}); eski v0 uçlarına dönülüyor (v0 27 Mart 2027'de kapanacak — uygulamanın Orders rolünü denetle)`);
+      }
+    }
+    return (await this.searchV0(first)).map((order) => ({ order }));
+  }
+
   private async poll(first: boolean): Promise<void> {
     if (this.polling || this.stopping) return;
     this.polling = true;
     if (!this.ordersOn) {
       this.polling = false;
-      return; // sipariş sohbetleri kapalı: yalnız mesajlaşma köprüsü çalışır
+      return; // sipariş sohbetleri kapalı
     }
     const startedAt = new Date().toISOString();
     try {
-      const orders: J[] = [];
-      let url: string | undefined = this.ordersQuery(first);
-      for (let page = 0; url && page < 10; page++) {
-        const { data } = await this.api('GET', url);
-        const list: J[] = Array.isArray(data.payload?.Orders) ? data.payload.Orders : [];
-        orders.push(...list);
-        const next: string | undefined = data.payload?.NextToken || undefined;
-        url = next && list.length ? `/orders/v0/orders?MarketplaceIds=${encodeURIComponent(this.marketplace.id)}&NextToken=${encodeURIComponent(next)}` : undefined;
-      }
+      const orders = await this.fetchOrders(first);
       // eskiden yeniye: sohbet sırası ve "canlı" bildirimler doğru olsun
-      orders.sort((a, b) => (Date.parse(a.PurchaseDate ?? '') || 0) - (Date.parse(b.PurchaseDate ?? '') || 0));
-      // kalemler: ilk yoklamada en yeni 30 sipariş, sonrasında yalnız daha önce görülmemiş siparişler (getOrderItems 0.5/sn)
-      const fresh = orders.filter((o) => !this.seen.has(String(o.AmazonOrderId)));
-      const withItems = new Set((first ? fresh.slice(-ITEMS_FIRST_MAX) : fresh).map((o) => String(o.AmazonOrderId)));
+      orders.sort((a, b) => (Date.parse(a.order.PurchaseDate ?? '') || 0) - (Date.parse(b.order.PurchaseDate ?? '') || 0));
+      // ayrı kalem isteği (v0 getOrderItems 0.5/sn; v2026 yalnız yanıtta kalem yoksa getOrder): ilk yoklamada en yeni 30, sonra yalnız yeniler
+      const fresh = orders.filter((x) => !x.items && !this.seen.has(String(x.order.AmazonOrderId)));
+      const withItems = new Set((first ? fresh.slice(-ITEMS_FIRST_MAX) : fresh).map((x) => String(x.order.AmazonOrderId)));
       let changed = 0;
-      for (const o of orders) {
+      for (const { order: o, items: got } of orders) {
         const id = String(o.AmazonOrderId ?? '');
         if (!id) continue;
-        let items: J[] | undefined;
-        if (withItems.has(id)) {
-          items = await this.fetchItems(id).catch((e) => {
+        let items: J[] | undefined = got;
+        if (!items && withItems.has(id)) {
+          items = await (this.ordersApi === 'v0' ? this.fetchItemsV0(id) : this.getOrderV2(id)).catch((e) => {
             if (e instanceof AuthError) throw e;
             bus.log('warn', `Amazon kalemler ${id}: ${(e as Error).message}`);
             return undefined;
@@ -389,7 +582,7 @@ export class AmazonConnector extends BaseConnector {
       if (e instanceof AuthError) {
         if (this.timer) clearInterval(this.timer);
         this.timer = undefined;
-        if (!first) this.setApiStatus('error', e.message);
+        if (!first) this.setStatus('error', e.message);
         throw e;
       }
       bus.log('warn', `Amazon yoklama: ${(e as Error).message}`);
@@ -414,7 +607,10 @@ export class AmazonConnector extends BaseConnector {
     const id = String(o.AmazonOrderId);
     const remoteChatId = `order-${id}`;
     const status: string = o.OrderStatus ?? 'Pending';
-    const sig = JSON.stringify([status, o.NumberOfItemsShipped ?? 0, o.NumberOfItemsUnshipped ?? 0, o.FulfillmentChannel ?? '']);
+    const pkgs: J[] = Array.isArray(o.Packages) ? o.Packages : [];
+    const base = [status, o.NumberOfItemsShipped ?? 0, o.NumberOfItemsUnshipped ?? 0, o.FulfillmentChannel ?? ''];
+    // paket/takip bilgisi (v2026) yalnız varsa imzaya girer: v0 imzaları eskisiyle aynı kalır
+    const sig = JSON.stringify(pkgs.length ? [...base, pkgs.map((p) => [p.status ?? '', p.trackingNumber ?? ''])] : base);
     const prev = this.seen.get(id);
     if (prev === sig) return false;
     this.seen.set(id, sig);
@@ -466,7 +662,9 @@ export class AmazonConnector extends BaseConnector {
           totals: { total },
           items: metaItems,
           shipping: { name: ship.Name || customer, phone, email, address, service: o.ShipServiceLevel ?? o.ShipmentServiceLevelCategory ?? undefined },
-          fulfillments: [{ status: channel ? `${STATUS_LABEL[status] ?? status} · ${channel}` : STATUS_LABEL[status] ?? status, company: o.FulfillmentChannel ?? undefined, date: o.LastUpdateDate }],
+          fulfillments: pkgs.length
+            ? pkgs.map((p) => ({ status: PACKAGE_LABEL[p.status] ?? p.status ?? STATUS_LABEL[status] ?? status, company: p.carrier ?? undefined, trackingNumber: p.trackingNumber ?? undefined, date: p.shipTime ?? o.LastUpdateDate }))
+            : [{ status: channel ? `${STATUS_LABEL[status] ?? status} · ${channel}` : STATUS_LABEL[status] ?? status, company: o.FulfillmentChannel ?? undefined, date: o.LastUpdateDate }],
           refunds: [],
           fulfillmentChannel: o.FulfillmentChannel,
           salesChannel: o.SalesChannel,
@@ -509,16 +707,13 @@ export class AmazonConnector extends BaseConnector {
     return remoteChatId.startsWith('order-');
   }
 
-  /** Sipariş sohbetine yazılan metin yerel not (Amazon'da serbest metin şablonsuz gönderilemez); köprü sohbeti köprüye gider */
+  /** Sipariş sohbetine yazılan metin yerel not (Amazon'da serbest metin şablonsuz gönderilemez; alıcı mesajı okuma/yanıt ucu yok) */
   async sendText(remoteChatId: string, text: string): Promise<{ remoteId: string }> {
-    if (this.isOrder(remoteChatId)) {
-      bus.log('warn', `Amazon ${remoteChatId}: serbest metin şablonsuz gönderilemez; sağ panelden şablonla gönder (yerel not olarak kaydedildi)`);
-      const id = `note-${Date.now()}`;
-      this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben (yerel not)', fromMe: true, text: `📝 ${text}`, ts: Date.now(), status: 'sent' });
-      return { remoteId: id };
-    }
-    if (!this.bridge) throw new Error('Amazon mesajlaşma köprüsü kapalı (yapılandırmada messaging: false)');
-    return this.bridge.sendText(remoteChatId, text);
+    if (!this.isOrder(remoteChatId)) throw new Error('Amazon alıcı mesajları desteklenmiyor (resmi API yok); sipariş sohbetinden şablonla gönder');
+    bus.log('warn', `Amazon ${remoteChatId}: serbest metin şablonsuz gönderilemez; sağ panelden şablonla gönder (yerel not olarak kaydedildi)`);
+    const id = `note-${Date.now()}`;
+    this.upsertMessage({ remoteChatId, remoteId: id, senderId: 'me', senderName: 'Ben (yerel not)', fromMe: true, text: `📝 ${text}`, ts: Date.now(), status: 'sent' });
+    return { remoteId: id };
   }
 
   /**
@@ -533,7 +728,7 @@ export class AmazonConnector extends BaseConnector {
     const kind = String(payload.kind ?? '');
     if (kind === 'actions') {
       const { data } = await this.api('GET', `/messaging/v1/orders/${encodeURIComponent(id)}?${mp}`);
-      const actions: string[] = (Array.isArray(data._embedded?.actions) ? data._embedded.actions : []).map((a: J) => String(a.name ?? a._links?.schema?.name ?? '')).filter(Boolean);
+      const actions = messagingActionNames(data);
       const existing = this.store.getChat(chatId(this.account.id, remoteChatId));
       const order = (existing?.meta?.order as J | undefined) ?? { id };
       this.upsertChat({ remoteId: remoteChatId, name: existing?.name ?? `#${id}`, meta: { ...(existing?.meta ?? {}), order: { ...order, messagingActions: actions } } });
@@ -551,24 +746,5 @@ export class AmazonConnector extends BaseConnector {
     if (Array.isArray(data.errors) && data.errors.length) throw new Error(`Amazon mesaj: ${String(data.errors[0].message ?? data.errors[0].code)}`);
     const now = Date.now();
     this.upsertMessage({ remoteChatId, remoteId: `msg-${type}-${now}`, senderId: 'me', senderName: 'Ben', fromMe: true, text: `✉️ [${tpl.label}] ${text}`, ts: now, status: 'sent' });
-  }
-
-  async sendMedia(remoteChatId: string, file: { path: string; name: string; mime: string; size: number }, caption?: string): Promise<{ remoteId: string }> {
-    if (this.isOrder(remoteChatId) || !this.bridge) throw new Error('Bu sohbette dosya gönderme desteklenmiyor');
-    return this.bridge.sendMedia(remoteChatId, file, caption);
-  }
-
-  async markRead(remoteChatId: string): Promise<void> {
-    if (this.isOrder(remoteChatId) || !this.bridge) return;
-    await this.bridge.markRead(remoteChatId);
-  }
-
-  async loadHistory(remoteChatId: string, limit = 50, before?: number): Promise<void> {
-    if (this.isOrder(remoteChatId) || !this.bridge) return;
-    await this.bridge.loadHistory(remoteChatId, limit, before);
-  }
-
-  async fetchMedia(url: string): Promise<{ body: Buffer; type: string } | undefined> {
-    return this.bridge?.fetchMedia(url);
   }
 }

@@ -1,10 +1,9 @@
 import { mediaUrl } from './desktop';
 import { publicAsset } from './demo-asset';
-import { useEffect, useState, type InputHTMLAttributes, type MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useId, useMemo, useState, type InputHTMLAttributes, type MouseEvent as ReactMouseEvent } from 'react';
 import type { ReactNode } from 'react';
 import { PLATFORMS, TAG_COLORS, type Platform } from './types';
-import { siWhatsapp, siTelegram, siX, siInstagram, siMessenger, siTiktok, siGmail, siIcloud, siShopify } from 'simple-icons';
-import { faSlack, faLinkedinIn, faMicrosoft, faYahoo, faYandex } from '@fortawesome/free-brands-svg-icons';
+import { BRAND_MARKUP } from './brand-icons';
 
 const PATHS: Record<string, ReactNode> = {
   search: (<><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></>),
@@ -53,6 +52,9 @@ const PATHS: Record<string, ReactNode> = {
   copy: (<><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V6a2 2 0 0 1 2-2h9" /></>),
   play: (<path d="M7 4.5v15l13-7.5z" />),
   external: (<><path d="M14 4h6v6" /><path d="M20 4 10 14" /><path d="M18 13v6H5V6h6" /></>),
+  // tam ekran / küçült: köşelere dört ok (uygulamalardaki standart "expand" simgesi)
+  maximize: (<><path d="M15 3h6v6M21 3l-7 7" /><path d="M9 21H3v-6M3 21l7-7" /><path d="M21 15v6h-6M21 21l-7-7" /><path d="M3 9V3h6M3 3l7 7" /></>),
+  minimize: (<><path d="M14 4v6h6M14 10l7-7" /><path d="M10 20v-6H4M10 14l-7 7" /><path d="M14 20v-6h6M14 14l7 7" /><path d="M10 4v6H4M10 10 3 3" /></>),
   mic: (<><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0" /><path d="M12 18v3" /></>),
   dots: (<><circle cx="5" cy="12" r="1.3" /><circle cx="12" cy="12" r="1.3" /><circle cx="19" cy="12" r="1.3" /></>),
   smile: (<><circle cx="12" cy="12" r="9" /><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0" /><path d="M9 9.5h.01M15 9.5h.01" /></>),
@@ -149,87 +151,41 @@ export function Icon({ name, size = 16, color = 'currentColor', sw = 1.8 }: { na
 }
 
 /**
- * Marka simgeleri — her platformun kendi kullanım kurallarına göre:
- * - WhatsApp: yeşil zemin üzerinde beyaz, değiştirilmemiş glif; "WhatsApp" yazımı korunur.
- * - Telegram: mavi zemin üzerinde beyaz.
- * - Instagram: renkli zeminde yalnızca beyaz glif; zemin resmi gradyan (düz renk yasak).
- * - Messenger: resmi gradyan üzerinde beyaz.
- * - X: yalnızca siyah/beyaz; her yanda glif genişliği kadar boşluk (glif küçük tutulur).
- * - Slack / LinkedIn: logolar üçüncü taraf paketlerde dağıtılamaz; resmi SVG'yi /brands/ altına koyarsan
- *   beyaz zeminde, LinkedIn için en az 21px olarak gösterilir. Yoksa harf rozeti.
- * - iMessage: Apple, uygulama simgelerinin üçüncü taraflarca kullanımına izin vermez; kendi nötr balon simgemiz.
- * Hiçbir logo 18px altında çizilmez (küçük yerlerde rozet otomatik büyür).
+ * Marka simgeleri: her uygulamanın ORİJİNAL simgesi, arayüzün her yerinde aynı bileşen (Chip). Kaynak landing sayfasındaki
+ * "21 uygulama" simgeleri (brand-icons.ts, 64×64); Trendyol / n11 / Shopier markanın kendi PNG'si (public/brands), Yandex
+ * resmi "Я" işareti marka kırmızısında. Hiçbir logo 18px altında çizilmez (küçük yerlerde rozet otomatik büyür).
  */
-type Brand = { path: string; bg: string; ratio: number; min?: number; vb?: string; layers?: Array<{ fill: string; dx: number; dy: number }> };
-// Slack ve LinkedIn simple-icons'ta yok; Font Awesome Free (CC BY 4.0) marka setinden.
-const fa = (i: { icon: [number, number, unknown, unknown, string | string[]] }) => ({ path: Array.isArray(i.icon[4]) ? i.icon[4].join(' ') : i.icon[4], vb: `0 0 ${i.icon[0]} ${i.icon[1]}` });
-
-const BRAND: Partial<Record<Platform, Brand>> = {
-  whatsapp: { path: siWhatsapp.path, bg: '#25D366', ratio: 0.62 },
-  telegram: { path: siTelegram.path, bg: '#26A5E4', ratio: 0.62 },
-  instagram: { path: siInstagram.path, bg: 'linear-gradient(45deg, #FFD600 0%, #FF7A00 25%, #FF0069 50%, #D300C5 75%, #7638FA 100%)', ratio: 0.6 },
-  messenger: { path: siMessenger.path, bg: 'linear-gradient(45deg, #0099FF 0%, #A033FF 40%, #FF5280 75%, #FF7061 100%)', ratio: 0.62 },
-  x: { path: siX.path, bg: '#000000', ratio: 0.45 },
-  // TikTok: siyah zeminde nota; resmi simgedeki gibi camgöbeği / kırmızı kaymalı katmanlar, üstte beyaz
-  tiktok: { path: siTiktok.path, bg: '#000000', ratio: 0.56, layers: [{ fill: '#25F4EE', dx: -0.7, dy: -0.7 }, { fill: '#FE2C55', dx: 0.7, dy: 0.7 }] },
-  // Slack: tek renkli logo, resmi aubergine zemin üzerinde beyaz (marka kılavuzunun izin verdiği kullanım)
-  slack: { ...fa(faSlack), bg: '#4A154B', ratio: 0.6 },
-  // LinkedIn: "in" logosu, resmi mavi (#0A66C2) zemin üzerinde beyaz
-  linkedin: { ...fa(faLinkedinIn), bg: '#0A66C2', ratio: 0.58 },
-  // E-posta sağlayıcıları
-  gmail: { path: siGmail.path, bg: '#EA4335', ratio: 0.6 },
-  outlook: { ...fa(faMicrosoft), bg: '#0F6CBD', ratio: 0.52 },
-  yahoo: { ...fa(faYahoo), bg: '#6001D2', ratio: 0.58 },
-  yandex: { ...fa(faYandex), bg: '#FC3F1D', ratio: 0.5 },
-  icloud: { path: siIcloud.path, bg: '#3693F3', ratio: 0.62 },
-  // Shopify: PNG'nin beyaz zemini yerine marka yeşilinde beyaz çanta (diğer alışveriş simgeleri gibi dolu kare)
-  shopify: { path: siShopify.path, bg: '#7AB55C', ratio: 0.62 },
-};
 const MIN_BRAND = 18;
 
-/** Alışveriş kanalları: harf rozeti yerine markanın kendi ikonu. */
-const SHOP_ICON: Partial<Record<Platform, { src: string; fit: 'cover' | 'contain' }>> = {
-  shopier: { src: '/brands/shopier.png', fit: 'cover' },
-  trendyol: { src: '/brands/trendyol.png', fit: 'cover' },
-  hepsiburada: { src: '/brands/hepsiburada.png', fit: 'cover' },
-  n11: { src: '/brands/n11.png', fit: 'cover' },
-  etsy: { src: '/brands/etsy.png', fit: 'cover' },
-  amazon: { src: '/brands/amazon.png', fit: 'cover' },
+/** Markanın kendi PNG simgesi olan kanallar (SVG karşılığı yok) */
+const PNG_ICON: Partial<Record<Platform, string>> = {
+  shopier: '/brands/shopier.png',
+  trendyol: '/brands/trendyol.png',
+  n11: '/brands/n11.png',
 };
 
 export function Chip({ platform, size = 18, ring }: { platform: Platform; size?: number; ring?: string }) {
   const p = PLATFORMS[platform];
-  const brand = BRAND[platform];
-  const shopIcon = SHOP_ICON[platform];
-  const [shopFailed, setShopFailed] = useState(false);
-  useEffect(() => setShopFailed(false), [platform]);
+  const png = PNG_ICON[platform];
+  const [pngFailed, setPngFailed] = useState(false);
+  useEffect(() => setPngFailed(false), [platform]);
+  // gradyan/kırpma kimlikleri örnek başına eşsiz: aynı simge birden çok kez (gizli öğede de) çizilince tanımlar karışmasın
+  const uid = useId().replace(/[^a-zA-Z0-9_-]/g, '');
+  const markup = BRAND_MARKUP[platform];
+  const html = useMemo(() => markup?.replace(/id="([^"]+)"/g, `id="$1-${uid}"`).replace(/url\(#([^)]+)\)/g, `url(#$1-${uid})`), [markup, uid]);
   const s = Math.max(size, MIN_BRAND);
   const base = { width: s, height: s, borderRadius: s * 0.3, boxShadow: ring ? `0 0 0 2px ${ring}` : undefined, overflow: 'hidden' as const };
-  if (shopIcon && !shopFailed) {
+  if (png && !pngFailed) {
     return (
-      <span className="plat" title={p.name} style={{ ...base, background: 'transparent' }}>
-        <img src={publicAsset(shopIcon.src.replace(/^\//, ''))} alt="" width={s} height={s} draggable={false} style={{ width: s, height: s, objectFit: shopIcon.fit, display: 'block' }} onError={() => setShopFailed(true)} />
+      <span className={`plat plat-${platform}`} title={p.name} style={{ ...base, background: 'transparent' }}>
+        <img src={publicAsset(png.replace(/^\//, ''))} alt="" width={s} height={s} draggable={false} style={{ width: s, height: s, objectFit: 'cover', display: 'block' }} onError={() => setPngFailed(true)} />
       </span>
     );
   }
-  if (brand) {
-    const inner = Math.round(s * brand.ratio);
+  if (html) {
     return (
-      <span className={`plat plat-${platform}`} title={p.name} style={{ ...base, background: brand.bg }}>
-        <svg width={inner} height={inner} viewBox={brand.vb ?? "0 0 24 24"} aria-hidden="true" style={{ overflow: 'visible' }}>
-          {brand.layers?.map((l) => <path key={l.fill} d={brand.path} fill={l.fill} transform={`translate(${l.dx} ${l.dy})`} />)}
-          <path d={brand.path} fill="#fff" />
-        </svg>
-      </span>
-    );
-  }
-  if (platform === 'imessage') {
-    return (
-      // Apple Mesajlar simgesi gibi: yeşil degrade zemin + dolu beyaz balon (kuyruk sol altta)
-      <span className="plat" title={p.name} style={{ ...base, background: 'linear-gradient(180deg, #65f97c 0%, #0cc723 100%)' }}>
-        <svg width={Math.round(s * 0.72)} height={Math.round(s * 0.72)} viewBox="0 0 24 24" aria-hidden="true">
-          <path fill="#fff" d="M12 3.2c-5.3 0-9.6 3.55-9.6 7.95 0 2.55 1.45 4.8 3.7 6.25-.2 1.25-.85 2.4-1.9 3.3 2 .05 3.8-.6 5.15-1.8.85.15 1.75.25 2.65.25 5.3 0 9.6-3.55 9.6-7.95S17.3 3.2 12 3.2z" />
-        </svg>
+      <span className={`plat plat-${platform}`} title={p.name} style={base}>
+        <svg width={s} height={s} viewBox="0 0 64 64" aria-hidden="true" style={{ display: 'block' }} dangerouslySetInnerHTML={{ __html: html }} />
       </span>
     );
   }

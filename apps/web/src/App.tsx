@@ -7,7 +7,7 @@ import { clearOpening as clearOpeningFor, markOpening, useLoginOpening } from '.
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { applyAccount, applyRead, mergeAccountsSnapshot, mergeChatsSnapshot, mergeFresh, newTouched, type Touched } from './sync-merge';
 import { api, connectEvents } from './api';
-import { PLATFORMS, ORDER_Q_PLATFORMS, isOrderPage, questionOrderRef, shopKind, shopPending, shopTabOf, type Account, type Chat, type ChatFlags, type CoreEvent, type Message, type Platform, type ShopTab, DEFAULT_TAGS } from './types';
+import { MAIL_LOGIN_WHO, PLATFORMS, ORDER_Q_PLATFORMS, isOrderPage, questionOrderRef, shopKind, shopPending, shopTabOf, type Account, type Chat, type ChatFlags, type CoreEvent, type Message, type Platform, type ShopTab, DEFAULT_TAGS } from './types';
 import { Avatar, Chip, Icon, IconText, stripLeadIcon, Logo, Resizer, SyncBar, syncPercent, Tag, ago, fmtTime, loadPaneSizes, useClosing } from './ui';
 import { Conversation, REACT_TEXT, refreshScheduled, startScheduledSends, statusIcon } from './Conversation';
 import { ConnectModal } from './Connect';
@@ -1664,9 +1664,13 @@ export default function App() {
                     // Bağlan: bu hesabın formu, e-posta adresi dolu gelir; kaydedince var olan hesap güncellenip yeniden bağlanır
                     setConnectFocus(`edit:${a.id}`);
                     setConnectOpen(true);
-                  } else if (is.action === 'panelOnly') {
+                  } else if (is.action === 'mailLogin') {
+                    // sağlayıcının giriş penceresi hemen açılır (uygulama şifreli eski hesap da tarayıcı girişine geçer); panel durumu gösterir
                     setConnectFocus(a.id);
                     setConnectOpen(true);
+                    notify(is.done);
+                    markOpening(a.id, is.done);
+                    api.restartAccount(a.id, { browserLogin: true }).catch((e) => (clearOpeningFor(a.id), notify(e.message, true)));
                   } else if (is.action === 'panel') {
                     setConnectFocus(a.id);
                     setConnectOpen(true);
@@ -1957,35 +1961,35 @@ function statusText(s: Account['status']): string {
  * Geçici 'connecting' uyarı sayılmaz. attention (bağlı ama PIN vb. bekliyor) önce gelir.
  */
 /** Giriş bilgisi reddi (yanlış/süresi dolmuş şifre, geçersiz API anahtarı): aynı bilgiyle yeniden denemek işe yaramaz */
-const AUTH_FAIL = /giriş reddedildi|uygulama şifresi|şifre|parola|kimlik doğrulama|yetkisiz|unauthori[sz]ed|invalid (credentials|api ?key|token)|authenticationfailed|login failed|auth(entication)? failed|\b40[13]\b|api anahtar/i;
-/** Bilgileri Bağlan formundan yeniden girilebilen (şifre/API anahtarıyla bağlanan) kanallar */
-const credentialForm = (a: Account) => {
-  const p = PLATFORMS[a.platform];
-  return p.mode === 'mail' || p.category === 'shop' || ((a.platform === 'gmail' || a.platform === 'icloud' || a.platform === 'yahoo') && /uygulama şifresi|giriş reddedildi/i.test(a.detail ?? ''));
-};
+const AUTH_FAIL = /giriş reddedildi|uygulama şifresi|şifre|parola|kimlik doğrulama|yetkisiz|unauthori[sz]ed|invalid (credentials|api ?key|token)|authenticationfailed|login failed|auth(entication)? failed|\b40[13]\b|api anahtar|kimlik bilgileri|gizli anahtar|servis anahtar/i;
+/** API bilgileri Bağlan formundan yeniden girilebilen kanallar (yalnız pazaryerleri; başka hiçbir uygulamada şifre formu yok) */
+const credentialForm = (a: Account) => PLATFORMS[a.platform].category === 'shop';
+/** Sessiz yeniden deneme yetmeyen, hata olunca Bağlan paneli açılan kanallar: pazaryerleri + eski IMAP (Diğer e-posta) hesabı */
+const panelChannel = (a: Account) => credentialForm(a) || PLATFORMS[a.platform].mode === 'mail';
 
-function accountIssue(a: Account): { title: string; how: string; label: string; action: 'reconnect' | 'connect' | 'credentials' | 'panel' | 'panelOnly'; done: string } | null {
+function accountIssue(a: Account): { title: string; how: string; label: string; action: 'reconnect' | 'connect' | 'credentials' | 'panel' | 'mailLogin'; done: string } | null {
   const name = PLATFORMS[a.platform].name;
   const browser = PLATFORMS[a.platform].mode === 'browser';
   const detail = (a.detail ?? '').replace(/\s+/g, ' ').trim();
   // geçici kopma: çekirdek arka planda kendiliğinden yeniden deniyor (registry heal) — denemeler bitmeden uyarı yok
   if (a.autoRetry && a.status !== 'connected') return null;
   // Şifre/anahtar reddedildiyse "Yeniden bağlan" aynı bilgiyle tekrar dener ve sessizce yine düşer → bilgileri güncelleme formunu aç
-  // Yahoo: uygulama şifresi reddedildi (Yahoo birçok hesapta kapattı) → tarayıcı girişi. Aynı şifreyle yeniden deneme yok (kilitlenme riski)
-  // Yandex: aynı — uygulama şifresi yerine normal şifreyle tarayıcı girişi
-  if ((a.platform === 'yahoo' || a.platform === 'yandex') && (a.status === 'error' || a.status === 'disconnected') && AUTH_FAIL.test(detail))
+  // E-posta (Gmail/Outlook/Yahoo/Yandex/iCloud) giriş reddi: eski uygulama şifresi yolu bırakılır, sağlayıcının kendi giriş penceresi açılır.
+  // Aynı şifreyle yeniden deneme yok (kilitlenme riski); şifre Mivelo'ya yazılmaz.
+  const who = MAIL_LOGIN_WHO[a.platform];
+  if (who && (a.status === 'error' || a.status === 'disconnected') && AUTH_FAIL.test(detail))
     return {
-      title: `${a.platform === 'yahoo' ? 'Yahoo' : 'Yandex'} uygulama şifresini kabul etmedi`,
-      how: `Uygulama şifresine gerek yok: açılan panelde “${a.platform === 'yahoo' ? 'Yahoo' : 'Yandex'} ile giriş yap” de; normal şifrenle bir kez giriş yapman yeterli.`,
-      label: `${a.platform === 'yahoo' ? 'Yahoo' : 'Yandex'} ile giriş yap`,
-      action: 'panelOnly',
-      done: '',
+      title: `${name} girişi yenilenmeli`,
+      how: `Aşağıdaki düğmeye bas; açılan ${who} penceresinde hesabına giriş yap. Giriş algılanınca pencere kendiliğinden kapanır.`,
+      label: `${who} ile giriş yap`,
+      action: 'mailLogin',
+      done: `${who} giriş penceresi açılıyor`,
     };
   if ((a.status === 'error' || a.status === 'pairing' || a.status === 'disconnected') && credentialForm(a) && AUTH_FAIL.test(detail))
     return {
-      title: 'Giriş bilgileri reddedildi',
-      how: PLATFORMS[a.platform].category === 'shop' ? `${name} API bilgilerini kontrol edip yeniden gir.` : `${name} şifreyi kabul etmedi. Yeni bir uygulama şifresi oluşturup gir (normal hesap şifresi çoğu zaman kabul edilmez).`,
-      label: PLATFORMS[a.platform].category === 'shop' ? 'Bilgileri güncelle' : 'Şifreyi güncelle',
+      title: 'API bilgileri reddedildi',
+      how: `${name} API entegrasyon bilgilerini satıcı panelinden kontrol edip yeniden gir.`,
+      label: 'API bilgilerini güncelle',
       action: 'credentials',
       done: '',
     };
@@ -2012,10 +2016,10 @@ function accountIssue(a: Account): { title: string; how: string; label: string; 
       done: `${name} giriş penceresi açılıyor`,
     };
   }
-  // Şifre/API anahtarıyla bağlanan kanallarda (e-posta, pazaryeri) sessiz yeniden deneme yetmez: hata ne olursa olsun hesabın
-  // Bağlan paneli açılır (tam hata metni + "Şifreyi güncelle" + "Yeniden dene"), yeniden deneme de arka planda başlar
-  if ((a.status === 'error' || a.status === 'disconnected') && credentialForm(a))
-    return { title: detail || (a.status === 'error' ? 'Bağlantı hatası' : 'Bağlantı kesildi'), how: 'Yeniden deneniyor; açılan panelde hatanın ayrıntısını görürsün. Şifre/anahtar değiştiyse oradan güncelle.', label: 'Yeniden bağlan', action: 'panel', done: 'Yeniden bağlanılıyor' };
+  // API anahtarıyla bağlanan kanallarda (pazaryeri, eski IMAP) sessiz yeniden deneme yetmez: hata ne olursa olsun hesabın
+  // Bağlan paneli açılır (tam hata metni + "API bilgilerini güncelle" + "Yeniden dene"), yeniden deneme de arka planda başlar
+  if ((a.status === 'error' || a.status === 'disconnected') && panelChannel(a))
+    return { title: detail || (a.status === 'error' ? 'Bağlantı hatası' : 'Bağlantı kesildi'), how: credentialForm(a) ? 'Yeniden deneniyor; açılan panelde hatanın ayrıntısını görürsün. API bilgileri değiştiyse oradan güncelle.' : 'Yeniden deneniyor; açılan panelde hatanın ayrıntısını görürsün.', label: 'Yeniden bağlan', action: 'panel', done: 'Yeniden bağlanılıyor' };
   if (a.status === 'error')
     return { title: detail || 'Bağlantı hatası', how: 'Yeniden bağlanmayı dene. Sorun sürerse kanalın ayrıntısına (Uygulama bağla) bak.', label: 'Yeniden bağlan', action: 'reconnect', done: 'Yeniden bağlanılıyor' };
   if (a.status === 'disconnected')

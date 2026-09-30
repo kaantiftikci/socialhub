@@ -1,7 +1,8 @@
 import type { Page } from 'playwright';
 import type { Attachment, Reaction } from '../../model.js';
 import type { SendOptions } from '../base.js';
-import { apiOf, needsPage, RATE_RE, type Msg, type Strategy, type Thread } from './bridge.js';
+import { bus } from '../../bus.js';
+import { apiOf, needsPage, RATE_RE, safeUrl, type Msg, type Strategy, type Thread } from './bridge.js';
 
 /**
  * Slack (tarayıcı oturumu): Slack'e bir kez giriş yapılır; web istemcisinin
@@ -32,6 +33,23 @@ interface TeamCfg {
   userId: string;
   /** Çalışma alanı adresi (https://<ws>.slack.com/) — web istemcisi API'yi buradan çağırır */
   url: string;
+  /** Tanı: anahtar nereden bulundu (localConfig_v2 teams / web istemcisinin kendi isteği) */
+  source?: 'localConfig' | 'istek';
+}
+
+/* ---------- tanı günlüğü: yalnız hata kodu/sayılar, asla mesaj içeriği ya da anahtar ---------- */
+const warned = new Map<string, number>();
+/** Aynı anahtarla en çok `everyMs`'de bir satır (her sohbet/tur için aynı hata günlüğü doldurmasın) */
+function logOnce(level: 'info' | 'warn', key: string, text: string, everyMs = 10 * 60_000): void {
+  const now = Date.now();
+  if (now - (warned.get(key) ?? 0) < everyMs) return;
+  warned.set(key, now);
+  bus.log(level, `slack: ${text}`);
+}
+/** Hata iletisinden Slack hata kodu ("Slack conversations.history: invalid_auth (HTTP 200, …)" → invalid_auth); içerik taşımaz */
+export function slackErrCode(e: unknown): string {
+  const msg = String((e as Error)?.message ?? e);
+  return msg.match(/Slack [\w.]+: ([\w-]+)/)?.[1] ?? msg.split('\n')[0].replace(/xox[a-z]-[\w-]+/g, 'xox?-…').slice(0, 80);
 }
 
 /**
@@ -44,27 +62,74 @@ interface TeamCfg {
  */
 const KEEP_QUERY = ['_x_version_ts', '_x_frontend_build_type', '_x_desktop_ia', '_x_gantry', 'fp'];
 const learned = { base: '', query: {} as Record<string, string>, xid: '' };
+/**
+ * Web istemcisinin KENDİ isteklerinin gövdesindeki xoxc anahtarı (çalışma alanı adresiyle). 2026'dan beri Slack web istemcisi
+ * anahtarı localConfig_v2'de tutmayabiliyor ("teams": {} — çalışma alanı bilgisi prevTeams'e taşınıyor); o zaman oturum anahtarı
+ * yalnız istemcinin bellek içi isteklerinde görünür. Değer asla günlüğe yazılmaz.
+ */
+interface Captured {
+  token: string;
+  /** https://<ws>.slack.com/api/ */
+  base: string;
+  /** slack_route sorgu parametresi (T…/E…:T…), yoksa '' */
+  teamId: string;
+}
+const captured: Captured[] = [];
 const watched = new WeakSet<Page>();
-/** app.slack.com'un aynı-kaynak /api/ ucu çalıştıysa (çapraz kaynak başarısız) doğrudan onu kullan */
-let sameOriginOnly = false;
+/**
+ * Çalışma alanı adresine ağ hatasıyla ulaşılamayıp app.slack.com aynı-kaynak ucu çalıştıysa bu zamana dek önce o denenir.
+ * Eskiden kalıcı bir bayraktı (sameOriginOnly): tek bir geçici ağ hatası (Mac uykudan uyanırken DNS) süreç boyunca TÜM
+ * çağrıları yalnız app.slack.com/api'ye kilitliyordu; orada çalışmayan yöntemler (ör. geçmiş) bir daha asla çalışma alanı
+ * adresinden denenmiyordu. Artık süreli ve her iki adres de sırayla denenir.
+ */
+let sameOriginUntil = 0;
+
+/** multipart/form-data ya da urlencoded gövdeden xoxc anahtarı */
+export function tokenFromBody(body: string | null | undefined): string | undefined {
+  if (!body) return undefined;
+  const mp = body.match(/name="token"\r?\n\r?\n(xoxc-[A-Za-z0-9-]+)/)?.[1];
+  if (mp) return mp;
+  const ue = body.match(/(?:^|&)token=(xoxc-[A-Za-z0-9%-]+)/)?.[1];
+  return ue ? decodeURIComponent(ue) : undefined;
+}
+
+/** Web istemcisinin bir API isteğini işle: host + sabit parametreleri ve (gövdede varsa) oturum anahtarını öğren */
+export function learnFromRequest(url: string, postData: string | null | undefined): void {
+  const m = url.match(/^(https:\/\/[a-z0-9-]+(?:\.enterprise)?\.slack\.com\/api\/)[\w.]+\?(.*)$/);
+  if (!m || !m[2].includes('_x_id=')) return;
+  const q = new URLSearchParams(m[2]);
+  // bizim kendi isteklerimiz de buradan geçer (aynı sayfa): parametre/host öğrenimi zararsız, anahtar zaten bizimki
+  const token = tokenFromBody(postData);
+  if (token) {
+    const teamId = q.get('slack_route') ?? '';
+    const i = captured.findIndex((c) => c.base === m[1]);
+    if (i >= 0) captured.splice(i, 1);
+    captured.push({ token, base: m[1], teamId });
+    if (captured.length > 8) captured.shift();
+  }
+  if (m[1] === 'https://app.slack.com/api/') return; // aynı-kaynak uç: çalışma alanı adresi değil
+  learned.base = m[1];
+  const keep: Record<string, string> = {};
+  for (const k of KEEP_QUERY) {
+    const v = q.get(k);
+    if (v) keep[k] = v;
+  }
+  learned.query = keep;
+  // _x_id önekini web istemcisinden öğren (ör. "noversion" ya da sürüm karması); uygulama adı asla gönderilmez
+  const xid = q.get('_x_id')?.match(/^([\w]+)-\d/)?.[1];
+  if (xid) learned.xid = xid;
+}
 
 function watchClientRequests(page: Page): void {
   if (watched.has(page) || typeof (page as { on?: unknown }).on !== 'function') return;
   watched.add(page);
   page.on('request', (req) => {
-    const m = req.url().match(/^(https:\/\/[a-z0-9-]+(?:\.enterprise)?\.slack\.com\/api\/)[\w.]+\?(.*)$/);
-    if (!m || !m[2].includes('_x_id=')) return;
-    learned.base = m[1];
-    const q = new URLSearchParams(m[2]);
-    const keep: Record<string, string> = {};
-    for (const k of KEEP_QUERY) {
-      const v = q.get(k);
-      if (v) keep[k] = v;
+    try {
+      if (!/\.slack\.com\/api\//.test(req.url())) return;
+      learnFromRequest(req.url(), req.method() === 'POST' ? req.postData() : undefined);
+    } catch {
+      /* gövde okunamadı */
     }
-    learned.query = keep;
-    // _x_id önekini web istemcisinden öğren (ör. "noversion" ya da sürüm karması); uygulama adı asla gönderilmez
-    const xid = q.get('_x_id')?.match(/^([\w]+)-\d/)?.[1];
-    if (xid) learned.xid = xid;
   });
 }
 
@@ -74,23 +139,39 @@ export function apiUrls(t: Pick<TeamCfg, 'domain' | 'url'>, method: string, lear
   const teamBase = t.url ? t.url.replace(/\/?$/, '/') + 'api/' : t.domain ? `https://${t.domain}.slack.com/api/` : '';
   // öğrenilen host yalnızca bu çalışma alanınınsa (çoklu çalışma alanında başka takımın host'u değil)
   const base = learnedCfg.base && (!teamBase || learnedCfg.base === teamBase) ? learnedCfg.base : teamBase;
-  if (!base || sameOriginOnly) return [sameOrigin];
+  if (!base) return [sameOrigin];
   const q = new URLSearchParams({ _x_id: `${learnedCfg.xid || 'noversion'}-${(now / 1000).toFixed(3)}`, ...learnedCfg.query, _x_gantry: 'true' });
-  return [`${base}${method}?${q}`, sameOrigin];
+  const team = `${base}${method}?${q}`;
+  return now < sameOriginUntil ? [sameOrigin, team] : [team, sameOrigin];
 }
 
-/** localStorage'daki localConfig_v2 → etkin çalışma alanı (sayfada ve sayfasız modda ortak) */
-export function parseTeam(raw: string | null | undefined): TeamCfg | undefined {
+type TeamEntry = { token?: string; domain?: string; name?: string; user_id?: string; url?: string; id?: string; team_id?: string };
+
+/**
+ * localStorage'daki localConfig_v2 → etkin çalışma alanı (sayfada ve sayfasız modda ortak). Anahtar `teams` içinde yoksa
+ * (2026 web istemcisi: "teams": {}, bilgi prevTeams'te) web istemcisinin kendi isteklerinden yakalanan anahtar kullanılır.
+ */
+export function parseTeam(raw: string | null | undefined, caps: Captured[] = captured): TeamCfg | undefined {
+  let cfg: { teams?: Record<string, TeamEntry>; prevTeams?: Record<string, TeamEntry> | TeamEntry[]; lastActiveTeamId?: string } = {};
   try {
-    if (!raw) return undefined;
-    const cfg = JSON.parse(raw) as { teams?: Record<string, { token?: string; domain?: string; name?: string; user_id?: string; url?: string }>; lastActiveTeamId?: string };
-    const teams = Object.values(cfg.teams ?? {});
-    const t = (cfg.lastActiveTeamId && cfg.teams?.[cfg.lastActiveTeamId]) || teams.find((x) => x.token?.startsWith('xoxc'));
-    if (!t?.token) return undefined;
-    return { token: t.token, domain: t.domain ?? '', name: t.name ?? 'Slack', userId: t.user_id ?? '', url: t.url ?? '' };
+    if (raw) cfg = JSON.parse(raw) ?? {};
   } catch {
-    return undefined;
+    cfg = {};
   }
+  const teams = Object.values(cfg.teams ?? {});
+  const t = (cfg.lastActiveTeamId && cfg.teams?.[cfg.lastActiveTeamId]) || teams.find((x) => x.token?.startsWith('xoxc'));
+  if (t?.token) return { token: t.token, domain: t.domain ?? '', name: t.name ?? 'Slack', userId: t.user_id ?? '', url: t.url ?? '', source: 'localConfig' };
+  if (!caps.length) return undefined;
+  // anahtarsız çalışma alanı bilgisi (ad/adres/kullanıcı): teams ya da prevTeams
+  const prev = Object.values(cfg.prevTeams ?? {}) as TeamEntry[];
+  const byId = (id?: string) => (id ? cfg.teams?.[id] ?? prev.find((x) => x.id === id || x.team_id === id) ?? (Array.isArray(cfg.prevTeams) ? undefined : cfg.prevTeams?.[id]) : undefined);
+  const baseOf = (e?: TeamEntry) => (e?.url ? e.url.replace(/\/?$/, '/') + 'api/' : e?.domain ? `https://${e.domain}.slack.com/api/` : '');
+  const meta = byId(cfg.lastActiveTeamId) ?? teams[0] ?? prev[0];
+  const cap = caps.find((c) => baseOf(meta) && c.base === baseOf(meta)) ?? caps[caps.length - 1];
+  // yakalanan anahtar başka çalışma alanınınsa o alanın bilgisi (yoksa yalnız adres)
+  const info = baseOf(meta) === cap.base ? meta : [...teams, ...prev].find((e) => baseOf(e) === cap.base);
+  const host = cap.base.match(/^https:\/\/([a-z0-9-]+)\./)?.[1] ?? '';
+  return { token: cap.token, domain: info?.domain ?? host, name: info?.name ?? 'Slack', userId: info?.user_id ?? '', url: info?.url ?? cap.base.replace(/api\/$/, ''), source: 'istek' };
 }
 
 async function team(page: Page): Promise<TeamCfg | undefined> {
@@ -99,8 +180,10 @@ async function team(page: Page): Promise<TeamCfg | undefined> {
     const o = h.state.origins.find((x) => x.origin === 'https://app.slack.com');
     return parseTeam(o?.localStorage.find((e) => e.name === 'localConfig_v2')?.value);
   }
-  if (page.isClosed() || !page.url().startsWith('https://app.slack.com/')) return undefined;
+  if (page.isClosed()) return undefined;
+  // web istemcisinin isteklerini sayfa hangi adreste olursa olsun erkenden izle (açılış istekleri anahtarı taşır)
   watchClientRequests(page);
+  if (!page.url().startsWith('https://app.slack.com/')) return undefined;
   const raw = await page.evaluate(() => {
     try {
       return localStorage.getItem('localConfig_v2');
@@ -120,11 +203,39 @@ async function team(page: Page): Promise<TeamCfg | undefined> {
 let lastNav = 0;
 async function openClient(page: Page): Promise<TeamCfg | undefined> {
   needsPage(page);
+  watchClientRequests(page);
   lastNav = Date.now();
   await page.goto(CLIENT, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => undefined);
   await page.waitForURL(/^https:\/\/app\.slack\.com\/client\/[A-Z]/, { timeout: 15_000 }).catch(() => undefined);
   await page.waitForTimeout(1000);
-  return team(page);
+  let t = await team(page);
+  // localConfig_v2'de anahtar yok: istemcinin ilk API isteği (anahtarı taşır) birkaç saniye içinde gelir
+  for (let i = 0; !t && i < 8 && !page.isClosed() && page.url().startsWith('https://app.slack.com/'); i++) {
+    await page.waitForTimeout(750);
+    t = await team(page);
+  }
+  if (!t) logOnce('warn', 'no-token', `oturum anahtarı bulunamadı (localConfig_v2'de takım yok, istemci isteği yakalanmadı; sayfa: ${safeUrl(page.url())})`);
+  return t;
+}
+
+/** Sonucu bu kodlarla dönen çağrıda sıradaki adres de denenir (adres/yönlendirme sorunu olabilir); ikisi de olmazsa ilk hata */
+const RETRY_NEXT = ['not_authed', 'invalid_auth', 'team_not_found', 'enterprise_is_restricted', 'non_json', 'team_access_not_granted'];
+
+interface CallResult {
+  j: J;
+  idx: number;
+  status?: number;
+  retryAfter?: string;
+  netErr?: string;
+}
+
+function callError(method: string, r: CallResult, urls: string[]): Error {
+  if (r.idx < 0) return new Error(`Slack ${method}: ağ hatası (${(r.netErr ?? '').split('\n')[0].slice(0, 120)})`);
+  const where = urls[r.idx]?.startsWith('https://app.slack.com/') ? 'app.slack.com' : 'çalışma alanı adresi';
+  const e = new Error(`Slack ${method}: ${String(r.j?.error ?? 'bilinmeyen_hata')} (HTTP ${r.status ?? '?'}, ${where})`) as Error & { retryAfter?: number };
+  const ra = Number(r.retryAfter);
+  if (ra > 0) e.retryAfter = ra;
+  return e;
 }
 
 async function slack(page: Page, method: string, params: Record<string, string | number | boolean> = {}): Promise<J> {
@@ -132,10 +243,13 @@ async function slack(page: Page, method: string, params: Record<string, string |
   if (!t) throw new Error('Slack oturumu bulunamadı');
   const urls = apiUrls(t, method);
   const h = apiOf(page);
+  let r: CallResult;
   if (h) {
     // Sayfasız: aynı çok parçalı POST Node'dan (profil kopyasıyla doğrulandı: client.counts ok)
     let netErr = '';
-    for (let i = 0; i < urls.length; i++) {
+    let firstFail: CallResult | undefined;
+    let got: CallResult | undefined;
+    for (let i = 0; i < urls.length && !got; i++) {
       const multipart: Record<string, string> = { token: t.token };
       for (const [k, v] of Object.entries(params)) multipart[k] = String(v);
       let res: Awaited<ReturnType<typeof h.api.post>>;
@@ -145,38 +259,50 @@ async function slack(page: Page, method: string, params: Record<string, string |
         netErr = (e as Error).message;
         continue;
       }
-      const j = (await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status()}` }))) as J;
-      if (!j.ok) throw new Error(`Slack ${method}: ${j.error ?? res.status()}`);
-      if (i > 0 && urls.length > 1) sameOriginOnly = true;
-      return j;
+      const j = (await res.json().catch(() => ({ ok: false, error: 'non_json' }))) as J;
+      const out: CallResult = { j, idx: i, status: res.status(), retryAfter: res.headers()['retry-after'], netErr };
+      if (j.ok || i === urls.length - 1 || !RETRY_NEXT.includes(String(j.error))) got = j.ok ? out : (firstFail ?? out);
+      else firstFail ??= out;
     }
-    throw new Error(`Slack ${method}: ağ hatası (${netErr})`);
-  }
-  const r = await page.evaluate(
-    async ({ method, params, token, urls }) => {
-      let netErr = '';
-      for (let i = 0; i < urls.length; i++) {
-        const body = new FormData();
-        body.append('token', token);
-        for (const [k, v] of Object.entries(params)) body.append(k, String(v));
-        let res: Response;
-        try {
-          res = await fetch(urls[i], { method: 'POST', body, credentials: 'include' });
-        } catch (e) {
-          // CORS/ağ hatası: sıradaki adresi dene
-          netErr = (e as Error).message;
-          continue;
+    r = got ?? firstFail ?? { j: { ok: false }, idx: -1, netErr };
+  } else {
+    r = (await page.evaluate(
+      // method: sayfada kullanılmaz; testlerdeki sahte sayfa çağrıyı onunla tanır
+      async ({ params, token, urls, retryNext }) => {
+        let netErr = '';
+        let firstFail: { j: Record<string, unknown>; idx: number; status: number; retryAfter: string; netErr: string } | undefined;
+        for (let i = 0; i < urls.length; i++) {
+          const body = new FormData();
+          body.append('token', token);
+          for (const [k, v] of Object.entries(params)) body.append(k, String(v));
+          let res: Response;
+          try {
+            res = await fetch(urls[i], { method: 'POST', body, credentials: 'include' });
+          } catch (e) {
+            // CORS/ağ hatası: sıradaki adresi dene
+            netErr = (e as Error).message;
+            continue;
+          }
+          const j = (await res.json().catch(() => ({ ok: false, error: 'non_json' }))) as Record<string, unknown>;
+          const out = { j, idx: i, status: res.status, retryAfter: res.headers.get('retry-after') ?? '', netErr };
+          if (j.ok) return out;
+          if (i < urls.length - 1 && retryNext.includes(String(j.error))) {
+            firstFail ??= out;
+            continue;
+          }
+          return firstFail ?? out;
         }
-        const j = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
-        if (!j.ok) throw new Error(`Slack ${method}: ${j.error ?? res.status}`);
-        return { j, idx: i };
-      }
-      throw new Error(`Slack ${method}: ağ/CORS hatası (${netErr})`);
-    },
-    { method, params, token: t.token, urls },
-  );
-  // yalnızca aynı-kaynak uç çalıştıysa sonraki çağrılarda boşuna çapraz kaynak deneme
-  if (r.idx > 0 && urls.length > 1) sameOriginOnly = true;
+        return firstFail ?? { j: { ok: false }, idx: -1, status: 0, retryAfter: '', netErr };
+      },
+      { method, params, token: t.token, urls, retryNext: RETRY_NEXT },
+    )) as CallResult;
+  }
+  if (!r.j?.ok) throw callError(method, r, urls);
+  // çalışma alanı adresine ağ/CORS hatasıyla ulaşılamadı, aynı-kaynak uç çalıştı: 10 dk önce o denensin (sonra yine çalışma alanı)
+  if (r.idx > 0 && r.netErr && urls[r.idx].startsWith('https://app.slack.com/')) {
+    sameOriginUntil = Date.now() + 10 * 60_000;
+    logOnce('info', 'same-origin', `çalışma alanı adresine ulaşılamadı (${r.netErr.split('\n')[0].slice(0, 80)}); 10 dk app.slack.com/api kullanılacak`);
+  }
   return r.j;
 }
 
@@ -193,18 +319,26 @@ const lastRead = new Map<string, string>();
 let meId = '';
 let listLoadedAt = 0;
 
+/** Adı alınamayan kimlikler → son deneme zamanı: her mesaj/turda yeniden users.info istenmesin (10 dk) */
+const userMiss = new Map<string, number>();
+
 async function userInfo(page: Page, id: string): Promise<UserInfo> {
   const c = users.get(id);
   if (c) return c;
   if (!id) return { name: 'Slack' };
+  if (Date.now() - (userMiss.get(id) ?? 0) < 10 * 60_000) return { name: id };
   try {
     // Botlar users.info'da yok: bots.info ile ad
     const r = id.startsWith('B') ? await slack(page, 'bots.info', { bot: id }) : await slack(page, 'users.info', { user: id });
     const u = r.user ?? r.bot ?? {};
     const v: UserInfo = { name: u.real_name || u.profile?.display_name || u.name || id, avatar: u.profile?.image_72 ?? u.icons?.image_72, handle: u.name && !id.startsWith('B') ? '@' + u.name : undefined };
     users.set(id, v);
+    userMiss.delete(id);
     return v;
-  } catch {
+  } catch (e) {
+    userMiss.set(id, Date.now());
+    const code = slackErrCode(e);
+    logOnce('warn', `user:${code}`, `${id.startsWith('B') ? 'bots.info' : 'users.info'} başarısız (${code}); ad yerine kimlik gösterilecek`);
     return { name: id };
   }
 }
@@ -298,13 +432,82 @@ const REPLY_PAGES = 2;
 /** Yanıtları bütçe yüzünden sonraya kalan kanallar → son döndürülen lastTs (threads() bunu 1 ms artırır: köprü sohbeti yine "değişmiş" sayar) */
 const pendingReplies = new Set<string>();
 const lastThreadTs = new Map<string, number>();
+/** conversations.replies hız sınırına takıldı: bu zamana dek yanıt istenmez (geçmiş yine alınır; kanal "değişmiş" kalır) */
+let repliesPausedUntil = 0;
+/** messages() tek çağrısı köprünün 60 sn sınırına yaklaşmasın: yanıt/ad aramaları bu süreden sonra sonraki tura kalır */
+const CALL_BUDGET_MS = 25_000;
+/**
+ * Sohbetin son (üst düzey) mesajının önizlemesi: client.counts önizleme vermez; `latest` gizli bir iletiye (kanala katılma,
+ * iş parçacığı yanıtı, silinen mesaj) aitse depo önizlemeyi hiç yazmıyordu (mesaj zamanı sohbetin son zamanından eski) →
+ * listede boş önizleme. threads() bunu döndürür; köprü önizlemesi boş sohbete yazar.
+ */
+const lastSeen = new Map<string, { ts: number; body: string; fromMe: boolean; sender: string }>();
+/** Tanı: ilk çağrıların özeti bir kez */
+let historyLogged = 0;
+
+/**
+ * Metni boş mesajın okunur metni: Slack blokları (rich_text: bölüm/liste/alıntı/kod; section/header/context) ve eski tip
+ * ekler (attachments: pretext/title/text/fallback). Uygulama/iş akışı mesajları ve bazı istemciler `text`'i boş bırakıp
+ * içeriği yalnız bloklarda taşıyor → eskiden bu mesajlar tamamen atılıyordu.
+ */
+export function blocksText(blocks: J[] | undefined, attachments?: J[]): string {
+  const inline = (els: J[] | undefined): string =>
+    (els ?? [])
+      .map((e) => {
+        switch (e?.type) {
+          case 'text':
+            return String(e.text ?? '');
+          case 'link':
+            return e.text && e.text !== e.url ? `${e.text} (${e.url})` : String(e.url ?? '');
+          case 'user':
+            return `<@${e.user_id}>`;
+          case 'channel':
+            return `#${e.channel_id}`;
+          case 'usergroup':
+            return '@grup';
+          case 'broadcast':
+            return `@${e.range ?? 'here'}`;
+          case 'emoji':
+            try {
+              return e.unicode ? String.fromCodePoint(...String(e.unicode).split('-').map((h: string) => parseInt(h, 16))) : SLACK_EMOJI[e.name] ?? `:${e.name}:`;
+            } catch {
+              return `:${e.name}:`;
+            }
+          case 'date':
+            return String(e.fallback ?? '');
+          case 'rich_text_list':
+            return (e.elements ?? []).map((x: J) => '• ' + inline(x.elements)).join('\n');
+          default:
+            return e?.elements ? inline(e.elements) : typeof e?.text === 'string' ? e.text : e?.text?.text ?? '';
+        }
+      })
+      .join('');
+  const out: string[] = [];
+  for (const b of blocks ?? []) {
+    if (b?.type === 'rich_text') out.push((b.elements ?? []).map((sec: J) => inline([sec])).join('\n'));
+    else if (b?.type === 'section' || b?.type === 'header') out.push([b.text?.text, ...((b.fields ?? []) as J[]).map((f) => f?.text)].filter(Boolean).join('\n'));
+    else if (b?.type === 'context') out.push(((b.elements ?? []) as J[]).map((x) => x?.text ?? '').filter(Boolean).join(' '));
+  }
+  let text = out.filter((x) => x.trim()).join('\n');
+  if (!text.trim()) text = ((attachments ?? []) as J[]).map((x) => [x.pretext, x.title, x.text].filter(Boolean).join('\n') || x.fallback || '').filter(Boolean).join('\n');
+  return text;
+}
+
+/** Mesajın ham metni: `text`, boşsa bloklar/ekler (Slack biçimi — formatSlackText ile çözülür) */
+export function rawSlackText(m: J): string {
+  const t = String(m.text ?? '');
+  return t.trim() ? t : blocksText(m.blocks as J[] | undefined, m.attachments as J[] | undefined);
+}
 
 async function toMsg(page: Page, m: J): Promise<Msg | undefined> {
   if (m.subtype && SKIP_SUBTYPES.has(String(m.subtype))) return undefined;
+  const files = ((m.files ?? []) as J[]).filter((f) => f.mode !== 'tombstone' && f.mode !== 'hidden_by_limit');
+  const raw = rawSlackText(m);
+  // boş mesaj için ad araması yapma (her biri bir users.info isteği)
+  if (!raw.trim() && !files.length) return undefined;
   const uid = String(m.user ?? m.bot_id ?? '');
   const u = m.subtype === 'bot_message' && m.username ? { name: String(m.username), avatar: m.icons?.image_64 } : await userInfo(page, uid);
-  const files = ((m.files ?? []) as J[]).filter((f) => f.mode !== 'tombstone' && f.mode !== 'hidden_by_limit');
-  const text = formatSlackText(String(m.text ?? ''), users);
+  const text = formatSlackText(raw, users);
   if (!text && !files.length) return undefined;
   return {
     id: String(m.ts),
@@ -320,6 +523,12 @@ async function toMsg(page: Page, m: J): Promise<Msg | undefined> {
     replyCount: m.reply_count ? Number(m.reply_count) : undefined,
     edited: m.edited ? true : undefined,
   };
+}
+
+/** Deponun yazdığı önizlemeyle aynı biçim (birebirde yalnız metin, grup/kanalda "Ad: metin" / "Sen: metin") */
+function previewOf(kind: Thread['kind'], p: { body: string; fromMe: boolean; sender: string } | undefined): string {
+  if (!p?.body) return '';
+  return kind !== 'direct' ? `${p.fromMe ? 'Sen' : p.sender.split(/\s+/)[0] || '?'}: ${p.body}` : p.body;
 }
 
 export const slackStrategy: Strategy = {
@@ -369,8 +578,16 @@ export const slackStrategy: Strategy = {
   async threads(page): Promise<Thread[]> {
     // client.counts: web istemcisinin kullandığı özet uç — kanal/DM listesi, son mesaj zamanı, okunmamış
     const counts = await slack(page, 'client.counts', {});
-    await loadConversationList(page).catch(() => undefined);
+    let listErr = '';
+    await loadConversationList(page).catch((e) => {
+      listErr = slackErrCode(e);
+      logOnce('warn', `list:${listErr}`, `conversations.list başarısız (${listErr}); adlar tek tek conversations.info ile alınacak`);
+    });
     const out: Thread[] = [];
+    const infoErr = (e: unknown) => {
+      const code = slackErrCode(e);
+      logOnce('warn', `info:${code}`, `conversations.info başarısız (${code})`);
+    };
     const push = async (c: J, kindHint: Thread['kind']) => {
       const id = String(c.id);
       if (c.last_read) lastRead.set(id, String(c.last_read));
@@ -381,7 +598,16 @@ export const slackStrategy: Strategy = {
       let handle: string | undefined;
       let participants: Thread['participants'];
       if (kind === 'direct') {
-        const uid = meta?.user ?? (await slack(page, 'conversations.info', { channel: id }).then((r) => String(r.channel?.user ?? '')).catch(() => ''));
+        const uid =
+          meta?.user ??
+          (await slack(page, 'conversations.info', { channel: id })
+            .then((r) => {
+              const u = String(r.channel?.user ?? '');
+              // tek tek alınan DM de önbelleğe (her turda yeniden istenmesin)
+              if (u) chans.set(id, { name: '', kind: 'direct', user: u });
+              return u;
+            })
+            .catch((e) => (infoErr(e), '')));
         if (uid) {
           const u = await userInfo(page, uid);
           name = u.name;
@@ -394,7 +620,8 @@ export const slackStrategy: Strategy = {
           const ch = (await slack(page, 'conversations.info', { channel: id })).channel ?? {};
           name = ch.name ? '#' + ch.name : ch.is_mpim ? 'Grup DM' : id;
           chans.set(id, { name, kind });
-        } catch {
+        } catch (e) {
+          infoErr(e);
           name = id;
         }
       }
@@ -404,34 +631,69 @@ export const slackStrategy: Strategy = {
       // yanıtları sonraya kalan kanal: zaman 1 ms ileri (köprü "değişti" sayıp messages()'ı yeniden çağırsın; sıra neredeyse hiç kaymaz)
       if (pendingReplies.has(id)) lastTs = Math.max(lastTs, (lastThreadTs.get(id) ?? 0) + 1);
       lastThreadTs.set(id, lastTs);
-      out.push({ id, name: name || id, kind, lastTs, preview: '', unread, avatarUrl: avatar, handle, participants });
+      out.push({ id, name: name || id, kind, lastTs, preview: previewOf(kind, lastSeen.get(id)), unread, avatarUrl: avatar, handle, participants });
     };
     for (const c of counts.ims ?? []) await push(c, 'direct');
     for (const c of counts.mpims ?? []) await push(c, 'group');
     for (const c of counts.channels ?? []) if (c.is_member !== false) await push(c, 'channel');
+    // Tanı (yarım saatte bir): sayılar, adı çözülen sohbetler, anahtarın kaynağı, adres ve mod — içerik yok
+    if (Date.now() - (warned.get('threads-diag') ?? 0) < 30 * 60_000) return out;
+    const t = await team(page).catch(() => undefined);
+    const named = out.filter((x) => x.name !== x.id).length;
+    logOnce(
+      'info',
+      'threads-diag',
+      `tanı: ${(counts.ims ?? []).length} birebir, ${(counts.mpims ?? []).length} grup, ${(counts.channels ?? []).length} kanal (listede ${out.length}); adı çözülen ${named}/${out.length}; ` +
+        `conversations.list ${listErr || 'ok'}; anahtar ${t?.source ?? '?'}; adres ${apiOf(page) ? 'sayfasız' : 'sayfa'}→${apiUrls(t ?? { domain: '', url: '' }, 'x')[0].startsWith('https://app.slack.com/') ? 'app.slack.com' : 'çalışma alanı'}`,
+      30 * 60_000,
+    );
     return out;
   },
 
   async messages(page, _cookies, threadId, limit, before): Promise<Msg[]> {
+    const started = Date.now();
     const params: Record<string, string | number | boolean> = { channel: threadId, limit };
     if (before) {
       // Slack ts saniye.mikrosaniye; before ms → saniye, inclusive=false → kesinlikle daha eski
       params.latest = (before / 1000).toFixed(6);
       params.inclusive = false;
     }
-    const r = await slack(page, 'conversations.history', params);
+    let r: J;
+    try {
+      r = await slack(page, 'conversations.history', params);
+    } catch (e) {
+      // köprü de özet yazar; burada kod + sohbet türü (D/C/G) — bir sonraki günlük kararı versin
+      const code = slackErrCode(e);
+      logOnce('warn', `history:${code}`, `conversations.history başarısız (${code}; ${threadId.slice(0, 1)}…; ${String((e as Error).message).match(/\(HTTP [^)]*\)/)?.[0] ?? ''})`, 5 * 60_000);
+      throw e;
+    }
+    const rawMsgs = (r.messages ?? []) as J[];
     const msgs: Msg[] = [];
-    for (const m of (r.messages ?? []) as J[]) {
+    for (const m of rawMsgs) {
       const msg = await toMsg(page, m);
       if (msg) msgs.push(msg);
     }
+    // Tanı: ham mesaj vardı ama hepsi elendi ya da hiç mesaj dönmedi (ücretsiz planda 90 günden eskiler gizli: is_limited)
+    if (!before && rawMsgs.length && !msgs.length)
+      logOnce('warn', 'history-filtered', `conversations.history ${rawMsgs.length} ham mesaj döndü ama hiçbiri okunamadı (alt türler: ${[...new Set(rawMsgs.map((m) => String(m.subtype ?? 'yok')))].slice(0, 5).join(',')}; metin alanı boş: ${rawMsgs.filter((m) => !String(m.text ?? '').trim()).length})`);
+    if (!before && !rawMsgs.length && r.is_limited) logOnce('warn', 'history-limited', 'conversations.history boş ve is_limited: Slack ücretsiz planı eski mesajları gizliyor');
+    if (!before && historyLogged < 1) {
+      historyLogged++;
+      bus.log('info', `slack: tanı: ilk conversations.history → ${rawMsgs.length} ham, ${msgs.length} mesaj${r.has_more ? ', has_more' : ''}${r.is_limited ? ', is_limited' : ''} (${Date.now() - started} ms)`);
+    }
     // İş parçacığı yanıtları history'de görünmez: reply_count'lu üst mesajların yanıtları (yeni yanıt geldiyse) ayrıca çekilir
     // yanıtı değişmiş diziler, en yeni yanıtlı önce; çağrı başına bütçe, kalanlar sonraki turlara (pendingReplies)
-    const due = ((r.messages ?? []) as J[])
+    const due = rawMsgs
       .filter((m) => m.reply_count && m.ts && threadsSeen.get(`${threadId}/${m.ts}`)?.latest !== String(m.latest_reply ?? m.reply_count))
       .sort((a, b) => Number(b.latest_reply ?? b.ts) - Number(a.latest_reply ?? a.ts));
     let left = due.length > REPLIES_PER_CALL;
     for (const m of due.slice(0, REPLIES_PER_CALL)) {
+      // Yanıtlar ikincil: hız sınırı beklemesinde ya da çağrı süresi dolmuşsa sonraki tura (geçmiş yine döner). Eskiden yanıttaki
+      // hız sınırı tüm çağrıyı fırlatıyordu → aynı sohbetin zaten alınmış geçmişi de atılıyor, iş parçacığı yoğun kanal hiç dolmuyordu.
+      if (Date.now() < repliesPausedUntil || Date.now() - started > CALL_BUDGET_MS) {
+        left = true;
+        break;
+      }
       const key = `${threadId}/${m.ts}`;
       const latest = String(m.latest_reply ?? m.reply_count);
       const prev = threadsSeen.get(key);
@@ -463,15 +725,29 @@ export const slackStrategy: Strategy = {
         threadsSeen.set(key, { latest: more ? '' : latest, newest });
         if (more) left = true;
       } catch (e) {
-        // hız sınırı köprüye gitsin (üstel geri çekilme; sohbet sonra yeniden denenir). Diğer hatada (dizi silinmiş vb.) bu
-        // latest_reply atlanır: her turda yeniden denenip sohbeti sürekli "değişmiş" tutmasın; yeni yanıt gelince yine denenir
-        if (RATE_RE.test((e as Error).message)) throw e;
+        const code = slackErrCode(e);
+        if (RATE_RE.test((e as Error).message)) {
+          // hız sınırı: dizi "görüldü" sayılmaz, yanıtlar Retry-After (yoksa 60 sn) boyunca istenmez; kanal değişmiş kalır
+          repliesPausedUntil = Date.now() + Math.min(Math.max((e as { retryAfter?: number }).retryAfter ?? 60, 10), 600) * 1000;
+          logOnce('warn', 'replies-rate', `conversations.replies hız sınırı; yanıtlar ${Math.round((repliesPausedUntil - Date.now()) / 1000)} sn sonra, geçmiş alınmaya devam ediyor`);
+          left = true;
+          break;
+        }
+        // Diğer hatada (dizi silinmiş vb.) bu latest_reply atlanır: her turda yeniden denenip sohbeti sürekli "değişmiş" tutmasın
+        logOnce('warn', `replies:${code}`, `conversations.replies başarısız (${code})`);
         threadsSeen.set(key, { latest, newest: prev?.newest ?? '' });
       }
     }
     if (left) pendingReplies.add(threadId);
     else if (!before) pendingReplies.delete(threadId);
-    return msgs.sort((a, b) => a.ts - b.ts);
+    msgs.sort((a, b) => a.ts - b.ts);
+    // son üst düzey mesaj → listedeki önizleme (threads())
+    if (!before) {
+      const last = [...msgs].reverse().find((m) => !m.threadId);
+      if (last && (lastSeen.get(threadId)?.ts ?? 0) <= last.ts)
+        lastSeen.set(threadId, { ts: last.ts, body: last.text || (last.attachments?.length ? `[${last.attachments[0].name ?? last.attachments[0].kind}]` : ''), fromMe: last.fromMe, sender: last.senderName });
+    }
+    return msgs;
   },
 
   async markRead(page, _cookies, threadId, lastIncomingId) {
@@ -594,5 +870,13 @@ export function _resetSlackState(): void {
   listLoadedAt = 0;
   learned.base = '';
   learned.query = {};
-  sameOriginOnly = false;
+  learned.xid = '';
+  captured.length = 0;
+  sameOriginUntil = 0;
+  userMiss.clear();
+  warned.clear();
+  lastSeen.clear();
+  repliesPausedUntil = 0;
+  historyLogged = 0;
+  lastNav = 0;
 }

@@ -1,10 +1,10 @@
 import { MailFrame } from './MailFrame';
 import { trReactionText } from './reaction-text';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { EmojiPicker } from './emoji';
 import { api, USE_STATIC } from './api';
 import { EventEditor } from './CalendarView';
-import { API_BASE, mediaUrl, openExternal } from './desktop';
+import { API_BASE, isTauri, mediaUrl, openExternal } from './desktop';
 import { DEFAULT_TAGS, EDIT_LIMIT_MS, EDIT_PLATFORMS, PLATFORMS, REPLY_PLATFORMS, UNSEND_LIMIT_MS, UNSEND_PLATFORMS, isOrderPage, questionOrderRef, shopKind, QUICK_REACTIONS, REACT_PLATFORMS, TAG_COLORS, openInAppLink, type Attachment, type CalendarDraft, type Chat, type ChatFlags, type DraftResult, type LinkPreview, type Message, type Reaction } from './types';
 import { guessWhen } from './when';
 import { useAiPrefs } from './ai-prefs';
@@ -302,7 +302,7 @@ export function Conversation({
   const [tagInput, setTagInput] = useState('');
   const [addingTag, setAddingTag] = useState(false);
   // Medya penceresi galeri olarak: sohbetteki tüm görsel/videolar arasında ←/→ ile gezinilir
-  const [lightbox, setLightboxState] = useState<{ list: Attachment[]; index: number } | null>(null);
+  const [lightbox, setLightboxState] = useState<LightboxState | null>(null);
   const lightboxP = useClosing(lightbox);
   useEffect(() => setLightboxState(null), [chat.id]);
   const endRef = useRef<HTMLDivElement>(null);
@@ -845,14 +845,17 @@ export function Conversation({
   const mediaList = useMemo(() => shown.flatMap((m) => (m.attachments ?? []).filter(isGalleryMedia)), [shown]);
   /** Eki galeri içinde aç; listede yoksa (ör. e-posta eki) tek başına */
   const setLightbox = useCallback(
-    (a: Attachment | null) => {
+    (a: Attachment | null, startAt?: number) => {
       if (!a) return setLightboxState(null);
       const same = (x: Attachment) => x === a || (!!(x.url || x.link) && x.url === a.url && x.link === a.link);
       const index = isGalleryMedia(a) ? mediaList.findIndex(same) : -1;
-      setLightboxState(index >= 0 ? { list: mediaList, index } : { list: [a], index: 0 });
+      const start = startAt ? { att: index >= 0 ? mediaList[index] : a, t: startAt } : undefined;
+      setLightboxState(index >= 0 ? { list: mediaList, index, start } : { list: [a], index: 0, start });
     },
     [mediaList],
   );
+  /** Mesajdaki bağlantı (metin, bağlantı kartı, e-posta gövdesi): yeni sekme yerine uygulama içi pencerede */
+  const openLink = useCallback((href: string) => setLightboxState({ list: [linkAttachment(href)], index: 0 }), []);
   // Balon listesi yalnız mesajlar/sohbet/açık menüler değişince yeniden kurulur: yazma alanındaki her tuş vuruşunda
   // (text durumu bu bileşende) ve App'in ilgisiz çizimlerinde 300-1000 balon baştan üretilmesin. Tıklama işleyicileri
   // her çizimde yenilenen işlevleri act ref'inden okur (bayat kapanış olmaz).
@@ -1182,7 +1185,7 @@ export function Conversation({
   }
 
   return (
-    <>
+    <OpenLinkCtx.Provider value={openLink}>
       <section className="conv" aria-label="Konuşma">
         <header className="conv-head">
           {onBack && (
@@ -1276,11 +1279,11 @@ export function Conversation({
                       </div>
                       <time>{fmtStamp(m.ts)}</time>
                     </header>
-                    {m.hasHtml ? <MailFrame messageId={m.id} fallback={m.text} /> : <div className="mail-body">{m.text}</div>}
+                    {m.hasHtml ? <MailFrame messageId={m.id} fallback={m.text} onLink={openLink} /> : <div className="mail-body">{m.text}</div>}
                     {m.attachments?.length ? (
                       <div className="mail-atts">
                         {m.attachments.map((a, i) => (
-                          <a key={i} className="mail-att" href={abs(a.link ?? a.url) ?? '#'} target="_blank" rel="noreferrer" onClick={(e) => (a.link || a.url ? (a.kind === 'image' ? (e.preventDefault(), setLightbox(a)) : undefined) : e.preventDefault())}>
+                          <a key={i} className="mail-att" href={abs(a.link ?? a.url) ?? '#'} onClick={(e) => (e.preventDefault(), a.link || a.url ? setLightbox(a) : notify('Bu ek indirilemedi (medya kaydı yok)', true))}>
                             <Icon name={a.kind === 'image' ? 'image' : a.kind === 'video' ? 'play' : 'file'} size={14} /> {a.name ?? attLabel(a.kind)}
                             {a.size ? <span className="sz"> · {fmtSize(a.size)}</span> : null}
                           </a>
@@ -1875,8 +1878,8 @@ export function Conversation({
               Paylaşılanlar
               <span style={{ color: 'var(--text3)', fontWeight: 400 }}>{allShared.length}</span>
               {allShared.length > 4 && (
-                <button className="btn ghost xs icon b" style={{ marginLeft: 'auto', transform: 'rotate(-90deg)' }} onClick={() => setMediaOpen(true)} title={`Tümünü büyük göster (${allShared.length})`} aria-label="Tüm paylaşılanlar">
-                  <Icon name="chev" size={13} sw={2} />
+                <button className="btn ghost xs icon b" style={{ marginLeft: 'auto' }} onClick={() => setMediaOpen(true)} title={`Tümünü büyük göster (${allShared.length})`} aria-label="Tüm paylaşılanlar">
+                  <Icon name="maximize" size={13} sw={2} />
                 </button>
               )}
             </span>
@@ -1961,8 +1964,8 @@ export function Conversation({
           </div>
         </div>
       )}
-      {lightboxP.value && <Lightbox list={lightboxP.value.list} index={lightboxP.value.index} onIndex={(index) => setLightboxState((v) => (v ? { ...v, index } : v))} closing={lightboxP.closing} onClose={() => setLightboxState(null)} />}
-    </>
+      {lightboxP.value && <Lightbox list={lightboxP.value.list} index={lightboxP.value.index} start={lightboxP.value.start} onIndex={(index) => setLightboxState((v) => (v ? { ...v, index } : v))} closing={lightboxP.closing} onClose={() => setLightboxState(null)} />}
+    </OpenLinkCtx.Provider>
   );
 }
 
@@ -2241,17 +2244,140 @@ function profileRole(chat: Chat): { text: string; href?: string } | undefined {
 }
 
 
-/** Medya penceresi: görsel/video doğrudan, Instagram/X gönderileri gömülü (embed) sayfayla, diğerleri bağlantıyla. */
-function Lightbox({ list, index, onIndex, onClose, closing }: { list: Attachment[]; index: number; onIndex: (i: number) => void; onClose: () => void; closing?: boolean }) {
+/** Açık medya penceresi: gezinilen liste + (satır içi oynatıcıdan gelindiyse) videonun kaldığı saniye */
+type LightboxState = { list: Attachment[]; index: number; start?: { att: Attachment; t: number } };
+
+/**
+ * Mesajdaki bağlantıların uygulama içinde açılması: sohbet bileşeni sağlar (Lightbox), bağlam yoksa (başka yerde kullanılan
+ * linkify) sistem tarayıcısı. Bağlantılar yeni sekme/pencere açmaz; dışarı yalnız pencerede "Tarayıcıda aç" ile çıkılır.
+ */
+const OpenLinkCtx = createContext<((href: string) => void) | null>(null);
+
+function MsgLink({ href }: { href: string }) {
+  const open = useContext(OpenLinkCtx);
+  return (
+    <a href={href} className="msg-link" onClick={(e) => (e.preventDefault(), open ? open(href) : void openExternal(href))}>
+      {href}
+    </a>
+  );
+}
+
+/** Adres → pencerede açılacak ek: doğrudan medya dosyasıysa türüne göre, değilse sayfa */
+function linkAttachment(href: string): Attachment {
+  const name = href.replace(/^https?:\/\/(www\.)?/i, '').replace(/[?#].*$/, '').split('/').filter(Boolean).pop() ?? href;
+  if (/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(href)) return { kind: 'video', link: href, name };
+  if (/\.(jpe?g|png|gif|webp)(\?|#|$)/i.test(href)) return { kind: 'image', link: href, name };
+  if (/\.(mp3|m4a|ogg|opus|wav)(\?|#|$)/i.test(href)) return { kind: 'audio', link: href, name };
+  if (/\.pdf(\?|#|$)/i.test(href)) return { kind: 'file', link: href, name, mime: 'application/pdf' };
+  return { kind: 'other', page: href, name: href };
+}
+
+function hostOf(u: string): string {
+  try {
+    return new URL(u).hostname.replace(/^www\./, '');
+  } catch {
+    return u;
+  }
+}
+
+/** Dış bağlantı: masaüstünde (Tauri) sistem tarayıcısında — WKWebView `target=_blank`'i açmıyor —, web'de yeni sekmede */
+function openOutside(url: string) {
+  void openExternal(url);
+}
+
+type FsDoc = Document & { webkitFullscreenElement?: Element | null; webkitExitFullscreen?: () => void };
+type FsEl = HTMLElement & { webkitRequestFullscreen?: () => void };
+type FsVideo = HTMLVideoElement & { webkitEnterFullscreen?: () => void; webkitDisplayingFullscreen?: boolean; webkitExitFullscreen?: () => void };
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+function fsElement(): Element | null {
+  const d = document as FsDoc;
+  return d.fullscreenElement ?? d.webkitFullscreenElement ?? null;
+}
+function exitFs() {
+  const d = document as FsDoc;
+  if (d.fullscreenElement && d.exitFullscreen) void d.exitFullscreen().catch(() => undefined);
+  else d.webkitExitFullscreen?.();
+}
+/**
+ * Gerçek tam ekran: standart API → webkit önekli (eski macOS WKWebView/Safari) → yalnız videoya özgü webkitEnterFullscreen
+ * (iOS). Hiçbiri tutmazsa false: çağıran uygulama içi tam pencereye düşer (Tauri'de öğe tam ekranı kapalı olabilir).
+ */
+async function enterFs(el: HTMLElement, video?: HTMLVideoElement | null): Promise<boolean> {
+  const e = el as FsEl;
+  if (typeof e.requestFullscreen === 'function') {
+    try {
+      const ok = await Promise.race([e.requestFullscreen().then(() => true), sleep(1500).then(() => false)]);
+      if (ok || fsElement()) return true;
+    } catch {
+      /* önekli yolu dene */
+    }
+  }
+  if (typeof e.webkitRequestFullscreen === 'function') {
+    try {
+      e.webkitRequestFullscreen();
+      await sleep(350);
+      if (fsElement()) return true;
+    } catch {
+      /* videoya özgü yolu dene */
+    }
+  }
+  const v = video as FsVideo | null | undefined;
+  if (v && typeof v.webkitEnterFullscreen === 'function') {
+    try {
+      v.webkitEnterFullscreen();
+      await sleep(350);
+      if (v.webkitDisplayingFullscreen) return true;
+    } catch {
+      /* yok */
+    }
+  }
+  return false;
+}
+/** Öğe şu an gerçek tam ekranda mı (değişimleri izler) */
+function useIsFullscreen(ref: React.RefObject<HTMLElement | null>): boolean {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    const sync = () => setOn(!!ref.current && fsElement() === ref.current);
+    document.addEventListener('fullscreenchange', sync);
+    document.addEventListener('webkitfullscreenchange', sync);
+    return () => {
+      document.removeEventListener('fullscreenchange', sync);
+      document.removeEventListener('webkitfullscreenchange', sync);
+    };
+  }, [ref]);
+  return on;
+}
+
+/** İndirme: web'de dosya indirilir; masaüstünde (WKWebView `download` özniteliğini yok sayar) sistem tarayıcısı indirir */
+function DownloadLink({ href, name, className, children, title }: { href: string; name?: string; className?: string; children: React.ReactNode; title?: string }) {
+  return (
+    <a href={href} className={className} download={name ?? true} title={title} aria-label={title} target="_blank" rel="noreferrer" onClick={isTauri ? (e) => (e.preventDefault(), openOutside(href)) : undefined}>
+      {children}
+    </a>
+  );
+}
+
+/**
+ * Medya penceresi (uygulama içi): görsel/video/ses/PDF doğrudan, Instagram/X/YouTube/TikTok/Vimeo gönderileri gömülü oynatıcıyla,
+ * gömülemeyen sayfalar önizleme kartıyla. Hiçbir tıklama yeni sekme açmaz; dışarı yalnız "Tarayıcıda aç" ile çıkılır.
+ * Tam ekran: gerçek tam ekran API'si, olmazsa pencere uygulama içinde tüm ekranı kaplar.
+ */
+function Lightbox({ list, index, start, onIndex, onClose, closing }: { list: Attachment[]; index: number; start?: LightboxState['start']; onIndex: (i: number) => void; onClose: () => void; closing?: boolean }) {
   const att = list[Math.min(Math.max(0, index), list.length - 1)];
   const many = list.length > 1;
+  const boxRef = useRef<HTMLDivElement>(null);
+  /** Uygulama içi tam pencere (gerçek tam ekran açılamayınca) */
+  const [full, setFull] = useState(false);
+  const boxFs = useIsFullscreen(boxRef);
   const go = useCallback((d: number) => many && onIndex((index + d + list.length) % list.length), [many, index, list.length, onIndex]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
       if (e.key === 'Escape') {
         e.preventDefault(); // arkadaki sohbet kapanmasın
-        onClose();
+        if (fsElement()) return; // tarayıcı tam ekrandan kendisi çıkar
+        if (full) setFull(false);
+        else onClose();
       } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && many) {
         // oynatılan videonun ileri/geri sarması yerine medya değişir; sohbet listesinin ok gezintisi de çalışmasın
         e.preventDefault();
@@ -2261,40 +2387,65 @@ function Lightbox({ list, index, onIndex, onClose, closing }: { list: Attachment
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [onClose, go, many]);
+  }, [onClose, go, many, full]);
+  // pencere kapanırken tam ekranda kalınmasın
+  useEffect(() => () => void (fsElement() && exitFs()), []);
   const link = att.link ? abs(att.link) : undefined;
   const page = att.page ?? (att.link && !isMediaFile(att.link) ? att.link : undefined);
   const embed = page ? embedUrl(page) : undefined;
   const isFile = isMediaFile(att.link);
+  const isVideo = att.kind === 'video' && isFile && !!link;
+  const isPdf = !!link && isFile && (/\.pdf(\?|#|$)/i.test(att.link ?? '') || !!att.mime?.includes('pdf'));
+  // sayfaya bağlı video/gönderi küçük resmi tek başına gösterilmez (oynamayan poster): önizleme kartı
+  const isImg = !isVideo && !(att.kind === 'audio' && link) && !embed && !(page && att.kind !== 'image') && !!(att.url || (att.kind === 'image' && link && isFile));
+  const toggleBoxFs = async () => {
+    if (boxFs) return exitFs();
+    if (full) return setFull(false);
+    if (!boxRef.current || !(await enterFs(boxRef.current))) setFull(true);
+  };
+  const expanded = full || boxFs;
   return (
-    <div className={`lightbox ${closing ? 'closing' : ''}`} onClick={onClose} role="dialog" aria-label={att.name ?? 'Medya'}>
-      <div className="box" onClick={(e) => e.stopPropagation()}>
-        {att.kind === 'video' && isFile && link ? (
-          <video key={link} src={link} poster={abs(att.url)} controls autoPlay playsInline />
+    <div className={`lightbox ${closing ? 'closing' : ''} ${full ? 'full' : ''}`} onClick={onClose} role="dialog" aria-label={att.name ?? 'Medya'}>
+      <div className={`box ${embed || page ? 'page' : ''}`} ref={boxRef} onClick={(e) => e.stopPropagation()}>
+        {isVideo ? (
+          <VideoPlayer key={link} src={link!} poster={abs(att.url)} autoPlay big startAt={start && start.att === att ? start.t : undefined} expanded={full} onFallback={() => setFull((v) => !v)} />
         ) : att.kind === 'audio' && link ? (
-          <div style={{ padding: 28, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center' }}>
+          <div className="lb-audio">
             <Icon name="mic" size={28} color="#fff" />
             <audio src={link} controls autoPlay />
           </div>
         ) : embed ? (
-          <iframe src={embed} title={att.name ?? 'Gönderi'} allow="autoplay; encrypted-media; picture-in-picture" />
-        ) : att.url || (att.kind === 'image' && link && isFile) ? (
+          <iframe key={embed} src={embed} title={att.name ?? 'Gönderi'} allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowFullScreen />
+        ) : isPdf ? (
+          <iframe key={link} className="lb-doc" src={link} title={att.name ?? 'Belge'} />
+        ) : isImg ? (
           <img src={att.kind === 'image' && link && (isImageFile(att.link) || !att.url) ? link : abs(att.url)} alt={att.name ?? ''} referrerPolicy="no-referrer" />
+        ) : page ? (
+          <PageCard page={page} att={att} />
         ) : link ? (
-          <div style={{ padding: 28, color: '#fff', fontSize: 13 }}>Önizleme yok — dosyayı aşağıdan indir.</div>
+          <div className="lb-file">
+            <Icon name="file" size={34} color="#fff" />
+            <b>{att.name ?? attLabel(att.kind)}</b>
+            <span>{att.size ? `${fmtSize(att.size)} · ` : ''}Önizleme yok — dosyayı aşağıdan indirebilirsin.</span>
+          </div>
         ) : null}
         <div className="bar">
           {many && <span className="lb-count">{index + 1} / {list.length}</span>}
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexGrow: 1 }}>{att.name ?? attLabel(att.kind)}</span>
+          <span className="lb-name">{att.name ?? attLabel(att.kind)}</span>
           {page && (
-            <a href={page} target="_blank" rel="noreferrer">
+            <button type="button" className="lb-act" onClick={() => openOutside(page)}>
               <Icon name="external" size={13} /> Tarayıcıda aç
-            </a>
+            </button>
           )}
           {link && isFile && (
-            <a href={link} target="_blank" rel="noreferrer" download={att.name ?? true}>
-              <Icon name="external" size={13} /> İndir
-            </a>
+            <DownloadLink href={link} name={att.name} className="lb-act">
+              <Icon name="download" size={13} /> İndir
+            </DownloadLink>
+          )}
+          {!isVideo && (isImg || embed || isPdf) && (
+            <button type="button" className="lb-act icon" onClick={() => void toggleBoxFs()} aria-label={expanded ? 'Tam ekrandan çık' : 'Tam ekran'} title={expanded ? 'Tam ekrandan çık' : 'Tam ekran'}>
+              <Icon name={expanded ? 'minimize' : 'maximize'} size={14} sw={2} />
+            </button>
           )}
         </div>
         <button className="close b" onClick={onClose} aria-label="Kapat">
@@ -2315,12 +2466,46 @@ function Lightbox({ list, index, onIndex, onClose, closing }: { list: Attachment
   );
 }
 
-/** Instagram ve X gönderilerinin iframe'de açılabilen gömülü sürümleri */
+/**
+ * Gömülemeyen sayfa (çoğu site X-Frame-Options ile iframe'i reddeder): Open Graph önizlemesi (görsel, site, başlık, açıklama)
+ * ve "Tarayıcıda aç". Önizleme gelmezse ekin küçük resmi / adresi.
+ */
+function PageCard({ page, att }: { page: string; att: Attachment }) {
+  const p = usePreview(page);
+  const ok = !!p && !p.none;
+  const img = (ok && p.image) || abs(att.url);
+  const title = (ok && p.title) || (att.name && att.name !== page ? att.name : undefined) || hostOf(page);
+  return (
+    <div className="lb-page">
+      {img ? (
+        <img src={img} alt="" referrerPolicy="no-referrer" onError={(e) => (e.currentTarget.style.display = 'none')} />
+      ) : (
+        <span className="lb-page-ic">
+          <Icon name={att.kind === 'video' ? 'play' : att.kind === 'image' ? 'image' : 'link'} size={34} color="#fff" />
+        </span>
+      )}
+      <div className="lb-page-body">
+        <span className="lb-page-site">{(ok && p.site) || hostOf(page)}</span>
+        <b>{title}</b>
+        {ok && p.description ? <span className="lb-page-desc">{p.description}</span> : null}
+        {!p ? <span className="lb-page-note">Önizleme yükleniyor…</span> : <span className="lb-page-note">Bu sayfa uygulama içinde gösterilemiyor; aşağıdaki "Tarayıcıda aç" ile açabilirsin.</span>}
+      </div>
+    </div>
+  );
+}
+
+/** iframe'de açılabilen gömülü sürümler: Instagram, X, YouTube, TikTok, Vimeo gönderileri */
 function embedUrl(link: string): string | undefined {
-  let m = link.match(/^https?:\/\/(?:www\.)?instagram\.com\/(p|reel|reels)\/([A-Za-z0-9_-]+)/);
+  let m = link.match(/^https?:\/\/(?:www\.)?instagram\.com\/(?:[^/?#]+\/)?(p|reel|reels|tv)\/([A-Za-z0-9_-]+)/);
   if (m) return `https://www.instagram.com/${m[1] === 'p' ? 'p' : 'reel'}/${m[2]}/embed/`;
-  m = link.match(/^https?:\/\/(?:www\.)?(?:x|twitter)\.com\/[^/]+\/status\/(\d+)/);
+  m = link.match(/^https?:\/\/(?:www\.|mobile\.)?(?:x|twitter)\.com\/[^/]+\/status(?:es)?\/(\d+)/);
   if (m) return `https://platform.twitter.com/embed/Tweet.html?dnt=true&embedId=twitter-widget-0&frame=false&hideCard=false&hideThread=false&id=${m[1]}&lang=tr&theme=light&widgetsVersion=2615f7e52b7e0%3A1702314776716`;
+  m = link.match(/^https?:\/\/(?:www\.|m\.)?youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|live\/)([A-Za-z0-9_-]{6,})/) ?? link.match(/^https?:\/\/youtu\.be\/([A-Za-z0-9_-]{6,})/);
+  if (m) return `https://www.youtube-nocookie.com/embed/${m[1]}?autoplay=1&rel=0`;
+  m = link.match(/^https?:\/\/(?:www\.|m\.)?tiktok\.com\/(?:@[^/]+\/(?:video|photo)|v|embed(?:\/v2)?)\/(\d+)/);
+  if (m) return `https://www.tiktok.com/embed/v2/${m[1]}`;
+  m = link.match(/^https?:\/\/(?:www\.)?vimeo\.com\/(\d+)/);
+  if (m) return `https://player.vimeo.com/video/${m[1]}?autoplay=1`;
   return undefined;
 }
 
@@ -2375,9 +2560,7 @@ function linkify(text: string): React.ReactNode {
     const href = raw.slice(0, raw.length - trail.length);
     if (m.index! > last) out.push(text.slice(last, m.index));
     out.push(
-      <a key={m.index} href={href} target="_blank" rel="noreferrer" className="msg-link" onClick={(e) => (e.preventDefault(), void openExternal(href))}>
-        {href}
-      </a>,
+      <MsgLink key={m.index} href={href} />,
     );
     if (trail) out.push(trail);
     last = m.index! + raw.length;
@@ -2457,12 +2640,12 @@ function usePreview(url: string | undefined): LinkPreview | null {
  * Paylaşılan X gönderisi, yerel önbellekte içeriği yoksa: çekirdek X'in herkese açık gömme verisinden (oturumsuz) yazar,
  * metin ve görseli getirir. Gelmezse (silinmiş/korumalı) sade bir kart; eskiden boş siyah kutu kalıyordu.
  */
-function XPostCard({ a, page }: { a: Attachment; page: string }) {
+function XPostCard({ a, page, onOpen }: { a: Attachment; page: string; onOpen: (a: Attachment) => void }) {
   const p = usePreview(page);
   const ok = p && !p.none && p.title;
   const handle = ok ? p.title!.match(/\((@[^)]+)\)\s*$/)?.[1] : undefined;
   return (
-    <a className={`att-card b xpost${ok && p.image ? '' : ' noimg'}`} href={page} target="_blank" rel="noreferrer" title="Gönderiyi tarayıcıda aç">
+    <button type="button" className={`att-card b xpost${ok && p.image ? '' : ' noimg'}`} onClick={() => onOpen(a.page ? a : { ...a, page })} title="Gönderiyi aç">
       {ok && p.image && <img src={p.image} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(e) => (e.currentTarget.style.display = 'none')} />}
       <span className="att-cap">
         <Icon name="link" size={13} />
@@ -2476,13 +2659,13 @@ function XPostCard({ a, page }: { a: Attachment; page: string }) {
             (a.name ?? 'Gönderi')
           )}
         </span>
-        <Icon name="external" size={12} />
       </span>
-    </a>
+    </button>
   );
 }
 
 function LinkCard({ url }: { url: string }) {
+  const open = useContext(OpenLinkCtx);
   const [p, setP] = useState<LinkPreview | null>(null);
   useEffect(() => {
     let alive = true;
@@ -2498,7 +2681,7 @@ function LinkCard({ url }: { url: string }) {
   }, [url]);
   if (!p || p.none || !p.title) return null;
   return (
-    <a className="linkcard b" href={p.url} target="_blank" rel="noreferrer" onClick={(e) => (e.preventDefault(), void openExternal(p.url))} title={p.url}>
+    <a className="linkcard b" href={p.url} onClick={(e) => (e.preventDefault(), open ? open(url) : void openExternal(p.url))} title={p.url}>
       {p.image && <img src={p.image} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(e) => (e.currentTarget.style.display = 'none')} />}
       <span className="lc-body">
         <span className="lc-site">{p.site}</span>
@@ -2595,14 +2778,14 @@ function isPageLink(u?: string): boolean {
 }
 
 /**
- * Mesaj balonundaki ek:
+ * Mesaj balonundaki ek (hiçbiri yeni sekme açmaz; tıklayınca uygulama içi medya penceresi):
  * - audio → <audio controls> (link)
- * - video (dosya) → <video controls> (link, url poster)
- * - sayfa bağlantısı (Instagram gönderisi vb.) → önizleme görseli + yeni sekmede aç
+ * - video (dosya) → sade oynatıcı (tam ekran düğmesi; olmazsa pencerede büyür)
+ * - sayfa bağlantısı (Instagram gönderisi, TikTok videosu vb.) → önizleme görseli; pencerede gömülü oynatıcı ya da önizleme kartı
  * - image → <img> (url), tıklayınca büyük pencere
- * - file/other → indirme bağlantısı (yeni sekme)
+ * - file/other → pencerede önizleme (PDF) / indirme
  */
-function AttachmentView({ a, onOpen }: { a: Attachment; onOpen: (a: Attachment) => void }) {
+function AttachmentView({ a, onOpen }: { a: Attachment; onOpen: (a: Attachment, startAt?: number) => void }) {
   const link = abs(a.link);
   const url = abs(a.url);
   const hideOnError = (e: React.SyntheticEvent<HTMLImageElement>) => (e.currentTarget.style.display = 'none');
@@ -2617,24 +2800,31 @@ function AttachmentView({ a, onOpen }: { a: Attachment; onOpen: (a: Attachment) 
   if (a.kind === 'video' && link && isMediaFile(a.link)) {
     return (
       <span className="att-card att-video">
-        <VideoPlayer src={link} poster={url} />
+        <VideoPlayer src={link} poster={url} onFallback={(t) => onOpen(a, t)} />
         <span className="att-cap">
           <Icon name="play" size={13} />
-          {a.name ?? attLabel(a.kind)}
-          <a href={link} target="_blank" rel="noreferrer" download={a.name ?? true} title="İndir" aria-label="Videoyu indir" style={{ marginLeft: 'auto', display: 'inline-flex', color: 'inherit' }}>
-            <Icon name="external" size={12} />
-          </a>
+          <span className="att-name">{a.name ?? attLabel(a.kind)}</span>
+          <DownloadLink href={link} name={a.name} className="att-dl" title="Videoyu indir">
+            <Icon name="download" size={13} />
+          </DownloadLink>
         </span>
       </span>
     );
   }
   const page = a.page ?? (isPageLink(a.link) ? a.link : undefined);
-  if (page && !url && X_STATUS.test(page)) return <XPostCard a={a} page={page} />;
+  if (page && !url && X_STATUS.test(page)) return <XPostCard a={a} page={page} onOpen={onOpen} />;
   if (page) {
     return (
-      <a className="att-card b" href={page} target="_blank" rel="noreferrer" title="Gönderiyi tarayıcıda aç">
+      <button type="button" className="att-card b" onClick={() => onOpen(a.page ? a : { ...a, page })} title={a.kind === 'video' ? 'Videoyu oynat' : 'Gönderiyi aç'}>
         {url ? (
-          <img src={url} alt="" loading="lazy" referrerPolicy="no-referrer" onError={hideOnError} />
+          <span className="att-thumb">
+            <img src={url} alt="" loading="lazy" referrerPolicy="no-referrer" onError={hideOnError} />
+            {a.kind === 'video' && (
+              <span className="al-play">
+                <Icon name="play" size={18} color="#fff" />
+              </span>
+            )}
+          </span>
         ) : (
           <span className="att-blank">
             <Icon name={a.kind === 'video' ? 'play' : 'link'} size={28} color="#fff" />
@@ -2642,10 +2832,9 @@ function AttachmentView({ a, onOpen }: { a: Attachment; onOpen: (a: Attachment) 
         )}
         <span className="att-cap">
           <Icon name={a.kind === 'video' ? 'play' : a.kind === 'image' ? 'image' : 'link'} size={13} />
-          {a.name ?? attLabel(a.kind)}
-          <Icon name="external" size={12} />
+          <span className="att-name">{a.name ?? attLabel(a.kind)}</span>
         </span>
-      </a>
+      </button>
     );
   }
   if (url) {
@@ -2660,11 +2849,10 @@ function AttachmentView({ a, onOpen }: { a: Attachment; onOpen: (a: Attachment) 
     );
   }
   return (
-    <a className="att" href={link} target={link ? '_blank' : undefined} rel="noreferrer" download={link && isMediaFile(a.link) ? a.name ?? true : undefined} style={{ textDecoration: 'none' }} title={link ? 'İndir' : undefined}>
+    <a className="att" href={link} rel="noreferrer" style={{ textDecoration: 'none' }} title={link ? 'Aç' : undefined} onClick={(e) => (e.preventDefault(), link && onOpen(a))}>
       <Icon name={a.kind === 'image' ? 'image' : a.kind === 'audio' ? 'mic' : a.kind === 'video' ? 'play' : 'file'} size={14} />
       {a.name ?? attLabel(a.kind)}
       {a.size ? <span style={{ opacity: 0.7 }}> · {fmtSize(a.size)}</span> : null}
-      {link ? <Icon name="external" size={12} /> : null}
     </a>
   );
 }
@@ -2678,9 +2866,13 @@ function fmtClock(secs: number) {
 /**
  * Sade video oynatıcı: yerel kontroller yerine ortada oynat/duraklat, altta ince ilerleme çubuğu (tıklayınca sarar),
  * köşede ses ve tam ekran. Tarayıcının dağınık kontrol çubuğu görünmez.
+ * Tam ekran önce gerçek API ile (standart → webkit öneki → iOS video); açılamazsa (Tauri WKWebView'da öğe tam ekranı kapalı
+ * olabilir; eskiden düğme hiçbir şey yapmıyordu) `onFallback(saniye)`: balonda medya penceresi, pencerede tüm ekranı kaplama.
  */
-function VideoPlayer({ src, poster }: { src: string; poster?: string }) {
+function VideoPlayer({ src, poster, autoPlay, startAt, big, expanded, onFallback }: { src: string; poster?: string; autoPlay?: boolean; startAt?: number; big?: boolean; expanded?: boolean; onFallback?: (t: number) => void }) {
   const ref = useRef<HTMLVideoElement>(null);
+  const box = useRef<HTMLSpanElement>(null);
+  const isFs = useIsFullscreen(box);
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
   const [prog, setProg] = useState(0);
@@ -2691,21 +2883,35 @@ function VideoPlayer({ src, poster }: { src: string; poster?: string }) {
     if (v.paused) void v.play().catch(() => undefined);
     else v.pause();
   };
+  const toggleFs = async () => {
+    const v = ref.current;
+    if (isFs) return exitFs();
+    if (expanded) return onFallback?.(v?.currentTime ?? 0);
+    if (box.current && (await enterFs(box.current, v))) return;
+    if (!big) v?.pause(); // pencerede kaldığı yerden sürer
+    onFallback?.(v?.currentTime ?? 0);
+  };
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  const on = isFs || !!expanded;
   return (
-    <span className={`vp ${playing ? 'playing' : ''}`}>
+    <span ref={box} className={`vp ${playing ? 'playing' : ''} ${big ? 'big' : ''}`}>
       <video
         ref={ref}
         src={src}
         poster={poster}
         preload="metadata"
         playsInline
+        autoPlay={autoPlay}
         muted={muted}
         onClick={toggle}
+        onDoubleClick={() => void toggleFs()}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onEnded={() => setPlaying(false)}
-        onLoadedMetadata={(e) => setDur(e.currentTarget.duration || 0)}
+        onLoadedMetadata={(e) => {
+          setDur(e.currentTarget.duration || 0);
+          if (startAt && startAt < (e.currentTarget.duration || Infinity)) e.currentTarget.currentTime = startAt;
+        }}
         onTimeUpdate={(e) => setProg(e.currentTarget.duration ? e.currentTarget.currentTime / e.currentTarget.duration : 0)}
       />
       {!playing && (
@@ -2731,8 +2937,8 @@ function VideoPlayer({ src, poster }: { src: string; poster?: string }) {
         <button type="button" className="vp-btn" onClick={() => setMuted((m) => !m)} aria-label={muted ? 'Sesi aç' : 'Sesi kapat'} title={muted ? 'Sesi aç' : 'Sesi kapat'}>
           <Icon name={muted ? 'mute' : 'volume'} size={13} sw={2} />
         </button>
-        <button type="button" className="vp-btn" onClick={() => void ref.current?.requestFullscreen?.().catch(() => undefined)} aria-label="Tam ekran" title="Tam ekran">
-          <Icon name="external" size={12} sw={2} />
+        <button type="button" className="vp-btn vp-fs" onClick={() => void toggleFs()} aria-label={on ? 'Tam ekrandan çık' : 'Tam ekran'} title={on ? 'Tam ekrandan çık' : 'Tam ekran'}>
+          <Icon name={on ? 'minimize' : 'maximize'} size={13} sw={2} />
         </button>
       </span>
     </span>

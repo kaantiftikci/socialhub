@@ -5,7 +5,8 @@ type Servers = Required<Pick<MailConfig, 'host' | 'port' | 'secure' | 'smtpHost'
 /** Bilinen sağlayıcılar (alan adı → sunucular); kullanıcı yalnız e-posta + şifre girer */
 const KNOWN: Array<[RegExp, Servers]> = [
   [/^(gmail|googlemail)\.com$/, { host: 'imap.gmail.com', port: 993, secure: true, smtpHost: 'smtp.gmail.com', smtpPort: 465, smtpSecure: true }],
-  [/^(outlook|hotmail|live|msn)\.[a-z.]+$/, { host: 'outlook.office365.com', port: 993, secure: true, smtpHost: 'smtp.office365.com', smtpPort: 587, smtpSecure: false }],
+  // Outlook.com kişisel hesap: SMTP smtp-mail.outlook.com (smtp.office365.com iş/okul hesapları içindir)
+  [/^(outlook|hotmail|live|msn)\.[a-z.]+$/, { host: 'outlook.office365.com', port: 993, secure: true, smtpHost: 'smtp-mail.outlook.com', smtpPort: 587, smtpSecure: false }],
   [/^(yahoo|ymail|rocketmail)\.[a-z.]+$/, { host: 'imap.mail.yahoo.com', port: 993, secure: true, smtpHost: 'smtp.mail.yahoo.com', smtpPort: 465, smtpSecure: true }],
   [/^(icloud|me|mac)\.com$/, { host: 'imap.mail.me.com', port: 993, secure: true, smtpHost: 'smtp.mail.me.com', smtpPort: 587, smtpSecure: false }],
   [/^yandex\.[a-z.]+$|^ya\.ru$/, { host: 'imap.yandex.com', port: 993, secure: true, smtpHost: 'smtp.yandex.com', smtpPort: 465, smtpSecure: true }],

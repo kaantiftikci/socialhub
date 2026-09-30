@@ -51,3 +51,28 @@ test('slack xoxp: sayfalı liste, eski mesaj canlı değil, gönderim imleci oyn
   await c.sendText('C2', 'selam');
   assert.equal(lastTs.get('C2'), before);
 });
+
+/** Tek sohbetin geçmiş hatası turun geri kalanını durdurmaz; metni boş (yalnız bloklu) mesaj da alınır */
+test('slack xoxp: bir sohbetin hatası diğerlerini engellemez; bloklu mesaj metni', async () => {
+  const store = new Store(path.join(tmp, 's2.db'));
+  const account = { id: 'slack:3', platform: 'slack' as const, label: 's', status: 'connected' as const, createdAt: 1 };
+  store.upsertAccount(account);
+  const c = new SlackConnector(account, store, 'xoxp-test');
+  const now = Date.now() / 1000;
+  (c as unknown as { meId: string }).meId = 'UME';
+  (c as unknown as { web: unknown }).web = {
+    users: {
+      info: async () => ({ user: { real_name: 'Ayşe', name: 'ayse' } }),
+      conversations: async () => ({ channels: [{ id: 'D1', is_im: true, user: 'U1' }, { id: 'C2', is_channel: true, name: 'genel' }] }),
+    },
+    conversations: {
+      history: async (a: { channel: string }) => {
+        if (a.channel === 'D1') throw Object.assign(new Error('An API error occurred: channel_not_found'), { data: { error: 'channel_not_found' } });
+        return { messages: [{ ts: now.toFixed(6), user: 'U1', text: '', blocks: [{ type: 'rich_text', elements: [{ type: 'rich_text_section', elements: [{ type: 'text', text: 'blok metni' }] }] }] }] };
+      },
+    },
+  };
+  await (c as unknown as { poll: (first: boolean) => Promise<void> }).poll(true);
+  assert.deepEqual(store.listMessages('slack:3/C2', 5).map((m) => m.text), ['blok metni']);
+  assert.equal(store.getChat('slack:3/C2')!.lastPreview, 'Ayşe: blok metni');
+});

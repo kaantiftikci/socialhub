@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
-import { mediaUrl } from './desktop';
+import { mediaUrl, openExternal } from './desktop';
 
 /* E-postanın özgün HTML gövdesi: betik çalıştırmayan, form göndermeyen iframe (sandbox'ta allow-scripts YOK; aynı köken yalnız
-   yüksekliği ölçmek için). İçerik ayrıca CSP ile sınırlı; bağlantılar yeni sekmede açılır. Yüklenemezse düz metin gösterilir. */
+   yüksekliği ölçmek için). İçerik ayrıca CSP ile sınırlı. http(s) bağlantıları yeni sekme yerine `onLink` ile uygulama içi pencerede
+   açılır (yoksa sistem tarayıcısı; Tauri WKWebView `target=_blank`'i açmıyor), mailto:/tel: sistem uygulamasında. Yüklenemezse düz metin. */
 const cache = new Map<string, string>();
 
 const CSP = "default-src 'none'; img-src * data: blob:; style-src 'unsafe-inline' *; font-src * data:; media-src * data: blob:";
@@ -17,10 +18,12 @@ function doc(html: string): string {
   return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${CSP}"><base target="_blank"><meta name="color-scheme" content="light"><style>${BASE_CSS}</style></head><body>${fixed}</body></html>`;
 }
 
-export function MailFrame({ messageId, fallback }: { messageId: string; fallback: string }) {
+export function MailFrame({ messageId, fallback, onLink }: { messageId: string; fallback: string; onLink?: (href: string) => void }) {
   const [html, setHtml] = useState<string | null | undefined>(cache.get(messageId));
   const ref = useRef<HTMLIFrameElement>(null);
   const [h, setH] = useState(120);
+  const linkRef = useRef(onLink);
+  linkRef.current = onLink;
 
   useEffect(() => {
     if (cache.has(messageId)) return setHtml(cache.get(messageId));
@@ -53,6 +56,19 @@ export function MailFrame({ messageId, fallback }: { messageId: string; fallback
     measure();
     const d = ref.current?.contentDocument;
     if (!d?.body) return;
+    d.addEventListener('click', (e) => {
+      const a = (e.target as Element | null)?.closest?.('a[href]') as HTMLAnchorElement | null;
+      if (!a || e.defaultPrevented) return;
+      const href = a.href;
+      if (/^https?:/i.test(href)) {
+        e.preventDefault();
+        if (linkRef.current) linkRef.current(href);
+        else void openExternal(href);
+      } else if (/^(mailto|tel):/i.test(href)) {
+        e.preventDefault();
+        void openExternal(href);
+      }
+    });
     // geç yüklenen görseller yüksekliği değiştirir
     const ro = new ResizeObserver(measure);
     ro.observe(d.body);

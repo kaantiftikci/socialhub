@@ -8,7 +8,12 @@ import { sessionDir } from '../config.js';
 import type { Attachment, Participant } from '../model.js';
 
 /**
- * Hepsiburada Pazaryeri: resmi entegrasyon API'leri (HTTP Basic Auth, entegrasyon kullanıcı adı/şifresi).
+ * Hepsiburada Pazaryeri: resmi entegrasyon API'leri.
+ *
+ * Kimlik (Ocak 2024'ten beri): HTTP Basic = `merchantId:ServisAnahtarı` (satıcı paneli → Entegrasyon → Entegrasyon bilgileri →
+ * servis anahtarı), `User-Agent` = entegratör kullanıcı adı (kendi entegrasyonunu yapan satıcıda panelde yazan kullanıcı adı).
+ * Token JSON: { merchantId, serviceKey, userAgent? }. Eski biçim { merchantId, username, password } (Basic kullanıcı:şifre,
+ * User-Agent `<merchantId> - <kullanıcı>`) hâlâ çalışır (yedek).
  *
  * Uçlar developers.hepsiburada.com (Eylül 2026) portalından doğrulandı; dokümandaki adresler test (SIT) ortamına
  * aittir, canlı ortam "-sit" kaldırılarak elde edilir:
@@ -24,8 +29,7 @@ import type { Attachment, Participant } from '../model.js';
  *      GET  /api/v1.0/issues?status=1&page&size&sortBy&desc                 soru listesi (1 bekleyen, 2 cevaplanan, 3 sorun bildirilen, 4 otomatik kapanan)
  *      GET  /api/v1.0/issues/{number}                                       soru detayı
  *      POST /api/v1.0/issues/{number}/answer  (multipart/form-data: Answer)  cevaplama (≤2000 karakter)
- *  - Her istekte `User-Agent` zorunlu; doküman "basic auth kullanıcı adı" der, entegratör rehberleri "merchantId - uygulama"
- *    der; ikisini de kapsayan `<merchantId> - <kullanıcıAdı>` gönderilir.
+ *  - Her istekte `User-Agent` zorunlu (yeni modelde entegratör kullanıcı adı; eski modelde `<merchantId> - <kullanıcıAdı>`).
  *  - Limit: OMS 1 sn'de 1000 istek (429 + X-RateLimit-* başlıkları).
  *
  * DOĞRULANMADI: yanıt gövdelerinin sayfalama sarmalayıcısı (dokümanda alan adları var, örnek yanıt yok). Kod hem düz dizi
@@ -44,8 +48,29 @@ const FIRST_TIMESPAN_H = 14 * 24;
 
 export interface HepsiburadaConfig {
   merchantId: string;
-  username: string;
-  password: string;
+  /** Yeni model: servis anahtarı (Basic şifresi; kullanıcı = merchantId) */
+  serviceKey?: string;
+  /** Yeni model: entegratör kullanıcı adı (User-Agent); boşsa eski kullanıcı adı, o da yoksa merchantId */
+  userAgent?: string;
+  /** Eski model (yedek): entegrasyon kullanıcı adı / şifresi */
+  username?: string;
+  password?: string;
+}
+
+/** Yapılandırmadan Basic kimliği ve User-Agent; eksikse `missing` Türkçe hata metni */
+export function hepsiburadaAuth(cfg: HepsiburadaConfig): { basicUser: string; basicPass: string; userAgent: string; label: string; legacy: boolean; missing?: string } {
+  const merchantId = cfg.merchantId.trim();
+  const serviceKey = String(cfg.serviceKey ?? '').trim();
+  const username = String(cfg.username ?? '').trim();
+  const password = String(cfg.password ?? '');
+  if (serviceKey) {
+    const ua = String(cfg.userAgent ?? '').trim() || username || merchantId;
+    return { basicUser: merchantId, basicPass: serviceKey, userAgent: ua, label: ua && ua !== merchantId ? ua : `${merchantId.slice(0, 8)}…`, legacy: false, missing: merchantId ? undefined : 'Hepsiburada merchant ID girilmedi' };
+  }
+  if (username && password) {
+    return { basicUser: username, basicPass: password, userAgent: `${merchantId} - ${username}`, label: username, legacy: true, missing: merchantId ? undefined : 'Hepsiburada merchant ID girilmedi' };
+  }
+  return { basicUser: '', basicPass: '', userAgent: '', label: '', legacy: false, missing: 'Hepsiburada merchant ID / servis anahtarı girilmedi' };
 }
 
 class HbError extends Error {
@@ -141,7 +166,13 @@ export class HepsiburadaConnector extends BaseConnector {
     } catch {
       /* bozuk JSON → start() hata verir */
     }
-    this.cfg = { merchantId: String(cfg.merchantId ?? '').trim(), username: String(cfg.username ?? '').trim(), password: String(cfg.password ?? '') };
+    this.cfg = {
+      merchantId: String(cfg.merchantId ?? '').trim(),
+      serviceKey: String(cfg.serviceKey ?? '').trim() || undefined,
+      userAgent: String(cfg.userAgent ?? '').trim() || undefined,
+      username: String(cfg.username ?? '').trim() || undefined,
+      password: cfg.password != null ? String(cfg.password) : undefined,
+    };
     this.ordersOn = ordersFlag(config);
     this.stateFile = path.join(sessionDir(account.id), 'hepsiburada-state.json');
     try {
@@ -153,9 +184,10 @@ export class HepsiburadaConnector extends BaseConnector {
   }
 
   private get headers(): Record<string, string> {
+    const a = hepsiburadaAuth(this.cfg);
     return {
-      authorization: 'Basic ' + Buffer.from(`${this.cfg.username}:${this.cfg.password}`).toString('base64'),
-      'user-agent': `${this.cfg.merchantId} - ${this.cfg.username}`,
+      authorization: 'Basic ' + Buffer.from(`${a.basicUser}:${a.basicPass}`).toString('base64'),
+      'user-agent': a.userAgent,
       accept: 'application/json',
     };
   }
@@ -189,9 +221,11 @@ export class HepsiburadaConnector extends BaseConnector {
 
   async start(_opts: StartOptions = {}): Promise<void> {
     this.stopping = false;
-    if (!this.cfg.merchantId || !this.cfg.username || !this.cfg.password) return this.setStatus('error', 'Hepsiburada merchant ID / kullanıcı adı / şifre girilmedi');
+    const auth = hepsiburadaAuth(this.cfg);
+    if (auth.missing) return this.setStatus('error', auth.missing);
+    if (auth.legacy) bus.log('info', 'Hepsiburada: eski kullanıcı adı/şifre kimliği kullanılıyor; servis anahtarına (merchantId + ServisAnahtarı) geçmen önerilir');
     this.setStatus('connecting');
-    this.account.label = this.account.label && !/^hepsiburada$/i.test(this.account.label) ? this.account.label : `Hepsiburada · ${this.cfg.username}`;
+    this.account.label = this.account.label && !/^hepsiburada$/i.test(this.account.label) ? this.account.label : `Hepsiburada · ${auth.label}`;
     try {
       await this.poll(true);
       this.setStatus('connected', `merchant ${this.cfg.merchantId.slice(0, 8)}…`);

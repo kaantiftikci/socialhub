@@ -42,13 +42,6 @@ test('slack belirteç dosyası: düz xoxp, JSON {token, appToken}; geçersizler 
   assert.equal(SLACK_MANIFEST.settings.socket_mode_enabled, true);
 });
 
-test('slack manifest arayüzdeki kopyayla aynı', async () => {
-  const fs = await import('node:fs');
-  const src = fs.readFileSync(new URL('../../../apps/web/src/Connect.tsx', import.meta.url), 'utf8');
-  for (const s of SLACK_USER_SCOPES) assert.ok(src.includes(`'${s}'`), s);
-  for (const e of SLACK_MANIFEST.settings.event_subscriptions.user_events) assert.ok(src.includes(`'${e}'`), e);
-});
-
 test('e-posta tarayıcı stratejileri canlı liste izleyicisi tanımlar', async () => {
   const { gmail } = await import('../src/connectors/browser/gmail.js');
   const { outlook } = await import('../src/connectors/browser/outlook.js');

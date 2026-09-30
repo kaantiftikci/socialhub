@@ -56,7 +56,10 @@ const DAY = 86_400_000;
 const FIRST_WINDOW = 14 * DAY - 60_000;
 /** Sonraki yoklamalar: son değişenler (PackageLastModifiedDate'e göre) — 3 günlük pencere geç gelen kargo/teslim olaylarını da yakalar */
 const NEXT_WINDOW = 3 * DAY;
+/** Sipariş paketleri sayfa boyu (v2 en çok 200) */
 const PAGE_SIZE = 200;
+/** Soru filtresi sayfa boyu: belge en çok 50 — 200 istenince 50 dönüyor ve "kısa sayfa" sanılıp ilk sayfada duruluyordu */
+const QUESTION_PAGE_SIZE = 50;
 
 /** Paket durumu → mesaj metni. `Created` yeni sipariş mesajıyla zaten anlatılıyor, ayrıca yazılmaz. */
 const PACKAGE_STATUS: Record<string, string> = {
@@ -398,12 +401,14 @@ export class TrendyolConnector extends BaseConnector {
 
   private async fetchQuestions(startDate: number, endDate: number, maxPages: number): Promise<J[]> {
     const out: J[] = [];
-    for (let page = 0; page < maxPages; page++) {
-      const data = await this.api('GET', 'questions', { startDate, endDate, page, size: PAGE_SIZE, orderByField: 'LastModifiedDate', orderByDirection: 'DESC' });
+    // sayfa sınırı sipariş sayfası (200) ölçeğinde verilir; 50'lik sayfalarda aynı kapasite için 4 katı
+    const limit = maxPages * Math.ceil(PAGE_SIZE / QUESTION_PAGE_SIZE);
+    for (let page = 0; page < limit; page++) {
+      const data = await this.api('GET', 'questions', { startDate, endDate, page, size: QUESTION_PAGE_SIZE, orderByField: 'LastModifiedDate', orderByDirection: 'DESC' });
       const list: J[] = Array.isArray(data.content) ? data.content : [];
       out.push(...list);
       const totalPages = Number(data.totalPages ?? 1);
-      if (page + 1 >= totalPages || list.length < PAGE_SIZE) break;
+      if (page + 1 >= totalPages || list.length < QUESTION_PAGE_SIZE) break;
     }
     return out;
   }

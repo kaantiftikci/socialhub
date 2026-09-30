@@ -249,3 +249,29 @@ test('sipariş API v2 yoksa (556) v1 ucuna düşer ve bir daha v2 denemez', asyn
   assert.ok(calls.some((x) => x.url.includes('/order/sellers/123/orders?')));
   await c.stop();
 });
+
+test('soru filtresi sayfa boyu 50 (belge üst sınırı): dolu 50\'lik sayfadan sonra sonraki sayfa istenir; sipariş sayfası 200', async () => {
+  const qs = Array.from({ length: 70 }, (_, i) => QUESTION({ id: 1000 + i }));
+  const calls = fakeFetch((url) => {
+    if (url.includes('/v2/orders')) return { body: page([]) };
+    if (url.includes('/qna/sellers/123/questions/filter')) {
+      const u = new URL(url);
+      const p = Number(u.searchParams.get('page'));
+      const size = Number(u.searchParams.get('size'));
+      // sunucu 50'den büyüğünü 50'ye kırpar
+      const eff = Math.min(size, 50);
+      return { body: { content: qs.slice(p * eff, (p + 1) * eff), page: p, size: eff, totalPages: Math.ceil(qs.length / eff), totalElements: qs.length } };
+    }
+    return undefined;
+  });
+  const { c, store, account } = setup();
+  await c.start();
+  assert.equal(account.status, 'connected', account.detail);
+  const qCalls = calls.filter((x) => x.url.includes('/questions/filter'));
+  assert.ok(qCalls.every((x) => new URL(x.url).searchParams.get('size') === '50'), 'soru isteği size=50');
+  assert.ok(qCalls.some((x) => new URL(x.url).searchParams.get('page') === '1'), 'ikinci sayfa istendi');
+  assert.ok(store.getChat(`${account.id}/q-1069`), '51.+ sorular da geldi');
+  const oCall = calls.find((x) => x.url.includes('/v2/orders'))!;
+  assert.equal(new URL(oCall.url).searchParams.get('size'), '200', 'sipariş sayfa boyu değişmedi');
+  await c.stop();
+});

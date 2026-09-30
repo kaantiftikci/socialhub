@@ -398,7 +398,11 @@ export class Registry {
     await this.remove(id);
   }
 
-  restart(id: string, opts: { external?: boolean } = {}): Promise<void> {
+  /**
+   * opts.browserLogin: e-posta sağlayıcısının kendi giriş penceresiyle yeniden bağlan — uygulama şifresiyle (eski IMAP yolu, token
+   * dosyası) bağlanmış hesap da token'ı bırakıp tarayıcı girişine geçer (arayüzde artık şifre formu yok; Kaan 29.09).
+   */
+  restart(id: string, opts: { external?: boolean; browserLogin?: boolean } = {}): Promise<void> {
     return this.serial(id, () => this.restartNow(id, opts));
   }
 
@@ -411,15 +415,22 @@ export class Registry {
     this.heal.delete(id);
   }
 
-  private async restartNow(id: string, opts: { external?: boolean } = {}): Promise<void> {
+  private async restartNow(id: string, opts: { external?: boolean; browserLogin?: boolean } = {}): Promise<void> {
     this.stopHeal(id);
     const a = this.store.getAccount(id);
     if (!a) throw new Error('Hesap yok');
     const c = this.connectors.get(id);
+    // e-posta: uygulama şifreli (token) hesap sağlayıcının giriş penceresine geçer; çerezsiz profilde pencere hemen açılır
+    let toBrowser = false;
+    if (opts.browserLogin && MAIL_BROWSER_LOGIN.includes(a.platform) && readToken(id) !== undefined) {
+      fs.rmSync(path.join(sessionDir(id), 'token'), { force: true });
+      bus.log('info', `${id}: uygulama şifresi yolu bırakıldı, ${a.platform} giriş penceresine geçiliyor`);
+      toBrowser = true;
+    }
     // PIN gibi kullanıcı eylemi bekleniyorsa yeni bağlantı pencereyi doğrudan açar (görünmez denetim turu yok)
     const window = !!(c as { attention?: string } | undefined)?.attention;
     // 'pairing' = giriş gerektiği biliniyor: görünmez denetim turu (10-20 sn) boşuna → giriş penceresi hemen açılır
-    const login = !window && a.status === 'pairing';
+    const login = !window && (a.status === 'pairing' || toBrowser);
     if (c) {
       this.connectors.delete(id);
       await withTimeout(c.stop(), 15_000).catch(() => undefined);
@@ -482,7 +493,7 @@ export class Registry {
         c = new ShopierConnector(account, this.store, token);
         break;
       }
-      // Pazar yerleri: token dosyası JSON yapılandırma (Bağlan formundan); siparişler API'den, mesajlar (Etsy/Shopify) köprüden
+      // Pazar yerleri: token dosyası JSON yapılandırma (Bağlan formundan); yalnız resmi API (tarayıcı köprüsü yok)
       case 'trendyol':
       case 'hepsiburada':
       case 'etsy':
@@ -498,8 +509,7 @@ export class Registry {
             : account.platform === 'hepsiburada'
               ? new HepsiburadaConnector(account, this.store, cfg)
               : account.platform === 'etsy'
-                ? // Etsy Mesajları tarayıcı köprüsü varsayılan kapalı (ban önleme); yapılandırmada messaging:true ile açılır
-                  new EtsyConnector(account, this.store, cfg, (() => { try { return (JSON.parse(cfg) as { messaging?: boolean }).messaging === true; } catch { return false; } })())
+                ? new EtsyConnector(account, this.store, cfg)
                 : account.platform === 'n11'
                   ? new N11Connector(account, this.store, cfg)
                   : account.platform === 'pttavm'
@@ -604,6 +614,9 @@ export class Registry {
     await withTimeout(Promise.all([...this.locks.values()]), 20_000).catch(() => undefined);
   }
 }
+
+/** Tarayıcı girişi (sağlayıcının kendi giriş penceresi) olan e-posta platformları; token (uygulama şifresi) yalnız eski hesaplarda */
+const MAIL_BROWSER_LOGIN: Platform[] = ['gmail', 'outlook', 'yahoo', 'yandex', 'icloud'];
 
 /** Hesap tarayıcı köprüsüyle mi çalışacak (spawn'daki seçimle aynı: token dosyası yoksa tarayıcı yolu) */
 function isBrowserAccount(a: Account): boolean {

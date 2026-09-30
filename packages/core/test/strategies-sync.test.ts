@@ -72,7 +72,7 @@ function fakeSlack(handlers: Record<string, (p: Record<string, unknown>) => unkn
   } as unknown as Page;
 }
 
-test('Slack (tarayıcı): çağrı başına ≤3 iş parçacığı, kalanlar sonraki turda; kanal "değişmiş" kalır; hız sınırı köprüye fırlar', async () => {
+test('Slack (tarayıcı): çağrı başına ≤3 iş parçacığı, kalanlar sonraki turda; kanal "değişmiş" kalır; yanıt hız sınırı geçmişi atmaz, geçmiş hız sınırı köprüye fırlar', async () => {
   _resetSlackState();
   const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
   const parents = Array.from({ length: 5 }, (_, i) => ({ ts: `17000000${i}0.000100`, user: 'U_A', text: `üst ${i}`, reply_count: 1, latest_reply: `17000001${i}0.000100` }));
@@ -100,9 +100,22 @@ test('Slack (tarayıcı): çağrı başına ≤3 iş parçacığı, kalanlar son
   assert.deepEqual(calls.filter((c) => c.method === 'conversations.replies').map((c) => c.params.ts), [parents[1].ts, parents[0].ts]);
   const t3 = (await slackStrategy.threads(page, {}))[0].lastTs;
   assert.equal(t3, t1, 'hepsi alındı: gerçek zaman');
-  // hız sınırı yutulmaz
+  // yanıtlardaki hız sınırı zaten alınmış geçmişi ATMAZ (eskiden tüm çağrı fırlıyordu → iş parçacığı yoğun kanal hiç dolmuyordu):
+  // geçmiş döner, yanıtlar beklemeye alınır, kanal sonraki turda yine "değişmiş"
   _resetSlackState();
   await slackStrategy.me(page, {});
+  const t4 = (await slackStrategy.threads(page, {}))[0].lastTs;
   rateLimit = true;
-  await assert.rejects(slackStrategy.messages(page, {}, 'C9', 25), /ratelimited/);
+  calls.length = 0;
+  const got = await slackStrategy.messages(page, {}, 'C9', 25);
+  assert.equal(got.filter((m) => !m.threadId).length, 5, 'üst mesajlar döndü');
+  assert.equal(calls.filter((c) => c.method === 'conversations.replies').length, 1, 'hız sınırından sonra başka yanıt istenmedi');
+  assert.equal((await slackStrategy.threads(page, {}))[0].lastTs, t4 + 1, 'yanıtlar sonraki tura kaldı');
+  calls.length = 0;
+  await slackStrategy.messages(page, {}, 'C9', 25);
+  assert.equal(calls.filter((c) => c.method === 'conversations.replies').length, 0, 'bekleme süresince yanıt istenmez');
+  // birincil çağrıdaki (geçmiş) hız sınırı köprüye fırlar (üstel geri çekilme)
+  _resetSlackState();
+  const limited = fakeSlack({ 'conversations.history': () => ({ ok: false, error: 'ratelimited' }), 'users.info': () => ({ user: {} }) }, []);
+  await assert.rejects(slackStrategy.messages(limited, {}, 'C9', 25), /ratelimited/);
 });

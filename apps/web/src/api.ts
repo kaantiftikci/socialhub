@@ -83,7 +83,8 @@ const liveApi = {
   accounts: () => call<Account[]>('GET', '/accounts'),
   addAccount: (platform: Platform, token?: string) => call<Account>('POST', '/accounts', { platform, token }),
   removeAccount: (id: string) => call('DELETE', `/accounts/${enc(id)}`),
-  restartAccount: (id: string) => call('POST', `/accounts/${enc(id)}/restart`),
+  /** browserLogin: e-posta hesabını sağlayıcının kendi giriş penceresiyle yeniden bağla (uygulama şifreli eski hesap da geçer) */
+  restartAccount: (id: string, opts?: { browserLogin?: boolean }) => call('POST', `/accounts/${enc(id)}/restart`, opts),
   messageHtml: (messageId: string) => call<{ html: string }>('GET', `/messages/${enc(messageId)}/html`),
   loginInput: (id: string, events: LoginInput[]) => call('POST', `/accounts/${enc(id)}/login-input`, { events }),
   loginCancel: (id: string) => call('POST', `/accounts/${enc(id)}/login-cancel`),

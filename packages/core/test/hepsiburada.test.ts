@@ -10,7 +10,7 @@ process.env.KAVSAK_DATA_DIR = tmp;
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
 const { Store } = await import('../src/store.js');
-const { HepsiburadaConnector } = await import('../src/connectors/hepsiburada.js');
+const { HepsiburadaConnector, hepsiburadaAuth } = await import('../src/connectors/hepsiburada.js');
 
 const CFG = JSON.stringify({ orders: true, merchantId: 'b2910839-83b9-4d45-adb6-86bad457edcb', username: 'magaza_dev', password: 'gizli' });
 
@@ -223,10 +223,41 @@ test('Hepsiburada: 401 → kimlik hatası; eksik yapılandırma → hata', async
     const c2 = new HepsiburadaConnector(s2.account, s2.store, JSON.stringify({ orders: true, merchantId: 'x' }));
     await c2.start();
     assert.equal(s2.account.status, 'error');
-    assert.match(s2.account.detail ?? '', /merchant ID \/ kullanıcı adı \/ şifre/);
+    assert.match(s2.account.detail ?? '', /merchant ID \/ servis anahtarı girilmedi/);
     const c3 = new HepsiburadaConnector(s2.account, s2.store, 'bozuk json');
     await c3.start();
     assert.equal(s2.account.status, 'error');
+  } finally {
+    restore();
+  }
+});
+
+test('Hepsiburada kimlik modeli (Ocak 2024): Basic merchantId:servisAnahtarı + User-Agent entegratör kullanıcı adı; eski kullanıcı/şifre yedek', async () => {
+  const M = 'b2910839-83b9-4d45-adb6-86bad457edcb';
+  assert.deepEqual(hepsiburadaAuth({ merchantId: M, serviceKey: 'SK1', userAgent: 'magaza_dev' }), { basicUser: M, basicPass: 'SK1', userAgent: 'magaza_dev', label: 'magaza_dev', legacy: false, missing: undefined });
+  assert.equal(hepsiburadaAuth({ merchantId: M, serviceKey: 'SK1' }).userAgent, M, 'userAgent yoksa merchantId');
+  assert.equal(hepsiburadaAuth({ merchantId: M, serviceKey: 'SK1', username: 'eski_kullanici' }).userAgent, 'eski_kullanici', 'userAgent yoksa eski kullanıcı adı');
+  assert.equal(hepsiburadaAuth({ merchantId: M, serviceKey: 'SK1', username: 'u', password: 'p' }).legacy, false, 'servis anahtarı varsa o kazanır');
+  assert.equal(hepsiburadaAuth({ merchantId: M, username: 'u', password: 'p' }).legacy, true);
+  assert.match(hepsiburadaAuth({ merchantId: '', serviceKey: 'SK1' }).missing ?? '', /merchant ID/);
+
+  const { store, account } = setup();
+  const { calls, restore } = fakeFetch((u) => {
+    if (u.host === 'oms-external.hepsiburada.com') return { body: { totalCount: 0, items: [] } };
+    if (u.pathname === '/api/v1.0/issues') return { body: { items: [] } };
+    return undefined;
+  });
+  try {
+    const c = new HepsiburadaConnector(account, store, JSON.stringify({ orders: true, merchantId: M, serviceKey: 'SERVIS-ANAHTARI', userAgent: 'magaza_dev' }));
+    await c.start();
+    assert.equal(account.status, 'connected', account.detail);
+    assert.equal(account.label, 'Hepsiburada · magaza_dev');
+    assert.ok(calls.length > 0);
+    for (const x of calls) {
+      assert.equal(x.headers.authorization, 'Basic ' + Buffer.from(`${M}:SERVIS-ANAHTARI`).toString('base64'));
+      assert.equal(x.headers['user-agent'], 'magaza_dev');
+    }
+    await c.stop();
   } finally {
     restore();
   }

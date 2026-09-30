@@ -12,6 +12,8 @@
   body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #f4f4f7; font: 15px/1.45 -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, system-ui, sans-serif; color: #16151b; }
   .card { width: min(380px, calc(100vw - 32px)); background: #fff; border: 1px solid #e3e2ea; border-radius: 18px; padding: 28px 26px 22px; box-shadow: 0 20px 50px -24px rgba(20, 16, 60, .25); }
   .logo { width: 52px; height: 52px; border-radius: 15px; background: var(--c); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 19px; letter-spacing: -.5px; margin: 0 auto 14px; }
+  .logo.img { background: none; overflow: hidden; }
+  .logo.img img { width: 100%; height: 100%; display: block; }
   h1 { font-size: 21px; text-align: center; margin: 0 0 4px; letter-spacing: -.3px; }
   .sub { text-align: center; color: #6e6c78; font-size: 13.5px; margin: 0 0 20px; }
   label { display: block; font-size: 12.5px; color: #44424d; margin: 0 0 5px; font-weight: 500; }
@@ -47,7 +49,17 @@
     var mail = q.get('mail') === '1';
     document.documentElement.style.setProperty('--c', color);
     document.title = name + ' girişi';
-    document.getElementById('logo').textContent = code;
+    // markanın orijinal simgesi (Mivelo'daki Chip ile aynı SVG); yalnız <svg> ise ve <img> olarak (betik çalışmaz)
+    var logo = q.get('logo') || '';
+    if (/^<svg[\s>]/.test(logo) && logo.length < 20000) {
+      var img = document.createElement('img');
+      img.alt = '';
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(logo);
+      var box = document.getElementById('logo');
+      box.textContent = '';
+      box.classList.add('img');
+      box.appendChild(img);
+    } else document.getElementById('logo').textContent = code;
     document.getElementById('title').textContent = name + ' hesabına giriş yap';
     document.getElementById('sub').textContent = 'Mivelo ile bağlamak için giriş yap';
     if (mail) document.getElementById('ul').textContent = 'E-posta adresi';

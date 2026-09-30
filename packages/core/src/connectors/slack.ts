@@ -5,7 +5,7 @@ import { BaseConnector, type OutFile, type SendOptions } from './base.js';
 import { bus } from '../bus.js';
 import type { Account, Participant, Reaction } from '../model.js';
 import type { Store } from '../store.js';
-import { SKIP_SUBTYPES, SLACK_EMOJI, completedShareTs, fileToAttachment, formatSlackText, slackEmojiName, type UserInfo } from './browser/slack.js';
+import { SKIP_SUBTYPES, SLACK_EMOJI, completedShareTs, fileToAttachment, formatSlackText, rawSlackText, slackEmojiName, type UserInfo } from './browser/slack.js';
 
 /**
  * Slack uygulama bildirimi (manifest): kullanıcı Bağlan ekranındaki bağlantıyla KENDİ çalışma alanında dahili bir uygulama
@@ -364,17 +364,30 @@ export class SlackConnector extends BaseConnector {
     this.applyReaction(channel, ts, { emoji: SLACK_EMOJI[base] ?? `:${base}:`, senderId: user, senderName: fromMe ? 'Ben' : (await this.user(user)).name, fromMe }, remove);
   }
 
+  /** Aynı hata satırı en çok 10 dk'da bir (yalnız kod/sayı; içerik yok) */
+  private warned = new Map<string, number>();
+  private warnOnce(key: string, text: string): void {
+    if (Date.now() - (this.warned.get(key) ?? 0) < 10 * 60_000) return;
+    this.warned.set(key, Date.now());
+    bus.log('warn', text);
+  }
+  /** adı alınamayan kimlik → son deneme (10 dk yeniden istenmez) */
+  private userMiss = new Map<string, number>();
+
   private async user(id: string): Promise<UserInfo> {
     if (!id) return { name: 'Slack' };
     const cached = this.users.get(id);
     if (cached) return cached;
+    if (Date.now() - (this.userMiss.get(id) ?? 0) < 10 * 60_000) return { name: id };
     try {
       const r = id.startsWith('B') ? await this.web.bots.info({ bot: id }) : await this.web.users.info({ user: id });
       const u = ((r as { user?: Record<string, any> }).user ?? (r as { bot?: Record<string, any> }).bot ?? {}) as Record<string, any>;
       const v: UserInfo = { name: u.real_name || u.profile?.display_name || u.name || id, avatar: u.profile?.image_72 ?? u.icons?.image_72, handle: u.name && !id.startsWith('B') ? '@' + u.name : undefined };
       this.users.set(id, v);
       return v;
-    } catch {
+    } catch (e) {
+      this.userMiss.set(id, Date.now());
+      this.warnOnce(`user:${slackError(e)}`, `Slack ${id.startsWith('B') ? 'bots.info' : 'users.info'} başarısız (${slackError(e) || 'hata'}); ad yerine kimlik`);
       return { name: id };
     }
   }
@@ -412,7 +425,17 @@ export class SlackConnector extends BaseConnector {
     this.polling = true;
     try {
       if (first || Date.now() - this.convsAt > 10 * 60_000) await this.refreshList();
-      for (const c of this.pickForPoll(first)) await this.fetchHistory(c, first);
+      // Sohbet başına ayrı: tek bir sohbetin hatası (not_in_channel, channel_not_found, eksik kapsam mpim:history…) eskiden
+      // turun geri kalanını durduruyordu → aynı sohbet hep önde seçildiği için diğer sohbetlerin mesajları/önizlemeleri hiç gelmiyordu
+      const failed: string[] = [];
+      for (const c of this.pickForPoll(first)) {
+        try {
+          await this.fetchHistory(c, first);
+        } catch (e) {
+          failed.push(`${c.id.slice(0, 1)}…:${slackError(e) || (e as Error).message.split('\n')[0].slice(0, 60)}`);
+        }
+      }
+      if (failed.length) this.warnOnce(`hist:${failed[0].split(':')[1]}`, `Slack geçmişi alınamadı: ${failed.length} sohbet (ilk: ${failed[0]})`);
     } catch (e) {
       bus.log('warn', `Slack yoklama hatası: ${(e as Error).message}`);
     } finally {
@@ -581,8 +604,9 @@ export class SlackConnector extends BaseConnector {
         if (!prev || Number(x.ts) > Number(prev)) this.threadLast.set(key, String(x.ts));
       }
       this.threadsSeen.set(key, latest ?? String(all[0]?.latest_reply ?? all.length));
-    } catch {
-      /* yanıtlar alınamadı; sonraki olay/yoklamada yeniden */
+    } catch (e) {
+      // yanıtlar alınamadı; sonraki olay/yoklamada yeniden
+      this.warnOnce(`replies:${slackError(e)}`, `Slack conversations.replies başarısız (${slackError(e) || (e as Error).message.split('\n')[0].slice(0, 60)})`);
     }
   }
 
@@ -592,8 +616,10 @@ export class SlackConnector extends BaseConnector {
     const files = (m.files ?? []).filter((f) => f.mode !== 'tombstone' && f.mode !== 'hidden_by_limit');
     const uid = String(m.user ?? m.bot_id ?? '');
     // bahsetmelerdeki adlar önbellekte olsun
-    for (const id of new Set([...(m.text ?? '').matchAll(/<@([A-Z0-9_]+)>/g)].map((x) => x[1]))) await this.user(id);
-    const text = formatSlackText(m.text ?? '', this.users);
+    // metni boş, içeriği yalnız bloklarda/eklerde olan mesajlar (uygulama/iş akışı mesajları) atılmasın
+    const raw = rawSlackText(m as Record<string, unknown>);
+    for (const id of new Set([...raw.matchAll(/<@([A-Z0-9_]+)>/g)].map((x) => x[1]))) await this.user(id);
+    const text = formatSlackText(raw, this.users);
     if (!text && !files.length) return;
     const fromMe = uid === this.meId;
     const u = m.subtype === 'bot_message' && m.username ? { name: m.username, avatar: m.icons?.image_64 } : fromMe ? { name: 'Ben' } : await this.user(uid);
@@ -644,6 +670,9 @@ type SlackMsg = {
   reply_count?: number;
   latest_reply?: string;
   files?: Array<Record<string, any>>;
+  /** metin boşsa içerik (rich_text / section) — rawSlackText */
+  blocks?: Array<Record<string, any>>;
+  attachments?: Array<Record<string, any>>;
   reactions?: Array<{ name?: string; users?: string[]; count?: number }>;
   /** düzenlendiyse {user, ts} */
   edited?: { user?: string; ts?: string };
