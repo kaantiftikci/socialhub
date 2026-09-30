@@ -10,3 +10,5 @@ apps/desktop/src-tauri/core-bundle/
 dist-single/
 design/appstore/out/
 design/appstore/.build.html
+apps/bridge/mivelo-bridge
+apps/bridge/mivelo-bridge.exe

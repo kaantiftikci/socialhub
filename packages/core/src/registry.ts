@@ -34,6 +34,8 @@ import { PttAvmConnector } from './connectors/pttavm.js';
 import { AmazonConnector } from './connectors/amazon.js';
 import { MAIL_PLATFORMS } from './model.js';
 import { bootOrder, bootSlots, type BootInfo } from './boot-plan.js';
+import { MautrixConnector, MAUTRIX_NET } from './connectors/mautrix/connector.js';
+import { ensureBinary, sidecar } from './connectors/mautrix/sidecar.js';
 
 /** Hesap ↔ connector eşlemesi. Açılışta kayıtlı hesapları kaldırır, yenilerini oluşturur. */
 /** Asılı kalan stop()/logout() HTTP isteğini sonsuza dek bekletmesin */
@@ -448,8 +450,14 @@ export class Registry {
   }
 
   private async spawn(account: Account, interactive = true, window = false, external = false, login = false): Promise<void> {
-    let c: Connector;
-    switch (account.platform) {
+    let c: Connector | undefined;
+    // Beeper (mautrix) köprüleri: WhatsApp, Instagram, Messenger, X, LinkedIn, Slack — ikili yoksa eski bağlayıcılar
+    if (mautrixWanted(account)) {
+      const bin = await ensureBinary();
+      if (bin) c = new MautrixConnector(account, this.store);
+      else bus.log('warn', `${account.platform}: köprü bileşeni yok, eski bağlayıcı kullanılıyor`);
+    }
+    if (!c) switch (account.platform) {
       case 'whatsapp':
         c = new WhatsAppConnector(account, this.store);
         break;
@@ -612,14 +620,23 @@ export class Registry {
     await Promise.all([...this.connectors.values()].map((c) => withTimeout(c.stop(), 10_000).catch(() => undefined)));
     // arka planda süren kaldırma/yeniden deneme işleri (kaldırılan hesabın connector'ını durdurma vb.) de bitsin: kapanışta açık bağlantı kalmasın
     await withTimeout(Promise.all([...this.locks.values()]), 20_000).catch(() => undefined);
+    await withTimeout(sidecar.stop(), 15_000).catch(() => undefined);
   }
 }
 
 /** Tarayıcı girişi (sağlayıcının kendi giriş penceresi) olan e-posta platformları; token (uygulama şifresi) yalnız eski hesaplarda */
 const MAIL_BROWSER_LOGIN: Platform[] = ['gmail', 'outlook', 'yahoo', 'yandex', 'icloud'];
 
+/** Hesap Beeper (mautrix) köprüsüyle mi çalışacak: Slack'te eski belirteçli (xoxp) hesaplar resmi API bağlayıcısında kalır */
+function mautrixWanted(a: Account): boolean {
+  if (!MAUTRIX_NET[a.platform] || process.env.MIVELO_ENGINE === 'legacy') return false;
+  if (a.platform === 'slack' && readToken(a.id) !== undefined) return false;
+  return true;
+}
+
 /** Hesap tarayıcı köprüsüyle mi çalışacak (spawn'daki seçimle aynı: token dosyası yoksa tarayıcı yolu) */
 function isBrowserAccount(a: Account): boolean {
+  if (mautrixWanted(a)) return false;
   const hasToken = readToken(a.id) !== undefined;
   switch (a.platform) {
     case 'linkedin':

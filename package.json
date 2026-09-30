@@ -19,7 +19,8 @@
     "demo:html": "node scripts/demo-html.mjs",
     "autodeploy": "node scripts/auto-deploy.mjs",
     "e2e": "node scripts/e2e.mjs",
-    "ci": "node scripts/ci-watch.mjs"
+    "ci": "node scripts/ci-watch.mjs",
+    "bridge:build": "node scripts/build-bridge.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

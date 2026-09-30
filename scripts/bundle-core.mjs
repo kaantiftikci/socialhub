@@ -13,6 +13,7 @@
  */
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -96,6 +97,21 @@ if (process.env.KAVSAK_BUNDLE_NODE === '1') {
   console.log(`[bundle-core] node ${process.version} eklendi: ${nodeOut}`);
 } else {
   fs.rmSync(path.join(out, 'bin'), { recursive: true, force: true });
+}
+
+// Beeper (mautrix) köprüsü (apps/bridge, Go): core/bin/mivelo-bridge[.exe]. Go yoksa atlanır (çekirdek ilk açılışta
+// mivelo.app'ten indirir); MIVELO_BUNDLE_BRIDGE=1 (CI) derlenemezse paketlemeyi durdurur, =0 hiç denemez.
+if (process.env.MIVELO_BUNDLE_BRIDGE !== '0') {
+  const goos = process.env.GOOS || { win32: 'windows', darwin: 'darwin', linux: 'linux' }[process.platform];
+  const bridgeOut = path.join(out, 'bin', goos === 'windows' ? 'mivelo-bridge.exe' : 'mivelo-bridge');
+  const r = spawnSync(process.execPath, [path.join(root, 'scripts', 'build-bridge.mjs'), bridgeOut], { stdio: 'inherit' });
+  if (r.status !== 0) {
+    if (process.env.MIVELO_BUNDLE_BRIDGE === '1') {
+      console.error('[bundle-core] köprü derlenemedi');
+      process.exit(1);
+    }
+    console.warn('[bundle-core] köprü pakete eklenmedi (Go yok ya da derleme hatası); uygulama ilk açılışta indirir');
+  }
 }
 
 /** Klasör boyutu (du yerine; Windows'ta da çalışır). Sembolik bağlar izlenmez. */

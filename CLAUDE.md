@@ -251,6 +251,34 @@ Dil: arayüz ve yorumlar Türkçe.
   tüm oturumlar tek sunucuda (güvenlik/KVKK), gerçek giriş sayfası kullanıcının tarayıcısında açılamıyor (çerezler sunucuya taşınamaz). Gerçek
   kullanım = masaüstü paketleri (DMG/EXE, kullanıcının kendi cihazı ve IP'si). Demo sitesi yalnız tanıtım (örnek veri). `#core=` tünel yolu (REMOTE_CORE) duruyor.
 ## Connector'lar ve kritik bilgiler
+- **Beeper (mautrix) köprüsü (30.09, Kaan: resmi çözümü olmayanları Beeper gibi Matrix kütüphanelerine taşı)**: WhatsApp, Instagram,
+  Messenger, X, LinkedIn, Slack artık `apps/bridge` (Go, `mivelo-bridge`) ile — Beeper'ın mautrix bağlayıcıları (whatsapp, meta
+  `connector`+`igconnector`, twitter, linkedin, slack; bridgev2 v0.31) **Matrix sunucusu olmadan**: `shim.go` sahte MatrixConnector
+  (oda = sohbet, `roomIDFor` portal anahtarını geri çözülebilir taşır; `BatchSending` + `AutoJoinInvites`; `SplitPortals`), olaylar
+  stdout'a JSON satırı (`message/edit/reaction/redact/receipt/typing/unread/batch/chat/chat.delete/tag/status/ghost`), istekler stdin
+  (`login.start/submit/wait/cancel, connect, disconnect, logout, chats, open, send, react, unreact, edit, redact, read, typing, backfill,
+  media`). Mesaj kimliği `rid` (rid.go): ağ kimliği (+"~parça"); WhatsApp'ta yalnız son parça (= eski Baileys kimliği → eski
+  mesajlar/sohbetler korunur, kopya yok). Medya istek üzerine (`DirectMediableNetwork`, `mxc://d/…` → `<veri>/bridge/<ağ>/media/d…`),
+  gönderilecek dosya `<veri>/bridge/<ağ>/out/`e kopyalanır (`mxc://f/` yalnız köprü klasörü içi). Eski mesajlar el ile görev
+  (`Backfill.Queue.Manual`, ilk 100 mesaj, yeniden bağlanınca ≤500). Veri `~/.mivelo/bridge/<ağ>/bridge.db` (WhatsApp anahtarları da;
+  0600, SQLCipher DEĞİL). Günlük düzeyi `MIVELO_BRIDGE_LOG` (vars. warn; içerik yazmaz, kimlik yazabilir).
+  Çekirdek: `connectors/mautrix/sidecar.ts` (tek süreç, çökünce üstel yeniden başlatma, `bridge.restart` olayında hesaplar yeniden
+  bağlanır; ikili sırası MIVELO_BRIDGE_BIN → paket `core/bin` → geliştirmede `apps/bridge/mivelo-bridge` (kaynak yeniyse ve Go varsa
+  arka planda derlenir) → `~/.mivelo/bin` (mivelo.app/indir/files/latest.json `bridge`, sha256 doğrulamalı indirme)), `connector.ts`
+  `MautrixConnector` (hesap ↔ köprü oturumu `sessions/<hesap>/mautrix.json {login, migrated}`; durum CONNECTED/CONNECTING/
+  TRANSIENT_DISCONNECT→connecting/BAD_CREDENTIALS·LOGGED_OUT→pairing/UNKNOWN_ERROR→error), `cookie-login.ts` (çerez adımı: önce
+  görünmez, eski tarayıcı profiliyle `sessions/<hesap>/profile` — eski IG/X/LinkedIn/Messenger/Slack hesapları GİRİŞSİZ taşınır; olmazsa
+  `--app` giriş penceresi; alan kaynakları cookie/local_storage/request_header/request_body/special + `extract_js`). WhatsApp eski
+  Baileys oturumu taşınamaz → bir kez QR (`pairing` "QR kodunu okutarak bağlan"; telefondaki eski "Mivelo" cihazı elle kaldırılabilir).
+  Tarayıcı kanallarının eski sohbetleri ilk köprü girişinde bir kez silinip yeniden eşitlenir (`migrated`). Slack'te belirteç dosyalı
+  (xoxp) eski hesaplar resmi API bağlayıcısında kalır. Telegram resmi MTProto (kendi api_id) → DEĞİŞMEDİ. TikTok köprüsü yok → tarayıcı.
+  Yedek: ikili yoksa ya da `MIVELO_ENGINE=legacy` → eski bağlayıcılar (whatsapp.ts Baileys, browser/*). Arayüz: X/Messenger/LinkedIn'de
+  yerel yanıt/tepki/düzenle/sil açıldı (types.ts; düzenleme 15 dk, LinkedIn 60 dk), QUOTE_TEXT yalnız TikTok/iMessage.
+  Paket: `scripts/build-bridge.mjs` (`npm run bridge:build`), bundle-core Go varsa `core/bin`e koyar (CI `MIVELO_BUNDLE_BRIDGE=1`;
+  setup-go 1.26, mac-intel `CC="clang -arch x86_64"`, Windows MinGW gcc), CI ayrıca `mivelo-bridge-<os>-<arch>` + latest.json `bridge`.
+  Testler: `apps/bridge` `go test` (sahte ağla uçtan uca + gerçek 6 bağlayıcı açılışı + çerez adımları), çekirdek
+  `mautrix-connector.test.ts` (olay eşleme), `mautrix-e2e.test.ts` (gerçek ikili + `MIVELO_FAKE_NET=1`; Go yoksa atlanır). Gerçek
+  hesaplarla DOĞRULANMADI. Lisans: apps/bridge AGPL-3.0 (depo açık). "Tüm verileri sil" köprüyü kapatıp `bridge/` klasörünü de siler.
 - **WhatsApp** (`connectors/whatsapp.ts`, Baileys 7.0.0-rc14): `browser: ['Mac','Mivelo','1.0']` + `syncFullHistory: true`.
   ASLA `Browsers.macOS(...)` + syncFullHistory birlikte kullanma (DARWIN kimliği → sunucu 428 ile anında kapatır).
   LID↔numara eşlemesi grup üyeliklerinden ve `chats.phoneNumberShare`'dan öğrenilir; kopya sohbetler `store.mergeChats` ile

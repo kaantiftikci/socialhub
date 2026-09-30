@@ -4,6 +4,8 @@
 # Sürüm: tauri.conf.json'daki ana sürüm + çalıştırma numarası (0.1.<n>); etiketle çalışınca etiketin sürümü (v0.2.0 → 0.2.0).
 # Node çalışma zamanı pakete gömülür (KAVSAK_BUNDLE_NODE=1): kullanıcının Node kurmasına gerek yok. Chromium pakete KONMAZ,
 # tarayıcıyla bağlanan ilk kanalda uygulama kendisi indirir (packages/core/src/browser-install.ts).
+# Beeper (mautrix) köprüsü (apps/bridge, Go + CGO) her hedef için derlenip core/bin'e gömülür; ayrıca files/'a
+# mivelo-bridge-<os>-<arch> olarak konur (geliştirme kurulumları ikiliyi buradan indirir, latest.json "bridge").
 # İmza: macOS ad-hoc ("-"; Apple Developer hesabı yok → ilk açılışta "Yine de aç"), Windows imzasız (SmartScreen "Yine de çalıştır").
 name: build-desktop
 on:
@@ -32,7 +34,7 @@ jobs:
   # (0.1.7'de testler üç makinede 15+ dk takılıp aylık 2.000 dakikanın %90'ını bitirdi). Sonuç paketlemeyi durdurmaz.
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     continue-on-error: true
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
@@ -42,9 +44,20 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: apps/bridge/go.sum
       - run: npm ci
+      - name: Köprü testleri (Go)
+        working-directory: apps/bridge
+        run: go test ./...
+      - name: Köprü ikilisi (çekirdeğin uçtan uca testi için)
+        run: node scripts/build-bridge.mjs "$RUNNER_TEMP/mivelo-bridge"
       - name: Çekirdek birim testleri
         run: npm test -w packages/core
+        env:
+          MIVELO_TEST_BRIDGE_BIN: ${{ runner.temp }}/mivelo-bridge
 
   build:
     needs: version
@@ -54,11 +67,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: mac-arm64, os: macos-14, arch: arm64, target: aarch64-apple-darwin, bundle: dmg }
+          - { name: mac-arm64, os: macos-14, arch: arm64, target: aarch64-apple-darwin, bundle: dmg, goos: darwin, goarch: arm64 }
           # Intel: Apple Silicon makinesinde x64 Node (Rosetta) + x86_64 Rust hedefi → yerel modüller x64 kurulur
-          - { name: mac-intel, os: macos-14, arch: x64, target: x86_64-apple-darwin, bundle: dmg }
+          - { name: mac-intel, os: macos-14, arch: x64, target: x86_64-apple-darwin, bundle: dmg, goos: darwin, goarch: amd64 }
           # windows-latest (VS 2026) npm'in node-gyp'inde tanınmıyor → yerel modül derlenemiyor; VS 2022'li imaj
-          - { name: windows-x64, os: windows-2022, arch: x64, target: x86_64-pc-windows-msvc, bundle: nsis }
+          - { name: windows-x64, os: windows-2022, arch: x64, target: x86_64-pc-windows-msvc, bundle: nsis, goos: windows, goarch: amd64 }
     runs-on: ${{ matrix.os }}
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
@@ -73,6 +86,14 @@ jobs:
           node-version: 22
           architecture: ${{ matrix.arch }}
           cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: apps/bridge/go.sum
+      - name: C derleyicisi (köprü CGO)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then gcc --version | head -1; else cc --version | head -1; fi
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -84,10 +105,23 @@ jobs:
       - run: npm ci
       - run: npm run build -w packages/core
       - run: npm run build -w apps/web
-      - name: Çekirdeği paketle (bundle-core + gömülü node)
+      - name: Çekirdeği paketle (bundle-core + gömülü node + köprü)
         run: node scripts/bundle-core.mjs
         env:
           KAVSAK_BUNDLE_NODE: '1'
+          MIVELO_BUNDLE_BRIDGE: '1'
+          MIVELO_BRIDGE_VERSION: ${{ needs.version.outputs.v }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          # Intel paketi Apple Silicon makinesinde çapraz derlenir
+          CC: ${{ matrix.name == 'mac-intel' && 'clang -arch x86_64' || '' }}
+          CGO_CFLAGS: ${{ matrix.goos == 'darwin' && '-mmacosx-version-min=11.0' || '' }}
+          CGO_LDFLAGS: ${{ matrix.goos == 'darwin' && '-mmacosx-version-min=11.0' || '' }}
+      - name: Köprü ikilisi mimarisi
+        shell: bash
+        run: |
+          b=apps/desktop/src-tauri/core-bundle/bin/mivelo-bridge; [ -f "$b" ] || b="$b.exe"
+          ls -la "$b"; file "$b" || true
       - name: Gömülü node ve yerel modül mimarisi
         if: runner.os == 'macOS'
         run: |
@@ -128,6 +162,9 @@ jobs:
           mkdir -p out
           b=apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle
           if [ "${{ matrix.bundle }}" = dmg ]; then cp "$b"/dmg/*.dmg "out/Mivelo-${{ matrix.name }}.dmg"; else cp "$b"/nsis/*.exe "out/Mivelo-${{ matrix.name }}-setup.exe"; fi
+          # geliştirme kurulumları (npm run dev) köprüyü buradan indirir
+          ext=""; [ "${{ matrix.goos }}" = windows ] && ext=".exe"
+          cp "apps/desktop/src-tauri/core-bundle/bin/mivelo-bridge$ext" "out/mivelo-bridge-${{ matrix.goos }}-${{ matrix.goarch }}$ext"
           ls -la out
       - uses: actions/upload-artifact@v4
         with:
@@ -156,7 +193,9 @@ jobs:
             const fs=require("fs"); const crypto=require("crypto"); const v=process.argv[1];
             // sha256: uygulama içi güncelleme (updater.ts) indirdiği paketi bununla doğrular
             const files={}; for (const f of fs.readdirSync("files")) files[f]={size:fs.statSync("files/"+f).size, sha256:crypto.createHash("sha256").update(fs.readFileSync("files/"+f)).digest("hex")};
-            fs.writeFileSync("files/latest.json", JSON.stringify({version:v, date:new Date().toISOString(), files}, null, 2));
+            // köprü ikilileri: "darwin-arm64" → {file, size, sha256} (sidecar.ts indirirken doğrular)
+            const bridge={}; for (const [f,x] of Object.entries(files)) { const m=/^mivelo-bridge-(\w+-\w+?)(?:\.exe)?$/.exec(f); if (m) bridge[m[1]]={file:f, ...x}; }
+            fs.writeFileSync("files/latest.json", JSON.stringify({version:v, date:new Date().toISOString(), files, bridge}, null, 2));
           ' "${{ needs.version.outputs.v }}"
           cp deploy/indir/.htaccess files/.htaccess
           cat files/latest.json

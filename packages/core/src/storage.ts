@@ -110,6 +110,22 @@ export async function storageReport(store: Pick<Store, 'sql'>, opts: { dataDir?:
     }
     parts.sessions += Math.max(0, all - media);
   }
+  // Beeper (mautrix) köprüsü: veritabanları + oturum anahtarları "oturumlar", medya önbelleği türlerine göre
+  const bridgeRoot = path.join(dataDir, 'bridge');
+  for (const net of await fs.promises.readdir(bridgeRoot).catch(() => [] as string[])) {
+    const netDir = path.join(bridgeRoot, net);
+    const all = await dirSize(netDir, budget);
+    let seen = 0;
+    await cacheEntries(
+      path.join(netDir, 'media'),
+      (_f, kind, size) => {
+        parts[kind] += size;
+        seen += size;
+      },
+      budget,
+    );
+    parts.sessions += Math.max(0, all - seen);
+  }
   parts.models = (await dirSize(opts.modelsDir ?? path.join(dataDir, 'models'), budget)) + (await dirSize(path.join(dataDir, 'ml'), budget));
   // sohbet başına: mesaj metni + ek bilgisi + e-posta HTML'i (yaklaşık), dosya sayısı kütüphaneden
   let chats: StorageReport['chats'] = [];
@@ -153,6 +169,16 @@ export async function clearMediaCache(opts: { olderThanDays: number; kinds: Medi
     if (isMailAccount(acc)) continue;
     await cacheEntries(path.join(sessions, acc, 'media'), async (fp, kind, size, mtime) => {
       if (!kinds.has(kind) || (opts.olderThanDays > 0 && mtime >= cutoff)) return;
+      await fs.promises.rm(fp, { force: true });
+      await fs.promises.rm(`${fp}.type`, { force: true });
+      files++;
+      bytes += size;
+    });
+  }
+  // köprünün istek üzerine indirdiği medya ("d" önekli; yeniden indirilebilir). Köprünün kendi yüklediği dosyalar (tek kopya) silinmez
+  for (const net of await fs.promises.readdir(path.join(dataDir, 'bridge')).catch(() => [] as string[])) {
+    await cacheEntries(path.join(dataDir, 'bridge', net, 'media'), async (fp, kind, size, mtime) => {
+      if (!/^d[0-9a-f]{32}$/.test(path.basename(fp)) || !kinds.has(kind) || (opts.olderThanDays > 0 && mtime >= cutoff)) return;
       await fs.promises.rm(fp, { force: true });
       await fs.promises.rm(`${fp}.type`, { force: true });
       files++;

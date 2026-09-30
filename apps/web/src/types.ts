@@ -109,13 +109,14 @@ export interface Message {
 }
 
 /** Mesaja alıntılı yanıt verilebilen platformlar (sağa kaydır / Yanıtla); Slack'te yanıt iş parçacığına gider */
-export const REPLY_PLATFORMS = new Set<Platform>(['whatsapp', 'telegram', 'instagram', 'slack', 'demo']);
+// Beeper (mautrix) köprüleriyle X, Messenger ve LinkedIn'de de yerel alıntılı yanıt, tepki, düzenleme ve silme var (30.09)
+export const REPLY_PLATFORMS = new Set<Platform>(['whatsapp', 'telegram', 'instagram', 'slack', 'x', 'messenger', 'linkedin', 'demo']);
 /**
  * Yerel alıntılı yanıtı olmayan mesajlaşma uygulamaları (TikTok, X, Messenger, LinkedIn, iMessage): sağa kaydır / Yanıtla yine çalışır,
  * mesajın başına tek satır alıntı eklenir ("↪ Ayşe: “…”"). Mivelo bu satırı balonda alıntı kutusu olarak gösterir (karşı taraf da Mivelo
  * kullanıyorsa onda da); öteki uygulamalarda düz metin olarak okunur.
  */
-export const QUOTE_TEXT_PLATFORMS = new Set<Platform>(['tiktok', 'x', 'messenger', 'linkedin', 'imessage']);
+export const QUOTE_TEXT_PLATFORMS = new Set<Platform>(['tiktok', 'imessage']);
 const QUOTE_LINE = /^↪ ([^\n:]{1,60}): “([^”\n]{0,160})”\n([\s\S]*)$/;
 export function quoteLine(senderName: string, text: string): string {
   const t = text.replace(/\s+/g, ' ').replace(/[”]/g, '"').trim();
@@ -127,13 +128,13 @@ export function parseQuoteLine(text: string): { senderName: string; text: string
   return m && m[3].trim() ? { senderName: m[1], text: m[2], rest: m[3] } : null;
 }
 /** Kendi mesajını düzenleyebilen platformlar (API destekli) */
-export const EDIT_PLATFORMS = new Set<Platform>(['whatsapp', 'telegram', 'slack', 'demo']);
+export const EDIT_PLATFORMS = new Set<Platform>(['whatsapp', 'telegram', 'slack', 'instagram', 'messenger', 'x', 'linkedin', 'demo']);
 /** Kendi mesajını herkesten silebilen (geri alabilen) platformlar */
-export const UNSEND_PLATFORMS = new Set<Platform>(['whatsapp', 'telegram', 'slack', 'instagram', 'demo']);
+export const UNSEND_PLATFORMS = new Set<Platform>(['whatsapp', 'telegram', 'slack', 'instagram', 'messenger', 'x', 'linkedin', 'demo']);
 /** Düzenleme süre sınırı (ms; yoksa sınırsız): WhatsApp 15 dk, Telegram 48 sa */
-export const EDIT_LIMIT_MS: Partial<Record<Platform, number>> = { whatsapp: 15 * 60_000, telegram: 48 * 3600_000 };
+export const EDIT_LIMIT_MS: Partial<Record<Platform, number>> = { whatsapp: 15 * 60_000, telegram: 48 * 3600_000, instagram: 15 * 60_000, messenger: 15 * 60_000, x: 15 * 60_000, linkedin: 60 * 60_000 };
 /** Herkesten silme süre sınırı (ms; yoksa sınırsız): WhatsApp ~2 gün */
-export const UNSEND_LIMIT_MS: Partial<Record<Platform, number>> = { whatsapp: 48 * 3600_000 };
+export const UNSEND_LIMIT_MS: Partial<Record<Platform, number>> = { whatsapp: 48 * 3600_000, linkedin: 60 * 60_000 };
 export const DELETED_TEXT = '🚫 Bu mesaj silindi';
 
 export type CoreEvent =
@@ -261,7 +262,7 @@ export const TAG_COLORS: Record<string, [string, string]> = {
 export const DEFAULT_TAGS = ['müşteri', 'ekip', 'fırsat', 'kişisel'];
 
 /** Emoji tepkisi verilebilen platformlar */
-export const REACT_PLATFORMS = new Set<Platform>(['whatsapp', 'telegram', 'slack', 'instagram', 'linkedin', 'demo']);
+export const REACT_PLATFORMS = new Set<Platform>(['whatsapp', 'telegram', 'slack', 'instagram', 'linkedin', 'messenger', 'x', 'demo']);
 /** Hızlı tepki çubuğu */
 export const QUICK_REACTIONS = ['👍', '❤️', '😂', '🔥', '👏', '😮'];
 

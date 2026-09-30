@@ -16,6 +16,7 @@ import type { Registry } from './registry.js';
 import type { Connector, LoginInput } from './connectors/base.js';
 import { resolveOAuth } from './connectors/mail.js';
 import { bus } from './bus.js';
+import { sidecar } from './connectors/mautrix/sidecar.js';
 import { AiError, aiEnabled, aiKey, aiKeySource, draftReply, isAiTone, setAiKey } from './ai.js';
 import { analyzeStyle, describeStyle } from './style.js';
 import { buildIcs, formatStart, parseStart } from './calendar.js';
@@ -319,7 +320,9 @@ export function createServer(store: Store, registry: Registry, port: number): ht
         closeLan();
       }
       for (const f of [SETTINGS_FILE, PROFILE_FILE(), path.join(DATA_DIR, 'send-guard.json')]) fs.rmSync(f, { force: true });
-      for (const d of ['sessions', 'outbox', 'calendar']) await fs.promises.rm(path.join(DATA_DIR, d), { recursive: true, force: true }).catch(() => undefined);
+      // köprü veritabanları (mautrix oturumları, WhatsApp anahtarları, medya önbelleği): süreç kapanınca silinir, gerekince yeniden açılır
+      await sidecar.stop().catch(() => undefined);
+      for (const d of ['sessions', 'outbox', 'calendar', 'bridge']) await fs.promises.rm(path.join(DATA_DIR, d), { recursive: true, force: true }).catch(() => undefined);
       bus.log('info', `Tüm veriler silindi (${n} hesap)`);
       bus.emit({ type: 'scheduled.update' });
       bus.emit({ type: 'events.update' });

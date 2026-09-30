@@ -16,6 +16,25 @@ export interface ChangeEntry {
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    id: '2026-09-30e',
+    date: '2026-09-30',
+    title: 'Yeni bağlantı altyapısı',
+    items: [
+      {
+        title: 'WhatsApp, Instagram, Messenger, X, LinkedIn ve Slack yeni altyapıda',
+        text: 'Bu uygulamalar artık arka planda gizli bir tarayıcı açmadan, doğrudan platformların kendi bağlantısıyla çalışıyor. Mesajlar daha hızlı geliyor, bilgisayarın daha az bellek ve pil harcıyor.',
+      },
+      {
+        title: 'Tepki, düzenleme, silme ve yanıt her yerde',
+        text: 'X, Messenger ve LinkedIn’de de mesajlara gerçek tepki verebilir, gönderdiğin mesajı düzenleyip silebilir, alıntılı yanıt yazabilirsin.',
+      },
+      {
+        title: 'WhatsApp için bir kez QR',
+        text: 'Yeni altyapıya geçerken WhatsApp bir kez QR kodu istiyor; sohbetlerin ve eski mesajların yerinde kalır. Diğer uygulamalarda kayıtlı oturumun kullanılır, yeniden giriş gerekmez.',
+      },
+    ],
+  },
+  {
     id: '2026-09-30d',
     date: '2026-09-30',
     title: 'Her uygulamada tepki, daha canlı Miveloji',

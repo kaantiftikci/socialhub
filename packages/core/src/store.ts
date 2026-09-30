@@ -806,6 +806,14 @@ export class Store {
     return n;
   }
 
+  /** Tek sohbeti (ve mesajlarını) sil — platformda silinen/ayrılınan sohbet */
+  deleteChat(id: string): void {
+    this.transaction(() => {
+      this.stmt('DELETE FROM messages WHERE chat_id = ?').run(id);
+      this.stmt('DELETE FROM chats WHERE id = ?').run(id);
+    });
+  }
+
   /** Hesabın belirli adlı sohbetlerini (ve mesajlarını) sil — hatalı sürümün ürettiği boş kayıtları temizlemek için */
   dropChatsNamed(accountId: string, name: string): number {
     const ids = (this.stmt('SELECT id FROM chats WHERE account_id = ? AND name = ?').all(accountId, name) as Array<{ id: string }>).map((r) => r.id);

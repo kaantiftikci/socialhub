@@ -26,6 +26,8 @@ test('browserSlots: macOS belleği free_count yerine toplamdan (8 çekirdek/8-16
 
 test('bootAll: sıradaki tarayıcı kanalları kopuk/yeşil kalmaz, "connecting" görünür; pairing korunur', async () => {
   process.env.MIVELO_BOOT_SLOTS = '1';
+  // eski motor (köprü ikilisi yokken): Instagram/LinkedIn/X tarayıcı kanalı olarak açılış sırasına girer
+  process.env.MIVELO_ENGINE = 'legacy';
   const store = new Store(path.join(tmp, 'b.db'));
   const reg = new Registry(store);
   const mk = (id: string, platform: 'instagram' | 'linkedin' | 'x' | 'whatsapp', status: 'disconnected' | 'connected' | 'pairing') =>
@@ -50,6 +52,7 @@ test('bootAll: sıradaki tarayıcı kanalları kopuk/yeşil kalmaz, "connecting"
   assert.ok(evs.includes('instagram:1:connecting') && evs.includes('linkedin:1:connecting'));
   assert.equal(spawned.length, 4);
   delete process.env.MIVELO_BOOT_SLOTS;
+  delete process.env.MIVELO_ENGINE;
   await reg.stopAll();
   store.close();
 });
