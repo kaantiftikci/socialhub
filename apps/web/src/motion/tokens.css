@@ -1,0 +1,14 @@
+/* Mivelo hareket kimliği (.claude/skills/motion-design): imza eğri, giriş/çıkış eğrileri, 3 süre. Yalnız transform/opacity animasyonu. */
+:root {
+  --m-ease: cubic-bezier(.2, 0, 0, 1);
+  --m-in: cubic-bezier(.05, .7, .1, 1);
+  --m-out: cubic-bezier(.3, 0, 1, 1);
+  --m-pop: cubic-bezier(.175, .885, .32, 1.275);
+  --m-quick: 150ms;
+  --m-std: 260ms;
+  --m-slow: 400ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root { --m-quick: 1ms; --m-std: 1ms; --m-slow: 1ms; }
+}
+html.reduce-motion { --m-quick: 1ms; --m-std: 1ms; --m-slow: 1ms; }
