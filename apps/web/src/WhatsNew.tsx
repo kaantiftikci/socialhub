@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { CHANGELOG, type ChangeEntry } from './changelog';
 import { Icon, Logo } from './ui';
 
@@ -61,7 +61,7 @@ export function pendingEntries(): ChangeEntry[] {
 
 const fmtDate = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' });
 
-export function WhatsNew({ ready }: { ready: boolean }) {
+export const WhatsNew = memo(function WhatsNew({ ready }: { ready: boolean }) {
   const [entries, setEntries] = useState<ChangeEntry[] | null>(null);
   const [closing, setClosing] = useState(false);
   const [older, setOlder] = useState(false);
@@ -105,8 +105,10 @@ export function WhatsNew({ ready }: { ready: boolean }) {
     setClosing(true);
     window.setTimeout(() => setEntries(null), 260);
   }
+  // Maddeler düz işlevle çizilir (iç içe tanımlı bileşen DEĞİL): App her yeniden çizildiğinde yeni bileşen türü oluşup liste
+  // baştan kuruluyor, giriş animasyonu sürekli yeniden oynuyordu
   let n = 0;
-  const Items = ({ e }: { e: ChangeEntry }) => (
+  const items = (e: ChangeEntry) => (
     <ol className="wn-list">
       {e.items.map((it, i) => (
         <li key={it.title} style={{ animationDelay: `${260 + n++ * 70}ms` }}>
@@ -138,13 +140,13 @@ export function WhatsNew({ ready }: { ready: boolean }) {
           </button>
         </div>
         <div className="wn-body">
-          <Items e={cur} />
+          {items(cur)}
           {[...rest, ...past].map((e) => (
             <section key={e.id} className="wn-older">
               <h3>
                 {e.title} <em>{fmtDate(e.date)}</em>
               </h3>
-              <Items e={e} />
+              {items(e)}
             </section>
           ))}
         </div>
@@ -163,7 +165,7 @@ export function WhatsNew({ ready }: { ready: boolean }) {
       </div>
     </div>
   );
-}
+});
 
 /** Yenilik sayısı 0'dan sayarak gelir (kutudan çıkanlar sayılıyor gibi) */
 function Counter({ to }: { to: number }) {
