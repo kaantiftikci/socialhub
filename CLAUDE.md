@@ -822,8 +822,22 @@ Dil: arayüz ve yorumlar Türkçe.
 - Miveloji Platformlar kartı tıklanır (`pickPlatform`: halka dilimi / satır → `platform`; seçimde tüm uygulamaların payı `allShares`'ten, diğerleri soluk, "Tümünü göster").
 - Medya: küçük resmi olmayan (ya da küçük resmi kırık) videoda ilk kare `<video preload=metadata src=…#t=0.5>`, görünürken + en çok 3 eşzamanlı (`useVideoSlot`).
   Bu ortamdaki Chromium H.264 çözemez (demo mp4 hata → eski simgeye düşer); Mac WKWebView çözer.
-- **Animasyon skill'i** `.claude/skills/motion-design/` (LottieFiles, MIT): animasyon işlerinde uygula. Önerilen Mivelo hareket kimliği: imza eğri
-  cubic-bezier(.2,0,0,1), giriş (.05,.7,.1,1), çıkış (.3,0,1,1), süreler 150/260/400 ms; yalnız transform/opacity.
+- **Animasyon skill'i** `.claude/skills/motion-design/` (LottieFiles, MIT): animasyon işlerinde uygula. Mivelo hareket kimliği: imza eğri
+  cubic-bezier(.2,0,0,1), giriş (.05,.7,.1,1), çıkış (.3,0,1,1), pop (.175,.885,.32,1.275), süreler 150/260/400 ms; yalnız transform/opacity.
+- **Hareketler (30.09, Kaan onayladı; önizleme artifact'ları "Mivelo Animasyon Önizleme" 20 sahne + "Mivelo Yükleme Ekranı" A)**: ortak
+  `apps/web/src/motion/tokens.css` (--m-ease/--m-in/--m-out/--m-pop/--m-quick|std|slow; azaltılmış harekette 1 ms) + `motion/motion.ts`
+  (EASE, DUR, reducedMotion(): sistem + `html.reduce-motion`, animate(), flipFirst/flipPlay). Alan başına CSS: `motion/boot.css`
+  (BootScreen, tema, ⌘K, Bağlan, güncelleme/izin kartı), `motion/app.css` (App/QuickSend/Focus), `motion/conversation.css`, `motion/extras.css`
+  (takvim, Ayarlar, Medya, kişi, pazaryeri, geri bildirim, yerel AI). styles.css'teki eski animasyonlar bu dosyalarda daha özgül seçiciyle
+  geçersiz kılınır (styles.css'e dokunulmadı). **BootScreen.tsx** (App `.booting` yerine; `bootShown` açılışta true, `ready = !booting && listReady`,
+  350 ms içinde hazırsa animasyonsuz kalkar; platform renkli noktalar raylardan logoya akar, logo `.sidebar .brand > svg`'ye uçar; 20 sn sonra
+  "İlk açılışta 1-2 dakika" notu). Tema `setThemePref` View Transitions ile tıklanan noktadan daire (ilk yükleme/sistem değişimi animasyonsuz).
+  Sohbet: yalnız yeni gelen ≤6 balon canlanır (açılışta 0), tik değişimi son 60 mesajda ref'le; **gönderilemeyen mesaj artık silinmez**:
+  balonda "Gönderilemedi · Yeniden dene · Kaldır" (sohbet açıksa; `dispatch/retryOut/discardOut`); tepki emojisi çipe uçar; Lightbox küçük
+  resimden FLIP; takip şeridi yanıt gelince yeşile dönüp kapanır. Liste `useListMotion`: yalnız 1-3 sohbet üste çıkınca, görünen satırlarda
+  FLIP (ilk 80 izlenir); `Roll` sayaçlar; `MvInd` kayan sekme göstergesi; `SyncTop` eşitleme çubuğu ("Eşitlendi" + kapanır); `ListSkeleton`
+  (`listReady`); bildirim kartı `.qr-slot` + kalan süre çizgisi (üzerine gelince durur); Odak yanıtında kart onaya döner, sonra çıkar
+  (başarı toast'u yalnız azaltılmış harekette). Karşıdan mesaj gelince "yazıyor" hemen kalkar. Gerçek Mac/WKWebView'da DOĞRULANMADI.
 - **Dokümantasyon** `docs/dokumantasyon.html` → `docs/Mivelo-Dokumantasyon.pdf` (`CHROMIUM=<chrome yolu> node docs/build-pdf.mjs`); özellik eklenince güncelle.
 
 ## Sunucu/arayüz sözleşmesi

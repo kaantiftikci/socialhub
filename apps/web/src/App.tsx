@@ -1,3 +1,4 @@
+import { BootScreen } from './BootScreen';
 import { FeedbackButton } from './Feedback';
 import { PersonChannelBar, SendVia, useUnifiedTimeline } from './UnifiedTimeline';
 import { peopleOnEvent, refreshPeople } from './people-store';
@@ -7,7 +8,8 @@ import { UpdateBanner } from './UpdateBanner';
 import { PermissionBanner } from './PermissionBanner';
 import { trPreview } from './reaction-text';
 import { clearOpening as clearOpeningFor, markOpening, useLoginOpening } from './login-opening';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { DUR, EASE, animate, reducedMotion } from './motion/motion';
 import { applyAccount, applyRead, mergeAccountsSnapshot, mergeChatsSnapshot, mergeFresh, newTouched, type Touched } from './sync-merge';
 import { api, connectEvents } from './api';
 import { pushMlEvent } from './ml-client';
@@ -151,6 +153,14 @@ export default function App() {
   }, [isMobile]);
   const [booting, setBooting] = useState<false | 'core' | 'data'>(false);
   const [bootSince] = useState(() => Date.now());
+  // yükleme ekranı (BootScreen): açılışta takılı; liste gelince logo kenar çubuğuna uçup kalkar (hızlı açılışta animasyonsuz)
+  const [bootShown, setBootShown] = useState(true);
+  const [bootSlow, setBootSlow] = useState(false);
+  useEffect(() => {
+    if (!bootShown) return;
+    const t = window.setTimeout(() => setBootSlow(true), Math.max(0, 20_000 - (Date.now() - bootSince)));
+    return () => window.clearTimeout(t);
+  }, [bootShown, bootSince]);
   // gece/gündüz düğmesi: görünen tema (sistem teması değişince de güncellenir)
   const [theme, setThemeState] = useState<'light' | 'dark'>(() => resolvedTheme());
   useEffect(() => onThemeChange(setThemeState), []);
@@ -301,7 +311,21 @@ export default function App() {
   const [settingsTab, setSettingsTab] = useState<'notify' | 'ai'>('notify');
   const [menu, setMenu] = useState<{ x: number; y: number; account: Account; confirm?: boolean } | null>(null);
   const menuP = useClosing(menu);
-  const connectP = useClosing(connectOpen || null);
+  const connectP = useClosing(connectOpen || null, 200);
+  // kapanış animasyonları (motion/app.css): hızlı gönder paleti ve alt bildirim kaybolurken kısa süre çizili kalır
+  const quickP = useClosing(quickSend, 150);
+  const toastP = useClosing(toast, 180);
+  /** İlk sohbet listesi geldi mi: gelene dek liste alanında iskelet satırlar (motion: ListSkeleton) */
+  const [listReady, setListReady] = useState(false);
+  const [skelLeaving, setSkelLeaving] = useState(false);
+  const mountedAt = useRef(Date.now());
+  useEffect(() => {
+    // iskelet göz kırpacak kadar kısa kaldıysa (hızlı açılış) geçiş çizilmez; yoksa satır satır solup gerçek satırlara bırakır
+    if (!listReady || Date.now() - mountedAt.current < 250 || reducedMotion()) return;
+    setSkelLeaving(true);
+    const t = window.setTimeout(() => setSkelLeaving(false), 12 * 35 + 320);
+    return () => clearTimeout(t);
+  }, [listReady]);
 
   const [, tick] = useState(0);
   // Ayarlar → Profil (ad, fotoğraf): açılışta yüklenir, kaydedilince 'mivelo-profile' ile yeniden çizilir
@@ -429,6 +453,7 @@ export default function App() {
           const slow = window.setTimeout(() => setBooting('data'), 1500);
           await refresh().finally(() => clearTimeout(slow));
           setBooting(false);
+          setListReady(true);
           return;
         } catch (e) {
           lastErr = String((e as Error).message);
@@ -437,6 +462,7 @@ export default function App() {
       }
       if (cancelled) return;
       setBooting(false);
+      setListReady(true);
       const info = isTauri ? await coreInfo() : '';
       notify(lastErr + (info ? '\n' + info : ''), true);
     })();
@@ -694,6 +720,8 @@ export default function App() {
           // demette sohbet aynı çerçevede gelir; sohbet bu arada silindiyse (birleştirme) listedeki kopyası kullanılır
           const chat = ev.chat ?? chatsRef.current.get(ev.message.chatId);
           if (ev.chat) queueChat(ev.chat);
+          // karşıdan mesaj geldi: "yazıyor" hemen kalksın (gösterge balonu gerçek mesaja dönüşür)
+          if (!ev.message.fromMe) setTyping((prev) => { if (!(ev.message.chatId in prev)) return prev; const next = { ...prev }; delete next[ev.message.chatId]; return next; });
           // yalnızca canlı gelen (eşitleme/geçmiş değil) ve yeni mesajlar bildirim çalsın
           if (chat && ev.live && !ev.message.fromMe && !chat.muted && !chat.hidden && !chat.archived && Date.now() - bootTs > 60_000 && Date.now() - ev.message.ts < 120_000) {
             void windowFocused().then((focused) => {
@@ -952,6 +980,23 @@ export default function App() {
     const idx = chatList.findIndex((c) => c.id === selected);
     if (idx >= rowLimit) setRowLimit(idx + 50);
   }, [selected, chatList, rowLimit]);
+
+  // ---- hareket: sohbet listesi (yer değiştirme FLIP'i, sekme geçişi, iskeletten geçiş) ve görünüm geçişi ----
+  const rowsRef = useRef<HTMLDivElement | null>(null);
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const flagView = FLAG_VIEWS.some((f) => f.view === view);
+  // yalnız en üstteki 80 sohbetin sırası izlenir (yer değiştirme tespiti için yeter; 3000'lik listeyi her olayda gezmez)
+  const motionOrder = useMemo(() => (flagView ? [] : chatList.slice(0, 80).map((c) => c.id)), [chatList, flagView]);
+  useListMotion(rowsRef, `${view}|${platformFilter ?? ''}|${filter}|${tagFilter ?? ''}|${imFolder ?? ''}|${mailFolder ?? ''}|${tgArchive}|${shopTab ?? ''}`, motionOrder, listReady && !composeOpen, !!query.trim());
+  const lastView = useRef(view);
+  useLayoutEffect(() => {
+    if (lastView.current === view) return;
+    lastView.current = view;
+    // görünüm değişimi (Gelen kutusu / Odak / Takvim / Miveloji / Medya…): içerik 200 ms solarak ve hafif kayarak gelir
+    const s = surfaceRef.current;
+    if (!s || reducedMotion()) return;
+    for (const c of Array.from(s.children).slice(0, 4)) animate(c, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 200, easing: EASE.in });
+  }, [view]);
 
   /** Boş liste metni: hangi sekme/filtre boşsa ona göre anlamlı bir açıklama */
   const emptyText = shopTab && isShop && filter === 'all' && !query.trim() ? (shopTab === 'order' ? 'Bu kanalda sipariş yok.' : shopTab === 'orderQ' ? 'Bu kanalda sipariş sorusu yok.' : 'Bu kanalda ürün sorusu yok.') : filter === 'followup' ? 'Takipte sohbet yok. Sohbetin sağ panelinden "Yanıt gelmezse hatırlat" ile ekle.' : imFolder || tgArchive || mailFolder ? 'Bu klasörde sohbet yok.' : query.trim() ? 'Aramayla eşleşen sohbet yok.' : filter === 'unread' && platformFilter !== 'imessage' ? 'Okunmamış sohbet yok.' : filter === 'waiting' && platformFilter !== 'imessage' ? 'Yanıt bekleyen sohbet yok.' : tagFilter ? 'Bu etikette sohbet yok.' : platformFilter ? 'Bu kanalda henüz sohbet yok.' : 'Bu filtreye uyan sohbet yok.';
@@ -1270,7 +1315,7 @@ export default function App() {
             {PLATFORMS[a.platform].name}
             {handleOf(a) && <span className="handle"> ({handleOf(a)})</span>}
           </span>
-          <span className="count">{fmtCount(perPlatform.get(a.platform) ?? 0)}</span>
+          <Roll className="count" value={fmtCount(perPlatform.get(a.platform) ?? 0)} />
           {accountIssue(a) ? (
             <span
               className="alert-ic"
@@ -1333,6 +1378,7 @@ export default function App() {
           Uygulama bağla
         </button>
         <div className="nav">
+          <MvInd sel=".nav-item.active" dep={`${view}|${filter}|${platformFilter ?? ''}|${tagFilter ?? ''}`} />
           <NavItem icon="inbox" label="Gelen kutusu" count={totals.unread} active={view === 'inbox' && filter === 'all' && !platformFilter && !tagFilter} onClick={() => goInbox('all')} />
           <NavItem icon="sparkle" label="Odak" badge="AI" count={focusWaiting.length} active={view === 'focus'} onClick={() => setView('focus')} />
           <NavItem icon="archive" label="Okunmamış" count={totals.unread} active={view === 'inbox' && filter === 'unread' && !platformFilter && !tagFilter} onClick={() => goInbox('unread')} />
@@ -1378,7 +1424,7 @@ export default function App() {
                 <button key={t} className={`tagbtn b ${tagFilter === t ? 'active' : ''}`} title={viewTags.indexOf(t) >= 0 ? `${MOD}${viewTags.indexOf(t) + 2}` : undefined} onClick={() => (setView('inbox'), setTagFilter(tagFilter === t ? null : t))}>
                   <span className="dot" style={{ background: tagDot(t) }} />
                   {t}
-                  {allTags.find(([x]) => x === t)?.[1] ? <span className="c">{allTags.find(([x]) => x === t)![1]}</span> : null}
+                  {allTags.find(([x]) => x === t)?.[1] ? <Roll className="c" value={String(allTags.find(([x]) => x === t)![1])} /> : null}
                 </button>
               ))}
             </div>
@@ -1405,12 +1451,10 @@ export default function App() {
       </nav>
       <Resizer pane="side" />
 
-      {booting && (
-        <div className="booting" role="status">
-          <span className="spin" /> {booting === 'data' ? 'Sohbetler yükleniyor…' : `Çekirdek başlatılıyor…${Date.now() - bootSince > 20_000 ? ' İlk açılışta 1-2 dakika sürebilir.' : ''}`}
-        </div>
+      {bootShown && (
+        <BootScreen stage={booting === 'data' ? 'data' : 'core'} slowHint={bootSlow} ready={!booting && listReady} onDone={() => setBootShown(false)} />
       )}
-      <div className="surface">
+      <div className="surface" ref={surfaceRef}>
         {view === 'wrapped' ? (
           <WrappedView
             notify={notify}
@@ -1437,12 +1481,11 @@ export default function App() {
         ) : (
           <>
             <section className="list" aria-label="Sohbet listesi">
-              {(booting || Object.keys(sync).length > 0) && (
-                <div className="synctop">
-                  <SyncBar progress={booting ? 5 : overallSync()} since={booting ? bootSince : Math.min(...Object.values(sync).map((s) => s.since))} />
-                  <span className="synclbl">{booting === 'data' ? 'Sohbetler yükleniyor' : booting ? 'Çekirdek başlatılıyor' : `${Object.keys(sync).length} kanal eşitleniyor`}</span>
-                </div>
-              )}
+              <SyncTop
+                active={!!booting || Object.keys(sync).length > 0}
+                progress={booting ? 5 : Object.keys(sync).length > 0 ? overallSync() : 100}
+                label={booting === 'data' ? 'Sohbetler yükleniyor' : booting ? 'Çekirdek başlatılıyor' : `${Object.keys(sync).length} kanal eşitleniyor`}
+              />
               {isMobile && (
                 <div className="m-topbar">
                   <button className="btn icon b b2" aria-label="Menü" title="Menü" onClick={() => setNavOpen(true)}>
@@ -1489,17 +1532,19 @@ export default function App() {
                 )}
                 {view === 'inbox' && platformFilter && ARCHIVE_TABS.has(platformFilter) && (
                   <div className="tabs" role="tablist" aria-label={`${PLATFORMS[platformFilter].name} klasörleri`}>
+                    <MvInd sel="button.active" dep={String(tgArchive)} track />
                     <button role="tab" aria-selected={!tgArchive} className={!tgArchive ? 'active' : ''} onClick={() => setTgArchive(false)}>
                       Sohbetler
                     </button>
                     <button role="tab" aria-selected={tgArchive} className={tgArchive ? 'active' : ''} onClick={() => (setTgArchive(true), setFilter('all'))}>
-                      Arşiv {archivedCount > 0 && <span className="c">{archivedCount}</span>}
+                      Arşiv {archivedCount > 0 && <Roll className="c" value={String(archivedCount)} />}
                     </button>
                   </div>
                 )}
                 {view === 'inbox' && isShop && <MarketTodayCard platform={platformFilter!} />}
                 {view === 'inbox' && (
                   <div className={`tabs ${isShop ? `shop n${ORDER_Q_PLATFORMS.has(platformFilter!) || shopCounts.total.orderQ > 0 ? 4 : 3}` : ''}`} role="tablist" aria-label={platformFilter === 'imessage' ? 'Mesajlar klasörleri' : 'Filtreler'}>
+                    <MvInd sel="button.active" dep={`${platformFilter ?? ''}|${filter}|${shopTab ?? ''}|${imFolder ?? ''}|${mailFolder ?? ''}`} track />
                     {/* iMessage: Okunmamış yerine Mesajlar uygulamasındaki klasörler */}
                     {isShop ? (
                       <>
@@ -1516,20 +1561,20 @@ export default function App() {
                           .filter(([k]) => k !== 'orderQ' || ORDER_Q_PLATFORMS.has(platformFilter!) || shopCounts.total.orderQ > 0)
                           .map(([k, label, title]) => (
                             <button key={k} role="tab" title={`${label} · sayı: ${title.toLowerCase()}`} aria-selected={shopTab === k && filter === 'all'} className={shopTab === k && filter === 'all' ? 'active' : ''} onClick={() => (setFilter('all'), setShopTab(k))}>
-                              {label} {shopCounts.n[k] > 0 && <span className="c">{fmtCount(shopCounts.n[k])}</span>}
+                              {label} {shopCounts.n[k] > 0 && <Roll className="c" value={fmtCount(shopCounts.n[k])} />}
                             </button>
                           ))}
                       </>
                     ) : (platformFilter === 'imessage' ? (['all'] as Filter[]) : (['all', 'unread', 'waiting'] as Filter[])).map((f) => (
                       <button key={f} role="tab" title={f === 'waiting' ? 'Yanıt bekleyenler: birebir sohbetler önce, gruplar sonra' : undefined} aria-selected={filter === f && !imFolder && !mailFolder} className={filter === f && !imFolder && !mailFolder ? 'active' : ''} onClick={() => (setFilter(f), setImFolder(null), setMailFolder(null))}>
                         {f === 'all' ? (platformFilter === 'imessage' ? 'Mesajlar' : 'Tümü') : f === 'unread' ? 'Okunmamış ' : 'Bekleyen '}
-                        {f === 'unread' && scoped.unread > 0 && <span className="c">{fmtCount(scoped.unread)}</span>}
-                        {f === 'waiting' && scoped.waiting > 0 && <span className="c">{fmtCount(scoped.waiting)}</span>}
+                        {f === 'unread' && scoped.unread > 0 && <Roll className="c" value={fmtCount(scoped.unread)} />}
+                        {f === 'waiting' && scoped.waiting > 0 && <Roll className="c" value={fmtCount(scoped.waiting)} />}
                       </button>
                     ))}
                     {(follow.n > 0 || filter === 'followup') && !imFolder && !mailFolder && (
                       <button role="tab" aria-selected={filter === 'followup'} className={`fol ${filter === 'followup' ? 'active' : ''} ${follow.due ? 'due' : ''}`} title="Yanıt gelmezse hatırlatılacak sohbetler" onClick={() => (setFilter('followup'), setImFolder(null), setMailFolder(null), setTgArchive(false), setShopTab(null))}>
-                        Takip {follow.n > 0 && <span className="c">{follow.due ? `${follow.due}/${follow.n}` : follow.n}</span>}
+                        Takip {follow.n > 0 && <Roll className="c" value={follow.due ? `${follow.due}/${follow.n}` : String(follow.n)} />}
                       </button>
                     )}
                     {platformFilter && PLATFORMS[platformFilter].category === 'mail' &&
@@ -1576,8 +1621,11 @@ export default function App() {
                 </div>
               )}
               {/* anahtar: uygulama/sekme/etiket değişince liste yeniden kurulur ve satırlar kademeli belirir */}
-              <div className="rows" key={`${view}|${platformFilter ?? ''}|${filter}|${tagFilter ?? ''}`} onScroll={onRowsScroll} style={composeOpen ? { display: 'none' } : undefined}>
-                {FLAG_VIEWS.some((f) => f.view === view) ? (
+              <div className="rows" ref={rowsRef} key={`${view}|${platformFilter ?? ''}|${filter}|${tagFilter ?? ''}`} onScroll={onRowsScroll} style={composeOpen ? { display: 'none' } : undefined}>
+                {listReady && skelLeaving && <ListSkeleton leaving />}
+                {!listReady ? (
+                  <ListSkeleton />
+                ) : FLAG_VIEWS.some((f) => f.view === view) ? (
                   (() => {
                     const f = FLAG_VIEWS.find((x) => x.view === view)!;
                     const list = flagged[f.flag];
@@ -1903,9 +1951,9 @@ export default function App() {
           <span className="spin" /> {openingTexts[openingTexts.length - 1]}…
         </div>
       )}
-      {toast && (
-        <div className={`toast ${toast.err ? 'err' : ''}`} role="status" aria-live="polite">
-          {toast.text}
+      {toastP.value && (
+        <div className={`toast ${toastP.value.err ? 'err' : ''} ${toastP.closing ? 'closing' : ''}`} role="status" aria-live="polite">
+          {toastP.value.text}
         </div>
       )}
       {ghost && dragId && (() => {
@@ -1923,7 +1971,7 @@ export default function App() {
         onOpen={(c) => (setView('inbox'), setSelected(c.id))}
         onEdit={(chatId, text) => setQuickSend({ chatId, text })}
       />
-      {quickSend && <QuickSend chats={allChats} initial={quickSend} onClose={() => setQuickSend(null)} onOpenChat={(id) => (setView('inbox'), setSelected(id), setFocusMsg(null))} />}
+      {quickP.value && <QuickSend chats={allChats} initial={quickP.value} closing={quickP.closing} onClose={() => setQuickSend(null)} onOpenChat={(id) => (setView('inbox'), setSelected(id), setFocusMsg(null))} />}
     </div>
   );
 }
@@ -2220,7 +2268,7 @@ function NavItem({ icon, label, count, active, onClick, badge, title }: { icon: 
         {label}
         {badge && <span className="pill lime" style={{ fontSize: 10, padding: '1px 5px', borderRadius: 5 }}>{badge}</span>}
       </span>
-      {count > 0 && <span className="count">{fmtCount(count)}</span>}
+      {count > 0 && <Roll className="count" value={fmtCount(count)} />}
     </button>
   );
 }
@@ -2245,8 +2293,20 @@ const ChatRow = memo(function ChatRow({
   const mailSender = isMail ? (chat.participants?.[0]?.name || chat.handle || '').replace(/<.*>/, '').trim() : '';
   const mailPreview = isMail && mailSender && chat.lastPreview?.startsWith(mailSender + ':') ? chat.lastPreview.slice(mailSender.length + 1).trim() : chat.lastPreview;
   const onClick = () => onSelect(chat.id);
+  // Satır yerinde kalırken yeni mesaj: önizleme aşağıdan kayarak değişir, okunmamış rozeti taşarak belirir (yer değiştirmede
+  // satır yeniden kurulursa bunu liste düzeyindeki useListMotion yapar)
+  const rowRef = useRef<HTMLDivElement>(null);
+  const seen = useRef({ preview: chat.lastPreview, unread: chat.unread });
+  useLayoutEffect(() => {
+    const was = seen.current;
+    seen.current = { preview: chat.lastPreview, unread: chat.unread };
+    const row = rowRef.current;
+    if (!row || reducedMotion()) return;
+    if (was.preview !== chat.lastPreview) animate(row.querySelector('.prev'), PREV_IN, { duration: 260, easing: EASE.in });
+    if (was.unread <= 0 && chat.unread > 0) animate(row.querySelector('.badge'), BADGE_POP, { duration: 280, delay: 80, easing: EASE.pop, fill: 'backwards' });
+  }, [chat.lastPreview, chat.unread]);
   return (
-    <div className={`row ${selected ? 'selected' : ''} ${chat.unread > 0 ? 'unread' : ''} ${isMail ? 'mailrow' : ''}`} onClick={onClick} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onClick()}>
+    <div ref={rowRef} data-cid={chat.id} className={`row ${selected ? 'selected' : ''} ${chat.unread > 0 ? 'unread' : ''} ${isMail ? 'mailrow' : ''}`} onClick={onClick} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onClick()}>
       <span className="avwrap">
         <Avatar name={isMail && mailSender ? mailSender : chat.name} size={44} url={chat.avatarUrl} />
         <Chip platform={chat.platform} size={17} ring={selected ? 'var(--surface)' : 'var(--bg)'} />
@@ -2280,7 +2340,7 @@ const ChatRow = memo(function ChatRow({
               {(isMail ? mailPreview : chat.lastPreview) ? <IconText text={isMail ? mailPreview! : trPreview(chat.lastPreview.replace(/↪ [^\n:]{1,60}: “[^”\n]{0,160}”\n/, ''))} size={12} /> : '…'}
             </span>
           )}
-          {chat.unread > 0 && <span className="badge" aria-label={`${chat.unread} okunmamış`}>{fmtBadge(chat)}</span>}
+          {chat.unread > 0 && <Roll className="badge" value={fmtBadge(chat)} aria-label={`${chat.unread} okunmamış`} />}
         </span>
       </span>
     </div>
@@ -2288,3 +2348,303 @@ const ChatRow = memo(function ChatRow({
 });
 
 /** Ayarlar → AI anahtarı: kullanıcının kendi Anthropic anahtarı; çekirdekte Anahtar Zinciri/DPAPI'de saklanır, geri okunmaz */
+
+// ---------- hareket (motion/app.css, motion/motion.ts; .claude/skills/motion-design) ----------
+// Kural: yalnız transform/opacity (sayaç genişliği ve kısa yükseklik kapanışı hariç); tıklama/klavye hiçbir animasyonu beklemez;
+// her şey yalnız ilgili değer DEĞİŞİNCE oynar (önceki değer ref'i); azaltılmış harekette süre 1 ms (animate) ya da hiç oynamaz.
+
+/** Önizleme metni aşağıdan kayarak gelir; okunmamış rozeti taşarak belirir */
+const PREV_IN: Keyframe[] = [{ opacity: 0, transform: 'translateY(100%)' }, { opacity: 1, transform: 'none' }];
+const BADGE_POP: Keyframe[] = [{ transform: 'scale(0)' }, { transform: 'none' }];
+
+/**
+ * Sayaç (kenar çubuğu, sekmeler, satır rozeti): değer değişince eski sayı yukarı çıkıp solar, yenisi aşağıdan gelir; genişlik
+ * yumuşakça değişir, küçük bir nabız. Eski sayı React'in bilmediği geçici bir kopyada (`.roll-g`) oynar, bitince silinir.
+ */
+const Roll = memo(function Roll({ value, className, ...rest }: { value: string; className?: string } & React.HTMLAttributes<HTMLSpanElement>) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const last = useRef(value);
+  useLayoutEffect(() => {
+    const old = last.current;
+    last.current = value;
+    const box = ref.current;
+    const cur = box?.firstElementChild as HTMLElement | null;
+    if (!box || !cur || old === value || !old || !value || reducedMotion()) return;
+    box.querySelectorAll('.roll-g').forEach((g) => g.remove());
+    const ghost = document.createElement('span');
+    ghost.className = 'roll-g';
+    ghost.setAttribute('aria-hidden', 'true');
+    ghost.textContent = old;
+    box.appendChild(ghost);
+    const w1 = box.offsetWidth;
+    const w0 = w1 - cur.offsetWidth + ghost.offsetWidth;
+    const drop = () => ghost.remove();
+    const out = animate(ghost, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(-100%)' }], { duration: 200, easing: EASE.out, fill: 'forwards' });
+    if (out) out.finished.then(drop, drop);
+    else drop();
+    animate(cur, [{ opacity: 0, transform: 'translateY(100%)' }, { opacity: 1, transform: 'none' }], { duration: 240, easing: EASE.in });
+    if (Math.abs(w0 - w1) > 0.5) animate(box, [{ width: `${w0}px` }, { width: `${w1}px` }], { duration: 220, easing: EASE.std });
+    animate(box, [{ transform: 'scale(1)' }, { transform: 'scale(1.15)', offset: 0.4 }, { transform: 'scale(1)' }], { duration: 260, easing: EASE.std });
+  }, [value]);
+  return (
+    <span ref={ref} className={`${className ?? ''} roll`} {...rest}>
+      <span className="roll-n">{value}</span>
+    </span>
+  );
+});
+
+/** Sekme geçişinin yönü (liste satırları o yöne kayarak gelir): gösterge kaydığında yazılır, liste aynı çizimde okur */
+let tabSlide = { dir: 0, at: 0 };
+
+/**
+ * Kayan seçim göstergesi: kapsayıcıdaki (üst öğe) `sel` öğesinin arkasında durur; seçim (`dep`) değişince oraya kayar ve boyunu
+ * alır (FLIP: yeni yerde çizilir, eski konum/ölçekten gelir). Sekme/menü genişliği değişirse (sayaç) yeniden yerleşir (animasyonsuz).
+ * Kapsayıcıda seçili öğenin kendi zemini motion/app.css'te kapatılır (`:has(> .mv-ind)`).
+ */
+function MvInd({ sel, dep, track = false }: { sel: string; dep: string; track?: boolean }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const last = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
+  const place = useCallback(
+    (anim: boolean) => {
+      const ind = ref.current;
+      const box = ind?.parentElement;
+      if (!ind || !box) return;
+      const t = box.querySelector<HTMLElement>(sel);
+      if (!t) {
+        ind.style.opacity = '0';
+        last.current = null;
+        return;
+      }
+      const r = { x: t.offsetLeft, y: t.offsetTop, w: t.offsetWidth, h: t.offsetHeight };
+      const p = last.current;
+      last.current = r;
+      ind.style.width = `${r.w}px`;
+      ind.style.height = `${r.h}px`;
+      ind.style.transform = `translate(${r.x}px, ${r.y}px)`;
+      ind.style.opacity = '1';
+      if (!anim) return;
+      if (!p) {
+        animate(ind, [{ opacity: 0 }, { opacity: 1 }], { duration: DUR.quick, easing: EASE.std });
+        return;
+      }
+      if (p.x === r.x && p.y === r.y && p.w === r.w && p.h === r.h) return;
+      if (track) tabSlide = { dir: Math.sign(r.x - p.x), at: performance.now() };
+      animate(ind, [{ transform: `translate(${p.x}px, ${p.y}px) scale(${p.w / r.w}, ${p.h / r.h})` }, { transform: `translate(${r.x}px, ${r.y}px)` }], { duration: 280, easing: EASE.std });
+    },
+    [sel, track],
+  );
+  useLayoutEffect(() => place(true), [dep, place]);
+  useEffect(() => {
+    const box = ref.current?.parentElement;
+    if (!box || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => place(false));
+    ro.observe(box);
+    for (const c of Array.from(box.children)) if (c !== ref.current) ro.observe(c);
+    return () => ro.disconnect();
+  }, [dep, place]);
+  return <span ref={ref} className="mv-ind" aria-hidden="true" />;
+}
+
+/**
+ * Liste üstündeki eşitleme çubuğu: gösterilen değer hedefe yumuşakça yetişir (rAF, React'e dokunmadan) ve asla geri gitmez;
+ * dolan kısımda parıltı. Eşitleme bitince çubuk yeşile döner, "Eşitlendi" yazar, ~1 sn sonra yüksekliği kapanarak kaybolur.
+ */
+function SyncTop({ active, progress, label }: { active: boolean; progress: number; label: string }) {
+  const [phase, setPhase] = useState<'off' | 'run' | 'done'>(active ? 'run' : 'off');
+  const boxRef = useRef<HTMLDivElement>(null);
+  const fillRef = useRef<HTMLSpanElement>(null);
+  const pctRef = useRef<HTMLElement>(null);
+  const val = useRef(0);
+  const target = useRef(0);
+  const raf = useRef(0);
+  const draw = () => {
+    if (fillRef.current) fillRef.current.style.transform = `scaleX(${val.current / 100})`;
+    if (pctRef.current) pctRef.current.textContent = `%${Math.round(val.current)}`;
+  };
+  const run = () => {
+    cancelAnimationFrame(raf.current);
+    if (reducedMotion()) {
+      val.current = target.current;
+      return draw();
+    }
+    const step = () => {
+      val.current += (target.current - val.current) * 0.12;
+      if (Math.abs(target.current - val.current) < 0.05) val.current = target.current;
+      draw();
+      if (val.current !== target.current) raf.current = requestAnimationFrame(step);
+    };
+    raf.current = requestAnimationFrame(step);
+  };
+  useEffect(() => () => cancelAnimationFrame(raf.current), []);
+  // yeni tur: sıfırdan; bitti: %100 → "Eşitlendi"
+  useEffect(() => {
+    if (active) {
+      setPhase((p) => {
+        if (p !== 'run') val.current = target.current = 0;
+        return 'run';
+      });
+    } else setPhase((p) => (p === 'run' ? 'done' : p));
+  }, [active]);
+  useLayoutEffect(() => {
+    if (phase === 'off') return;
+    const next = phase === 'done' ? 100 : Math.max(target.current, Math.min(100, progress));
+    target.current = next;
+    draw();
+    run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [progress, phase]);
+  useEffect(() => {
+    if (phase !== 'done') return;
+    animate(boxRef.current?.querySelector('.synclbl'), [{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], { duration: 240, delay: 60, easing: EASE.in, fill: 'backwards' });
+    const t = window.setTimeout(() => {
+      const box = boxRef.current;
+      if (!box) return setPhase('off');
+      const h = box.offsetHeight;
+      box.style.overflow = 'hidden';
+      const a = animate(box, [{ height: `${h}px`, opacity: 1 }, { height: '0px', opacity: 0, paddingTop: '0px', paddingBottom: '0px' }], { duration: 260, easing: EASE.std, fill: 'forwards' });
+      const end = () => setPhase((p) => (p === 'done' ? 'off' : p));
+      if (a) a.finished.then(end, end);
+      else end();
+    }, 1100);
+    return () => clearTimeout(t);
+  }, [phase]);
+  if (phase === 'off') return null;
+  return (
+    <div ref={boxRef} className={`synctop mv-sync ${phase === 'done' ? 'done' : ''}`}>
+      <span className="mv-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(phase === 'done' ? 100 : progress)}>
+        <span ref={fillRef} className="mv-fill" style={{ transform: `scaleX(${val.current / 100})` }} />
+      </span>
+      {phase === 'done' ? (
+        <span className="synclbl ok" role="status">
+          <Icon name="check" size={12} sw={2.4} /> Eşitlendi
+        </span>
+      ) : (
+        <span className="synclbl">
+          {label} <b ref={pctRef} className="mv-pct">%{Math.round(val.current)}</b>
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Yükleniyor iskeleti: satır biçiminde parıltılı yer tutucular; `leaving`: gerçek satırların üstünde satır satır solar */
+function ListSkeleton({ leaving = false }: { leaving?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!leaving) return;
+    Array.from(ref.current?.children ?? []).forEach((s, i) => animate(s, [{ opacity: 1 }, { opacity: 0 }], { duration: 120, delay: i * 35, easing: EASE.out, fill: 'forwards' }));
+  }, [leaving]);
+  return (
+    <div ref={ref} className={`mv-skel ${leaving ? 'leaving' : ''}`} aria-hidden="true">
+      {Array.from({ length: 10 }, (_, i) => (
+        <div key={i} className="mv-skel-row">
+          <span className="c mv-shim" />
+          <span className="ls">
+            <span className="l mv-shim" style={{ width: `${38 + ((i * 17) % 28)}%` }} />
+            <span className="l mv-shim" style={{ width: `${60 + ((i * 23) % 32)}%` }} />
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Önceki sıranın başına yalnız 1-3 sohbet çıktıysa (geri kalanın sırası aynı) o sohbetler; toplu değişimde null */
+function topMovers(a: string[], b: string[]): string[] | null {
+  if (!a.length || !b.length) return null;
+  for (let k = 1; k <= 3; k++) {
+    const head = new Set(b.slice(0, k));
+    const restB = b.slice(k, k + 40);
+    const restA = a.filter((id) => !head.has(id)).slice(0, restB.length);
+    if (restA.length === restB.length && restA.every((id, i) => id === restB[i])) {
+      const moved = b.slice(0, k).filter((id, i) => a.indexOf(id) !== i);
+      return moved.length ? moved : null;
+    }
+  }
+  return null;
+}
+
+/** Çizili satırların kaydırma alanı içindeki konumları (offsetTop dönüşümden ve kaydırmadan etkilenmez; en çok 600 satır) */
+function rowPositions(box: HTMLElement): Map<string, { top: number; el: HTMLElement }> {
+  const m = new Map<string, { top: number; el: HTMLElement }>();
+  const rows = box.querySelectorAll<HTMLElement>('.row[data-cid]');
+  for (let i = 0; i < rows.length && i < 600; i++) m.set(rows[i].dataset.cid!, { top: rows[i].offsetTop, el: rows[i] });
+  return m;
+}
+
+/**
+ * Sohbet listesi hareketi:
+ * - yeni mesaj gelen sohbet (en çok 3) üste çıkınca: satır hafifçe kalkar, ~380 ms'de üste süzülür, aradakiler 25 ms arayla aşağı
+ *   iner (FLIP, YALNIZ görünen satırlar); satır yeniden kurulduysa (gün grubu değişti) önizleme ve rozet burada canlanır
+ * - sekme/kanal/etiket değişince: ilk 12 satır sekmenin kaydığı yönden (yoksa aşağıdan) kademeli gelir
+ * - ilk liste gelince (iskeletten): ilk 12 satır 35 ms arayla yerine geçer
+ * Açılış, arama, toplu yenileme (>3 sohbet) ve arka plandaki sekmede oynamaz.
+ */
+function useListMotion(rowsRef: React.RefObject<HTMLDivElement | null>, key: string, order: string[], ready: boolean, quiet: boolean): void {
+  const prev = useRef<{ key: string; order: string[]; pos: Map<string, { top: number; el: HTMLElement }>; ready: boolean } | null>(null);
+  const running = useRef<Animation[]>([]);
+  const sig = order.join('|');
+  useLayoutEffect(() => {
+    const box = rowsRef.current;
+    const p = prev.current;
+    const pos = box && ready ? rowPositions(box) : new Map<string, { top: number; el: HTMLElement }>();
+    prev.current = { key, order, pos, ready };
+    if (!box || !ready || !p || quiet || reducedMotion() || document.visibilityState === 'hidden') return;
+    const rows = (sel: string) => Array.from(box.querySelectorAll<HTMLElement>(sel)).slice(0, 12);
+    if (!p.ready) {
+      rows('.group-label, .row, .empty').forEach((r, i) => animate(r, [{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }], { duration: 240, delay: 120 + i * 35, easing: EASE.in, fill: 'backwards' }));
+      return;
+    }
+    if (p.key !== key) {
+      const dir = performance.now() - tabSlide.at < 250 ? tabSlide.dir : 0;
+      const from = dir ? `translateX(${dir * 16}px)` : 'translateY(8px)';
+      rows('.group-label, .row, .empty').forEach((r, i) => animate(r, [{ opacity: 0, transform: from }, { opacity: 1, transform: 'none' }], { duration: 240, delay: (dir ? 60 : 0) + i * 30, easing: EASE.in, fill: 'backwards' }));
+      return;
+    }
+    const movers = topMovers(p.order, order);
+    if (!movers) return;
+    running.current.forEach((a) => a.cancel());
+    const bag: Animation[] = (running.current = []);
+    const keep = (a: Animation | null) => a && bag.push(a);
+    const mv = new Set(movers);
+    const top = box.scrollTop - 80;
+    const bottom = box.scrollTop + box.clientHeight + 80;
+    let j = 0;
+    for (const [id, { top: y, el }] of pos) {
+      if (y > bottom) break;
+      if (y + el.offsetHeight < top) continue;
+      const o = p.pos.get(id);
+      if (mv.has(id)) {
+        if (!o) {
+          keep(animate(el, [{ opacity: 0, transform: 'translateY(-6px) scale(.98)' }, { opacity: 1, transform: 'none' }], { duration: 320, easing: EASE.in }));
+          continue;
+        }
+        const d = Math.min(o.top, bottom) - y;
+        el.dataset.mvLift = '1';
+        const a = animate(
+          el,
+          [
+            { transform: `translateY(${d}px)`, easing: EASE.std },
+            { transform: `translateY(${d}px) scale(1.015)`, offset: 0.16, easing: EASE.std },
+            { transform: 'scale(1.015)', offset: 0.66, easing: EASE.std },
+            { transform: 'none' },
+          ],
+          { duration: 760 },
+        );
+        const land = () => delete el.dataset.mvLift;
+        if (a) (keep(a), a.finished.then(land, land));
+        else land();
+        if (o.el !== el) {
+          // satır yeni kuruldu (ör. "Dün" → "Bugün"): ChatRow önceki değeri bilmiyor
+          keep(animate(el.querySelector('.prev'), PREV_IN, { duration: 260, delay: 300, easing: EASE.in, fill: 'backwards' }));
+          keep(animate(el.querySelector('.badge'), BADGE_POP, { duration: 280, delay: 380, easing: EASE.pop, fill: 'backwards' }));
+        }
+      } else if (o) {
+        const d = o.top - y;
+        if (Math.abs(d) < 0.5) continue;
+        keep(animate(el, [{ transform: `translateY(${d}px)` }, { transform: 'none' }], { duration: 280, delay: 120 + 25 * j++, easing: EASE.std, fill: 'backwards' }));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, sig, ready, quiet]);
+}

@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
 import { PLATFORMS, type Chat, type Message, type Platform } from './types';
 import { Avatar, Chip, Icon, fmtTime } from './ui';
 import { mlApi, type SemanticResult } from './ml-api';
+import { DUR, EASE, animate, reducedMotion } from './motion/motion';
 
 /** transcript: eşleşen sesli mesaj metni; via: anlamsal aramada hangi koldan geldi */
 type Hit = { message: Message; chat: Chat; transcript?: string; via?: 'semantic' | 'text' | 'both' };
@@ -141,6 +142,70 @@ export function SearchPalette({ chats, onClose, onOpenChat, onOpenMessage }: { c
     listRef.current?.querySelector<HTMLElement>(`[data-i="${active}"]`)?.scrollIntoView({ block: 'nearest' });
   }, [active]);
 
+  // ---- hareket (s9): açılış, sonuçların sırayla gelişi, kayan seçim vurgusu, kapanış ----
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const palRef = useRef<HTMLDivElement>(null);
+  const selRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const wrap = wrapRef.current;
+    const opened = performance.now();
+    animate(wrap, [{ opacity: 0 }, { opacity: 1 }], { duration: DUR.quick, easing: EASE.std });
+    animate(palRef.current, [{ opacity: 0, transform: 'translateY(-10px) scale(.98)' }, { opacity: 1, transform: 'none' }], { duration: 240, easing: EASE.in });
+    return () => {
+      // Kapanış: hangi yoldan kapanırsa kapansın (Esc, Enter, dışa tıklama, ⌘K) bileşen hemen kalkar; ekrandaki kopyası 150 ms'de
+      // solar (tıklamaları almaz, sohbete gitmeyi bekletmez). StrictMode'un anlık ikinci takma turunda kopya yapılmaz.
+      if (!wrap || reducedMotion() || performance.now() - opened < 60) return;
+      const ghost = wrap.cloneNode(true) as HTMLElement;
+      ghost.style.pointerEvents = 'none';
+      ghost.setAttribute('aria-hidden', 'true');
+      const scroll = wrap.querySelector('.pal-list')?.scrollTop ?? 0;
+      document.body.appendChild(ghost);
+      const gl = ghost.querySelector('.pal-list');
+      if (gl) gl.scrollTop = scroll;
+      animate(ghost.querySelector('.palette'), [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(.98)' }], { duration: DUR.quick, easing: EASE.out, fill: 'forwards' });
+      const a = animate(ghost, [{ opacity: 1 }, { opacity: 0 }], { duration: 180, easing: EASE.out, fill: 'forwards' });
+      const rm = () => ghost.remove();
+      if (a) a.finished.then(rm, rm);
+      else rm();
+      window.setTimeout(rm, 400);
+    };
+  }, []);
+  // yeni gelen sonuç satırları (ilk ~8) 30 ms arayla; yerinde kalan satırlar yeniden oynamaz
+  const seenRows = useRef(new WeakSet<Element>());
+  useLayoutEffect(() => {
+    const rows = listRef.current?.querySelectorAll('.pal-row');
+    if (!rows) return;
+    let k = 0;
+    rows.forEach((r, i) => {
+      if (seenRows.current.has(r)) return;
+      seenRows.current.add(r);
+      if (i < 8) animate(r, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 220, delay: k++ * 30, easing: EASE.in, fill: 'backwards' });
+    });
+  }, [items]);
+  // seçim vurgusu ayrı katman: ok tuşuyla/fareyle kayarak gider; liste değişince atlamadan yerine konur
+  const selAt = useRef<{ y: number; items: Item[] } | null>(null);
+  useLayoutEffect(() => {
+    const sel = selRef.current;
+    const row = listRef.current?.querySelector<HTMLElement>(`.pal-row[data-i="${active}"]`);
+    if (!sel) return;
+    if (!row) {
+      sel.style.display = 'none';
+      selAt.current = null;
+      return;
+    }
+    const y = row.offsetTop;
+    sel.style.display = '';
+    sel.style.width = `${row.offsetWidth}px`;
+    sel.style.height = `${row.offsetHeight}px`;
+    sel.style.transform = `translate(${row.offsetLeft}px, ${y}px)`;
+    const prev = selAt.current;
+    if (prev && prev.items === items && prev.y !== y) {
+      sel.getAnimations().forEach((a) => a.cancel());
+      animate(sel, [{ transform: `translate(${row.offsetLeft}px, ${prev.y}px)` }, { transform: `translate(${row.offsetLeft}px, ${y}px)` }], { duration: DUR.quick, easing: EASE.std });
+    }
+    selAt.current = { y, items };
+  }, [active, items]);
+
   const choose = (it: Item | undefined) => {
     if (!it) return;
     if (it.kind === 'chat') onOpenChat(it.chat.id);
@@ -159,8 +224,8 @@ export function SearchPalette({ chats, onClose, onOpenChat, onOpenMessage }: { c
   const total = hits.length;
   let idx = only ? 0 : chatHits.length;
   return (
-    <div className="overlay palette-wrap" onMouseDown={onClose}>
-      <div className="palette" role="dialog" aria-label="Her yerde ara" onMouseDown={(e) => e.stopPropagation()} onKeyDown={onKey}>
+    <div className="overlay palette-wrap pal-anim" ref={wrapRef} onMouseDown={onClose}>
+      <div className="palette" ref={palRef} role="dialog" aria-label="Her yerde ara" onMouseDown={(e) => e.stopPropagation()} onKeyDown={onKey}>
         <div className="pal-in">
           <Icon name="search" size={17} />
           <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder={semantic ? 'Doğal dille ara — "geçen ay Ahmet’in gönderdiği fatura"' : 'Tüm uygulamalarda ara — kişi, mesaj, dosya adı…'} aria-label="Arama" spellCheck={false} />
@@ -220,7 +285,8 @@ export function SearchPalette({ chats, onClose, onOpenChat, onOpenMessage }: { c
             )}
           </div>
         )}
-        <div className="pal-list" ref={listRef}>
+        <div className={`pal-list ${items.length ? 'has-sel' : ''}`} ref={listRef}>
+          <div className="pal-sel" ref={selRef} aria-hidden="true" />
           {!term && (
             <div className="pal-empty">
               <Icon name="search" size={22} />

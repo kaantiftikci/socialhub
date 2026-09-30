@@ -1,1 +1,101 @@
-/* app animasyonları — bkz. motion/tokens.css */
+/* app animasyonları — bkz. motion/tokens.css, motion/motion.ts. Yalnız transform/opacity; JS animasyonları App.tsx / QuickSend.tsx /
+   Focus.tsx'te (Web Animations). Buradaki geçersiz kılmalar styles.css'teki eski CSS animasyonlarının yerini alır. */
+
+/* ---------- sayaç (Roll): eski sayı yukarı, yenisi aşağıdan ---------- */
+.roll { position: relative; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; vertical-align: middle; }
+.roll-n { display: inline-block; }
+.roll-g { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; white-space: nowrap; }
+/* kenar çubuğundaki sayaç metni sağa yaslı kalsın */
+.nav-item .count.roll, .chan .count.roll { justify-content: flex-end; }
+.nav-item.active .count.roll { justify-content: center; }
+.chan .count.roll:empty, .chan .count.roll:has(> .roll-n:empty) { padding: 0; }
+
+/* ---------- kayan seçim göstergesi (MvInd) ---------- */
+.mv-ind { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-origin: 0 0; pointer-events: none; opacity: 0; z-index: 0; }
+/* sekmeler: mor gösterge, seçili sekme yazısı beyaz */
+.tabs:has(> .mv-ind) { position: relative; }
+.tabs > .mv-ind { background: var(--v); border-radius: 9px; box-shadow: 0 1px 2px rgba(17, 16, 22, .12); }
+.tabs:has(> .mv-ind) button { position: relative; z-index: 1; transition: color var(--m-std) var(--m-ease), background .15s ease, transform .12s ease; }
+.tabs:has(> .mv-ind) button.active,
+[data-theme="dark"] .tabs:has(> .mv-ind) button.active { background: transparent; box-shadow: none; color: #fff; }
+.tabs:has(> .mv-ind) button.active .c,
+.tabs:has(> .mv-ind) button.active.due .c { color: rgba(255, 255, 255, .85); }
+/* kenar menüsü: seçili öğenin zemini kayar */
+.nav:has(> .mv-ind) { position: relative; }
+.nav > .mv-ind { background: var(--bg2); border: 1px solid var(--line3); border-radius: 10px; box-shadow: inset 0 1px 0 var(--hl-inset); }
+.nav:has(> .mv-ind) .nav-item { position: relative; z-index: 1; }
+.nav:has(> .mv-ind) .nav-item.active { background: transparent; border-color: transparent; box-shadow: none; }
+
+/* ---------- sohbet listesi ---------- */
+/* satır girişi artık JS'te (yalnız sekme/kanal değişiminde ve ilk yüklemede, ilk 12 satır); yer değiştiren satır yeniden
+   kurulunca CSS animasyonu tekrar oynamasın */
+.list .rows { position: relative; }
+.list .rows .row { animation: none; }
+/* üste süzülen satır: kalkık (gölgeli, diğerlerinin üstünde) */
+.list .rows .row[data-mv-lift] { z-index: 2; background: var(--surface); box-shadow: var(--shadow-2); }
+
+/* yükleniyor iskeleti */
+.mv-skel { display: flex; flex-direction: column; padding-top: 6px; }
+.mv-skel.leaving { position: absolute; left: 8px; right: 8px; top: 0; z-index: 3; pointer-events: none; }
+.mv-skel.leaving .mv-skel-row { background: var(--bg); }
+.mv-skel-row { display: flex; align-items: center; gap: 12px; height: 66px; padding: 10px; flex: none; }
+.mv-skel-row .c { width: 44px; height: 44px; border-radius: 50%; flex: none; }
+.mv-skel-row .ls { flex: 1; display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+.mv-skel-row .l { display: block; height: 10px; border-radius: 6px; }
+.mv-shim { background: linear-gradient(90deg, var(--bg2) 0%, var(--line) 50%, var(--bg2) 100%); background-size: 200% 100%; animation: mvShim 1.2s linear infinite; }
+@keyframes mvShim { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+
+/* ---------- eşitleme çubuğu (SyncTop) ---------- */
+.mv-sync .mv-track { position: relative; flex-grow: 1; height: 6px; border-radius: 6px; background: var(--v-soft); overflow: hidden; }
+.mv-sync .mv-fill { position: absolute; inset: 0; border-radius: 6px; background: var(--lime); box-shadow: 0 0 0 1px rgba(180, 220, 0, .35) inset; transform-origin: left; transform: scaleX(0); overflow: hidden; transition: background-color 220ms var(--m-ease), box-shadow 220ms var(--m-ease); }
+.mv-sync .mv-fill::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .55), transparent); transform: translateX(-100%); animation: mvSyncShine 1.4s linear infinite; }
+@keyframes mvSyncShine { to { transform: translateX(100%); } }
+.mv-sync .synclbl { display: inline-flex; align-items: center; gap: 5px; }
+.mv-sync .mv-pct { font-weight: 600; color: var(--text2); font-variant-numeric: tabular-nums; }
+.mv-sync.done .mv-fill { background: #22c55e; box-shadow: none; }
+.mv-sync.done .mv-fill::after { animation: none; opacity: 0; }
+.mv-sync .synclbl.ok { color: var(--green-txt); font-weight: 600; }
+
+/* ---------- gelen mesaj kartları (QuickReplyStack) ---------- */
+.qr-slot { position: relative; flex: none; }
+.qr-shadow { position: absolute; inset: 0; border-radius: 14px; box-shadow: var(--shadow-3); pointer-events: none; }
+[data-theme="dark"] .qr-shadow { box-shadow: 0 12px 30px -10px rgba(0, 0, 0, .8); }
+.msgtoasts .msgtoast.qr-card { animation: none; box-shadow: none; }
+.msgtoasts .qr-timer { animation: none; }
+html.reduce-motion .qr-timer { display: none; }
+
+/* ---------- Odak: gönderildi onayı ---------- */
+.fcard.fsent { justify-content: center; }
+.fcard .okrow { display: flex; align-items: center; gap: 7px; color: var(--green-txt); font-weight: 600; font-size: 13.5px; padding: 2px 0; }
+
+/* ---------- açılır katmanlar ---------- */
+@keyframes mvPopIn { from { opacity: 0; transform: scale(.92) translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes mvPopOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(.96); } }
+@keyframes mvSideIn { from { opacity: 0; transform: translateX(-6px) scale(.97); } to { opacity: 1; transform: none; } }
+/* sağ tık bağlam menüsü */
+.menu-backdrop > .menu { transform-origin: 0 0; animation: mvPopIn 180ms var(--m-in) both; }
+.menu-backdrop.closing { pointer-events: none; }
+.menu-backdrop > .menu.closing { animation: mvPopOut 130ms var(--m-out) both; }
+/* kanal uyarı kartı (işaretin sağında açılır) */
+.alert-pop { transform-origin: 0 28px; animation: mvSideIn 200ms var(--m-in) both; }
+/* alt bildirim */
+@keyframes mvToastIn { from { opacity: 0; transform: translate(-50%, 12px) scale(.97); } to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes mvToastOut { from { opacity: 1; transform: translate(-50%, 0); } to { opacity: 0; transform: translate(-50%, 6px) scale(.98); } }
+.app > .toast { animation: mvToastIn 240ms var(--m-in) both; }
+.app > .toast.closing { animation: mvToastOut 180ms var(--m-out) both; pointer-events: none; }
+/* hızlı gönder (⌘⇧K) paleti */
+@keyframes mvPalIn { from { opacity: 0; transform: translateY(-10px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes mvPalOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(.98); } }
+.qs-wrap .palette.qs { animation: mvPalIn 240ms var(--m-in) both; }
+.qs-wrap.closing { animation: fadeOut 150ms var(--m-out) both; pointer-events: none; }
+.qs-wrap.closing .palette.qs { animation: mvPalOut 150ms var(--m-out) both; }
+
+/* ---------- hareketleri azalt ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .mv-shim, .mv-sync .mv-fill::after { animation: none; }
+  .menu-backdrop > .menu, .alert-pop, .app > .toast, .qs-wrap .palette.qs, .qs-wrap.closing { animation: none !important; }
+  .qr-timer { display: none; }
+}
+html.reduce-motion .mv-shim, html.reduce-motion .mv-sync .mv-fill::after,
+html.reduce-motion .menu-backdrop > .menu, html.reduce-motion .alert-pop, html.reduce-motion .app > .toast,
+html.reduce-motion .qs-wrap .palette.qs, html.reduce-motion .qs-wrap.closing { animation: none !important; }

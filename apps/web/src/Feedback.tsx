@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { STATIC_DEMO } from './profile';
+import { reducedMotion } from './motion/motion';
 import { Icon } from './ui';
 
 /**
@@ -35,11 +36,27 @@ export function FeedbackButton() {
   const [sent, setSent] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const website = useRef('');
+  // kapanış: panel sağ alta doğru 150 ms'de küçülüp solar (motion/extras.css `.fb-panel.closing`), sonra kaldırılır
+  const [closing, setClosing] = useState(false);
+  const closeT = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(closeT.current), []);
+  const close = () => {
+    if (closing) return;
+    if (reducedMotion()) return setOpen(false);
+    setClosing(true);
+    closeT.current = window.setTimeout(() => (setOpen(false), setClosing(false)), 150);
+  };
+  const openPanel = () => {
+    window.clearTimeout(closeT.current);
+    setClosing(false);
+    setOpen(true);
+    setSent(false);
+  };
 
   useEffect(() => () => atts.forEach((a) => URL.revokeObjectURL(a.url)), []); // eslint-disable-line react-hooks/exhaustive-deps
   // Ayarlar → Yardım / Hakkında: "Sorun bildir"
   useEffect(() => {
-    const on = () => (setHidden(false), setOpen(true));
+    const on = () => (window.clearTimeout(closeT.current), setClosing(false), setHidden(false), setOpen(true));
     window.addEventListener('mivelo-feedback', on);
     return () => window.removeEventListener('mivelo-feedback', on);
   }, []);
@@ -110,10 +127,10 @@ export function FeedbackButton() {
     <>
       {!open && (
         <div className="fb-fab">
-          <button className="fb-bubble" onClick={() => (setOpen(true), setSent(false))} tabIndex={-1} aria-hidden="true">
+          <button className="fb-bubble" onClick={openPanel} tabIndex={-1} aria-hidden="true">
             Hata / öneri bildir
           </button>
-          <button className="fb-open" onClick={() => (setOpen(true), setSent(false))} aria-label="Hata bildir ya da öneri gönder" title="Hata bildir / öneri gönder">
+          <button className="fb-open" onClick={openPanel} aria-label="Hata bildir ya da öneri gönder" title="Hata bildir / öneri gönder">
             <Icon name="thread" size={24} sw={2} />
           </button>
           <button className="fb-hide" onClick={() => setHidden(true)} aria-label="Geri bildirim düğmesini gizle" title="Gizle (sayfa yenilenince geri gelir)">
@@ -122,17 +139,22 @@ export function FeedbackButton() {
         </div>
       )}
       {open && (
-        <div className="fb-panel" role="dialog" aria-label="Geri bildirim">
+        <div className={`fb-panel ${closing ? 'closing' : ''}`} role="dialog" aria-label="Geri bildirim" onKeyDown={(e) => e.key === 'Escape' && (e.stopPropagation(), close())}>
           <div className="fb-head">
             <b>Geri bildirim</b>
             <span>Hata, öneri ya da isteğini doğrudan bize ilet</span>
-            <button className="btn icon ghost xs b" onClick={() => setOpen(false)} aria-label="Kapat">
+            <button className="btn icon ghost xs b" onClick={close} aria-label="Kapat">
               <Icon name="x" size={14} sw={2} />
             </button>
           </div>
           {sent ? (
             <div className="fb-sent">
-              <Icon name="check" size={22} sw={2.4} color="var(--green-txt)" />
+              {/* onay: halka pop ile büyür, tik çizilir (motion/extras.css) */}
+              <span className="fb-ok" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="26" height="26">
+                  <path d="M5 12.5l4.5 4.5L19 7.5" pathLength={1} />
+                </svg>
+              </span>
               <b>Teşekkürler, iletildi!</b>
               <span>İnceleyip gerekirse sana döneceğiz.</span>
               <button className="btn sm b b2" onClick={() => setSent(false)}>

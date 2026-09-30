@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type InputHTMLAttributes } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type InputHTMLAttributes } from 'react';
 import { clearOpening, markOpening } from './login-opening';
 import { api, USE_STATIC } from './api';
 import { DEMO_OFFLINE, STATIC_DEMO } from './profile';
 import { openDemoLoginWindow, staticApi } from './static-demo';
 import { MAC_ONLY, MAIL_LOGIN_WHO, PLATFORMS, type Account, type CoreOs, type Platform } from './types';
 import { Chip, Icon, PasswordInput, SyncBar, syncPercent } from './ui';
+import { EASE, animate, reducedMotion } from './motion/motion';
 
 const ORDER: Platform[] = ['whatsapp', 'telegram', 'slack', 'imessage', 'linkedin', 'x', 'instagram', 'messenger', 'tiktok'];
 const MAIL_ORDER: Platform[] = ['gmail', 'outlook', 'yahoo', 'yandex', 'icloud', 'imap'];
@@ -57,6 +58,52 @@ export function ConnectModal({
   const [busy, setBusy] = useState(false);
 
   const activeAccount = accounts.find((a) => a.id === active);
+
+  // ---- hareket (s11 + s4b): pencere yükselerek açılır, kartlar dalga halinde; kapanışta hızlanarak iner ----
+  const ovRef = useRef<HTMLDivElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const ov = ovRef.current;
+    animate(ov, [{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: EASE.std });
+    animate(ov?.querySelector('.modal'), [{ opacity: 0, transform: 'translateY(14px) scale(.97)' }, { opacity: 1, transform: 'none' }], { duration: 320, easing: EASE.in });
+    // yalnız görünen ilk ~24 kart; toplam yayılım < 500 ms
+    const cards = [...(gridRef.current?.querySelectorAll('.pcard') ?? [])].slice(0, 24);
+    cards.forEach((c, i) =>
+      animate(c, [{ opacity: 0, transform: 'translateY(8px) scale(.96)' }, { opacity: 1, transform: 'none' }], { duration: 240, delay: 80 + Math.min(i, 18) * 22, easing: EASE.in, fill: 'backwards' }),
+    );
+  }, []);
+  const exit = useRef<Array<Animation | null>>([]);
+  useLayoutEffect(() => {
+    exit.current.forEach((a) => a?.cancel()); // kapanırken yeniden açıldıysa soluk kalmasın
+    exit.current = [];
+    if (!closing) return;
+    const ov = ovRef.current;
+    exit.current = [
+      animate(ov?.querySelector('.modal'), [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(8px) scale(.98)' }], { duration: 180, easing: EASE.out, fill: 'forwards' }),
+      animate(ov, [{ opacity: 1 }, { opacity: 0 }], { duration: 180, easing: EASE.out, fill: 'forwards' }),
+    ];
+  }, [closing]);
+  // Kart durumu geçişleri: bağlanıyor/eşleşme → bağlı = yeşil onay çizilir + pop + parçacıklar; → hata = kısa sallanma.
+  // Önceki durum ref'te; ilk çizimde (pencere açılırken zaten bağlı) animasyon yok.
+  const prevStatus = useRef<Map<Platform, Account['status']> | null>(null);
+  useLayoutEffect(() => {
+    const now = new Map<Platform, Account['status']>();
+    for (const a of accounts) {
+      const cur = now.get(a.platform);
+      if (!cur || STATUS_RANK[a.status] < STATUS_RANK[cur]) now.set(a.platform, a.status);
+    }
+    const prev = prevStatus.current;
+    prevStatus.current = now;
+    if (!prev || reducedMotion()) return;
+    for (const [p, s] of now) {
+      const was = prev.get(p);
+      if (!was || was === s) continue;
+      const card = gridRef.current?.querySelector<HTMLElement>(`.pcard[data-p="${p}"]`);
+      if (!card) continue;
+      if (s === 'connected' && (was === 'connecting' || was === 'pairing')) celebrate(card);
+      else if (s === 'error') shake(card);
+    }
+  }, [accounts]);
   /**
    * Bu pencerede "Bağlan" ile başlatılan hesaplar: pencere kapanınca hâlâ QR/giriş bekleyen QR'lı hesap (WhatsApp, Telegram;
    * demoda tüm bekleyenler) iptal edilir — hiç bağlanmamış yeni hesap kaldırılır, Bağlan kartı ilk haline döner. Tarayıcıyla
@@ -438,7 +485,7 @@ export function ConnectModal({
   );
 
   return (
-    <div className={`overlay ${closing ? 'closing' : ''}`} onClick={onClose}>
+    <div className={`overlay connect-ov ${closing ? 'closing' : ''}`} ref={ovRef} onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Uygulama bağla">
         {/* kapatma düğmesi kaydırılan alanın DIŞINDA: aşağı inince de görünür */}
         <button className="btn icon b b2 modal-x" onClick={onClose} aria-label="Kapat">
@@ -451,7 +498,7 @@ export function ConnectModal({
           </h2>
         </div>
 
-        <div className="grid3">
+        <div className="grid3" ref={gridRef}>
           {[...ORDER, ...MAIL_ORDER, ...SHOP_ORDER].map((p) => {
             const meta = PLATFORMS[p];
             // kartın durumu en iyi durumdaki hesaptan (bağlı olan önde); ilk kaydı göstermek bağlı hesabın yanında "Bağlı değil" yazıyordu
@@ -485,7 +532,7 @@ export function ConnectModal({
                     <Icon name="bag" size={16} sw={2} /> Alışveriş
                   </div>
                 )}
-              <div className={`pcard ${!available ? 'soon' : ''} ${isActive ? 'active' : ''}`}>
+              <div className={`pcard ${!available ? 'soon' : ''} ${isActive ? 'active' : ''}`} data-p={p}>
                 <div className="top">
                   <Chip platform={p} size={44} />
                   <div style={{ minWidth: 0 }}>
@@ -553,6 +600,53 @@ export function ConnectModal({
       </div>
     </div>
   );
+}
+
+/** Bağlandı: kanal logosunun üstünde yeşil daire pop'la belirir, onay çizilir, 8 parçacık saçılır; sonra kendiliğinden kalkar */
+function celebrate(card: HTMLElement): void {
+  const chip = card.querySelector('.top > :first-child');
+  if (!chip) return;
+  card.querySelector('.pc-burst')?.remove();
+  const cr = card.getBoundingClientRect(),
+    r = chip.getBoundingClientRect();
+  const burst = document.createElement('span');
+  burst.className = 'pc-burst';
+  burst.setAttribute('aria-hidden', 'true');
+  burst.style.left = `${r.left - cr.left - card.clientLeft}px`;
+  burst.style.top = `${r.top - cr.top - card.clientTop}px`;
+  burst.style.width = `${r.width}px`;
+  burst.style.height = `${r.height}px`;
+  burst.innerHTML =
+    '<span class="pc-done"><svg width="60%" height="60%" viewBox="0 0 24 24"><path d="M5 12.5 10 17 19 7.5" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="pc-bits"></span>';
+  card.appendChild(burst);
+  const done = burst.querySelector('.pc-done'),
+    ck = burst.querySelector('path'),
+    bits = burst.querySelector('.pc-bits')!;
+  animate(done, [{ transform: 'scale(0)' }, { transform: 'none' }], { duration: 320, easing: EASE.pop, fill: 'forwards' });
+  if (ck) {
+    const l = ck.getTotalLength();
+    ck.style.strokeDasharray = String(l);
+    animate(ck, [{ strokeDashoffset: l }, { strokeDashoffset: 0 }], { duration: 220, delay: 180, easing: EASE.std, fill: 'both' });
+  }
+  const cols = ['var(--v)', 'var(--lime)', 'var(--green-txt)', '#27A7E7'];
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2,
+      d = r.width * 0.75 + (i % 2) * 8,
+      b = document.createElement('i');
+    b.style.background = cols[i % 4];
+    bits.appendChild(b);
+    animate(b, [{ opacity: 0, transform: 'translate(0,0) scale(.4)' }, { opacity: 1, offset: 0.2 }, { opacity: 0, transform: `translate(${Math.cos(a) * d}px,${Math.sin(a) * d}px) scale(1)` }], { duration: 520, delay: 200, easing: EASE.in, fill: 'both' });
+  }
+  // onay bir süre görünür, sonra solar ve gerçek logo geri gelir
+  const out = animate(burst, [{ opacity: 1 }, { opacity: 0 }], { duration: 260, delay: 1400, easing: EASE.out, fill: 'forwards' });
+  const rm = () => burst.remove();
+  if (out) out.finished.then(rm, rm);
+  else rm();
+}
+
+/** Hata: kart ±8 px kısa sallanır (360 ms; yalnız transform, taşma yok) */
+function shake(card: HTMLElement): void {
+  animate(card, [{ transform: 'none' }, { transform: 'translateX(-8px)' }, { transform: 'translateX(8px)' }, { transform: 'translateX(-6px)' }, { transform: 'translateX(4px)' }, { transform: 'none' }], { duration: 360, easing: 'ease-in-out' });
 }
 
 /** Eski sürümlerin yazdığı hatalı etiketler (Facebook hata sayfası başlığı, Outlook localStorage anahtarı) */

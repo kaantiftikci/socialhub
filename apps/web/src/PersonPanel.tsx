@@ -1,10 +1,48 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from './api';
 import { peopleApi, type PersonChat, type PersonSuggestion } from './people-api';
 import { refreshPeople, usePeople } from './people-store';
 import { Avatar, Chip, Icon } from './ui';
 import { PLATFORMS, type Chat, type Platform } from './types';
+import { EASE, animate, reducedMotion } from './motion/motion';
+
+/** Bölümler açılışta 35 ms arayla soldan kayarak gelir (bir kez; toplam < 500 ms) */
+export function staggerIn(root: Element | null | undefined, selector = ':scope > *', dx = 10) {
+  if (!root || reducedMotion()) return;
+  Array.from(root.querySelectorAll(selector))
+    .slice(0, 12)
+    .forEach((n, i) => animate(n, [{ opacity: 0, transform: `translateX(${dx}px)` }, { opacity: 1, transform: 'none' }], { duration: 260, delay: i * 35, easing: EASE.in, fill: 'backwards' }));
+}
+
+/**
+ * Birleştirme önerisi kabul/ret: satır sola kayıp solar (180 ms, EASE.out), ardından yüksekliği kapanır (180 ms). İstek
+ * beklenmez (paralel); hata olursa `cancel()` satırı geri getirir. Veri yenilenince satır zaten kalkar.
+ */
+function exitRow(el: HTMLElement | null): { done: Promise<void>; cancel: () => void } {
+  if (!el || reducedMotion() || typeof el.animate !== 'function') return { done: Promise.resolve(), cancel: () => undefined };
+  const h = el.offsetHeight;
+  const cs = getComputedStyle(el);
+  const a = el.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateX(-28px)' }], { duration: 180, easing: EASE.out, fill: 'forwards' });
+  const b = el.animate(
+    [
+      { height: `${h}px`, marginTop: cs.marginTop, marginBottom: cs.marginBottom, paddingTop: cs.paddingTop, paddingBottom: cs.paddingBottom, borderWidth: cs.borderTopWidth },
+      { height: '0px', marginTop: '0px', marginBottom: '0px', paddingTop: '0px', paddingBottom: '0px', borderWidth: '0px' },
+    ],
+    { duration: 180, delay: 150, easing: EASE.std, fill: 'forwards' },
+  );
+  el.style.overflow = 'hidden';
+  el.style.pointerEvents = 'none';
+  return {
+    done: b.finished.then(() => undefined, () => undefined),
+    cancel: () => {
+      a.cancel();
+      b.cancel();
+      el.style.overflow = '';
+      el.style.pointerEvents = '';
+    },
+  };
+}
 
 /**
  * Kişi birleştirme arayüzü: sağ ayrıntı panelindeki "Kişi" bölümü (bu kişinin diğer kanalları, Bağla…, Ayır, öneri),
@@ -44,24 +82,36 @@ export function PersonPanel({ chat, onSelectChat, notify }: { chat: Chat; onSele
   const [askUnlink, setAskUnlink] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => (setPicker(false), setAskUnlink(null)), [chat.id]);
+  const secRef = useRef<HTMLDivElement>(null);
+  const shownFor = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (!secRef.current || shownFor.current === chat.id) return;
+    shownFor.current = chat.id;
+    staggerIn(secRef.current);
+  }, [chat.id]);
   if (!personable(chat)) return null;
   const person = byChat.get(chat.id);
   const mine = suggestByChat.get(chat.id) ?? [];
-  const run = async (fn: () => Promise<unknown>, ok?: string) => {
+  const run = async (fn: () => Promise<unknown>, ok?: string, row?: HTMLElement | null) => {
     if (busy) return;
     setBusy(true);
+    const ex = exitRow(row ?? null);
     try {
       await fn();
+      await ex.done;
       await refreshPeople();
+      // satır veride kaldıysa (ör. öneri yenilendi) geri getir; kalkacaksa React onu bir sonraki çizimde siler
+      window.setTimeout(() => row?.isConnected && ex.cancel(), 400);
       if (ok) notify(ok);
     } catch (e) {
+      ex.cancel();
       notify((e as Error).message, true);
     } finally {
       setBusy(false);
     }
   };
   return (
-    <div className="ctx-sec person-sec">
+    <div ref={secRef} className="ctx-sec person-sec">
       <span className="label">
         Kişi{person ? ` · ${person.chats.length} kanal` : ''}
         {suggestions.length > 0 && (
@@ -103,10 +153,10 @@ export function PersonPanel({ chat, onSelectChat, notify }: { chat: Chat; onSele
             {s.reasons.join(' · ')} · %{Math.round(s.score * 100)}
           </span>
           <span className="ps-acts">
-            <button type="button" className="btn xs primary b" disabled={busy} onClick={() => void run(() => peopleApi.mergeSuggestion(s.key), 'Birleştirildi')}>
+            <button type="button" className="btn xs primary b" disabled={busy} onClick={(e) => void run(() => peopleApi.mergeSuggestion(s.key), 'Birleştirildi', e.currentTarget.closest<HTMLElement>('.psug'))}>
               Birleştir
             </button>
-            <button type="button" className="btn xs b b2" disabled={busy} onClick={() => void run(() => peopleApi.dismiss(s.key))}>
+            <button type="button" className="btn xs b b2" disabled={busy} onClick={(e) => void run(() => peopleApi.dismiss(s.key), undefined, e.currentTarget.closest<HTMLElement>('.psug'))}>
               Hayır
             </button>
           </span>
@@ -202,13 +252,18 @@ export function SuggestionsModal({ onClose, notify, onSelectChat }: { onClose: (
   const { suggestions } = usePeople();
   const [busy, setBusy] = useState<string | null>(null);
   const strong = suggestions.filter((s) => s.strong);
-  const act = async (key: string, fn: () => Promise<unknown>, ok?: string) => {
+  const act = async (key: string, fn: () => Promise<unknown>, ok?: string, row?: HTMLElement | null) => {
     setBusy(key);
+    const ex = exitRow(row ?? null);
     try {
       await fn();
+      await ex.done;
       await refreshPeople();
+      // satır veride kaldıysa (ör. öneri yenilendi) geri getir; kalkacaksa React onu bir sonraki çizimde siler
+      window.setTimeout(() => row?.isConnected && ex.cancel(), 400);
       if (ok) notify(ok);
     } catch (e) {
+      ex.cancel();
       notify((e as Error).message, true);
     } finally {
       setBusy(null);
@@ -250,10 +305,10 @@ export function SuggestionsModal({ onClose, notify, onSelectChat }: { onClose: (
                   </span>
                 </span>
                 <span className="ps-acts">
-                  <button type="button" className="btn xs primary b" disabled={!!busy} onClick={() => void act(s.key, () => peopleApi.mergeSuggestion(s.key), `${s.name} birleştirildi`)}>
+                  <button type="button" className="btn xs primary b" disabled={!!busy} onClick={(e) => void act(s.key, () => peopleApi.mergeSuggestion(s.key), `${s.name} birleştirildi`, e.currentTarget.closest<HTMLElement>('.pm-sug'))}>
                     Birleştir
                   </button>
-                  <button type="button" className="btn xs b b2" disabled={!!busy} onClick={() => void act(s.key, () => peopleApi.dismiss(s.key))}>
+                  <button type="button" className="btn xs b b2" disabled={!!busy} onClick={(e) => void act(s.key, () => peopleApi.dismiss(s.key), undefined, e.currentTarget.closest<HTMLElement>('.pm-sug'))}>
                     Hayır
                   </button>
                 </span>

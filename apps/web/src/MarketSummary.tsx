@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, type MarketDigest, type MarketSummary } from './api';
 import { addDays, dayKey, formatMoney, formatMoneyList, type Money } from './market-calc';
 import { PLATFORMS, type Platform } from './types';
 import { Chip, Icon } from './ui';
+import { EASE, animate } from './motion/motion';
 
 /**
  * Pazaryeri gün sonu özeti (arayüz): kanal listesinin üstünde katlanabilir "Bugün" kartı + ayrıntılı gün sonu paneli
@@ -47,11 +48,13 @@ function Delta({ cur, prev, label, compact }: { cur: number; prev: number; label
 
 function useSummary(day: string, platform: Platform | null, refreshMs = 60_000) {
   const [data, setData] = useState<MarketSummary | null>(null);
+  // verinin hangi güne ait olduğu (gün değişiminde sayı animasyonu yalnız yeni günün verisi gelince oynar)
+  const [dataDay, setDataDay] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const load = useCallback(() => {
     api
       .marketSummary(day, platform)
-      .then((s) => (setData(s), setErr(null)))
+      .then((s) => (setData(s), setDataDay(day), setErr(null)))
       .catch((e: Error) => setErr(e.message));
   }, [day, platform]);
   useEffect(() => {
@@ -63,7 +66,7 @@ function useSummary(day: string, platform: Platform | null, refreshMs = 60_000) 
       window.removeEventListener('focus', load);
     };
   }, [load, refreshMs]);
-  return { data, err, reload: load };
+  return { data, dataDay, err, reload: load };
 }
 
 /** Kanal listesinin üstündeki "Bugün" kartı (yalnız pazaryeri kanalında) */
@@ -94,12 +97,13 @@ export function MarketTodayCard({ platform }: { platform: Platform }) {
             </span>
           </button>
           <button type="button" className="btn ghost xs icon b b2" aria-label={collapsed ? 'Özeti genişlet' : 'Özeti daralt'} aria-expanded={!collapsed} onClick={toggle}>
-            <span style={{ display: 'inline-flex', transform: collapsed ? 'none' : 'rotate(180deg)' }}>
+            <span className="ms-chev" style={{ display: 'inline-flex', transform: collapsed ? 'none' : 'rotate(180deg)' }}>
               <Icon name="chev" size={13} sw={2} />
             </span>
           </button>
         </div>
-        {!collapsed && (
+        {/* katlanır alan: yükseklik (grid satırı 0fr⇄1fr) + solma 260 ms, motion/extras.css */}
+        <div className={`ms-fold ${collapsed ? 'shut' : ''}`} inert={collapsed} aria-hidden={collapsed}>
           <button type="button" className="ms-card-grid b" onClick={() => setOpen(true)}>
             <span title="Bugünkü sipariş · dünle karşılaştırma">
               <em>Sipariş</em>
@@ -122,7 +126,7 @@ export function MarketTodayCard({ platform }: { platform: Platform }) {
               <span className="ms-delta flat">bekliyor</span>
             </span>
           </button>
-        )}
+        </div>
       </div>
       {open && <MarketSummaryPanel initialPlatform={platform} onClose={() => setOpen(false)} />}
     </>
@@ -134,7 +138,27 @@ export function MarketSummaryPanel({ initialPlatform, onClose }: { initialPlatfo
   const today = dayKey(Date.now());
   const [day, setDay] = useState(today);
   const [scope, setScope] = useState<Platform | null>(initialPlatform);
-  const { data, err } = useSummary(day, scope);
+  const { data, dataDay, err } = useSummary(day, scope);
+  // ilk veri: 7 gün çubukları alttan büyür (25 ms kademeli); gün değişimi: sayılar yeni yönde kayarak değişir
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const shown = useRef<{ day: string | null; bars: boolean }>({ day: null, bars: false });
+  useLayoutEffect(() => {
+    const body = bodyRef.current;
+    if (!body || !data || !dataDay) return;
+    const prev = shown.current.day;
+    shown.current.day = dataDay;
+    if (!shown.current.bars) {
+      shown.current.bars = true;
+      body.querySelectorAll('.ms-bar .fill').forEach((n, i) => animate(n, [{ transform: 'scaleY(0)' }, { transform: 'none' }], { duration: 400, delay: i * 25, easing: EASE.in, fill: 'backwards' }));
+      return;
+    }
+    if (prev === dataDay) return;
+    const up = dataDay > (prev ?? '') ? 1 : -1;
+    body.querySelectorAll('.ms-m b, .ms-m .ms-cmp, .ms-m .ms-sub').forEach((n) =>
+      animate(n, [{ opacity: 0, transform: `translateY(${up * 10}px)` }, { opacity: 1, transform: 'none' }], { duration: 260, easing: EASE.in }),
+    );
+    body.querySelectorAll('.ms-two .ms-list > li').forEach((n, i) => animate(n, [{ opacity: 0 }, { opacity: 1 }], { duration: 200, delay: Math.min(i, 6) * 20, easing: EASE.std, fill: 'backwards' }));
+  }, [data, dataDay]);
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
@@ -190,7 +214,7 @@ export function MarketSummaryPanel({ initialPlatform, onClose }: { initialPlatfo
             </button>
           </div>
         )}
-        <div className="ms-body">
+        <div ref={bodyRef} className="ms-body">
           {err && <p className="ms-err">{err}</p>}
           {!data ? (
             <div className="ms-loading">

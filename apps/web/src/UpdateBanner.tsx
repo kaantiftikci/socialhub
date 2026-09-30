@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, type UpdateStatus } from './api';
 import { isTauri, openExternal } from './desktop';
-import { Icon } from './ui';
+import { Icon, useClosing } from './ui';
+import { DUR, EASE, animate } from './motion/motion';
 
 /** Masaüstü paketi (DMG/EXE) sürümü: CI'da VITE_APP_VERSION ile gömülür (build-desktop.yml) */
 export const APP_VERSION = (import.meta.env.VITE_APP_VERSION as string | undefined) || '';
@@ -24,7 +25,21 @@ const newer = (a: string, b: string) => {
  * "Sonra" o sürümü bir daha göstermez.
  */
 export function UpdateBanner() {
-  const [latest, setLatest] = useState<string | null>(null);
+  const [latestNow, setLatest] = useState<string | null>(null);
+  // "Sonra" deyince kart 150 ms'de solarak kalkar (değer kapanış boyunca tutulur)
+  const shown = useClosing(latestNow, DUR.quick);
+  const latest = shown.value;
+  const cardRef = useRef<HTMLDivElement>(null);
+  const visible = !!latest;
+  useLayoutEffect(() => {
+    if (!visible) return;
+    animate(cardRef.current, [{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, transform: 'none' }], { duration: DUR.std, easing: EASE.in });
+  }, [visible]);
+  const exit = useRef<Animation | null>(null);
+  useLayoutEffect(() => {
+    exit.current?.cancel(); // kapanırken yeniden göründüyse soluk kalmasın
+    exit.current = shown.closing ? animate(cardRef.current, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(8px)' }], { duration: DUR.quick, easing: EASE.out, fill: 'forwards' }) : null;
+  }, [shown.closing]);
   const [st, setSt] = useState<UpdateStatus | null>(null);
   const poll = useRef<number | undefined>(undefined);
   useEffect(() => {
@@ -96,7 +111,7 @@ export function UpdateBanner() {
           ? `${st.error ?? 'Bilinmeyen hata'}`
           : 'Güncelle deyince arka planda iner ve kurulur; verilerin ve bağlı hesapların korunur.';
   return (
-    <div className="update-card" role="status">
+    <div className="update-card" role="status" ref={cardRef} style={shown.closing ? { pointerEvents: 'none' } : undefined}>
       <Icon name="download" size={16} sw={2} />
       <div>
         <b>{title}</b>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
 import { PLATFORMS, type Account } from './types';
 import { Avatar, Chip, Icon, PasswordInput } from './ui';
@@ -14,6 +14,7 @@ import { PermissionSettings } from './Onboarding';
 import { LocalAiPane } from './LocalAiPane';
 import { AboutPane, AccountsPane, DevicesPane, GeneralPane, HelpPane, HighlightCtx, KeysPane, LookPane, NotifyBehavior, Row, StoragePane, Switch } from './SettingsPanes';
 import type { LicenseStatus, Profile } from './api';
+import { EASE, animate } from './motion/motion';
 
 type Tab = 'profile' | 'accounts' | 'general' | 'look' | 'notify' | 'apps' | 'keys' | 'devices' | 'ai' | 'localai' | 'perms' | 'storage' | 'help' | 'about' | 'account' | 'logout' | 'reset';
 type Lan = { enabled: boolean; urls: string[]; qr?: string } | null;
@@ -145,6 +146,23 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
     }
     return out.slice(0, 14);
   }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
+  // bölüm değişimi: sağ içerik 200 ms solarak + 8 px yükselerek gelir (açılışta pencere animasyonu yeter)
+  const bodyRef = useRef<HTMLElement>(null);
+  const prevTab = useRef(tab);
+  useLayoutEffect(() => {
+    if (prevTab.current === tab) return;
+    prevTab.current = tab;
+    const body = bodyRef.current;
+    if (!body) return;
+    body.scrollTop = 0;
+    const enter = (n: Element) => !n.classList.contains('set-head') && animate(n, [{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], { duration: 200, easing: EASE.in });
+    Array.from(body.children).forEach(enter);
+    // verisini sonradan yükleyen bölümler (Yerel AI, Depolama…) ilk çizimde yer tutucu gösterir: kısa süre içinde gelen asıl içerik de aynı girişle
+    const mo = new MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach((n) => n instanceof Element && enter(n))));
+    mo.observe(body, { childList: true });
+    const t = window.setTimeout(() => mo.disconnect(), 600);
+    return () => (window.clearTimeout(t), mo.disconnect());
+  }, [tab]);
   const go = (k: Tab, title = '') => {
     setTab(k);
     setHl(title || null);
@@ -212,7 +230,7 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
             </button>
           )}
         </aside>
-        <section className="set-body">
+        <section ref={bodyRef} className="set-body">
           <header className="set-head">
             <h3>{labelOf(tab)}</h3>
             <button className="btn icon b b2" onClick={onClose} aria-label="Kapat">

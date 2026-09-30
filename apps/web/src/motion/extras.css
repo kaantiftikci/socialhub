@@ -1,1 +1,76 @@
-/* extras animasyonları — bkz. motion/tokens.css */
+/* extras animasyonları — bkz. motion/tokens.css. Takvim, Ayarlar, Medya, Kişi, Pazaryeri özeti, Geri bildirim, Yerel AI.
+   Yalnız transform/opacity (katlanır alanlarda kısa yükseklik geçişi hariç); süreler var(--m-*) → hareketleri azalt'ta 1 ms. */
+
+/* ── Takvim: etkinlik penceresi açılış 320 ms (EASE.in) / kapanış 180 ms (EASE.out) ── */
+@keyframes mxCalIn { from { opacity: 0; transform: translateY(16px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes mxCalOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(10px) scale(.985); } }
+@keyframes mxFadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes mxFadeOut { from { opacity: 1; } to { opacity: 0; } }
+.overlay.cal-ov { animation: mxFadeIn var(--m-std) var(--m-in) both; }
+.overlay.cal-ov .modal.cal-modal { animation: mxCalIn calc(var(--m-slow) * .8) var(--m-in) both; }
+.overlay.cal-ov.closing { animation: mxFadeOut calc(var(--m-quick) * 1.2) var(--m-out) both; pointer-events: none; }
+.overlay.cal-ov.closing .modal.cal-modal { animation: mxCalOut calc(var(--m-quick) * 1.2) var(--m-out) both; }
+
+/* yeni etkinlik (s20): hücre kısa vurgulanır, çip pop ile yerleşir, ajanda satırı yükselerek girer */
+.cv-cell { position: relative; }
+.cv-cell > .cv-n, .cv-cell > .cv-evs { position: relative; }
+.cv-flash { position: absolute; inset: 0; pointer-events: none; background: var(--v-soft); box-shadow: inset 0 0 0 2px var(--v); opacity: 0; animation: mxCellFlash calc(var(--m-slow) * 2.4) var(--m-ease) both; }
+@keyframes mxCellFlash { 0% { opacity: 0; transform: scale(.94); } 16% { opacity: 1; transform: scale(1); } 45% { opacity: 1; } 100% { opacity: 0; transform: none; } }
+.cv-chip.pop { transform-origin: left center; animation: mxChipPop var(--m-std) var(--m-pop) calc(var(--m-quick) * .8) both; }
+@keyframes mxChipPop { from { opacity: 0; transform: scaleX(.3) scaleY(.7); } to { opacity: 1; transform: none; } }
+.cv-item.enter { animation: mxRise var(--m-std) var(--m-in) calc(var(--m-quick) * .5) both; }
+@keyframes mxRise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+
+/* ── Ayarlar: pencere açılış/kapanış ── */
+@keyframes mxSetIn { from { opacity: 0; transform: translateY(14px) scale(.985); } to { opacity: 1; transform: none; } }
+@keyframes mxSetOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(8px) scale(.99); } }
+.overlay.set-ov { animation: mxFadeIn var(--m-std) var(--m-in) both; }
+.overlay.set-ov .modal.set-modal { animation: mxSetIn calc(var(--m-slow) * .8) var(--m-in) both; }
+.overlay.set-ov.closing { animation: mxFadeOut calc(var(--m-quick) * 1.2) var(--m-out) both; pointer-events: none; }
+.overlay.set-ov.closing .modal.set-modal { animation: mxSetOut calc(var(--m-quick) * 1.2) var(--m-out) both; }
+/* anahtar topuzu yaylı (EASE.pop, 200 ms); basılıyken hafif sıkışır */
+.set-modal .sw::after { transition: transform calc(var(--m-quick) * 1.34) var(--m-pop), width var(--m-quick) var(--m-ease); }
+.set-modal .sw { transition: background var(--m-quick) var(--m-ease); }
+.set-modal .sw:not(:disabled):active::after { transform: scale(.88); }
+.set-modal .sw.on:not(:disabled):active::after { transform: translateX(16px) scale(.88); }
+
+/* ── Medya: süzgeç değişirken eski ızgara soluklaşır (çapraz solmanın ilk yarısı) ── */
+.ml-body > .ml-group { transition: opacity var(--m-quick) var(--m-ease); }
+.ml-body.swapping > .ml-group { opacity: .35; }
+
+/* ── Pazaryeri "Bugün" kartı: katlanır alan (yükseklik + solma, 260 ms) ── */
+.ms-fold { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows var(--m-std) var(--m-ease), opacity var(--m-std) var(--m-ease), margin-top var(--m-std) var(--m-ease); }
+.ms-fold > .ms-card-grid { min-height: 0; overflow: hidden; }
+.ms-fold.shut { grid-template-rows: 0fr; opacity: 0; margin-top: -10px; } /* 6 px kart aralığı + ızgaranın 4 px alt dolgusu */
+.ms-card.collapsed .ms-fold.shut { transition-timing-function: var(--m-out); transition-duration: calc(var(--m-std) * .75); }
+.ms-chev { transition: transform var(--m-std) var(--m-ease); }
+.ms-bar .fill { transform-origin: bottom; }
+/* gün sonu paneli açılışı */
+.overlay.ms-ov .modal.ms-panel { animation: mxSetIn calc(var(--m-slow) * .8) var(--m-in) both; }
+
+/* ── Geri bildirim paneli: sağ alttan büyüyerek (260 ms EASE.in) / kapanış 150 ms EASE.out ── */
+@keyframes mxFbIn { from { opacity: 0; transform: translateY(8px) scale(.9); } to { opacity: 1; transform: none; } }
+@keyframes mxFbOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(6px) scale(.92); } }
+.fb-panel { transform-origin: 100% 100%; animation: mxFbIn var(--m-std) var(--m-in) both; }
+.fb-panel.closing { animation: mxFbOut var(--m-quick) var(--m-out) both; pointer-events: none; }
+.fb-fab .fb-open { animation: mxFadeIn var(--m-quick) var(--m-ease) both; }
+/* gönderim başarısı: halka pop, tik çizilir */
+.fb-ok { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: var(--green-bg); color: var(--green-txt); animation: mxOkPop calc(var(--m-std) * 1.1) var(--m-pop) both; }
+.fb-ok path { fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 1; animation: mxDraw var(--m-std) var(--m-ease) calc(var(--m-quick) * .9) forwards; }
+@keyframes mxOkPop { from { opacity: 0; transform: scale(.4); } to { opacity: 1; transform: none; } }
+@keyframes mxDraw { to { stroke-dashoffset: 0; } }
+.fb-sent > b, .fb-sent > span, .fb-sent > .btn { animation: mxRise var(--m-std) var(--m-in) both; }
+.fb-sent > b { animation-delay: calc(var(--m-quick) * .6); }
+.fb-sent > span { animation-delay: calc(var(--m-quick) * .8); }
+.fb-sent > .btn { animation-delay: var(--m-quick); }
+@media (prefers-reduced-motion: reduce) { .fb-ok path { stroke-dashoffset: 0; animation: none; } }
+html.reduce-motion .fb-ok path { stroke-dashoffset: 0; animation: none; }
+
+/* ── Yerel AI: indirme çubuğu transform ile, geri gitmez; bitince yeşil ── */
+.lai-bar .lai-fill { width: 100%; transform-origin: left center; border-radius: 0; transition: transform var(--m-slow) var(--m-ease), background var(--m-std) var(--m-ease); }
+.lai-bar.done .lai-fill { background: var(--green-txt); }
+.lai-ok.pop { color: var(--green-txt); animation: mxOkPop var(--m-std) var(--m-pop) both; }
+@media (prefers-reduced-motion: reduce) { .lai-bar .lai-fill { transition: none; } }
+
+/* Medya: eski genel `wrIn` her karoda (sonsuz kaydırmada da) oynuyordu → kapalı; giriş MediaLibrary.tsx'te yalnız ilk yükleme/süzgeçte */
+.ml-body .ml-tile, .ml-body .ml-row { animation: none; }

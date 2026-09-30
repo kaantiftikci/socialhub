@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { EASE, animate, reducedMotion } from './motion/motion';
 import { api } from './api';
 import { PLATFORMS, type Chat, type DraftResult } from './types';
 import { Avatar, Chip, Icon, IconText, ago, agoLong, stripLeadIcon } from './ui';
@@ -79,6 +80,76 @@ export function Focus({
       if (el) (el.focus(), el.setSelectionRange(el.value.length, el.value.length));
     });
   };
+  // ---- hareket: satır içi yanıt kutusu kartın içinde açılır; gönderince kart "… ile gönderildi" onayına dönüşür (onay çizilir),
+  // ~1 sn sonra sola kayıp çıkar ve yeri kapanır (alttaki kartlar yukarı süzülür). Kart bu sırada listeden düşse de (okundu →
+  // bekleyenlerden çıkar) `sentFx` onu eski sırasında tutar.
+  const cardEls = useRef(new Map<string, HTMLDivElement>());
+  const cardRef = (key: string) => (el: HTMLDivElement | null) => void (el ? cardEls.current.set(key, el) : cardEls.current.delete(key));
+  const sentH = useRef(new Map<string, number>());
+  const [sentFx, setSentFx] = useState<Record<string, { chat: Chat; index: number }>>({});
+  const played = useRef(new Set<string>());
+  async function markSent(c: Chat) {
+    const el = cardEls.current.get(c.id);
+    const index = visible.findIndex((x) => x.id === c.id);
+    setReplyFor((r) => (r === c.id ? null : r));
+    if (!el || index < 0 || reducedMotion()) {
+      setDone((x) => ({ ...x, [c.id]: true }));
+      notify(`${PLATFORMS[c.platform].name} ile gönderildi · ${c.name} listeden çıktı`);
+      return;
+    }
+    sentH.current.set(c.id, el.offsetHeight);
+    await Promise.all(Array.from(el.children).map((n) => animate(n, [{ opacity: 1 }, { opacity: 0 }], { duration: 140, easing: EASE.out, fill: 'forwards' })?.finished.catch(() => undefined)));
+    setSentFx((x) => ({ ...x, [c.id]: { chat: c, index } }));
+    setDone((x) => ({ ...x, [c.id]: true }));
+  }
+  useLayoutEffect(() => {
+    for (const id of Object.keys(sentFx)) {
+      if (played.current.has(id)) continue;
+      played.current.add(id);
+      const el = cardEls.current.get(`${id}:ok`);
+      const h = sentH.current.get(id);
+      const finish = () => setSentFx((x) => {
+        const n = { ...x };
+        delete n[id];
+        return n;
+      });
+      if (!el || h == null) {
+        finish();
+        continue;
+      }
+      const h2 = el.offsetHeight;
+      animate(el, [{ height: `${h}px` }, { height: `${h2}px` }], { duration: 240, easing: EASE.std });
+      const ok = el.firstElementChild;
+      animate(ok, [{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }], { duration: 220, delay: 80, easing: EASE.in, fill: 'backwards' });
+      const ck = el.querySelector<SVGPathElement>('.ck');
+      if (ck && typeof ck.getTotalLength === 'function') {
+        const L = ck.getTotalLength();
+        ck.style.strokeDasharray = String(L);
+        animate(ck, [{ strokeDashoffset: L }, { strokeDashoffset: 0 }], { duration: 220, delay: 140, easing: EASE.std, fill: 'backwards' });
+      }
+      window.setTimeout(async () => {
+        if (!el.isConnected) return finish();
+        el.style.pointerEvents = 'none';
+        await animate(el, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateX(-40px)' }], { duration: 200, easing: EASE.out, fill: 'forwards' })?.finished.catch(() => undefined);
+        el.style.overflow = 'hidden';
+        await animate(el, [{ height: `${h2}px`, marginBottom: '0px', paddingTop: '14px', paddingBottom: '14px', borderWidth: '1px' }, { height: '0px', marginBottom: '-12px', paddingTop: '0px', paddingBottom: '0px', borderWidth: '0px' }], { duration: 200, easing: EASE.std, fill: 'forwards' })?.finished.catch(() => undefined);
+        finish();
+      }, 1000);
+    }
+  }, [sentFx]);
+  // yanıt kutusu kartın içinde açılır (kısa yükseklik açılışı + solma)
+  useLayoutEffect(() => {
+    if (!replyFor || reducedMotion()) return;
+    const box = cardEls.current.get(replyFor)?.querySelector<HTMLElement>('.freply');
+    if (!box) return;
+    const h = box.offsetHeight;
+    box.style.overflow = 'hidden';
+    const a = animate(box, [{ height: '0px', opacity: 0 }, { height: `${h}px`, opacity: 1 }], { duration: 240, easing: EASE.std });
+    const clear = () => void (box.style.overflow = '');
+    if (a) a.finished.then(clear, clear);
+    else clear();
+  }, [replyFor]);
+
   async function sendReply(c: Chat) {
     const text = replyText.trim();
     if (!text || sending) return;
@@ -86,10 +157,8 @@ export function Focus({
     try {
       await api.send(c.id, text);
       await api.markRead(c.id).catch(() => undefined);
-      setDone((x) => ({ ...x, [c.id]: true }));
-      setReplyFor(null);
       setReplyText('');
-      notify(`${PLATFORMS[c.platform].name} ile gönderildi · ${c.name} listeden çıktı`);
+      await markSent(c);
     } catch (e) {
       notify((e as Error).message, true);
     } finally {
@@ -125,8 +194,7 @@ export function Focus({
     try {
       await api.send(c.id, d.draft);
       await api.markRead(c.id);
-      setDone((x) => ({ ...x, [c.id]: true }));
-      notify(`${PLATFORMS[c.platform].name} ile gönderildi · ${c.name} listeden çıktı`);
+      await markSent(c);
     } catch (e) {
       notify((e as Error).message, true);
     } finally {
@@ -135,6 +203,9 @@ export function Focus({
   }
 
   const visible = waiting.filter((c) => !done[c.id]);
+  // gönderildi onayını gösteren kartlar eski sıralarında kalır (animasyon bitince düşer)
+  const shown: Array<{ c: Chat; sent: boolean }> = visible.map((c) => ({ c, sent: false }));
+  for (const { chat, index } of Object.values(sentFx).sort((a, b) => a.index - b.index)) if (!visible.some((x) => x.id === chat.id)) shown.splice(Math.min(index, shown.length), 0, { c: chat, sent: true });
 
   return (
     <section className="focus" aria-label="Odak modu">
@@ -196,11 +267,22 @@ export function Focus({
             <span style={{ fontSize: 12.5, color: 'var(--text3)' }}>En yeniden eskiye</span>
           </div>
           {visible.length === 0 && <div className="empty card">Şu an yanıt bekleyen kimse yok. Yeni mesaj gelince burada görünür.</div>}
-          {visible.map((c, i) => {
+          {shown.map(({ c, sent }, i) => {
+            if (sent)
+              return (
+                <div key={`${c.id}:ok`} ref={cardRef(`${c.id}:ok`)} className="fcard fsent" role="status">
+                  <div className="okrow">
+                    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+                      <path className="ck" d="M5 12.5 10 17 19 7.5" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    {PLATFORMS[c.platform].name} ile gönderildi · {c.name}
+                  </div>
+                </div>
+              );
             const d = drafts[c.id];
             const draft = typeof d === 'object' ? d : null;
             return (
-              <div key={c.id} className={`fcard ${i === 0 ? 'hot' : ''}`}>
+              <div key={c.id} ref={cardRef(c.id)} className={`fcard ${i === 0 ? 'hot' : ''}`}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <span className="avwrap">
                     <Avatar name={c.name} size={42} url={c.avatarUrl} />

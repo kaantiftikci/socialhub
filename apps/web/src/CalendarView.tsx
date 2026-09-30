@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api, type DeviceCalendars } from './api';
 import { PLATFORMS, type CalEvent, type CalendarDraft, type Chat } from './types';
 import { Chip, Icon } from './ui';
+import { EASE, animate, reducedMotion } from './motion/motion';
 
 /* ───────────────────────── yardımcılar ───────────────────────── */
 
@@ -57,13 +58,26 @@ const CAL_DEVICE = 'mivelo.calDevice';
 export function EventEditor({
   initial,
   notify,
-  onClose,
+  onClose: close0,
+  onSaved,
 }: {
   initial: CalendarDraft & { id?: string; remindMin?: number; location?: string; deviceCalendar?: string };
   notify: (t: string, err?: boolean) => void;
   onClose: () => void;
+  /** kaydedilen etkinlik (Takvim görünümü gün hücresini vurgular) */
+  onSaved?: (ev: CalEvent) => void;
 }) {
   const editing = !!initial.id;
+  // kapanış: 180 ms hızlanarak (EASE.out, motion/extras.css `.cal-ov.closing`), sonra gerçekten kaldırılır
+  const [closing, setClosing] = useState(false);
+  const closeT = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(closeT.current), []);
+  const onClose = () => {
+    if (closeT.current !== undefined) return;
+    if (reducedMotion()) return close0();
+    setClosing(true);
+    closeT.current = window.setTimeout(close0, 180);
+  };
   const [title, setTitle] = useState(initial.title);
   const [date, setDate] = useState(initial.start.slice(0, 10));
   const [time, setTime] = useState(initial.start.slice(11, 16));
@@ -118,6 +132,7 @@ export function EventEditor({
         calendar: withDevice ? cal || undefined : undefined,
       });
       if (withDevice && cal) lsSet(CAL_NAME, cal);
+      if (r.event) onSaved?.(r.event);
       const when = new Date(parseYmd(date)).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' });
       if (r.device?.added) notify(`Takvime eklendi · ${when}${time ? ' ' + time : ''} · ${dev?.app ?? 'Cihaz'}: ${r.device.calendar}`);
       else if (r.device && r.device.denied) notify(`Mivelo takvimine eklendi. ${dev?.app ?? 'Cihaz'} takvimi izni kapalı: Sistem Ayarları → Gizlilik ve Güvenlik → Otomasyon → Mivelo → Takvim`, true);
@@ -181,7 +196,7 @@ export function EventEditor({
   }
 
   return (
-    <div className="overlay" onClick={onClose}>
+    <div className={`overlay cal-ov ${closing ? 'closing' : ''}`} onClick={onClose}>
       <div className="modal cal-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={editing ? 'Etkinliği düzenle' : 'Takvime ekle'} onKeyDown={(e) => e.key === 'Escape' && (e.preventDefault(), onClose())}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <Icon name="calendar" size={20} color="var(--v)" />
@@ -374,6 +389,38 @@ export function CalendarView({
   }, [refreshKey, today]);
   const upcoming = useMemo(() => upcomingAll.filter((e) => e.start.slice(0, 10) >= today).sort((a, b) => a.start.localeCompare(b.start)).slice(0, 6), [upcomingAll, today]);
 
+  // ay değişimi: ızgara içeriği geçiş yönünde 16 px kayarak + solarak gelir (240 ms). Yön yeni ayın eskisine göre konumundan.
+  const gridRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const prevMonth = useRef(month.getTime());
+  useLayoutEffect(() => {
+    const prev = prevMonth.current;
+    prevMonth.current = month.getTime();
+    if (prev === month.getTime()) return;
+    const dir = month.getTime() > prev ? 1 : -1;
+    // tek anahtar kare = başlangıç; bitiş öğenin kendi değeri (ör. önceki/sonraki ay günlerinin soluk rakamı)
+    const kf = [{ opacity: 0, transform: `translateX(${dir * 16}px)` }];
+    gridRef.current?.querySelectorAll('.cv-cell > *').forEach((n) => animate(n, kf, { duration: 240, easing: EASE.in }));
+    animate(titleRef.current, [{ opacity: 0, transform: `translateX(${dir * 8}px)` }, { opacity: 1, transform: 'none' }], { duration: 240, easing: EASE.in });
+  }, [month]);
+
+  // yeni kaydedilen etkinlik (motion s20): gün hücresi kısa vurgulanır, çip "pop" ile yerleşir, ajandada satır yükselerek girer
+  const [flash, setFlash] = useState<{ id: string; day: string; n: number } | null>(null);
+  const flashT = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(flashT.current), []);
+  const onSaved = (ev: CalEvent) => {
+    const day = ev.start.slice(0, 10);
+    const d = parseYmd(day);
+    // gösterilen aralıkta hemen görünsün (WS/refreshKey ile gelen tazesi bunu ezer)
+    setEvents((l) => [...l.filter((x) => x.id !== ev.id), ev]);
+    setUpcomingAll((l) => [...l.filter((x) => x.id !== ev.id), ev]);
+    setSel(day);
+    setMonth((m) => (m.getFullYear() === d.getFullYear() && m.getMonth() === d.getMonth() ? m : new Date(d.getFullYear(), d.getMonth(), 1)));
+    setFlash((f) => ({ id: ev.id, day, n: (f?.n ?? 0) + 1 }));
+    window.clearTimeout(flashT.current);
+    flashT.current = window.setTimeout(() => setFlash(null), 1200);
+  };
+
   const go = (delta: number) => setMonth((m) => new Date(m.getFullYear(), m.getMonth() + delta, 1));
   const goToday = () => {
     const d = new Date();
@@ -401,7 +448,7 @@ export function CalendarView({
   const chip = (e: CalEvent) => {
     const c = e.chatId ? chats.get(e.chatId) : undefined;
     return (
-      <button key={e.id} type="button" className={`cv-chip ${e.allDay ? 'all' : ''}`} title={`${timeOf(e) ? timeOf(e) + ' ' : ''}${e.title}`} onClick={(ev) => (ev.stopPropagation(), setSel(e.start.slice(0, 10)), openEvent(e))}>
+      <button key={e.id} type="button" className={`cv-chip ${e.allDay ? 'all' : ''} ${flash?.id === e.id ? 'pop' : ''}`} title={`${timeOf(e) ? timeOf(e) + ' ' : ''}${e.title}`} onClick={(ev) => (ev.stopPropagation(), setSel(e.start.slice(0, 10)), openEvent(e))}>
         {c && <Chip platform={c.platform} size={12} />}
         {timeOf(e) && <time>{timeOf(e)}</time>}
         <span>{e.title}</span>
@@ -417,7 +464,7 @@ export function CalendarView({
             <Icon name="grip" size={16} sw={2} />
           </button>
         )}
-        <h1>
+        <h1 ref={titleRef}>
           {MONTHS[month.getMonth()]} <em>{month.getFullYear()}</em>
         </h1>
         <div className="cv-nav">
@@ -438,7 +485,7 @@ export function CalendarView({
       </div>
 
       <div className="cv-body">
-        <div className="cv-month" role="grid" aria-label={`${MONTHS[month.getMonth()]} ${month.getFullYear()}`}>
+        <div ref={gridRef} className="cv-month" role="grid" aria-label={`${MONTHS[month.getMonth()]} ${month.getFullYear()}`}>
           {WEEKDAYS.map((w) => (
             <div key={w} className="cv-wd" role="columnheader">
               {w}
@@ -459,6 +506,7 @@ export function CalendarView({
                 onDoubleClick={() => newAt(k)}
                 onKeyDown={(e) => e.key === 'Enter' && newAt(k)}
               >
+                {flash?.day === k && <span key={flash.n} className="cv-flash" aria-hidden="true" />}
                 <span className="cv-n">{d.getDate()}</span>
                 <div className="cv-evs">
                   {list.slice(0, 3).map(chip)}
@@ -488,7 +536,7 @@ export function CalendarView({
                 </button>
               </div>
             ) : (
-              dayEvents.map((e) => <AgendaItem key={e.id} e={e} chat={e.chatId ? chats.get(e.chatId) : undefined} onEdit={() => openEvent(e)} onOpenChat={onOpenChat} />)
+              dayEvents.map((e) => <AgendaItem key={e.id} e={e} fresh={flash?.id === e.id} chat={e.chatId ? chats.get(e.chatId) : undefined} onEdit={() => openEvent(e)} onOpenChat={onOpenChat} />)
             )}
           </div>
           <div className="cv-up">
@@ -525,14 +573,14 @@ export function CalendarView({
           </div>
         </aside>
       </div>
-      {edit && <EventEditor initial={edit} notify={notify} onClose={() => setEdit(null)} />}
+      {edit && <EventEditor initial={edit} notify={notify} onClose={() => setEdit(null)} onSaved={onSaved} />}
     </section>
   );
 }
 
-function AgendaItem({ e, chat, onEdit, onOpenChat }: { e: CalEvent; chat?: Chat; onEdit: () => void; onOpenChat: (chatId: string, messageId?: string) => void }) {
+function AgendaItem({ e, chat, fresh, onEdit, onOpenChat }: { e: CalEvent; chat?: Chat; fresh?: boolean; onEdit: () => void; onOpenChat: (chatId: string, messageId?: string) => void }) {
   return (
-    <div className="cv-item" role="button" tabIndex={0} onClick={onEdit} onKeyDown={(k) => k.key === 'Enter' && onEdit()}>
+    <div className={`cv-item ${fresh ? 'enter' : ''}`} role="button" tabIndex={0} onClick={onEdit} onKeyDown={(k) => k.key === 'Enter' && onEdit()}>
       <span className="cv-bar" />
       <div className="cv-item-b">
         <span className="cv-time">{timeOf(e) ? `${timeOf(e)} – ${endTime(e)}` : 'Tüm gün'}</span>

@@ -1,6 +1,6 @@
 import { MailFrame } from './MailFrame';
 import { trReactionText } from './reaction-text';
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { EmojiPicker } from './emoji';
 import { api, USE_STATIC } from './api';
 import { EventEditor } from './CalendarView';
@@ -14,6 +14,7 @@ import { VoiceTranscript } from './MlBubble';
 import { loadChatTranscripts } from './ml-client';
 import { getPrefs, usePrefs } from './prefs';
 import { useClosing, Avatar, Chip, Icon, IconText, Resizer, Tag, ago, fmtDay, fmtStamp, fmtTime, leadIcon } from './ui';
+import { DUR, EASE, animate, reducedMotion } from './motion/motion';
 
 /** Bağlayıcıların yazdığı sistem mesajı baş emojileri (kullanıcıların nadiren mesaja başladığı): balonda ikon olarak çizilir */
 const SYSTEM_LEAD = new Set(['🔒', '🚫', '⏳', '⌛', '🗑', '⚠']);
@@ -282,7 +283,7 @@ export function Conversation({
   // (WS message.upsert) aynı metinle gelir ve bu kopya gizlenir. Hata olursa balon kalkar, metin kutuya geri döner.
   // realId: platformun verdiği kimlik (onaydan sonra); metin sonradan düzenlense/silinse de kopya kimlikle eşleşir
   const prefs = usePrefs();
-  const [outbox, setOutbox] = useState<Array<Message & { realId?: string }>>([]);
+  const [outbox, setOutbox] = useState<Array<Message & { realId?: string; retry?: OutSend }>>([]);
   const messages = useMemo(() => {
     // bire bir eşleşme: aynı metin art arda gönderilince ilk gerçek kayıt iki balonu birden gizlemesin
     const used = new Set<string>();
@@ -354,7 +355,9 @@ export function Conversation({
   const [addingTag, setAddingTag] = useState(false);
   // Medya penceresi galeri olarak: sohbetteki tüm görsel/videolar arasında ←/→ ile gezinilir
   const [lightbox, setLightboxState] = useState<LightboxState | null>(null);
-  const lightboxP = useClosing(lightbox);
+  const lightboxP = useClosing(lightbox, 300); // küçük resme geri dönüş (≈280 ms) bitmeden kaldırılmasın
+  /** Son tıklanan küçük resim (medya penceresi oradan büyüyerek açılır, kapanınca oraya döner) */
+  const thumbRef = useRef<{ el: HTMLElement; at: number } | null>(null);
   useEffect(() => setLightboxState(null), [chat.id]);
   const endRef = useRef<HTMLDivElement>(null);
   const msgsRef = useRef<HTMLDivElement>(null);
@@ -374,6 +377,9 @@ export function Conversation({
   }, []);
   /** Kendi mesajını düzenleme: yazma alanı düzenleme kipinde (üstte çubuk), Enter kaydeder, Esc iptal; önceki taslak saklanır */
   const [editTarget, setEditTarget] = useState<Message | null>(null);
+  // yanıt/düzenleme çubuğu kapanırken kısa süre kalır (aşağı kayarak kapanır)
+  const replyP = useClosing(replyTarget, 150);
+  const editP = useClosing(editTarget, 150);
   const editSaved = useRef('');
   /** Kendi mesajındaki "Düzenle / Herkesten sil" menüsü ve silme onayı (Tauri'de confirm() yok: ikinci tık onaylar) */
   const [ownFor, setOwnFor] = useState<string | null>(null);
@@ -422,10 +428,12 @@ export function Conversation({
     setOwnFor(null);
     setDelAsk(null);
     if (editTarget?.id === m.id) cancelEdit();
+    startDeleteFx(m.id); // görsel: metin bulanıklaşır (API beklemez)
     try {
       await api.deleteMessage(m.id);
       notify('Mesaj herkesten silindi');
     } catch (e) {
+      cancelDeleteFx(m.id);
       notify(`Silinemedi: ${(e as Error).message}`, true);
     }
   }
@@ -828,8 +836,9 @@ export function Conversation({
   }
 
   // Kaydırma: sohbet açılınca en alta; "daha eski mesajlar" başa eklenince okunan yer korunur; yeni mesaj gelince
-  // yalnızca zaten alttaysan en alta iner (yukarı kaydırırken sohbet durum/okundu güncellemeleriyle aşağı fırlamaz)
-  useEffect(() => {
+  // yalnızca zaten alttaysan en alta iner (yukarı kaydırırken sohbet durum/okundu güncellemeleriyle aşağı fırlamaz).
+  // Çizimden önce (layout): yeni balonun giriş animasyonu kaymış konumdan başlamasın
+  useLayoutEffect(() => {
     const el = msgsRef.current;
     const first = messages[0]?.id;
     const last = messages[messages.length - 1]?.id;
@@ -886,6 +895,178 @@ export function Conversation({
     };
   }, [chat.id]);
 
+
+  // ---- Hareket (motion/conversation.css, .claude/skills/motion-design): yeni balon girişi, tik değişimi, tepki uçuşu, herkesten
+  // sil, gönderilemedi, yazıyor → mesaj. Hepsi görsel katman: API çağrıları beklemez. Sohbet açılırken ve yeniden çizimde eski
+  // balonlar oynamaz; yalnız sondan geriye yeni kimlikler (≤60) ve son 60 mesajın durumu karşılaştırılır (3000+ mesajda döngü yok).
+  const fx = useRef<{ chat: string; seen: Set<string>; status: Map<string, Message['status']>; outIds: string[]; typingAt: number; typingRect?: { w: number; h: number } }>({
+    chat: '',
+    seen: new Set(),
+    status: new Map(),
+    outIds: [],
+    typingAt: 0,
+  });
+  /** Tepki çubuğunda seçilen emoji: çip çizilince oradan çipe uçar */
+  const flyRef = useRef<{ mid: string; emoji: string; from: DOMRect; at: number } | null>(null);
+  const armFly = (btn: HTMLElement, mid: string, emoji: string) => {
+    flyRef.current = { mid, emoji: colorEmoji(emoji), from: btn.getBoundingClientRect(), at: Date.now() };
+  };
+  /** Herkesten sil: onayda metin bulanıklaşır; silindi kaydı gelince balon eski boyundan yenisine geçer */
+  const delFx = useRef<{ id: string; at: number; w: number; h: number; bg: string; anim: Animation | null } | null>(null);
+  const wrapOf = (id: string): HTMLElement | null => msgsRef.current?.querySelector<HTMLElement>(`[data-mid="${CSS.escape(id)}"]`)?.closest<HTMLElement>('.bwrap') ?? null;
+  function startDeleteFx(id: string) {
+    const bub = wrapOf(id)?.querySelector<HTMLElement>('.bub');
+    if (!bub) return;
+    const cs = getComputedStyle(bub);
+    const anim = animate(bub, [{ color: cs.color, textShadow: `0 0 0 ${cs.color}` }, { color: 'transparent', textShadow: '0 0 8px transparent' }], { duration: 180, easing: EASE.out, fill: 'forwards' });
+    delFx.current = { id, at: Date.now(), w: bub.offsetWidth, h: bub.offsetHeight, bg: cs.backgroundColor, anim };
+  }
+  function cancelDeleteFx(id: string) {
+    if (delFx.current?.id !== id) return;
+    delFx.current.anim?.cancel();
+    delFx.current = null;
+  }
+  const typingNow = useRef(typing);
+  typingNow.current = typing;
+  // yazıyor balonunun boyu (mesaj gelince bu boydan gerçek boya uzar)
+  useLayoutEffect(() => {
+    const f = fx.current;
+    if (typing != null) {
+      const b = msgsRef.current?.querySelector<HTMLElement>('.typing-bub');
+      if (b) f.typingRect = { w: b.offsetWidth, h: b.offsetHeight };
+      f.typingAt = 0;
+    } else if (f.typingRect && !f.typingAt) f.typingAt = Date.now();
+  }, [typing]);
+  useLayoutEffect(() => {
+    const f = fx.current;
+    const tail = messages.slice(-60);
+    const outNow = tail.filter((m) => m.id.startsWith('out-')).map((m) => m.id);
+    if (f.chat !== chat.id) {
+      // sohbet açıldı: var olanlar "görülmüş", animasyon yok
+      f.chat = chat.id;
+      f.seen = new Set(messages.map((m) => m.id));
+      f.status = new Map(tail.filter((m) => m.fromMe).map((m) => [m.id, m.status]));
+      f.outIds = outNow;
+      f.typingRect = undefined;
+      return;
+    }
+    // gerçek kaydı gelen iyimser balonlar: yerine geçen kayıt giriş animasyonu oynatmaz, tik durumunu devralır
+    const vanished = f.outIds.filter((id) => !outNow.includes(id));
+    f.outIds = outNow;
+    const fresh: Message[] = [];
+    for (let i = messages.length - 1; i >= 0 && fresh.length < 60; i--) {
+      const m = messages[i];
+      if (f.seen.has(m.id)) break;
+      f.seen.add(m.id);
+      fresh.push(m);
+    }
+    fresh.reverse();
+    // toplu eşitleme (çok sayıda yeni mesaj): animasyon yok
+    const animateIn = fresh.length <= 6;
+    for (const m of fresh) {
+      if (m.fromMe && !m.id.startsWith('out-') && vanished.length) {
+        const st = f.status.get(vanished.shift()!);
+        if (st) f.status.set(m.id, st);
+        continue;
+      }
+      if (animateIn) enterFx(m);
+    }
+    if (f.status.size > 400) f.status = new Map(tail.filter((m) => m.fromMe).map((m) => [m.id, f.status.get(m.id) ?? m.status]));
+    for (const m of tail) {
+      if (!m.fromMe) continue;
+      const prev = f.status.get(m.id);
+      f.status.set(m.id, m.status);
+      if (prev && prev !== m.status) tickFx(m, prev);
+    }
+    // herkesten sil: silindi kaydı geldi
+    const d = delFx.current;
+    if (d) {
+      const m = tail.find((x) => x.id === d.id);
+      if (m?.deleted) {
+        delFx.current = null;
+        revealDeleted(d);
+      } else if (Date.now() - d.at > 8000) cancelDeleteFx(d.id);
+    }
+    // tepki uçuşu: çip çizildi mi
+    const fl = flyRef.current;
+    if (fl) {
+      const w = Date.now() - fl.at < 4000 ? wrapOf(fl.mid) : null;
+      const chip = w ? [...w.querySelectorAll<HTMLElement>('.rchip')].find((c) => c.querySelector('.e')?.textContent === fl.emoji) : undefined;
+      if (chip) flyToChip(fl.from, fl.emoji, chip, w!.querySelector<HTMLElement>('.bub'));
+      if (chip || !w) flyRef.current = null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, chat.id]);
+  /** Yeni balon: benimki aşağıdan yükselir, gelen soldan kayar; yazıyor göstergesinin yerine gelen balon onun boyundan uzar */
+  function enterFx(m: Message) {
+    const w = wrapOf(m.id);
+    if (!w) return;
+    const f = fx.current;
+    const bub = w.querySelector<HTMLElement>('.bub');
+    if (!m.fromMe && f.typingRect && bub && (typingNow.current != null || Date.now() - f.typingAt < 1500)) {
+      const { w: w0, h: h0 } = f.typingRect;
+      f.typingRect = undefined;
+      const w1 = bub.offsetWidth;
+      const h1 = bub.offsetHeight;
+      if (w1 >= w0 * 0.8) {
+        const color = getComputedStyle(bub).color;
+        animate(bub, [{ width: `${w0}px`, height: `${h0}px`, overflow: 'hidden' }, { width: `${w1}px`, height: `${h1}px`, overflow: 'hidden' }], { duration: DUR.std, easing: EASE.std });
+        animate(bub, [{ color: 'transparent' }, { color }], { duration: 220, delay: 100, easing: EASE.std, fill: 'backwards' });
+        return;
+      }
+    }
+    const grp = w.closest<HTMLElement>('.grp');
+    // grubun ilk balonuysa grup (avatar/gönderen adıyla) birlikte gelir
+    const target = grp && grp.querySelector('.bwrap') === w ? grp : w;
+    const origin = m.fromMe ? '100% 100%' : '0 100%';
+    animate(
+      target,
+      m.fromMe
+        ? [{ opacity: 0, transform: 'translateY(18px) scale(.96)', transformOrigin: origin }, { opacity: 1, transform: 'none', transformOrigin: origin }]
+        : [{ opacity: 0, transform: 'translate(-14px, 6px) scale(.94)', transformOrigin: origin }, { opacity: 1, transform: 'none', transformOrigin: origin }],
+      { duration: DUR.std, easing: EASE.in },
+    );
+  }
+  /** Tik değişimi: saat → tek tik çizilir → ikinci tik kayarak gelir → görüldüde renk (CSS geçişi) + küçük zıplama */
+  function tickFx(m: Message, prev: Message['status']) {
+    const w = wrapOf(m.id);
+    const tk = w?.querySelector<HTMLElement>('.bt .tick');
+    if (!w || !tk) return;
+    const paths = tk.querySelectorAll<SVGPathElement>('path');
+    const draw = (p: SVGPathElement | undefined, delay: number) => {
+      if (!p || typeof p.getTotalLength !== 'function') return;
+      const l = p.getTotalLength();
+      animate(p, [{ strokeDasharray: `${l}`, strokeDashoffset: `${l}` }, { strokeDasharray: `${l}`, strokeDashoffset: '0' }], { duration: 180, delay, easing: EASE.std, fill: 'backwards' });
+    };
+    const slide = (p: SVGPathElement | undefined, delay: number) => animate(p, [{ opacity: 0, transform: 'translateX(-5px)' }, { opacity: 1, transform: 'none' }], { duration: 160, delay, easing: EASE.in, fill: 'backwards' });
+    const st = m.status;
+    if (st === 'sent') draw(paths[0], 0);
+    else if (st === 'delivered' || st === 'read') {
+      if (prev === 'pending' || prev === 'failed') {
+        draw(paths[0], 0);
+        slide(paths[1], 200);
+      } else if (prev === 'sent') slide(paths[1], 0);
+      if (st === 'read') animate(tk, [{ transform: 'none' }, { transform: 'scale(1.25)', offset: 0.4 }, { transform: 'none' }], { duration: 260, delay: prev === 'delivered' ? 0 : 160, easing: EASE.std });
+    } else if (st === 'failed') {
+      // gönderilemedi: sert sallanma ±6px, kırmızı çerçeve, hata simgesi pop, "Yeniden dene" aşağı süzülür
+      const bub = w.querySelector<HTMLElement>('.bub');
+      animate(bub, [{ transform: 'none' }, { transform: 'translateX(-6px)' }, { transform: 'translateX(6px)' }, { transform: 'translateX(-4px)' }, { transform: 'translateX(2px)' }, { transform: 'none' }], { duration: 360, easing: 'ease-in-out' });
+      animate(bub, [{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: EASE.std, pseudoElement: '::after' });
+      animate(tk, [{ transform: 'scale(0)' }, { transform: 'none' }], { duration: 260, easing: EASE.pop });
+      animate(w.querySelector('.fail-note'), [{ opacity: 0, transform: 'translateY(-4px)' }, { opacity: 1, transform: 'none' }], { duration: 220, delay: 120, easing: EASE.in, fill: 'backwards' });
+    }
+  }
+  /** Silindi kaydı: balon eski boyundan/renginden yenisine, "Bu mesaj silindi" belirir (bulanıklaşma 180 ms'yi bitirir) */
+  function revealDeleted(d: NonNullable<typeof delFx.current>) {
+    d.anim?.cancel();
+    const bub = wrapOf(d.id)?.querySelector<HTMLElement>('.bub');
+    if (!bub) return;
+    const rest = Math.max(0, 180 - (Date.now() - d.at));
+    const cs = getComputedStyle(bub);
+    animate(bub, [{ width: `${d.w}px`, height: `${d.h}px`, backgroundColor: d.bg }, { width: `${bub.offsetWidth}px`, height: `${bub.offsetHeight}px`, backgroundColor: cs.backgroundColor }], { duration: 280, delay: rest, easing: EASE.std, fill: 'backwards' });
+    animate(bub, [{ color: 'transparent' }, { color: cs.color }], { duration: 220, delay: rest + 120, easing: EASE.std, fill: 'backwards' });
+  }
+
   const shown = useMemo(() => {
     const q = (search ?? '').trim().toLocaleLowerCase('tr-TR');
     // "X bir mesajı beğendi" türü olay metinleri sohbette satır olarak gösterilmez (liste önizlemesinde kalır; tepkiler çip olarak görünür)
@@ -904,7 +1085,10 @@ export function Conversation({
       const same = (x: Attachment) => x === a || (!!(x.url || x.link) && x.url === a.url && x.link === a.link);
       const index = isGalleryMedia(a) ? mediaList.findIndex(same) : -1;
       const start = startAt ? { att: index >= 0 ? mediaList[index] : a, t: startAt } : undefined;
-      setLightboxState(index >= 0 ? { list: mediaList, index, start } : { list: [a], index: 0, start });
+      const th = thumbRef.current;
+      thumbRef.current = null;
+      const origin = th && Date.now() - th.at < 1000 && th.el.isConnected ? th.el : undefined;
+      setLightboxState(index >= 0 ? { list: mediaList, index, start, origin } : { list: [a], index: 0, start, origin });
     },
     [mediaList],
   );
@@ -913,8 +1097,8 @@ export function Conversation({
   // Balon listesi yalnız mesajlar/sohbet/açık menüler değişince yeniden kurulur: yazma alanındaki her tuş vuruşunda
   // (text durumu bu bileşende) ve App'in ilgisiz çizimlerinde 300-1000 balon baştan üretilmesin. Tıklama işleyicileri
   // her çizimde yenilenen işlevleri act ref'inden okur (bayat kapanış olmaz).
-  const act = useRef({ react, startEdit, unsend, setFollowUp, calFromText, notify });
-  act.current = { react, startEdit, unsend, setFollowUp, calFromText, notify };
+  const act = useRef({ react, startEdit, unsend, setFollowUp, calFromText, notify, retryOut, discardOut });
+  act.current = { react, startEdit, unsend, setFollowUp, calFromText, notify, retryOut, discardOut };
   const bubbleList = useMemo(
     () =>
       groups.map((g) =>
@@ -976,7 +1160,7 @@ export function Conversation({
                             <span className="tq-t">{parent?.text || 'İş parçacığı'}</span>
                           </button>
                         )}
-                        <div className={`bub ${g.items.length === 1 ? 'first last' : i === 0 ? 'first' : i === g.items.length - 1 ? 'last' : 'mid'} ${isReact ? 'react' : ''} ${m.deleted ? 'deleted' : ''}`}>
+                        <div className={`bub ${g.items.length === 1 ? 'first last' : i === 0 ? 'first' : i === g.items.length - 1 ? 'last' : 'mid'} ${isReact ? 'react' : ''} ${m.deleted ? 'deleted' : ''} ${m.status === 'failed' && g.fromMe ? 'm-failed' : ''}`}>
                           {m.replyTo && (
                             // alıntı: tıklayınca yanıtlanan mesaja kaydır ve vurgula
                             <button
@@ -1042,6 +1226,23 @@ export function Conversation({
                             );
                           })()}
                         </div>
+                        {g.fromMe && m.status === 'failed' && (
+                          <span className="fail-note" role="status">
+                            <Icon name="alert" size={12} sw={2.2} /> Gönderilemedi
+                            {m.id.startsWith('out-') && (
+                              <>
+                                {' · '}
+                                <button type="button" onClick={() => act.current.retryOut(m)}>
+                                  Yeniden dene
+                                </button>
+                                {' · '}
+                                <button type="button" className="sub" onClick={() => act.current.discardOut(m)}>
+                                  Kaldır
+                                </button>
+                              </>
+                            )}
+                          </span>
+                        )}
                         {url && <LinkCard url={url} />}
                         {m.reactions?.length ? <ReactionChips list={m.reactions} onToggle={canReact && !reactAsText && !foreign ? (e) => act.current.react(m, e) : undefined} /> : null}
                         {!!m.replyCount && !threadFocus && (
@@ -1077,7 +1278,7 @@ export function Conversation({
                               </button>
                             ),
                             canFollow && (
-                              <button key="f" type="button" className={`rtrig ${chat.followUp ? 'rtrig-on' : ''}`} aria-label={chat.followUp ? 'Takip hatırlatıcısını kaldır' : '2 gün yanıt gelmezse hatırlat'} title={chat.followUp ? 'Takip hatırlatıcısını kaldır' : 'Takip: 2 gün yanıt gelmezse hatırlat'} onClick={() => void act.current.setFollowUp(chat.followUp ? null : 2)}>
+                              <button key="f" type="button" className={`rtrig ${chat.followUp ? 'rtrig-on' : ''}`} aria-label={chat.followUp ? 'Takip hatırlatıcısını kaldır' : '2 gün yanıt gelmezse hatırlat'} title={chat.followUp ? 'Takip hatırlatıcısını kaldır' : 'Takip: 2 gün yanıt gelmezse hatırlat'} onClick={(ev) => (!chat.followUp && shakeBell(ev.currentTarget.querySelector('svg')), void act.current.setFollowUp(chat.followUp ? null : 2))}>
                                 <Icon name="bell" size={14} />
                               </button>
                             ),
@@ -1097,7 +1298,7 @@ export function Conversation({
                           <span className="rbar" role="toolbar" aria-label="Hızlı işlemler">
                             {canReact &&
                               QUICK_REACTIONS.map((e) => (
-                                <button key={e} type="button" className={m.reactions?.some((r) => r.fromMe && r.emoji === e) ? 'on' : ''} onClick={() => (act.current.react(m, e), setBarFor(null))} title={reactAsText ? `${e}: ${platform.name}’da tepki yok; alıntılı emoji yanıtı olarak gider (Mivelo’da tepki olarak görünür)` : `${e} tepkisi`}>
+                                <button key={e} type="button" className={m.reactions?.some((r) => r.fromMe && r.emoji === e) ? 'on' : ''} onClick={(ev) => (!ev.currentTarget.classList.contains('on') && armFly(ev.currentTarget, m.id, e), act.current.react(m, e), setBarFor(null))} title={reactAsText ? `${e}: ${platform.name}’da tepki yok; alıntılı emoji yanıtı olarak gider (Mivelo’da tepki olarak görünür)` : `${e} tepkisi`}>
                                   {e}
                                 </button>
                               ))}
@@ -1149,7 +1350,6 @@ export function Conversation({
                       </div>
                     );
                   })}
-                  {g.fromMe && g.items[g.items.length - 1].status === 'failed' && <span className="meta" style={{ color: 'var(--danger)' }}>Gönderilemedi</span>}
                 </div>
               </div>
             ),
@@ -1158,6 +1358,55 @@ export function Conversation({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [groups, chat, avatarOf, byRemote, messages, threadFocus, barFor, ownFor, delAsk, reactPick, setLightbox, startReply, timeline],
   );
+
+  // ---- takip şeridi: açılınca zil sallanır + şerit aşağı kayarak açılır; yanıt gelip takip kapanınca yeşile dönüp kapanır ----
+  const followRef = useRef<HTMLDivElement>(null);
+  const followOutRef = useRef<HTMLDivElement>(null);
+  const [followExit, setFollowExit] = useState<{ ok: boolean; text: string } | null>(null);
+  const followPrev = useRef<{ chat: string; f?: Chat['followUp']; text: string }>({ chat: '', text: '' });
+  useLayoutEffect(() => {
+    const p = followPrev.current;
+    const f = chat.followUp;
+    followPrev.current = { chat: chat.id, f, text: f ? followText(chat.name, f) : p.text };
+    if (p.chat !== chat.id) return void setFollowExit(null); // sohbet açılışında animasyon yok
+    if (!!p.f === !!f) return;
+    if (f) {
+      setFollowExit(null);
+      const el = followRef.current;
+      if (!el) return;
+      const h = el.offsetHeight;
+      animate(el, [{ height: '0px', paddingTop: '0px', paddingBottom: '0px', opacity: 0 }, { height: `${h}px`, paddingTop: '8px', paddingBottom: '8px', opacity: 1 }], { duration: DUR.std, delay: 120, easing: EASE.std, fill: 'backwards' });
+      for (const c of el.children) animate(c, [{ transform: 'translateY(-8px)' }, { transform: 'none' }], { duration: 280, delay: 120, easing: EASE.in, fill: 'backwards' });
+      shakeBell(el.querySelector('svg'));
+      return;
+    }
+    // kapandı: son mesaj karşıdan ve takip başladıktan sonraysa yanıt geldi (çekirdek kendiliğinden kapattı)
+    const last = messages[messages.length - 1];
+    setFollowExit({ ok: !!p.f && !!last && !last.fromMe && last.ts > p.f.since, text: p.text });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chat.followUp, chat.id]);
+  useEffect(() => {
+    if (!followExit) return;
+    const el = followOutRef.current;
+    let alive = true;
+    let t = 0;
+    const close = () => {
+      const a = el ? animate(el, [{ height: `${el.offsetHeight}px`, paddingTop: '8px', paddingBottom: '8px', opacity: 1 }, { height: '0px', paddingTop: '0px', paddingBottom: '0px', opacity: 0 }], { duration: 220, easing: EASE.std, fill: 'forwards' }) : null;
+      void (a?.finished ?? Promise.resolve()).then(
+        () => alive && setFollowExit(null),
+        () => alive && setFollowExit(null),
+      );
+    };
+    if (followExit.ok) {
+      animate(el?.firstElementChild, [{ transform: 'scale(.6)', opacity: 0.4 }, { transform: 'none', opacity: 1 }], { duration: 240, easing: EASE.pop });
+      animate(el, [{ opacity: 0.4 }, { opacity: 1 }], { duration: 240, easing: EASE.std });
+      t = window.setTimeout(close, reducedMotion() ? 900 : 1300);
+    } else close();
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [followExit]);
   const lastIncoming = [...messages].reverse().find((m) => !m.fromMe);
   const needsReply = !!lastIncoming && messages[messages.length - 1]?.id === lastIncoming.id;
   const [mediaOpen, setMediaOpen] = useState(false);
@@ -1224,12 +1473,20 @@ export function Conversation({
     const replyTo = rt && chat.platform !== 'slack' && !textQuote ? rt.remoteId : undefined;
     const quote = rt && replyTo ? { remoteId: rt.remoteId, senderName: rt.fromMe ? 'Sen' : rt.senderName, text: (rt.text || rt.attachments?.[0]?.name || '').slice(0, 160), fromMe: rt.fromMe } : undefined;
     const id = `out-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    setOutbox((x) => [...x, { id, chatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text: body, ts: Date.now(), status: 'pending', threadId, replyTo: quote }]);
+    const params: OutSend = { chatId, body, threadId, replyTo, typed, reaction: !!reaction };
+    setOutbox((x) => [...x, { id, chatId, remoteId: id, senderId: 'me', senderName: 'Ben', fromMe: true, text: body, ts: Date.now(), status: 'pending', threadId, replyTo: quote, retry: params }]);
     if (!reaction) {
       setText('');
       setDraft(null);
       setReplyTarget(null);
+      pressSend();
     }
+    return dispatch(id, params);
+  }
+
+  /** Giden mesajı platforma yollar (iyimser balon `id`); hata olursa balon "Gönderilemedi · Yeniden dene" ile kalır */
+  async function dispatch(id: string, p: OutSend) {
+    const { chatId, body, threadId, replyTo } = p;
     // art arda gönderimler sırasını korusun (her biri bir öncekini bekler; arayüz beklemez). Zincir modül düzeyinde,
     // sohbet kimliğine göre: sohbetten çıkıp dönünce yeni mesaj yoldaki eskisini geçmesin
     const run = (sendChains.get(chatId) ?? Promise.resolve()).then(() => api.send(chatId, body, threadId, replyTo));
@@ -1243,11 +1500,37 @@ export function Conversation({
       setOutbox((x) => x.map((o) => (o.id === id ? { ...o, status: 'sent', realId: r?.remoteId } : o)));
       setTimeout(() => setOutbox((x) => x.filter((o) => o.id !== id)), 5000);
     } catch (e) {
-      setOutbox((x) => x.filter((o) => o.id !== id));
-      // açık kompozöre (bu sohbet hâlâ açıksa) ya da sohbet yeniden açılınca kompozöre geri gelsin
-      if (!reaction) restoreFailed(chatId, typed);
+      if (!p.reaction && aliveRef.current) {
+        // sohbet açık: balon kırmızı çerçeveyle kalır, altında "Yeniden dene" (metin kaybolmaz)
+        setOutbox((x) => x.map((o) => (o.id === id ? { ...o, status: 'failed' } : o)));
+      } else {
+        setOutbox((x) => x.filter((o) => o.id !== id));
+        // sohbet kapandıysa metin, sohbet yeniden açılınca kompozöre gelsin
+        if (!p.reaction) restoreFailed(chatId, p.typed);
+      }
       notify((e as Error).message, true);
     }
+  }
+  /** Gönderilemeyen iyimser balonu yeniden yolla (saat → tikler) */
+  function retryOut(m: Message) {
+    const o = outbox.find((x) => x.id === m.id);
+    if (!o?.retry) return;
+    setOutbox((x) => x.map((y) => (y.id === m.id ? { ...y, status: 'pending' } : y)));
+    void dispatch(o.id, o.retry);
+  }
+  /** Gönderilemeyen balonu kaldır; yazma alanı boşsa metin oraya döner */
+  function discardOut(m: Message) {
+    const o = outbox.find((x) => x.id === m.id);
+    setOutbox((x) => x.filter((y) => y.id !== m.id));
+    if (o?.retry) setText((t) => (t.trim() ? t : o.retry!.typed));
+  }
+  /** Gönder düğmesi: basılma + kağıt uçak sağ üstten çıkıp soldan geri gelir (s2) */
+  const sendBtnRef = useRef<HTMLButtonElement>(null);
+  function pressSend() {
+    const b = sendBtnRef.current;
+    if (!b || reducedMotion()) return;
+    animate(b, [{ transform: 'none' }, { transform: 'scale(.92)', offset: 0.3 }, { transform: 'scale(1.05)', offset: 0.7 }, { transform: 'none' }], { duration: 300, easing: EASE.std });
+    animate(b.querySelector('svg'), [{ transform: 'none', opacity: 1 }, { transform: 'translate(5px,-5px)', opacity: 0, offset: 0.45 }, { transform: 'translate(-5px,5px)', opacity: 0, offset: 0.46 }, { transform: 'none', opacity: 1 }], { duration: 420, easing: EASE.std });
   }
 
   function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -1330,14 +1613,16 @@ export function Conversation({
           </div>
         )}
 
+        {!chat.followUp && followExit && (
+          <div ref={followOutRef} className={`snooze-banner follow m-exit ${followExit.ok ? 'm-ok' : ''}`} role="status">
+            <Icon name={followExit.ok ? 'check' : 'bell'} size={15} sw={followExit.ok ? 2.2 : 1.8} />
+            <span>{followExit.ok ? 'Yanıt geldi · takip kapandı' : followExit.text}</span>
+          </div>
+        )}
         {chat.followUp && (
-          <div className={`snooze-banner follow ${chat.followUp.due ? 'due' : ''}`}>
+          <div ref={followRef} className={`snooze-banner follow ${chat.followUp.due ? 'due' : ''}`}>
             <Icon name="bell" size={15} />
-            <span>
-              {chat.followUp.due
-                ? `${chat.name} yanıt vermedi. Nazik bir hatırlatma gönderebilirsin.`
-                : `${fmtFollow(chat.followUp.at)} yanıt gelmezse hatırlatılacak. ${chat.name} yazınca kendiliğinden kapanır.`}
-            </span>
+            <span>{followText(chat.name, chat.followUp)}</span>
             {chat.followUp.due && draftOn && (
               <button type="button" className="btn xs soft b b2" onClick={() => void makeDraft()}>
                 <Icon name="sparkle" size={12} color="var(--v)" sw={2} /> Hatırlatma yaz
@@ -1352,7 +1637,14 @@ export function Conversation({
           <OrderPage chat={chat} messages={messages} relatedQuestion={relatedQuestion} onOpenChat={onOpenChat} />
         ) : (
         <>
-        <div className={`msgs ${isMail ? 'mail' : ''}`} ref={msgsRef}>
+        <div
+          className={`msgs ${isMail ? 'mail' : ''}`}
+          ref={msgsRef}
+          onClickCapture={(e) => {
+            const t = (e.target as HTMLElement).closest?.('.al-tile, .att-card');
+            thumbRef.current = t ? { el: (t.querySelector('img') ?? t) as HTMLElement, at: Date.now() } : null;
+          }}
+        >
           {isMail && (
             <div className="mail-thread">
               <h3 className="mail-subject">{chat.name}</h3>
@@ -1564,24 +1856,24 @@ export function Conversation({
               </button>
             </div>
           )}
-          {replyTarget && (
-            <div className="reply-bar" key={replyTarget.id}>
+          {replyP.value && (replyTarget || !editTarget) && (
+            <div className={`reply-bar ${replyP.closing ? 'm-closing' : ''}`} key={replyP.value.id}>
               <Icon name="reply" size={14} sw={2} />
               <span className="rb-body">
-                <b>{replyTarget.fromMe ? 'Kendine' : replyTarget.senderName} yanıt veriyorsun</b>
-                <span>{replyTarget.text || replyTarget.attachments?.[0]?.name || 'Mesaj'}</span>
+                <b>{replyP.value.fromMe ? 'Kendine' : replyP.value.senderName} yanıt veriyorsun</b>
+                <span>{replyP.value.text || replyP.value.attachments?.[0]?.name || 'Mesaj'}</span>
               </span>
               <button className="btn ghost xs icon b" onClick={() => setReplyTarget(null)} aria-label="Yanıtı iptal et" title="İptal (Esc)">
                 <Icon name="x" size={13} sw={2} />
               </button>
             </div>
           )}
-          {editTarget && (
-            <div className="reply-bar edit-bar" key={`e-${editTarget.id}`}>
+          {editP.value && (editTarget || !replyTarget) && (
+            <div className={`reply-bar edit-bar ${editP.closing ? 'm-closing' : ''}`} key={`e-${editP.value.id}`}>
               <Icon name="pen" size={14} sw={2} />
               <span className="rb-body">
                 <b>Mesajı düzenle</b>
-                <span>{editTarget.text}</span>
+                <span>{editP.value.text}</span>
               </span>
               <button className="btn ghost xs icon b" onClick={cancelEdit} aria-label="Düzenlemeyi iptal et" title="İptal (Esc)">
                 <Icon name="x" size={13} sw={2} />
@@ -1684,7 +1976,7 @@ export function Conversation({
                 <span className="kbd">Tab</span> kabul et
               </span>
             )}
-            <button className="btn primary b" onClick={send} disabled={!!uploading || !!rec || !(pending || text.trim() || draftShown?.draft)}>
+            <button ref={sendBtnRef} className="btn primary b" onClick={() => void send()} disabled={!!uploading || !!rec || !(pending || text.trim() || draftShown?.draft)}>
               {uploading ? <span className="spin" /> : <Icon name={editTarget ? 'check' : 'send'} size={15} sw={1.9} />} {editTarget ? 'Kaydet' : 'Gönder'}
             </button>
           </div>
@@ -2068,7 +2360,7 @@ export function Conversation({
           </div>
         </div>
       )}
-      {lightboxP.value && <Lightbox list={lightboxP.value.list} index={lightboxP.value.index} start={lightboxP.value.start} onIndex={(index) => setLightboxState((v) => (v ? { ...v, index } : v))} closing={lightboxP.closing} onClose={() => setLightboxState(null)} />}
+      {lightboxP.value && <Lightbox list={lightboxP.value.list} index={lightboxP.value.index} start={lightboxP.value.start} origin={lightboxP.value.origin} onIndex={(index) => setLightboxState((v) => (v ? { ...v, index } : v))} closing={lightboxP.closing} onClose={() => setLightboxState(null)} />}
     </OpenLinkCtx.Provider>
   );
 }
@@ -2348,8 +2640,11 @@ function profileRole(chat: Chat): { text: string; href?: string } | undefined {
 }
 
 
+/** İyimser gönderimin parametreleri (Yeniden dene aynısını yollar) */
+type OutSend = { chatId: string; body: string; threadId?: string; replyTo?: string; typed: string; reaction: boolean };
+
 /** Açık medya penceresi: gezinilen liste + (satır içi oynatıcıdan gelindiyse) videonun kaldığı saniye */
-type LightboxState = { list: Attachment[]; index: number; start?: { att: Attachment; t: number } };
+type LightboxState = { list: Attachment[]; index: number; start?: { att: Attachment; t: number }; origin?: HTMLElement };
 
 /**
  * Mesajdaki bağlantıların uygulama içinde açılması: sohbet bileşeni sağlar (Lightbox), bağlam yoksa (başka yerde kullanılan
@@ -2466,7 +2761,7 @@ function DownloadLink({ href, name, className, children, title }: { href: string
  * gömülemeyen sayfalar önizleme kartıyla. Hiçbir tıklama yeni sekme açmaz; dışarı yalnız "Tarayıcıda aç" ile çıkılır.
  * Tam ekran: gerçek tam ekran API'si, olmazsa pencere uygulama içinde tüm ekranı kaplar.
  */
-function Lightbox({ list, index, start, onIndex, onClose, closing }: { list: Attachment[]; index: number; start?: LightboxState['start']; onIndex: (i: number) => void; onClose: () => void; closing?: boolean }) {
+function Lightbox({ list, index, start, origin, onIndex, onClose, closing }: { list: Attachment[]; index: number; start?: LightboxState['start']; origin?: HTMLElement; onIndex: (i: number) => void; onClose: () => void; closing?: boolean }) {
   const att = list[Math.min(Math.max(0, index), list.length - 1)];
   const many = list.length > 1;
   const boxRef = useRef<HTMLDivElement>(null);
@@ -2508,8 +2803,72 @@ function Lightbox({ list, index, start, onIndex, onClose, closing }: { list: Att
     if (!boxRef.current || !(await enterFs(boxRef.current))) setFull(true);
   };
   const expanded = full || boxFs;
+  // Paylaşılan öğe geçişi (FLIP): görsel, tıklanan küçük resmin yerinden tam boya büyür; kapanınca (aynı görseldeyse) oraya döner
+  const firstAtt = useRef(att).current;
+  const [flip] = useState(() => !!origin && isImg && !reducedMotion());
+  const flipTo = (box: HTMLElement): Keyframe | null => {
+    const img = box.querySelector('img');
+    if (!origin?.isConnected || !img) return null;
+    const r = origin.getBoundingClientRect();
+    const bi = img.getBoundingClientRect();
+    const bb = box.getBoundingClientRect();
+    // küçük resim görünür alanda değilse geri dönüş anlamsız
+    if (!r.width || !bi.width || r.bottom < 0 || r.top > window.innerHeight) return null;
+    const s = Math.max(r.width / bi.width, r.height / bi.height);
+    const tx = r.left + r.width / 2 - bb.left - (bi.left + bi.width / 2 - bb.left) * s;
+    const ty = r.top + r.height / 2 - bb.top - (bi.top + bi.height / 2 - bb.top) * s;
+    return { transform: `translate(${tx}px, ${ty}px) scale(${s})`, transformOrigin: '0 0', borderRadius: `${12 / s}px` };
+  };
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    if (!flip || !box) return;
+    const img = box.querySelector('img');
+    const chrome = box.querySelectorAll<HTMLElement>('.bar, .close');
+    box.style.opacity = '0';
+    let alive = true;
+    let played = false;
+    const runs: Array<Animation | null> = [];
+    const play = () => {
+      if (!alive || played) return;
+      played = true;
+      box.style.opacity = '';
+      const from = flipTo(box);
+      if (!from) return void animate(box, [{ opacity: 0, transform: 'translateY(10px) scale(.98)' }, { opacity: 1, transform: 'none' }], { duration: 200, easing: EASE.std });
+      origin!.style.visibility = 'hidden';
+      const a = animate(box, [from, { transform: 'none', transformOrigin: '0 0', borderRadius: '28px' }], { duration: 380, easing: EASE.in });
+      runs.push(a);
+      for (const c of chrome) runs.push(animate(c, [{ opacity: 0 }, { opacity: 1 }], { duration: 200, delay: 220, easing: EASE.std, fill: 'backwards' }));
+      const show = () => void (origin!.style.visibility = '');
+      void (a?.finished ?? Promise.resolve()).then(show, show);
+    };
+    // görsel yüklenmeden boyu bilinmez: en çok 300 ms beklenir, olmazsa sade açılış
+    if (!img || img.complete) play();
+    else {
+      img.addEventListener('load', play, { once: true });
+      img.addEventListener('error', play, { once: true });
+      window.setTimeout(play, 300);
+    }
+    return () => {
+      // (StrictMode'da etki iki kez çalışır: ilk turun animasyonu ölçümü bozmasın)
+      alive = false;
+      for (const a of runs) a?.cancel();
+      box.style.opacity = '';
+      if (origin) origin.style.visibility = '';
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!flip || !closing || !box) return;
+    const to = att === firstAtt && !full && !boxFs ? flipTo(box) : null;
+    if (!to) return void animate(box, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(.98)' }], { duration: 150, easing: EASE.out, fill: 'forwards' });
+    origin!.style.visibility = 'hidden';
+    for (const c of box.querySelectorAll('.bar, .close')) animate(c, [{ opacity: 1 }, { opacity: 0 }], { duration: 120, easing: EASE.out, fill: 'forwards' });
+    animate(box, [{ transform: 'none', transformOrigin: '0 0', borderRadius: '28px' }, to], { duration: 280, easing: EASE.std, fill: 'forwards' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closing]);
   return (
-    <div className={`lightbox ${closing ? 'closing' : ''} ${full ? 'full' : ''}`} onClick={onClose} role="dialog" aria-label={att.name ?? 'Medya'}>
+    <div className={`lightbox ${closing ? 'closing' : ''} ${full ? 'full' : ''} ${flip ? 'lb-flip' : ''}`} onClick={onClose} role="dialog" aria-label={att.name ?? 'Medya'}>
       <div className={`box ${embed || page ? 'page' : ''}`} ref={boxRef} onClick={(e) => e.stopPropagation()}>
         {isVideo ? (
           <VideoPlayer key={link} src={link!} poster={abs(att.url)} autoPlay big startAt={start && start.att === att ? start.t : undefined} expanded={full} onFallback={() => setFull((v) => !v)} />
@@ -2696,6 +3055,54 @@ export function statusIcon(s: Message['status']) {
   if (s === 'pending') return <span className="tick" title="Gönderiliyor"><Icon name="clock" size={11} sw={2.2} /></span>;
   if (s === 'failed') return <span className="tick failed" title="Gönderilemedi"><Icon name="alert" size={12} sw={2.2} /></span>;
   return null;
+}
+
+/** Takip şeridi metni */
+function followText(name: string, f: NonNullable<Chat['followUp']>): string {
+  return f.due ? `${name} yanıt vermedi. Nazik bir hatırlatma gönderebilirsin.` : `${fmtFollow(f.at)} yanıt gelmezse hatırlatılacak. ${name} yazınca kendiliğinden kapanır.`;
+}
+
+/** Zil sallanması (takip hatırlatıcısı açılınca) */
+function shakeBell(el: Element | null | undefined) {
+  const o = '50% 15%';
+  animate(el, [{ transform: 'rotate(0)', transformOrigin: o }, { transform: 'rotate(16deg)', transformOrigin: o, offset: 0.15 }, { transform: 'rotate(-13deg)', transformOrigin: o, offset: 0.35 }, { transform: 'rotate(8deg)', transformOrigin: o, offset: 0.55 }, { transform: 'rotate(-4deg)', transformOrigin: o, offset: 0.75 }, { transform: 'rotate(0)', transformOrigin: o }], { duration: 620, easing: 'ease-out' });
+}
+
+/** Tepki uçuşu: emoji çubuktaki yerinden kavis çizerek çipe uçar (body'de sabit konumlu kopya), çip zıplayarak yerleşir, balon hafifçe esner */
+function flyToChip(from: DOMRect, emoji: string, chip: HTMLElement, bub: HTMLElement | null) {
+  const pop = () => {
+    animate(chip, [{ transform: 'scale(.4)' }, { transform: 'none' }], { duration: 280, easing: EASE.pop });
+    animate(bub, [{ transform: 'none' }, { transform: 'scale(1.02)', offset: 0.4 }, { transform: 'none' }], { duration: 220, easing: EASE.std });
+  };
+  const to = (chip.querySelector('.e') ?? chip).getBoundingClientRect();
+  if (reducedMotion() || !from.width || !to.width) return pop();
+  const n = document.createElement('span');
+  n.className = 'm-fly';
+  n.textContent = emoji;
+  n.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(n);
+  const w = n.offsetWidth;
+  const h = n.offsetHeight;
+  const x0 = from.left + from.width / 2 - w / 2;
+  const y0 = from.top + from.height / 2 - h / 2;
+  const x1 = to.left + to.width / 2 - w / 2;
+  const y1 = to.top + to.height / 2 - h / 2;
+  const end = Math.max(0.4, Math.min(1, to.height / h));
+  chip.style.visibility = 'hidden';
+  const a = n.animate(
+    [
+      { transform: `translate(${x0}px, ${y0}px) scale(1)` },
+      { transform: `translate(${(x0 + x1) / 2}px, ${Math.min(y0, y1) - 20}px) scale(1.08)`, offset: 0.5 },
+      { transform: `translate(${x1}px, ${y1}px) scale(${end})` },
+    ],
+    { duration: 380, easing: EASE.std },
+  );
+  const done = () => {
+    n.remove();
+    chip.style.visibility = '';
+    pop();
+  };
+  a.finished.then(done, done);
 }
 
 /** Metin sunumlu semboller (❤ ♥ ☺ …) renkli emoji olarak çizilsin: varyasyon seçicisi (U+FE0F) eklenir */

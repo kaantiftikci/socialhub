@@ -1,1 +1,104 @@
-/* conversation animasyonları — bkz. motion/tokens.css */
+/* conversation animasyonları — bkz. motion/tokens.css. Sohbet (Conversation.tsx): yalnız transform/opacity (kısa boy/renk
+   geçişleri hariç). Tetiklenen hareketler (yeni balon, tik, tepki uçuşu, silme, gönderilemedi, takip şeridi, medya FLIP) TSX'te
+   motion.ts `animate()` ile; burada yalnız sürekli durumlar ve açılış/kapanış kuralları. styles.css'i ezmek için aynı ya da daha
+   yüksek özgüllük. */
+
+/* Balon girişi: sohbet açılırken yüzlerce balon oynamasın → CSS girişleri kapalı; yalnız yeni gelenler JS ile (enterFx) */
+.conv .msgs .grp, .conv .msgs .bub { animation: none; }
+/* arama/alıntıdan gelinen vurgulama korunur */
+.conv .msgs .bwrap.flash .bub { animation: msgFlash 2.4s ease-out; }
+
+/* Yazıyor göstergesi: balon avatarın köşesinden büyür, noktalar dalga gibi yükselir */
+.conv .msgs .typing-grp { animation: none; }
+.conv .msgs .typing-bub { transform-origin: 0 100%; animation: m-typ-in 280ms var(--m-pop) both; }
+.conv .typing-bub .tdots i { animation: m-dot 1100ms ease-in-out infinite; }
+.conv .typing-bub .tdots i:nth-child(2) { animation-delay: 140ms; }
+.conv .typing-bub .tdots i:nth-child(3) { animation-delay: 280ms; }
+@keyframes m-typ-in { from { opacity: 0; transform: scale(.4); } to { opacity: 1; transform: none; } }
+@keyframes m-dot { 0% { transform: translateY(0); opacity: .4; } 30% { transform: translateY(-3px); opacity: 1; } 60%, 100% { transform: translateY(0); opacity: .4; } }
+
+/* Tikler: görüldüde renk geçişi; gönderilirken saatin akrebi döner */
+.conv .bub .bt .tick { transition: color 220ms var(--m-ease); }
+.conv .bub .bt .tick[title="Gönderiliyor"] svg path { transform-box: view-box; transform-origin: 50% 50%; animation: m-hand 900ms linear infinite; }
+@keyframes m-hand { to { transform: rotate(360deg); } }
+
+/* Gönderilemedi: kırmızı çerçeve (açılışı JS'te ::after opaklığı), altında "Yeniden dene" */
+.conv .msgs .bub.m-failed { position: relative; }
+.conv .msgs .bub.m-failed::after { content: ''; position: absolute; inset: 0; border-radius: inherit; box-shadow: 0 0 0 2px var(--danger); pointer-events: none; }
+.conv .fail-note { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; line-height: 1.3; color: var(--danger); margin-top: 1px; }
+.conv .fail-note button { border: 0; background: none; padding: 0; font: inherit; font-weight: 600; color: var(--danger); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.conv .fail-note button.sub { font-weight: 500; color: var(--text3); }
+
+/* Tepki çubuğu taşarak açılır, emojiler 25 ms arayla (backwards: bitince :hover büyütmesi çalışsın) */
+.conv .rbar:not(.own-menu) { transform-origin: 100% 100%; animation: m-rbar-in 220ms var(--m-pop) backwards; }
+.conv .bwrap.me .rbar:not(.own-menu) { transform-origin: 0 100%; }
+.conv .rbar:not(.own-menu) > button { animation: m-rbar-item 240ms var(--m-pop) backwards; }
+.conv .rbar:not(.own-menu) > button:nth-child(1) { animation-delay: 40ms; }
+.conv .rbar:not(.own-menu) > button:nth-child(2) { animation-delay: 65ms; }
+.conv .rbar:not(.own-menu) > button:nth-child(3) { animation-delay: 90ms; }
+.conv .rbar:not(.own-menu) > button:nth-child(4) { animation-delay: 115ms; }
+.conv .rbar:not(.own-menu) > button:nth-child(5) { animation-delay: 140ms; }
+.conv .rbar:not(.own-menu) > button:nth-child(6) { animation-delay: 165ms; }
+.conv .rbar:not(.own-menu) > button:nth-child(7) { animation-delay: 190ms; }
+.conv .rbar:not(.own-menu) > button:nth-child(8) { animation-delay: 215ms; }
+.conv .rbar:not(.own-menu) > button:nth-child(n+9) { animation-delay: 240ms; }
+@keyframes m-rbar-in { from { opacity: 0; transform: translateY(6px) scale(.85); } to { opacity: 1; transform: none; } }
+@keyframes m-rbar-item { from { opacity: 0; transform: translateY(8px) scale(.6); } to { opacity: 1; transform: none; } }
+
+/* Uçan tepki kopyası (body'de, sabit konum; JS kaldırır) */
+.m-fly { position: fixed; left: 0; top: 0; z-index: 90; pointer-events: none; font-size: 20px; line-height: 1; font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; will-change: transform; }
+
+/* Kendi mesajı menüsü (Düzenle / Herkesten sil) tetikleyicinin köşesinden açılır; onay düğmesi kırmızıya geçer */
+.conv .rbar.own-menu { transform-origin: 100% 100%; animation: m-menu-in 180ms var(--m-in) backwards; }
+.conv .bwrap.me .rbar.own-menu { transform-origin: 0 100%; }
+.conv .rbar.own-menu button { transition: background-color 160ms var(--m-ease), color 160ms var(--m-ease); }
+.conv .rbar.own-menu button.danger { animation: m-pop-in 220ms var(--m-pop) backwards; }
+@keyframes m-menu-in { from { opacity: 0; transform: translateY(4px) scale(.9); } to { opacity: 1; transform: none; } }
+@keyframes m-pop-in { from { transform: scale(.92); } to { transform: none; } }
+
+/* Yanıt / düzenleme çubuğu: aşağıdan açılır, aşağı kayarak kapanır */
+.conv .composer .reply-bar { transform-origin: 0 100%; animation: m-bar-in var(--m-std) var(--m-in) both; }
+.conv .composer .reply-bar.m-closing { animation: m-bar-out var(--m-quick) var(--m-out) both; pointer-events: none; }
+@keyframes m-bar-in { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes m-bar-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(6px); } }
+
+/* "En alta in" düğmesi: taşarak belirir, küçülerek kaybolur */
+.conv .downbtn { animation: m-down-in var(--m-std) var(--m-pop) both; }
+.conv .downwrap.closing .downbtn { animation: m-down-out var(--m-quick) var(--m-out) both; }
+@keyframes m-down-in { from { opacity: 0; transform: translateY(8px) scale(.8); } to { opacity: 1; transform: none; } }
+@keyframes m-down-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(6px) scale(.85); } }
+
+/* Takip şeridi (boy/iç kaydırma JS'te); yanıt gelince yeşil */
+.conv .snooze-banner.follow { overflow: hidden; flex-shrink: 0; } /* overflow:hidden flex öğesini daraltmasın */
+.conv .snooze-banner.follow.m-ok { background: var(--green-bg); color: var(--green-txt); }
+.conv .snooze-banner.follow.m-exit { pointer-events: none; }
+
+/* Sağ ayrıntı paneli: içerik 35 ms arayla sağdan kayarak (panel genişlemesi styles.css ctxIn) */
+aside.ctx > * { animation: m-ctx-item var(--m-std) var(--m-in) backwards; animation-delay: 100ms; }
+aside.ctx > :nth-child(2) { animation-delay: 135ms; }
+aside.ctx > :nth-child(3) { animation-delay: 170ms; }
+aside.ctx > :nth-child(4) { animation-delay: 205ms; }
+aside.ctx > :nth-child(5) { animation-delay: 240ms; }
+aside.ctx > :nth-child(6) { animation-delay: 275ms; }
+aside.ctx > :nth-child(7) { animation-delay: 310ms; }
+aside.ctx > :nth-child(n+8) { animation-delay: 345ms; }
+@keyframes m-ctx-item { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
+
+/* Medya penceresi paylaşılan öğe geçişi (FLIP, JS): perde ayrı katmanda solar, kutu küçük resimden büyür */
+.lightbox.lb-flip { background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
+.lightbox.lb-flip::before { content: ''; position: fixed; inset: 0; background: var(--scrim); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); animation: m-fade-in 220ms var(--m-ease) both; }
+.lightbox.lb-flip.closing { animation: none; }
+.lightbox.lb-flip.closing::before { animation: m-fade-out 260ms var(--m-ease) both; }
+.lightbox.lb-flip .box, .lightbox.lb-flip.closing .box { animation: none; }
+@keyframes m-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes m-fade-out { from { opacity: 1; } to { opacity: 0; } }
+
+/* Hareketleri azalt (sistem ya da Ayarlar → Görünüm): sürekli döngüler ve gecikmeli girişler durur */
+@media (prefers-reduced-motion: reduce) {
+  .conv .typing-bub .tdots i, .conv .bub .bt .tick svg path, aside.ctx > * { animation: none !important; }
+  .conv .typing-bub .tdots i { opacity: .7; }
+  .conv .rbar, .conv .rbar > button, .conv .composer .reply-bar, .conv .downbtn, .conv .msgs .typing-bub { animation-duration: 1ms !important; animation-delay: 0ms !important; }
+}
+html.reduce-motion .conv .typing-bub .tdots i, html.reduce-motion .conv .bub .bt .tick svg path, html.reduce-motion aside.ctx > * { animation: none !important; }
+html.reduce-motion .conv .typing-bub .tdots i { opacity: .7; }
+html.reduce-motion .conv .rbar, html.reduce-motion .conv .rbar > button, html.reduce-motion .conv .composer .reply-bar, html.reduce-motion .conv .downbtn, html.reduce-motion .conv .msgs .typing-bub { animation-duration: 1ms !important; animation-delay: 0ms !important; }

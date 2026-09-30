@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Icon } from './ui';
 import { mlApi, type MlModel, type MlSettings, type ModelKey } from './ml-api';
 import { refreshMlStatus, useMlStatus } from './ml-client';
@@ -28,6 +28,22 @@ function Switch({ on, onChange, disabled, label }: { on: boolean; onChange: (v: 
   return <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled} className={`sw ${on ? 'on' : ''}`} onClick={() => onChange(!on)} />;
 }
 
+/**
+ * İlerleme çubuğu: dolgu transform scaleX ile (düzen hesabı yok) yumuşak ilerler, aynı indirmede asla geri gitmez;
+ * `done` iken %100 + yeşil. `resetKey` değişince (yeni indirme) sıfırdan başlar.
+ */
+function Progress({ pct, done, thin, resetKey }: { pct: number; done?: boolean; thin?: boolean; resetKey?: string }) {
+  const max = useRef({ key: resetKey, v: 0 });
+  if (max.current.key !== resetKey) max.current = { key: resetKey, v: 0 };
+  max.current.v = Math.max(max.current.v, Math.min(100, Math.max(0, pct)));
+  const v = done ? 100 : Math.max(2, max.current.v);
+  return (
+    <div className={`lai-bar ${thin ? 'thin' : ''} ${done ? 'done' : ''}`} role="progressbar" aria-valuenow={Math.round(v)} aria-valuemin={0} aria-valuemax={100}>
+      <span className="lai-fill" style={{ transform: `scaleX(${v / 100})` }} />
+    </div>
+  );
+}
+
 function ModelCard({ m, runtimeMb, runtimeReady, demo, notify }: { m: MlModel; runtimeMb: number; runtimeReady: boolean; demo?: boolean; notify: (t: string, err?: boolean) => void }) {
   const [ask, setAsk] = useState<'download' | 'remove' | null>(null);
   const act = (p: Promise<unknown>, ok?: string) =>
@@ -35,6 +51,17 @@ function ModelCard({ m, runtimeMb, runtimeReady, demo, notify }: { m: MlModel; r
       .then(() => (ok && notify(ok), refreshMlStatus()))
       .catch((e) => notify((e as Error).message, true))
       .finally(() => setAsk(null));
+  // indirme bitince çubuk kısa süre %100 yeşil kalır, "Hazır" rozeti onayla belirir
+  const prevState = useRef(m.state);
+  const [justDone, setJustDone] = useState(false);
+  useLayoutEffect(() => {
+    const was = prevState.current;
+    prevState.current = m.state;
+    if (was !== 'downloading' || m.state !== 'ready') return;
+    setJustDone(true);
+    const t = window.setTimeout(() => setJustDone(false), 1400);
+    return () => window.clearTimeout(t);
+  }, [m.state]);
   const size = `${m.approx ? '≈' : ''}${m.sizeMb >= 1000 ? `${(m.sizeMb / 1024).toFixed(1)} GB` : `${m.sizeMb} MB`}`;
   return (
     <div className={`lai-card ${m.state}`}>
@@ -48,7 +75,7 @@ function ModelCard({ m, runtimeMb, runtimeReady, demo, notify }: { m: MlModel; r
         </span>
         <span className="lai-state">
           {m.state === 'ready' ? (
-            <span className="lai-ok">
+            <span className={`lai-ok ${justDone ? 'pop' : ''}`}>
               <Icon name="check" size={12} sw={2.4} /> {demo ? 'Demo: indirilmiş' : 'Hazır'} · {size}
             </span>
           ) : m.state === 'downloading' ? (
@@ -58,11 +85,7 @@ function ModelCard({ m, runtimeMb, runtimeReady, demo, notify }: { m: MlModel; r
           )}
         </span>
       </div>
-      {m.state === 'downloading' && (
-        <div className="lai-bar" role="progressbar" aria-valuenow={m.pct} aria-valuemin={0} aria-valuemax={100}>
-          <span style={{ width: `${Math.max(2, m.pct)}%` }} />
-        </div>
-      )}
+      {(m.state === 'downloading' || justDone) && <Progress pct={m.pct} done={m.state === 'ready'} resetKey={m.key} />}
       {m.state === 'error' && m.error && (
         <div className="lai-err">
           <Icon name="alert" size={13} /> {m.error}
@@ -154,9 +177,7 @@ export function LocalAiPane({ notify }: { notify: (t: string, err?: boolean) => 
           <Switch label="Anlamsal arama dizini" disabled={!ready('embed')} on={st.settings.semanticIndex} onChange={(v) => void save({ semanticIndex: v })} />
         </Row>
         {st.settings.semanticIndex && ready('embed') && ix.pct < 100 && (
-          <div className="lai-bar thin" role="progressbar" aria-valuenow={ix.pct} aria-valuemin={0} aria-valuemax={100}>
-            <span style={{ width: `${Math.max(2, ix.pct)}%` }} />
-          </div>
+          <Progress pct={ix.pct} thin resetKey="index" />
         )}
       </div>
       <p className="set-note">Modeller ~/.mivelo/models klasöründe durur. Çalışırken biraz işlemci kullanır; birkaç dakika kullanılmayınca bellekten çıkar.</p>

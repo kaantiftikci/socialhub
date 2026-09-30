@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { isMac, isTauri, openExternal } from './desktop';
 import { setupDone } from './Onboarding';
-import { Icon } from './ui';
+import { Icon, useClosing } from './ui';
+import { DUR, EASE, animate } from './motion/motion';
 
 type Missing = 'notifications' | 'fulldisk' | 'microphone' | 'messages';
 
@@ -70,7 +71,21 @@ async function missingPermissions(hasIMessage: boolean): Promise<Missing[]> {
  * denenir); ✕ o izni 3 gün göstermez. Açılışta, pencere öne gelince ve 30 sn'de bir yeniden denetlenir → izin verilince kaybolur.
  */
 export function PermissionBanner({ hasIMessage }: { hasIMessage: boolean }) {
-  const [missing, setMissing] = useState<Missing | null>(null);
+  const [missingNow, setMissing] = useState<Missing | null>(null);
+  // kart sağdan girer (260 ms), ✕ / izin verilince 150 ms'de solarak çıkar (değer kapanış boyunca tutulur)
+  const shown = useClosing(missingNow, DUR.quick);
+  const missing = shown.value;
+  const cardRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!missing || shown.closing) return;
+    animate(cardRef.current, [{ opacity: 0, transform: 'translateX(16px)' }, { opacity: 1, transform: 'none' }], { duration: DUR.std, easing: EASE.in });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missing]);
+  const exit = useRef<Animation | null>(null);
+  useLayoutEffect(() => {
+    exit.current?.cancel(); // kapanırken yeniden göründüyse soluk kalmasın
+    exit.current = shown.closing ? animate(cardRef.current, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateX(12px)' }], { duration: DUR.quick, easing: EASE.out, fill: 'forwards' }) : null;
+  }, [shown.closing]);
   const check = useCallback(async () => {
     if (!isTauri || !setupDone()) return setMissing(null);
     const d = dismissed();
@@ -112,7 +127,7 @@ export function PermissionBanner({ hasIMessage }: { hasIMessage: boolean }) {
     setMissing(null);
   };
   return (
-    <div className="perm-card" role="status">
+    <div className="perm-card" role="status" ref={cardRef} style={shown.closing ? { pointerEvents: 'none' } : undefined}>
       <Icon name={m.icon} size={18} sw={1.8} />
       <div>
         <p>{m.text}</p>

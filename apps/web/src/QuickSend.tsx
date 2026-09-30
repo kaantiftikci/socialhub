@@ -1,5 +1,7 @@
 import {
+  useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -9,6 +11,7 @@ import { api } from "./api";
 import { MOD_KEY } from "./desktop";
 import { PLATFORMS, isOrderPage, type Chat } from "./types";
 import { Avatar, Chip, Icon, IconText } from "./ui";
+import { EASE, animate, reducedMotion } from "./motion/motion";
 
 /**
  * Hızlı gönder (⌘⇧K / Ctrl+Shift+K) ve bildirimden hızlı yanıt.
@@ -156,11 +159,14 @@ export function QuickSend({
   onClose,
   onOpenChat,
   initial,
+  closing = false,
 }: {
   chats: Chat[];
   onClose: () => void;
   onOpenChat: (id: string) => void;
   initial?: { chatId?: string; text?: string } | null;
+  /** kapanış animasyonu sürüyor (App useClosing): tıklamalar alttakine geçer */
+  closing?: boolean;
 }) {
   const [q, setQ] = useState("");
   const [active, setActive] = useState(0);
@@ -221,7 +227,7 @@ export function QuickSend({
   const mail = to ? PLATFORMS[to.platform].category === "mail" : false;
   return (
     <div
-      className="overlay palette-wrap qs-wrap"
+      className={`overlay palette-wrap qs-wrap ${closing ? "closing" : ""}`}
       onMouseDown={onClose}
       onKeyDown={(e) => {
         if (e.key === "Escape")
@@ -409,19 +415,74 @@ function ReplyCard({
   const [open, setOpen] = useState(false);
   const canReply = !isOrderPage(t.chat) && t.chat.kind !== "channel";
   const paused = hold || focus || open || !!reply;
+  const slotRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const shadowRef = useRef<HTMLSpanElement>(null);
+  const barRef = useRef<HTMLSpanElement>(null);
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
+  // Çıkış: kart sağa kayıp solar (180 ms), sonra yeri yumuşakça kapanır (alttaki kartlar zıplamaz); ancak sonra listeden düşer
+  const leaving = useRef(false);
+  const dismiss = useCallback(() => {
+    if (leaving.current) return;
+    leaving.current = true;
+    const slot = slotRef.current;
+    const card = cardRef.current;
+    if (!slot || !card || reducedMotion()) return onDismissRef.current();
+    slot.style.pointerEvents = "none";
+    const h = slot.offsetHeight;
+    animate(shadowRef.current, [{ opacity: 1 }, { opacity: 0 }], { duration: 140, easing: EASE.out, fill: "forwards" });
+    const out = animate(card, [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "translateX(40px) scale(.98)" }], { duration: 180, easing: EASE.out, fill: "forwards" });
+    const done = () => onDismissRef.current();
+    if (!out) return done();
+    out.finished
+      .then(() => {
+        slot.style.overflow = "hidden";
+        return animate(slot, [{ height: `${h}px`, marginBottom: "0px" }, { height: "0px", marginBottom: "-8px" }], { duration: 180, easing: EASE.std, fill: "forwards" })?.finished;
+      })
+      .then(done, done);
+  }, []);
+  // Giriş: kart sağdan gelir (320 ms), gölge 60 ms, avatar 90 ms geriden; ad ve metin kısa aralıkla belirir
+  useLayoutEffect(() => {
+    const card = cardRef.current;
+    if (!card || reducedMotion()) return;
+    animate(card, [{ opacity: 0, transform: "translateX(28px) scale(.96)" }, { opacity: 1, transform: "none" }], { duration: 320, easing: EASE.in });
+    animate(shadowRef.current, [{ opacity: 0, transform: "translateX(28px) scale(.96)" }, { opacity: 1, transform: "none" }], { duration: 320, delay: 60, easing: EASE.std, fill: "backwards" });
+    animate(card.querySelector(".avwrap"), [{ opacity: 0, transform: "scale(.6)" }, { opacity: 1, transform: "none" }], { duration: 280, delay: 90, easing: EASE.pop, fill: "backwards" });
+    card.querySelectorAll(".qr-head .body > *").forEach((n, i) =>
+      animate(n, [{ opacity: 0, transform: "translateY(4px)" }, { opacity: 1, transform: "none" }], { duration: 220, delay: 110 + i * 35, easing: EASE.std, fill: "backwards" }),
+    );
+  }, []);
+  // Kalan süre: alttaki çizgi süreyle kısalır; üzerine gelince / yazarken çizgi de süre de durur, kaldığı yerden devam eder
+  const left = useRef(TOAST_MS);
+  const bar = useRef<Animation | null>(null);
   useEffect(() => {
     if (paused) return;
-    const h = window.setTimeout(onDismiss, TOAST_MS);
-    return () => clearTimeout(h);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paused]);
+    const t0 = performance.now();
+    if (!bar.current && barRef.current && typeof barRef.current.animate === "function")
+      bar.current = barRef.current.animate([{ transform: "scaleX(1)" }, { transform: "scaleX(0)" }], { duration: TOAST_MS, easing: "linear", fill: "forwards" });
+    bar.current?.play();
+    const h = window.setTimeout(dismiss, Math.max(0, left.current));
+    return () => {
+      clearTimeout(h);
+      left.current -= performance.now() - t0;
+      bar.current?.pause();
+    };
+  }, [paused, dismiss]);
+  const openChat = () => {
+    onOpen();
+    dismiss();
+  };
   const send = () => {
     if (!reply.trim()) return;
     void quickSendText(t.chat, reply);
-    onDismiss();
+    dismiss();
   };
   return (
+    <div className="qr-slot" data-k={`t${t.id}`} ref={slotRef}>
+      <span className="qr-shadow" ref={shadowRef} aria-hidden="true" />
     <div
+      ref={cardRef}
       className={`msgtoast qr-card ${paused ? "held" : ""}`}
       role="group"
       aria-label={`${t.chat.name} bildirimi`}
@@ -432,7 +493,7 @@ function ReplyCard({
         <button
           type="button"
           className="qr-head b"
-          onClick={onOpen}
+          onClick={openChat}
           title="Sohbeti aç"
         >
           <span className="avwrap">
@@ -466,7 +527,7 @@ function ReplyCard({
             <button
               type="button"
               className="btn ghost xs b b2"
-              onClick={onOpen}
+              onClick={openChat}
             >
               Aç
             </button>
@@ -477,7 +538,7 @@ function ReplyCard({
         type="button"
         className="x b"
         aria-label="Kapat"
-        onClick={onDismiss}
+        onClick={dismiss}
       >
         <Icon name="x" size={12} sw={2} />
       </button>
@@ -512,18 +573,13 @@ function ReplyCard({
           >
             <Icon name="send" size={13} sw={2} />
           </button>
-          <button type="button" className="btn ghost xs b b2" onClick={onOpen}>
+          <button type="button" className="btn ghost xs b b2" onClick={openChat}>
             Aç
           </button>
         </form>
       )}
-      {!paused && (
-        <span
-          className="qr-timer"
-          style={{ animationDuration: `${TOAST_MS}ms` }}
-          aria-hidden="true"
-        />
-      )}
+      <span ref={barRef} className="qr-timer" aria-hidden="true" />
+    </div>
     </div>
   );
 }
@@ -540,12 +596,39 @@ export function QuickReplyStack({
   onEdit: (chatId: string, text: string) => void;
 }) {
   const outs = useOutbox();
+  // FLIP: kart eklenip çıkınca (aynı sohbetin eski kartı yenisiyle değişince, üste "Gönderiliyor" hapı gelince) diğerleri kayar.
+  // Eski konumlar çizimden ÖNCE okunur (kart yığını değiştiyse; kapanan kartın yeri o sırada zaten sıfırlanmış olur), yenileri
+  // useLayoutEffect'te; offsetTop dönüşümden etkilenmez, en çok birkaç öğe.
+  const boxRef = useRef<HTMLDivElement>(null);
+  const committed = useRef("");
+  const before = useRef<Map<string, number> | null>(null);
+  const sig = [...outs.map((o) => `o${o.id}`), ...toasts.map((t) => `t${t.id}`)].join(",");
+  const tops = (box: HTMLElement | null) => {
+    const m = new Map<string, number>();
+    for (const el of box ? (Array.from(box.children) as HTMLElement[]) : []) if (el.dataset.k) m.set(el.dataset.k, el.offsetTop);
+    return m;
+  };
+  if (sig !== committed.current) before.current = tops(boxRef.current);
+  useLayoutEffect(() => {
+    committed.current = sig;
+    const prev = before.current;
+    before.current = null;
+    const box = boxRef.current;
+    if (!prev || !box || reducedMotion()) return;
+    const next = tops(box);
+    for (const el of Array.from(box.children) as HTMLElement[]) {
+      const a = prev.get(el.dataset.k ?? ""), b = next.get(el.dataset.k ?? "");
+      if (a == null || b == null || Math.abs(a - b) < 0.5) continue;
+      animate(el, [{ transform: `translateY(${a - b}px)` }, { transform: "none" }], { duration: 300, easing: EASE.std });
+    }
+  }, [sig]);
   if (!toasts.length && !outs.length) return null;
   return (
-    <div className="msgtoasts" aria-live="polite">
+    <div className="msgtoasts" aria-live="polite" ref={boxRef}>
       {outs.map((o) => (
         <div
           key={o.id}
+          data-k={`o${o.id}`}
           className={`qs-out ${o.state}`}
           role={o.state === "error" ? "alert" : undefined}
         >
@@ -602,7 +685,7 @@ export function QuickReplyStack({
           key={t.id}
           t={t}
           onDismiss={() => onDismiss(t.id)}
-          onOpen={() => (onDismiss(t.id), onOpen(t.chat))}
+          onOpen={() => onOpen(t.chat)}
         />
       ))}
     </div>

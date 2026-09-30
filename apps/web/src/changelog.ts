@@ -16,6 +16,29 @@ export interface ChangeEntry {
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    id: '2026-09-30f',
+    date: '2026-09-30',
+    title: 'Baştan sona yeni hareketler',
+    items: [
+      {
+        title: 'Yeni açılış ekranı',
+        text: 'Mivelo açılırken bütün uygulamaların mesajları tek yerde birleşiyor; hazır olunca logo kenar çubuğundaki yerine geçiyor. Ne kadarının hazırlandığını alttaki çubuktan görebilirsin.',
+      },
+      {
+        title: 'Mesajlaşma daha canlı',
+        text: 'Gönderdiğin mesajın tikleri sırayla çiziliyor, görülünce renk değiştiriyor. Tepki verdiğin emoji mesaja uçuyor; gönderilemeyen mesaj yerinde kalıyor ve tek dokunuşla yeniden deneyebiliyorsun.',
+      },
+      {
+        title: 'Liste ve bildirimler',
+        text: 'Yeni mesaj gelen sohbet listede yumuşakça en üste çıkıyor, okunmamış sayıları kayarak değişiyor. Bildirim kartlarının altındaki çizgi, kartın ne zaman kapanacağını gösteriyor.',
+      },
+      {
+        title: 'Her yerde aynı dil',
+        text: 'Tema geçişi, arama, Bağlan penceresi, takvim, Ayarlar ve Medya aynı akıcı hareketleri kullanıyor. Ayarlar → Görünüm’deki “Hareketleri azalt” hepsini kapatır.',
+      },
+    ],
+  },
+  {
     id: '2026-09-30e',
     date: '2026-09-30',
     title: 'Yeni bağlantı altyapısı',

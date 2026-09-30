@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
 import { peopleApi, type Person, type PersonChat, type TimelineMessage } from './people-api';
 import { onPeopleEvent, usePeople } from './people-store';
 import { Chip, Icon } from './ui';
 import { PLATFORMS, type Chat, type Message, type Platform } from './types';
+import { staggerIn } from './PersonPanel';
 
 /**
  * Birleşik zaman çizelgesi: sohbet bir kişiye bağlıysa (kişi birden çok kanalda) başlık altında kanal çipleri + "Tüm kanallar".
@@ -128,9 +129,18 @@ export function useUnifiedTimeline(current: Chat | undefined, chats: Map<string,
 
 /** Sohbet başlığının altındaki kanal şeridi: bu kişinin kanalları + "Tüm kanallar" */
 export function PersonChannelBar({ tl, current, onSelectChat }: { tl: UnifiedTimelineState; current: Chat; onSelectChat: (id: string) => void }) {
+  // kanal çipleri kişi ilk görününce 35 ms arayla kayarak gelir (aynı kişinin kanalları arasında geçişte tekrar oynamaz)
+  const ref = useRef<HTMLDivElement>(null);
+  const shownFor = useRef<string | null>(null);
+  const pid = tl.person?.id ?? null;
+  useLayoutEffect(() => {
+    if (!pid || shownFor.current === pid) return;
+    shownFor.current = pid;
+    staggerIn(ref.current, ':scope > *', 12);
+  }, [pid]);
   if (!tl.person) return null;
   return (
-    <div className="pchan" role="tablist" aria-label={`${tl.person.name}: kanallar`}>
+    <div ref={ref} className="pchan" role="tablist" aria-label={`${tl.person.name}: kanallar`}>
       <button type="button" role="tab" aria-selected={tl.on} className={`pchan-it all b ${tl.on ? 'on' : ''}`} onClick={() => tl.setOn(!tl.on)} title="Bu kişinin tüm kanallarındaki mesajlar tek zaman çizelgesinde">
         <Icon name="users" size={13} sw={2} /> Tüm kanallar
       </button>
@@ -160,10 +170,17 @@ export function PersonChannelBar({ tl, current, onSelectChat }: { tl: UnifiedTim
 
 /** Birleşik görünümde yazma alanının üstü: yanıtın gideceği kanal */
 export function SendVia({ tl }: { tl: UnifiedTimelineState }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const visible = !!(tl.on && tl.person && tl.sendChat);
+  const was = useRef(false);
+  useLayoutEffect(() => {
+    if (visible && !was.current) staggerIn(ref.current, ':scope > .k, :scope .sv-it', 8);
+    was.current = visible;
+  }, [visible]);
   if (!tl.on || !tl.person || !tl.sendChat) return null;
   const cur = tl.sendChat;
   return (
-    <div className="sendvia">
+    <div ref={ref} className="sendvia">
       <span className="k">Gönderilecek kanal</span>
       <span className="sv-list" role="radiogroup" aria-label="Gönderilecek kanal">
         {tl.person.chats.map((c) => (

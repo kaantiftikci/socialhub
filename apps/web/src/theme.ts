@@ -1,3 +1,6 @@
+import { flushSync } from 'react-dom';
+import { EASE, reducedMotion } from './motion/motion';
+
 /** Görünüm: Sistem / Açık / Koyu (gece modu). Seçim cihaza özel (localStorage), <html data-theme> ile uygulanır. */
 export type ThemePref = 'system' | 'light' | 'dark';
 const KEY = 'mivelo.theme';
@@ -43,7 +46,48 @@ export function setThemePref(pref: ThemePref): void {
   } catch {
     /* yok */
   }
-  applyTheme(pref);
+  if (!switchWithCircle(pref)) applyTheme(pref);
+}
+
+/*
+ * Tema değişimi dairesel açılır: yeni tema tıklanan noktadan daire olarak yayılır (View Transitions, 480 ms). Yalnız kullanıcı
+ * eylemiyle (setThemePref); ilk yükleme ve sistem teması değişimi (applyTheme) animasyonsuz. Tıklama konumu belgeye yakalama
+ * aşamasında kurulan pointerdown dinleyicisinden; klavyeyle seçildiyse odaktaki öğenin ortası, o da yoksa ekran ortası.
+ */
+let lastPointer: { x: number; y: number; t: number } | null = null;
+if (typeof document !== 'undefined') {
+  document.addEventListener('pointerdown', (e) => (lastPointer = { x: e.clientX, y: e.clientY, t: performance.now() }), { capture: true, passive: true });
+}
+type VTDoc = Document & { startViewTransition?: (cb: () => void) => { ready: Promise<void>; finished: Promise<void> } };
+
+function switchWithCircle(pref: ThemePref): boolean {
+  const doc = document as VTDoc;
+  const root = document.documentElement;
+  if (!doc.startViewTransition || reducedMotion() || document.hidden || root.dataset.theme === resolvedTheme(pref)) return false;
+  let x = innerWidth / 2,
+    y = innerHeight / 2;
+  if (lastPointer && performance.now() - lastPointer.t < 1500) ({ x, y } = lastPointer);
+  else if (document.activeElement && document.activeElement !== document.body) {
+    const r = document.activeElement.getBoundingClientRect();
+    (x = r.left + r.width / 2), (y = r.top + r.height / 2);
+  }
+  const R = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+  root.classList.add('theme-vt');
+  let vt: ReturnType<NonNullable<VTDoc['startViewTransition']>>;
+  try {
+    // dinleyicilerin React durum güncellemesi (düğme simgesi) yeni anlık görüntüye girsin diye eşzamanlı çizilir
+    vt = doc.startViewTransition(() => flushSync(() => applyTheme(pref)));
+  } catch {
+    root.classList.remove('theme-vt');
+    return false;
+  }
+  vt.ready
+    .then(() =>
+      root.animate({ clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${R}px at ${x}px ${y}px)`] }, { duration: 480, easing: EASE.std, pseudoElement: '::view-transition-new(root)' }),
+    )
+    .catch(() => undefined);
+  vt.finished.finally(() => root.classList.remove('theme-vt')).catch(() => undefined);
+  return true;
 }
 
 /** Masaüstü: pencere çerçevesi / başlık çubuğu da aynı temada olsun (Tauri 2 Window.setTheme; null = sistem) */

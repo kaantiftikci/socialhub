@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { api } from './api';
 import { mediaUrl } from './desktop';
 import { PLATFORMS, type Attachment, type LinkPreview, type Platform } from './types';
@@ -6,6 +6,7 @@ import type { LibFacets, LibItem, LibKind } from './insights-types';
 import { Chip, Icon } from './ui';
 import { MediaLightbox, isMediaFileUrl } from './Conversation';
 import { saveBlob } from './save-file';
+import { EASE, animate } from './motion/motion';
 
 /**
  * Medya ve dosya kütüphanesi: tüm platformlardan fotoğraf, video, dosya, ses ve bağlantılar tek ekranda.
@@ -197,20 +198,43 @@ export function MediaLibrary({ notify, onMenu, onOpenMessage }: { notify: (t: st
   }, [reload]);
 
   const query = useMemo(() => ({ kind: tab === 'all' ? undefined : tab, platform: platform ?? undefined, chat: chat || undefined, q: q || undefined, limit: PAGE }), [tab, platform, chat, q]);
+  // giriş animasyonu: ilk yükleme 'rise' (görünen ilk 16 öğe 20 ms arayla), süzgeç değişimi 'fade' (çapraz solma);
+  // sonsuz kaydırmayla gelenler animasyonsuz. `swapping`: yeni süzgecin sonucu beklenirken eski ızgara soluklaşır.
+  const enterRef = useRef<'rise' | 'fade' | null>(null);
+  const firstLoad = useRef(true);
+  const [swapping, setSwapping] = useState(false);
   useEffect(() => {
     const id = ++reqRef.current;
     setLoading(true);
     setSel(new Set());
+    if (!firstLoad.current) setSwapping(true);
     api
       .library(query)
       .then((p) => {
         if (id !== reqRef.current) return;
+        enterRef.current = firstLoad.current ? 'rise' : 'fade';
+        firstLoad.current = false;
+        setSwapping(false);
         setItems(p.items);
         setNext(p.next);
       })
-      .catch((e) => id === reqRef.current && notify((e as Error).message, true))
+      .catch((e) => id === reqRef.current && (setSwapping(false), notify((e as Error).message, true)))
       .finally(() => id === reqRef.current && setLoading(false));
   }, [query, reload, notify]);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const mode = enterRef.current;
+    enterRef.current = null;
+    const body = bodyRef.current;
+    if (!mode || !body) return;
+    if (mode === 'fade') {
+      body.querySelectorAll(':scope > .ml-group, :scope > .ml-empty').forEach((n) => animate(n, [{ opacity: 0.35 }, { opacity: 1 }], { duration: 200, easing: EASE.std }));
+      return;
+    }
+    const bottom = body.getBoundingClientRect().bottom;
+    const tiles = Array.from(body.querySelectorAll('.ml-tile, .ml-row')).filter((n) => n.getBoundingClientRect().top < bottom).slice(0, 16);
+    tiles.forEach((n, i) => animate(n, [{ opacity: 0, transform: 'translateY(10px) scale(.98)' }, { opacity: 1, transform: 'none' }], { duration: 260, delay: i * 20, easing: EASE.in, fill: 'backwards' }));
+  }, [items]);
 
   const loadMore = useCallback(() => {
     if (!next || loading) return;
@@ -352,7 +376,7 @@ export function MediaLibrary({ notify, onMenu, onOpenMessage }: { notify: (t: st
         </div>
       )}
 
-      <div className="ml-body">
+      <div ref={bodyRef} className={`ml-body ${swapping ? 'swapping' : ''}`}>
         {!loading && items.length === 0 && (
           <div className="ml-empty">
             <span className="ml-empty-ic">
