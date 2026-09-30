@@ -1,5 +1,5 @@
 import type { Chat, CoreEvent, Message } from './types';
-import type { IndexStatus, MessageTranslation, MlModel, MlSettings, MlStatus, ModelKey, SemanticResult, Transcript } from './ml-api';
+import type { IndexStatus, MlModel, MlSettings, MlStatus, ModelKey, SemanticResult, Transcript } from './ml-api';
 import { demoPeopleSource } from './static-demo';
 import { detectLanguage, LANG_NAMES } from './lang-detect';
 
@@ -43,55 +43,6 @@ const voiceText = (m: Message): string | undefined => {
   const file = Object.keys(VOICE_TEXT).find((f) => (a.link ?? '').includes(f.replace('.wav', '')));
   return file ? VOICE_TEXT[file] : VOICE_FALLBACK;
 };
-
-/** Hazır çeviriler (demo sohbetlerindeki yabancı müşteri mesajları) */
-const TRANSLATIONS: Record<string, string> = {
-  'Hi! I love the gold ring. Is it available in size 7 (US)?': 'Merhaba! Altın yüzüğe bayıldım. 7 numara (ABD ölçüsü) var mı?',
-  'Hi Emma! Yes, size 7 is in stock. It ships within 2 business days.': 'Merhaba Emma! Evet, 7 numara stokta. 2 iş günü içinde kargoya verilir.',
-  'Great! Do you ship to Germany, and how long does delivery usually take?': 'Harika! Almanya’ya gönderim yapıyor musunuz, teslimat genelde ne kadar sürüyor?',
-  'Also, could you add a small gift note? It is a birthday present for my sister.': 'Bir de küçük bir hediye notu ekleyebilir misiniz? Kız kardeşime doğum günü hediyesi.',
-};
-
-/** Satıcı yanıtları için küçük sözlük (demo "Çevir ve gönder": gerçek uygulamada model çevirir) */
-const PHRASES: Record<string, Array<[string, string]>> = {
-  en: [
-    ['merhaba', 'Hi'], ['teşekkür(ler| ederiz| ederim)', 'thank you'], ['almanya.?ya', 'to Germany'], ['gönderiyoruz|gönderim yapıyoruz', 'we ship'],
-    ['evet', 'yes'], ['hayır', 'no'], ['teslimat', 'delivery'], ['kargo(ya)?', 'shipping'], ['genelde', 'usually'], ['iş günü', 'business days'],
-    ['sürüyor|sürer', 'takes'], ['hediye notu', 'gift note'], ['ekleriz|ekleyeceğiz|ekliyoruz', "we'll add"], ['ücretsiz', 'free of charge'],
-    ['yarın', 'tomorrow'], ['bugün', 'today'], ['stokta', 'in stock'], ['sipariş(iniz)?', 'your order'], ['takip numarası', 'tracking number'],
-    ['ile', 'with'], ['ve', 'and'], ['de|da', 'too'], ['iyi günler', 'have a nice day'], ['memnuniyetle', 'happily'],
-  ],
-  de: [
-    ['merhaba', 'Hallo'], ['teşekkür(ler| ederiz| ederim)', 'vielen Dank'], ['evet', 'ja'], ['kargo(ya)?', 'Versand'], ['yarın', 'morgen'],
-    ['iş günü', 'Werktage'], ['hediye notu', 'Geschenknotiz'], ['ücretsiz', 'kostenlos'], ['sipariş(iniz)?', 'Ihre Bestellung'], ['ve', 'und'],
-  ],
-};
-
-/** Demo akışındaki olası satıcı yanıtları: anahtar kelimelere göre akıcı hazır çeviri (gerçekte model çevirir) */
-const REPLIES: Array<{ keys: string[]; en: string; de: string }> = [
-  {
-    keys: ['almanya', 'hediye'],
-    en: 'Hi! Yes, we ship to Germany; delivery usually takes about 5 business days. We will gladly add a gift note free of charge.',
-    de: 'Hallo! Ja, wir versenden nach Deutschland; die Lieferung dauert in der Regel etwa 5 Werktage. Eine Geschenknotiz legen wir gerne kostenlos bei.',
-  },
-  { keys: ['almanya'], en: 'Hi! Yes, we ship to Germany; delivery usually takes about 5 business days.', de: 'Hallo! Ja, wir versenden nach Deutschland; die Lieferung dauert in der Regel etwa 5 Werktage.' },
-  { keys: ['hediye'], en: 'Of course! We will add a gift note free of charge.', de: 'Natürlich! Wir legen kostenlos eine Geschenknotiz bei.' },
-  { keys: ['kargo', 'yarın'], en: 'Your order will be shipped tomorrow; I will send you the tracking number.', de: 'Ihre Bestellung wird morgen versendet; ich schicke Ihnen die Sendungsnummer.' },
-];
-
-function demoTranslate(text: string, target: string): string {
-  const known = TRANSLATIONS[text.trim()];
-  if (known && target === 'tr') return known;
-  const low = text.toLocaleLowerCase('tr-TR');
-  const reply = REPLIES.find((r) => r.keys.every((k) => low.includes(k)));
-  if (reply && (target === 'en' || target === 'de')) return reply[target];
-  const table = PHRASES[target];
-  if (!table) return text;
-  let out = text;
-  // kelime sınırı Türkçe harflerle (\b yalnız ASCII): "ve" "veriyoruz"un içinde değişmesin
-  for (const [pat, to] of table) out = out.replace(new RegExp(`(?<!\\p{L})(?:${pat})(?!\\p{L})`, 'giu'), to);
-  return out.charAt(0).toUpperCase() + out.slice(1);
-}
 
 const norm = (s: string) => s.toLocaleLowerCase('tr-TR');
 /** Eşanlamlı kümeleri: "anlamsal" eşleşme taklidi (Türkçe + İngilizce) */
@@ -139,9 +90,6 @@ function indexStatus(): IndexStatus {
   return { enabled: settings().semanticIndex, ready: state.embed.state === 'ready', indexed: n, total: n, pct: 100, running: false };
 }
 
-/** Demo: Google anahtarı yalnız bellekte (hiçbir yere gönderilmez) */
-let demoGoogle: string | null = null;
-
 function status(): MlStatus {
   return {
     demo: true,
@@ -149,7 +97,6 @@ function status(): MlStatus {
     runtime: { ready: true, approxMb: 36 },
     settings: settings(),
     index: indexStatus(),
-    translate: { engine: 'google', ai: false, google: { set: !!demoGoogle, hint: demoGoogle ? `…${demoGoogle.slice(-4)}` : null } },
     languages: LANG_NAMES,
   };
 }
@@ -263,23 +210,5 @@ export const demoMlApi = {
       hints: { dateLabel: hint.label, people },
       index: indexStatus(),
     };
-  },
-  setGoogleKey: async (key: string | null) => {
-    if (key && !/^AIza[0-9A-Za-z_-]{30,60}$/.test(key.trim())) throw new Error('Geçersiz Google API anahtarı (AIza… ile başlamalı)');
-    demoGoogle = key?.trim() || null;
-    await wait(300);
-    return status();
-  },
-  translate: async (messageId: string, target = 'tr', force = false): Promise<MessageTranslation> => {
-    const m = demoPeopleSource.messages().find((x) => x.id === messageId);
-    if (!m) throw new Error('Mesaj bulunamadı');
-    const g = detectLanguage(m.text);
-    if (!force && g.lang === target) return { messageId, lang: target, source: g.lang, text: m.text, same: true };
-    await wait(450);
-    return { messageId, lang: target, source: g.lang, text: demoTranslate(m.text, target), engine: 'google' };
-  },
-  translateText: async (text: string, target: string, source?: string | null) => {
-    await wait(500);
-    return { text: demoTranslate(text, target), source: source ?? detectLanguage(text).lang ?? 'tr', target, engine: 'google' as const };
   },
 };

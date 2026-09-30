@@ -8,7 +8,6 @@ import { demoMlApi } from './demo-ml';
  * Statik demoda model indirmeden taklit (demo-ml.ts).
  */
 export type ModelKey = 'whisper' | 'embed';
-export type TranslateEngine = 'google';
 export interface MlModel {
   key: ModelKey;
   id: string;
@@ -37,7 +36,6 @@ export interface MlStatus {
   runtime: { ready: boolean; approxMb: number };
   settings: MlSettings;
   index: IndexStatus;
-  translate: { engine: TranslateEngine | null; ai: boolean; google?: { set: boolean; hint: string | null } };
   languages: Record<string, string>;
   demo?: boolean;
 }
@@ -63,16 +61,6 @@ export interface SemanticResult {
   hints: { dateLabel?: string; people: string[] };
   index: IndexStatus;
 }
-export interface MessageTranslation {
-  messageId: string;
-  lang: string;
-  source: string | null;
-  text: string;
-  same?: boolean;
-  engine?: TranslateEngine;
-  cached?: boolean;
-}
-
 async function call<T>(method: string, path: string, body?: unknown, retried = false): Promise<T> {
   const token = await coreToken();
   const init: RequestInit = {
@@ -111,10 +99,6 @@ const liveMlApi = {
   transcripts: (chatId: string) => call<Record<string, Transcript>>('GET', `/ml/transcripts?chat=${enc(chatId)}`),
   transcribe: (messageId: string) => call<Transcript>('POST', '/ml/transcribe', { messageId }),
   search: (q: string, limit = 60) => call<SemanticResult>('GET', `/ml/search?q=${enc(q)}&limit=${limit}`),
-  setGoogleKey: (key: string | null) => call<MlStatus>('POST', '/ml/google-key', { key }),
-  translate: (messageId: string, target?: string, force = false) => call<MessageTranslation>('POST', '/ml/translate', { messageId, target, force }),
-  translateText: (text: string, target: string, source?: string | null) =>
-    call<{ text: string; source: string | null; target: string; engine: TranslateEngine }>('POST', '/ml/translate-text', { text, target, source: source ?? undefined }),
 };
 
 export const mlApi: typeof liveMlApi = USE_STATIC ? demoMlApi : liveMlApi;

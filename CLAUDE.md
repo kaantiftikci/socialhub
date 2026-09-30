@@ -750,8 +750,7 @@ Dil: arayüz ve yorumlar Türkçe.
 - **Dosya kaydetme (masaüstü)** `POST /api/downloads` (`downloads.ts`, yalnız yerel, gövde ≤80 MB) → İndirilenler + Finder/Gezgin'de göster; arayüz `save-file.ts saveBlob`.
   `store.sql()` (Ajan C) B'nin modüllerince kullanılıyor.
 - **Yerel AI (30.09, `packages/core/src/ml/`)**: sesli mesajı yazıya dökme (`Xenova/whisper-small` q8 ≈250 MB), anlamsal arama (`Xenova/multilingual-e5-small` q8, 384 boyut,
-  int8 vektör `embeddings`, bellek içi kaba kuvvet + FTS ile RRF hibrit, tarih/kişi ipuçları `query.ts`), çeviri (YALNIZ Google Cloud Translation anahtarıyla; Claude ile çeviri ve YEREL ÇEVİRİ MODELİ (NLLB) 30.09'da KALDIRILDI — Kaan: ağır; eski indirme
-  açılışta diskten silinir; dil algılama modelsiz `lang.ts`, arayüz kopyası `lang-detect.ts` AYNI kalmalı). Modeller yalnız Ayarlar → Yerel AI modelleri'nde onayla `~/.mivelo/models`e iner; ayarlar `~/.mivelo/ml.json`.
+  int8 vektör `embeddings`, bellek içi kaba kuvvet + FTS ile RRF hibrit, tarih/kişi ipuçları `query.ts`), (çeviri 30.09'da tamamen KALDIRILDI; eski NLLB indirmesi açılışta diskten silinir; dil algılama modelsiz `lang.ts`, arayüz kopyası `lang-detect.ts` AYNI kalmalı). Modeller yalnız Ayarlar → Yerel AI modelleri'nde onayla `~/.mivelo/models`e iner; ayarlar `~/.mivelo/ml.json`.
   Çalışma zamanı pakette YOK: ilk indirmede npm'den sabit sürüm + sha512 (transformers 4.3.0 Node yapısı + onnxruntime-web wasm) → `~/.mivelo/ml/runtime/<sürüm>`;
   `Symbol.for('onnxruntime')` + `device:'auto'`; sharp/onnxruntime-node yerine boş taslak. onnxruntime-node KULLANILMAZ (darwin-x64 ikilisi yok, 113 MB). Çıkarım worker_thread'de
   (`engine.ts`, tek kuyruk, kullanıcı işi önce, 3 dk boşta işçi kapanır). Ses: Ogg/Opus `opus-decoder` (bağımlılık), WAV; diğerleri macOS afconvert, yoksa ffmpeg.
@@ -759,10 +758,13 @@ Dil: arayüz ve yorumlar Türkçe.
   `ml.status`, `transcript.update`. Arayüz `MlBubble.tsx` (balon altı metin/çeviri, "Çevir", "Çevir ve gönder", sağ panel "Otomatik çevir" `mivelo.autoTranslate`), ⌘K "Anlamsal"
   (`mivelo.searchSemantic`), `LocalAiPane.tsx`. Demo `demo-ml.ts`. Gerçek modellerle ve gerçek Mac/Windows'ta DOĞRULANMADI (bu ortamda Hugging Face 403); ilk kullanımda
   `Sesli mesaj yazıya döküldü: N sn ses…` günlüğüne bakılmalı.
-- **Google çeviri (30.09, Kaan: "yerel çeviri yerine ücretsiz resmi translate")** `ml/google-translate.ts`: resmi Google Cloud Translation v2 (Basic),
-  kullanıcının KENDİ `AIza…` anahtarı (ayda 500 bin karakter ücretsiz, Google faturalandırma hesabı şart) → gizli depo `google-translate` (secrets.ts), arayüze yalnız maske;
-  `POST /api/ml/google-key` yalnız yerelden. Tek motor Google (Claude ile çeviri, yerel model ve "Yalnız yerel çeviri" kaldırıldı; anahtar yoksa "Çevir" 409 + Ayarlar yönlendirmesi). Ayarlar → Yerel AI modelleri →
-  "Google çeviri" satırı (`GoogleKeyRow`). Anahtarsız resmi olmayan translate.googleapis.com "gtx" KULLANILMAZ (ToS). Test: ml-google-translate.test.ts. Gerçek anahtarla denenmedi.
+- **Çeviri KALDIRILDI (30.09, Kaan: işletim sistemlerinin kendi çevirisi var)**: yerel NLLB, Claude ve Google Cloud Translation yolları, `/api/ml/translate*`,
+  `/api/ml/google-key`, `/api/ml/chat-lang`, "Çevir" düğmesi, "Çevir ve gönder", "Otomatik çevir" silindi. `translations` tablosu ve `translateTarget` ayarı zararsız kalıntı.
+- **Raporum ek (30.09)**: uygulama çipleri (`/api/stats?platform=`, önbellek anahtarında platform; CACHE_VER v2), ısı haritası 24 saat etiketli + hücreye tıkla →
+  `cells[i]` (o gün+saatte ilk 4 uygulama/kişi, `CellDetail`), altında gün dilimleri (Sabah/Öğle/Akşam/Gece) + hafta içi/sonu; gruplar avatarlı.
+- **Hızlı yanıt kartı (30.09)**: platform adı yok, logo rozeti `.qr-badge` (eski `.msgtoast .plat` kuralı Chip'i daraltıyordu), metin 4 satır (bildirim gövdesi ≤400),
+  yanıt kutusu "Yanıtla" ile açılır. TikTok paylaşılan video: bağlantısız kartta kimlik öznitelik/React props'tan (`videoIdOf`) → `@_/video/<id>` → gömülü oynatıcı.
+- Medya kütüphanesi: kişi/sohbet seçicisi kaldırıldı; arama kutusu uygulama çiplerinin sağında.
 - **Dokümantasyon** `docs/dokumantasyon.html` → `docs/Mivelo-Dokumantasyon.pdf` (`CHROMIUM=<chrome yolu> node docs/build-pdf.mjs`); özellik eklenince güncelle.
 
 ## Sunucu/arayüz sözleşmesi

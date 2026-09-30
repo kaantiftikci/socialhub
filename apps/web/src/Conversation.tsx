@@ -10,8 +10,8 @@ import { guessWhen } from './when';
 import { useAiPrefs } from './ai-prefs';
 import { QuestionDraftBar, isShopQuestion } from './QuestionDraft';
 import { PersonPanel } from './PersonPanel';
-import { AutoTranslateRow, ComposeTranslate, TranslationBlock, VoiceTranscript, canTranslate } from './MlBubble';
-import { loadChatTranscripts, translateMessage as mlTranslate, useAutoTranslateEffect } from './ml-client';
+import { VoiceTranscript } from './MlBubble';
+import { loadChatTranscripts } from './ml-client';
 import { useClosing, Avatar, Chip, Icon, IconText, Resizer, Tag, ago, fmtDay, fmtStamp, fmtTime, leadIcon } from './ui';
 
 /** Bağlayıcıların yazdığı sistem mesajı baş emojileri (kullanıcıların nadiren mesaja başladığı): balonda ikon olarak çizilir */
@@ -286,7 +286,6 @@ export function Conversation({
   useEffect(() => {
     if (voiceChats) for (const id of voiceChats.split('|')) loadChatTranscripts(id);
   }, [voiceChats]);
-  useAutoTranslateEffect(chat.id, messages);
   const [search, setSearch] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -987,7 +986,6 @@ export function Conversation({
                             );
                           })()}
                         </div>
-                        {!isReact && <TranslationBlock m={m} />}
                         {url && <LinkCard url={url} />}
                         {m.reactions?.length ? <ReactionChips list={m.reactions} onToggle={canReact && !foreign ? (e) => act.current.react(m, e) : undefined} /> : null}
                         {!!m.replyCount && !threadFocus && (
@@ -1025,11 +1023,6 @@ export function Conversation({
                             canFollow && (
                               <button key="f" type="button" className={`rtrig ${chat.followUp ? 'rtrig-on' : ''}`} aria-label={chat.followUp ? 'Takip hatırlatıcısını kaldır' : '2 gün yanıt gelmezse hatırlat'} title={chat.followUp ? 'Takip hatırlatıcısını kaldır' : 'Takip: 2 gün yanıt gelmezse hatırlat'} onClick={() => void act.current.setFollowUp(chat.followUp ? null : 2)}>
                                 <Icon name="bell" size={14} />
-                              </button>
-                            ),
-                            canTranslate(m) && !isReact && (
-                              <button key="t" type="button" className="rtrig" aria-label="Çevir" title="Çevir" onClick={() => (void mlTranslate(m.id), setBarFor(null))}>
-                                <Icon name="translate" size={14} />
                               </button>
                             ),
                             (editable || unsendable) && (
@@ -1579,7 +1572,6 @@ export function Conversation({
               </button>
               {emojiOpen && <EmojiPicker onPick={insertEmoji} onClose={() => setEmojiOpen(false)} />}
             </span>
-            <ComposeTranslate chat={chat} messages={messages} text={text} setText={setText} onSend={(t) => void send(t)} disabled={!!pending || !!editTarget || !!rec} />
             {rec ? (
               <span className="rec-bar" role="status" aria-live="polite">
                 <span className="rec-dot" />
@@ -1695,8 +1687,6 @@ export function Conversation({
             </div>
           </div>
         )}
-
-        <AutoTranslateRow chatId={chat.id} />
 
         {PLATFORMS[chat.platform].category !== 'shop' && (
           <div className="ctx-sec">

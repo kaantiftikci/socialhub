@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type http from 'node:http';
-import { aiEnabled } from '../ai.js';
 import { bus } from '../bus.js';
 import type { Store } from '../store.js';
 import { MODEL_KEYS, MODELS_DIR, MlError, mlSettings, saveMlSettings, type ModelKey } from './config.js';
@@ -10,9 +9,7 @@ import { chatTranscripts } from './ml-store.js';
 import { allModelStatus, cancelDownload, emitMlStatus, removeModel, RUNTIME_APPROX_MB, runtimeReady, startDownload } from './models.js';
 import { SemanticIndex } from './semantic.js';
 import { TranscribeService, type MediaSource } from './transcribe.js';
-import { chatLanguage, translateMessage, translateTexts, translationEngine } from './translate.js';
 import { LANG_NAMES } from './lang.js';
-import { googleKeyInfo, setGoogleKey } from './google-translate.js';
 
 type Handler = (req: http.IncomingMessage, res: http.ServerResponse, params: Record<string, string>, body: unknown) => Promise<unknown> | unknown;
 type Route = (method: string, path: string, handler: Handler) => void;
@@ -51,23 +48,10 @@ export function registerMlRoutes(route: Route, deps: { store: Store; media: Medi
     runtime: { ready: runtimeReady(), approxMb: RUNTIME_APPROX_MB },
     settings: mlSettings(),
     index: semantic.status(),
-    translate: { engine: translationEngine(), ai: aiEnabled(), google: googleKeyInfo() },
     languages: LANG_NAMES,
   });
 
   route('GET', '/api/ml', wrap(() => status()));
-  // Google Cloud Translation anahtarı (yalnız bu bilgisayardan; değer asla geri dönmez, yalnız maske)
-  route(
-    'POST',
-    '/api/ml/google-key',
-    wrap((req, _s, _p, body) => {
-      deps.localOnly?.(req);
-      const k = (body as { key?: unknown } | null)?.key;
-      setGoogleKey(typeof k === 'string' ? k : null);
-      emitMlStatus(true);
-      return status();
-    }),
-  );
   route(
     'POST',
     '/api/ml/settings',
@@ -129,39 +113,6 @@ export function registerMlRoutes(route: Route, deps: { store: Store; media: Medi
       const limit = Math.max(1, Math.min(200, Number(sp.get('limit')) || 60));
       if (!text) return { hits: [], mode: 'text', hints: { people: [] }, index: semantic.status() };
       return semantic.search(text, limit);
-    }),
-  );
-
-  // ---- çeviri ----
-  route(
-    'POST',
-    '/api/ml/translate',
-    wrap(async (_r, _s, _p, body) => {
-      const b = (body ?? {}) as { messageId?: string; target?: string; force?: boolean };
-      if (!b.messageId) throw httpError(400, 'messageId gerekli');
-      return translateMessage(store, b.messageId, b.target || mlSettings().translateTarget, { force: !!b.force });
-    }),
-  );
-  route(
-    'POST',
-    '/api/ml/translate-text',
-    wrap(async (_r, _s, _p, body) => {
-      const b = (body ?? {}) as { text?: string; target?: string; source?: string };
-      const text = (b.text ?? '').trim();
-      if (!text) throw httpError(400, 'Metin boş');
-      if (text.length > 8000) throw httpError(413, 'Metin çok uzun');
-      if (!b.target) throw httpError(400, 'Hedef dil gerekli');
-      const r = await translateTexts([text], b.target, { source: b.source ?? null });
-      return { text: r.texts[0] ?? '', source: r.source, target: b.target, engine: r.engine };
-    }),
-  );
-  route(
-    'GET',
-    '/api/ml/chat-lang',
-    wrap((req) => {
-      const chatId = q(req).get('chat') ?? '';
-      if (!chatId) throw httpError(400, 'chat gerekli');
-      return chatLanguage(store, chatId);
     }),
   );
 

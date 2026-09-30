@@ -17,7 +17,6 @@ const { saveMlSettings, resetMlSettingsCache } = await import('../src/ml/config.
 const { TranscribeService } = await import('../src/ml/transcribe.js');
 const { SemanticIndex } = await import('../src/ml/semantic.js');
 const { getTranscript, chatTranscripts } = await import('../src/ml/ml-store.js');
-const { translateMessage, chatLanguage, translationEngine } = await import('../src/ml/translate.js');
 const { isOgg } = await import('../src/ml/audio.js');
 type Message = import('../src/model.js').Message;
 
@@ -40,7 +39,7 @@ function fakeEmbed(text: string): Float32Array {
   return v.map((x) => x / n);
 }
 
-const calls = { transcribe: 0, embed: 0, translate: 0 };
+const calls = { transcribe: 0, embed: 0 };
 setMlBackend({
   async transcribe(audio, language) {
     calls.transcribe++;
@@ -52,16 +51,6 @@ setMlBackend({
     return texts.map(fakeEmbed);
   },
 });
-// çeviri: Google Cloud Translation (sahte fetch + yer tutucu anahtar)
-const { resetGoogleKeyCache } = await import('../src/ml/google-translate.js');
-resetGoogleKeyCache('AIza' + 'x'.repeat(35));
-const realFetch = globalThis.fetch;
-globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
-  if (!String(url).includes('translation.googleapis.com')) return realFetch(url, init);
-  calls.translate++;
-  const b = JSON.parse(String(init?.body)) as { q: string[]; target: string; source?: string };
-  return new Response(JSON.stringify({ data: { translations: b.q.map((t) => ({ translatedText: `[${b.source ?? '?'}>${b.target}] ${t}`, detectedSourceLanguage: b.source ?? 'en' })) } }), { status: 200 });
-}) as typeof fetch;
 resetMlSettingsCache();
 saveMlSettings({ semanticIndex: true, autoTranscribe: false });
 
@@ -166,34 +155,7 @@ test('ml akış: anlamsal dizin + hibrit arama (tarih/kişi ipuçları), silinen
   idx.stop();
 });
 
-test('ml akış: çeviri — yabancı mesaj çevrilir ve önbelleklenir, Türkçe mesaj modele gitmez, düzenleme önbelleği siler', async () => {
-  const s = seed();
-  assert.equal(translationEngine(), 'google');
-  const before = calls.translate;
-  const tr = await translateMessage(s.store, s.m4.id, 'tr');
-  assert.equal(tr.source, 'en');
-  assert.equal(tr.engine, 'google');
-  assert.equal(tr.text, '[en>tr] Hello, when will my order ship? Thanks!');
-  const cached = await translateMessage(s.store, s.m4.id, 'tr');
-  assert.equal(cached.cached, true);
-  assert.equal(calls.translate, before + 1, 'ikinci istek önbellekten');
-  const same = await translateMessage(s.store, s.m2.id, 'tr');
-  assert.equal(same.same, true);
-  assert.equal(calls.translate, before + 1, 'Türkçe mesaj çevrilmez');
-  // metin değişince (düzenleme) çeviri önbelleği silinir
-  s.store.applyEdit(s.m4.id, 'Hello again, any update on shipping?');
-  const fresh = await translateMessage(s.store, s.m4.id, 'tr');
-  assert.ok(!fresh.cached);
-  assert.equal(calls.translate, before + 2);
-  // sohbetin dili: Ayşe İngilizce yazıyor
-  assert.equal(chatLanguage(s.store, s.ayse).lang, 'en');
-  assert.equal(chatLanguage(s.store, s.ahmet).lang, 'tr');
-  // hesap silinince çeviri satırları da gider
-  s.store.deleteAccount(s.acc.id);
-  assert.equal((s.store.mlStmt('SELECT COUNT(*) AS n FROM translations').get() as { n: number }).n, 0);
-});
-
-test('ml uçları: durum, ayar kaydı, hata eşleme (409 model yok → Türkçe ileti), metin çevirisi', async () => {
+test('ml uçları: durum, ayar kaydı, hata eşleme (409 model yok → Türkçe ileti), çeviri yok', async () => {
   const { registerMlRoutes } = await import('../src/ml/routes.js');
   const s = seed();
   const routes = new Map<string, (req: unknown, res: unknown, params: Record<string, string>, body: unknown) => unknown>();
@@ -215,16 +177,13 @@ test('ml uçları: durum, ayar kaydı, hata eşleme (409 model yok → Türkçe 
     assert.equal(saved.settings.translateTarget, 'tr', 'geçersiz dil kodu yok sayılır');
     await assert.rejects(Promise.resolve().then(() => call('POST /api/ml/transcribe', {})), (e: HttpErr) => e.status === 400);
     await assert.rejects(Promise.resolve().then(() => call('POST /api/ml/models/:key/download', undefined, '/', { key: 'yok' })), (e: HttpErr) => e.status === 404);
-    const tr = (await call('POST /api/ml/translate-text', { text: 'Almanya’ya gönderiyoruz, teşekkürler', target: 'en' })) as { text: string; engine: string };
-    assert.match(tr.text, /^\[\?>en\]/);
     // model "yok" sayılınca anlaşılır 409
     setMlBackend(
       { transcribe: async () => ({ text: '', lang: null }), embed: async () => [] },
       [],
     );
     await assert.rejects(Promise.resolve().then(() => call('POST /api/ml/transcribe', { messageId: s.voice.id })), (e: HttpErr) => e.status === 409 && /modeli indir/.test(e.message));
-    const lang = (await call('GET /api/ml/chat-lang', undefined, `/api/ml/chat-lang?chat=${encodeURIComponent(s.ayse)}`)) as { lang: string };
-    assert.equal(lang.lang, 'en');
+    assert.equal(routes.has('POST /api/ml/translate'), false, 'çeviri kaldırıldı');
   } finally {
     semantic.stop();
     transcribe.stop();
