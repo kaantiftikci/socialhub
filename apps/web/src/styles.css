@@ -1803,11 +1803,13 @@ button.att-card.xpost img, button.att-card .att-thumb img { cursor: pointer; }
 .qr-head:hover b { text-decoration: underline; }
 .msgtoast.qr-card .x { border: 0; background: transparent; cursor: pointer; }
 .qr-reply { display: flex; align-items: center; gap: 6px; }
-.qr-acts { display: flex; justify-content: flex-end; gap: 6px; }
+.qr-row { display: flex; align-items: flex-end; gap: 8px; min-width: 0; padding-right: 18px; }
+.qr-row .qr-head { flex: 1; padding-right: 0; }
+.qr-acts { display: flex; flex: none; gap: 6px; }
 .qr-acts .btn { display: inline-flex; align-items: center; gap: 5px; }
 .qr-head .avwrap .qr-badge { position: absolute; right: -4px; bottom: -4px; line-height: 0; }
 .qr-head .avwrap .qr-badge .plat { position: static; transform: none; }
-.msgtoasts { width: 340px; }
+.msgtoasts { width: 380px; }
 .qr-reply input { flex: 1; min-width: 0; height: 30px; border: 1px solid var(--line); border-radius: 9px; padding: 0 10px; background: var(--field); color: var(--text); font: inherit; font-size: 13px; outline: none; }
 .qr-reply input:focus { border-color: var(--v-line); box-shadow: 0 0 0 3px var(--v-soft); }
 .qr-timer { position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; background: var(--v); opacity: .45; transform-origin: left; animation: qrTimer linear forwards; }
