@@ -402,19 +402,44 @@ export class Store {
     }
   }
 
-  /** "Tüm verileri sil": hesaplar kaldırıldıktan sonra kalan her şey (etkinlikler, meta, sahipsiz sohbet/mesaj) */
+  /** "Tüm verileri sil" sürerken hesapları hemen gizle (listAccounts/listChats/arama/WS görmez) */
+  hideAccounts(ids: string[]): void {
+    for (const id of ids) this.removing.add(id);
+  }
+
+  /**
+   * "Tüm verileri sil": her şey tek işlemde. Satır başına çalışan tetikleyiciler (FTS silme, medya kütüphanesi kuyruğu)
+   * silme süresince kaldırılıp sonra aynen geri kurulur — 300 bin mesajda satır satır tetikleyici + dilimli hesap silme
+   * dakikalar sürüyor, arayüz yarım kalmış durumu görüp hata veriyordu (Kaan, 01.10). Silinen içerik secure_delete ile
+   * sıfırlanır; uzun süren (olay döngüsünü kilitleyen) VACUUM yapılmaz.
+   */
   wipeAll(): void {
-    this.db.transaction(() => {
-      for (const t of ['messages', 'person_chats', 'people', 'people_dismissed', 'chat_participants', 'chats', 'accounts', 'events', 'meta']) this.db.prepare(`DELETE FROM ${t}`).run();
-      this.db.exec("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')");
-    })();
-    this.purged.clear();
-    // silinen içerik dosyanın boş sayfalarında kalmasın
+    const has = (t: string) => !!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type IN ('table') AND name = ?").get(t);
+    const triggers = this.db
+      .prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name IN ('messages', 'transcripts') AND sql IS NOT NULL")
+      .all() as Array<{ name: string; sql: string }>;
+    // bağlı tablolar önce boşaltılıyor; yabancı anahtar denetimi kapalıyken tam tablo silme satır satır CASCADE aramaz (3×)
+    const fk = this.db.pragma('foreign_keys', { simple: true });
+    this.db.pragma('foreign_keys = OFF');
+    this.db.pragma('secure_delete = ON');
     try {
-      this.db.exec('VACUUM');
-    } catch {
-      /* meşgul: sonraki açılışta boş sayfalar yeniden kullanılır */
+      this.db.transaction(() => {
+        for (const t of triggers) this.db.exec(`DROP TRIGGER IF EXISTS "${t.name}"`);
+        // önce mesajlara bağlı tablolar (CASCADE satır satır çalışmasın), sonra tam tablo silmeleri
+        for (const t of ['transcripts', 'embeddings', 'translations', 'library_items', 'library_dirty'])
+          if (has(t)) this.db.exec(`DELETE FROM ${t}`);
+        for (const t of ['messages', 'person_chats', 'people', 'people_dismissed', 'chat_participants', 'chats', 'accounts', 'events', 'meta']) this.db.exec(`DELETE FROM ${t}`);
+        this.db.exec("INSERT INTO messages_fts(messages_fts) VALUES ('delete-all')");
+        if (has('transcripts_fts')) this.db.exec("INSERT INTO transcripts_fts(transcripts_fts) VALUES ('delete-all')");
+        for (const t of triggers) this.db.exec(t.sql);
+      })();
+    } finally {
+      this.db.pragma('secure_delete = OFF');
+      if (fk) this.db.pragma('foreign_keys = ON');
     }
+    // kapanması zaman aşımına uğrayan bir connector'ın geç yazımı hesabı geri getirmesin
+    for (const id of this.removing) this.purged.add(id);
+    this.removing.clear();
   }
 
   deleteAccount(id: string): void {

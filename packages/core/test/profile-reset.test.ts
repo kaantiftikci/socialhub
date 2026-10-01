@@ -47,3 +47,39 @@ test('removeAll her hesabı kaldırır ve bitince döner; wipeAll kalan her şey
   assert.equal(store.meta('boot_ms:genel'), undefined);
   assert.equal(store.search('örnek', 10).length, 0);
 });
+
+test('wipeAll büyük veritabanında hızlı; tetikleyiciler geri kurulur, eklenen mesaj yine aranır', async () => {
+  const { installLibrary } = await import('../src/library.js');
+  const store = new Store(path.join(tmp, 'big.db'));
+  installLibrary(store);
+  const id = 'telegram:big';
+  store.upsertAccount({ id, platform: 'telegram', label: 'x', status: 'connected', createdAt: 1 });
+  for (let c = 0; c < 40; c++) {
+    store.upsertChat({ id: `${id}/c${c}`, accountId: id, platform: 'telegram', remoteId: `c${c}`, name: 'Sohbet', kind: 'direct', unread: 0, lastMessageAt: 1, lastPreview: 'örnek', tags: [] });
+    store.transaction(() => {
+      for (let i = 0; i < 1000; i++)
+        store.upsertMessage({ id: `${id}/c${c}/m${i}`, chatId: `${id}/c${c}`, remoteId: `m${i}`, senderId: 'o', senderName: 'Kişi', fromMe: false, text: `örnek mesaj ${i} https://example.com/${i}`, ts: i + 1, status: 'read' });
+    });
+  }
+  const triggersBefore = (store.sql("SELECT count(*) n FROM sqlite_master WHERE type = 'trigger'").get() as { n: number }).n;
+  const t0 = Date.now();
+  store.hideAccounts([id]);
+  assert.deepEqual(store.listAccounts(), []);
+  store.wipeAll();
+  const ms = Date.now() - t0;
+  assert.ok(ms < 3000, `wipeAll ${ms} ms`);
+  const triggersAfter = (store.sql("SELECT count(*) n FROM sqlite_master WHERE type = 'trigger'").get() as { n: number }).n;
+  assert.equal(triggersAfter, triggersBefore);
+  assert.equal((store.sql('SELECT count(*) n FROM messages').get() as { n: number }).n, 0);
+  assert.equal((store.sql('SELECT count(*) n FROM library_dirty').get() as { n: number }).n, 0);
+  // silinen hesap geç gelen yazımla geri dirilmez
+  store.upsertAccount({ id, platform: 'telegram', label: 'x', status: 'connected', createdAt: 1 });
+  assert.deepEqual(store.listAccounts(), []);
+  // yeni hesap normal çalışır, FTS tetikleyicisi geri kurulmuş
+  const nid = 'telegram:new';
+  store.upsertAccount({ id: nid, platform: 'telegram', label: 'y', status: 'connected', createdAt: 2 });
+  store.upsertChat({ id: `${nid}/c`, accountId: nid, platform: 'telegram', remoteId: 'c', name: 'Yeni', kind: 'direct', unread: 0, lastMessageAt: 1, lastPreview: '', tags: [] });
+  store.upsertMessage({ id: `${nid}/c/m`, chatId: `${nid}/c`, remoteId: 'm', senderId: 'o', senderName: 'Kişi', fromMe: false, text: 'yepyeni kelime', ts: 5, status: 'read' });
+  assert.equal(store.search('yepyeni', 10).length, 1);
+  assert.equal(store.listAccounts().length, 1);
+});

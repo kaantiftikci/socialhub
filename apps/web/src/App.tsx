@@ -295,6 +295,18 @@ export default function App() {
   const [prompts, setPrompts] = useState<Record<string, { prompt: 'phone' | 'code' | 'password'; message: string }>>({});
   const [ai, setAi] = useState(false);
   const [online, setOnline] = useState(false);
+  // "Tüm verileri sil" sürerken: olaylar/hata bildirimleri yok sayılır, ekran kilitlenir (yarım durum hata göstermesin)
+  const [wiping, setWiping] = useState(false);
+  const wipingRef = useRef(false);
+  useEffect(() => {
+    const on = (e: Event) => {
+      const v = (e as CustomEvent<boolean>).detail !== false;
+      wipingRef.current = v;
+      setWiping(v);
+    };
+    window.addEventListener('mivelo-wiping', on);
+    return () => window.removeEventListener('mivelo-wiping', on);
+  }, []);
   const [toast, setToast] = useState<{ text: string; err?: boolean } | null>(null);
   /** Pencere öndeyken başka sohbete gelen mesaj: sağ üstte platform rozetli küçük kart (sistem bildirimi kapalı olabilir) */
   const [inToasts, setInToasts] = useState<Array<{ id: number; chat: Chat; text: string }>>([]);
@@ -346,6 +358,7 @@ export default function App() {
 
   const toastTimer = useRef<number | undefined>(undefined);
   const notify = useCallback((text: string, err = false) => {
+    if (err && wipingRef.current) return;
     setToast({ text, err });
     // önceki bildirimin zamanlayıcısı yenisini erken kapatmasın
     clearTimeout(toastTimer.current);
@@ -406,10 +419,10 @@ export default function App() {
   useEffect(() => {
     // "ResizeObserver loop …" tarayıcının zararsız uyarısı (gözlemci aynı karede yeniden tetiklendi); hata sayılmaz
     const onErr = (e: ErrorEvent) => {
-      if (/ResizeObserver loop/i.test(e.message ?? '')) return;
+      if (wipingRef.current || /ResizeObserver loop/i.test(e.message ?? '')) return;
       notify(`Arayüz hatası: ${e.message}`, true);
     };
-    const onRej = (e: PromiseRejectionEvent) => notify(`Arayüz hatası: ${String((e.reason as Error)?.message ?? e.reason)}`, true);
+    const onRej = (e: PromiseRejectionEvent) => !wipingRef.current && notify(`Arayüz hatası: ${String((e.reason as Error)?.message ?? e.reason)}`, true);
     // uygulama kapalıyken zamanı geçen zamanlanmış mesajlar sessizce gönderilmez (Conversation.tsx flushScheduled)
     const onMissed = (e: Event) => notify(`${(e as CustomEvent<number>).detail} zamanlanmış mesaj uygulama kapalıyken zamanını kaçırdı; gönderilmedi.`, true);
     window.addEventListener('error', onErr);
@@ -580,6 +593,7 @@ export default function App() {
       }, sec * 1000);
     };
     const onEvent = (ev: CoreEvent) => {
+      if (wipingRef.current) return; // silme bitince sayfa yeniden yüklenir
       if (pushLoginEvent(ev)) return; // Mivelo içi giriş ekranı kareleri App durumundan geçmez
       if (pushMlEvent(ev)) return; // yerel AI (model durumu, sesli mesaj metni): ml-client.ts kendi deposunda
       peopleOnEvent(ev); // kişi birleştirme: people.update, birleşik zaman çizelgesi
@@ -753,7 +767,7 @@ export default function App() {
     };
     const stop = connectEvents(onEvent, (open) => {
       setOnline(open);
-      if (!open) return;
+      if (!open || wipingRef.current) return;
       // kopuklukta kaçan 'bitti' (progress 1) olayı yüzünden eşitleme çubuğu takılı kalmasın: süren eşitleme yeni olayla geri gelir
       // başlangıç zamanı korunur (replay ile geri gelen eşitlemenin çubuğu zamanla ilerleyen payını kaybedip geri zıplamasın)
       setSync((prev) => {
@@ -1451,6 +1465,15 @@ export default function App() {
       </nav>
       <Resizer pane="side" />
 
+      {wiping && (
+        <div className="wipe-screen" role="alert" aria-busy="true">
+          <div className="wipe-card">
+            <span className="wipe-spin" aria-hidden />
+            <b>Veriler siliniyor…</b>
+            <p>Uygulamalardan çıkış yapılıyor ve bu bilgisayardaki veriler temizleniyor. Birkaç saniye sürer.</p>
+          </div>
+        </div>
+      )}
       {bootShown && (
         <BootScreen stage={booting === 'data' ? 'data' : 'core'} slowHint={bootSlow} ready={!booting && listReady} onDone={() => setBootShown(false)} />
       )}

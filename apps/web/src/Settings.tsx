@@ -476,6 +476,7 @@ function AccountPane({ mode, onReset, onCancel, notify }: { mode: 'view' | 'logo
   };
   const doReset = () => {
     setBusy(true);
+    window.dispatchEvent(new CustomEvent('mivelo-wiping', { detail: true }));
     api
       .resetAll()
       .then(() => {
@@ -498,6 +499,7 @@ function AccountPane({ mode, onReset, onCancel, notify }: { mode: 'view' | 'logo
         location.reload();
       })
       .catch((e) => {
+        window.dispatchEvent(new CustomEvent('mivelo-wiping', { detail: false }));
         setBusy(false);
         notify((e as Error).message, true);
       });

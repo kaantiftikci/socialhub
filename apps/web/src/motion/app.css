@@ -99,3 +99,39 @@ html.reduce-motion .qr-timer { display: none; }
 html.reduce-motion .mv-shim, html.reduce-motion .mv-sync .mv-fill::after,
 html.reduce-motion .menu-backdrop > .menu, html.reduce-motion .alert-pop, html.reduce-motion .app > .toast,
 html.reduce-motion .qs-wrap .palette.qs, html.reduce-motion .qs-wrap.closing { animation: none !important; }
+
+/* "Tüm verileri sil" sürerken ekran kilidi (App.tsx wiping) */
+.wipe-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  backdrop-filter: blur(6px);
+  animation: wipe-in var(--m-std) var(--m-in) both;
+}
+.wipe-card {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  max-width: 340px;
+  padding: 26px 28px;
+  border-radius: 18px;
+  background: var(--card);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.18);
+  text-align: center;
+}
+.wipe-card b { font-size: 15px; }
+.wipe-card p { margin: 0; font-size: 12.5px; color: var(--text2); line-height: 1.5; }
+.wipe-spin {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2.5px solid color-mix(in srgb, var(--v) 22%, transparent);
+  border-top-color: var(--v);
+  animation: wipe-rot 0.8s linear infinite;
+  margin-bottom: 4px;
+}
+@keyframes wipe-in { from { opacity: 0; } }
+@keyframes wipe-rot { to { transform: rotate(360deg); } }

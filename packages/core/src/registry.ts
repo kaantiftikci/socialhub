@@ -375,13 +375,30 @@ export class Registry {
   private removals = new Map<string, Promise<void>>();
 
   /**
-   * "Tüm verileri sil" (Ayarlar → Hesap): her hesap platformdan çıkarılır (WhatsApp bağlı cihazlar, Telegram oturumu…),
-   * durdurulur, mesajları ve oturum klasörü silinir; hepsi bitince döner.
+   * "Tüm verileri sil" (Ayarlar → Hesap): hesaplar HEMEN gizlenir, platform çıkışları (WhatsApp bağlı cihazlar, Telegram
+   * oturumu…) ve durdurmalar AYNI ANDA yapılır (hesap başına çıkış ≤6 sn, durdurma ≤5 sn). Veri silme hesap hesap değil,
+   * çağıran tarafın `store.wipeAll`'ıyla tek seferde (01.10, Kaan: sırayla çıkış + dilimli silme dakikalar sürüyordu).
+   * Süren tekil kaldırmalar beklenir.
    */
   async removeAll(): Promise<number> {
     const ids = [...new Set([...this.store.listAccounts().map((a) => a.id), ...this.connectors.keys()])];
-    for (const id of ids) await this.remove(id).catch(() => undefined);
-    await Promise.all(ids.map((id) => this.removals.get(id)?.catch(() => undefined)));
+    this.store.hideAccounts(ids);
+    const conns = ids.map((id) => {
+      this.fresh.delete(id);
+      this.stopHeal(id);
+      const c = this.connectors.get(id);
+      this.connectors.delete(id);
+      bus.emit({ type: 'account.removed', accountId: id });
+      return [id, c] as const;
+    });
+    await Promise.all(
+      conns.map(async ([id, c]) => {
+        if (!c) return;
+        await withTimeout(c.logout?.() ?? Promise.resolve(), 6_000).catch((e) => bus.log('warn', `${id} platform çıkışı yapılamadı: ${(e as Error).message}`));
+        await withTimeout(c.stop(), 5_000).catch(() => undefined);
+      }),
+    );
+    await Promise.all([...this.removals.values()].map((j) => j.catch(() => undefined)));
     return ids.length;
   }
 

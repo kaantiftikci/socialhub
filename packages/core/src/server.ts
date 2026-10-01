@@ -301,13 +301,18 @@ export function createServer(store: Store, registry: Registry, port: number): ht
    * kapanır…), sonra mesajlar, sohbetler, oturumlar, etkinlikler, zamanlanmış gönderimler, profil, AI anahtarı ve ayarlar.
    * Lisans (cihaz hakkı), veritabanı anahtarı, yerel API belirteci ve günlükler kalır.
    */
-  let resetting = false;
+  let resetting: Promise<{ ok: boolean; accounts: number }> | null = null;
+  // önceki silmeden yarım kalan klasörler (çekirdek arka plan silmesi bitmeden kapandıysa)
+  void fs.promises
+    .readdir(DATA_DIR)
+    .then((names) => names.filter((n) => n.startsWith('.silinecek-')).forEach((n) => void fs.promises.rm(path.join(DATA_DIR, n), { recursive: true, force: true }).catch(() => undefined)))
+    .catch(() => undefined);
   route('POST', '/api/reset', async (r, _s, _p, body) => {
     localOnly(r);
     if ((body as { confirm?: string }).confirm !== 'SIL') throw new HttpError(400, 'Onay eksik');
-    if (resetting) throw new HttpError(409, 'Silme sürüyor');
-    resetting = true;
-    try {
+    // ikinci istek (WebKit "Load failed" yeniden denemesi) süren silmeyi bekler, hata almaz
+    if (resetting) return resetting;
+    const job = (async () => {
       bus.log('info', 'Tüm veriler siliniyor (kullanıcı isteği)');
       const n = await registry.removeAll();
       scheduled.clear();
@@ -322,13 +327,29 @@ export function createServer(store: Store, registry: Registry, port: number): ht
       for (const f of [SETTINGS_FILE, PROFILE_FILE(), path.join(DATA_DIR, 'send-guard.json')]) fs.rmSync(f, { force: true });
       // köprü veritabanları (mautrix oturumları, WhatsApp anahtarları, medya önbelleği): süreç kapanınca silinir, gerekince yeniden açılır
       await sidecar.stop().catch(() => undefined);
-      for (const d of ['sessions', 'outbox', 'calendar', 'bridge']) await fs.promises.rm(path.join(DATA_DIR, d), { recursive: true, force: true }).catch(() => undefined);
+      // büyük klasörler (tarayıcı profilleri, medya önbelleği) önce adı değiştirilip arka planda silinir: yanıt beklemesin
+      const trash: string[] = [];
+      for (const d of ['sessions', 'outbox', 'calendar', 'bridge']) {
+        const from = path.join(DATA_DIR, d);
+        const to = path.join(DATA_DIR, `.silinecek-${d}-${Date.now()}`);
+        try {
+          await fs.promises.rename(from, to);
+          trash.push(to);
+        } catch {
+          await fs.promises.rm(from, { recursive: true, force: true }).catch(() => undefined);
+        }
+      }
+      for (const t of trash) void fs.promises.rm(t, { recursive: true, force: true }).catch(() => undefined);
       bus.log('info', `Tüm veriler silindi (${n} hesap)`);
       bus.emit({ type: 'scheduled.update' });
       bus.emit({ type: 'events.update' });
       return { ok: true, accounts: n };
+    })();
+    resetting = job;
+    try {
+      return await job;
     } finally {
-      resetting = false;
+      resetting = null;
     }
   });
 

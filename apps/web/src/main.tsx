@@ -14,10 +14,12 @@ import './motion/extras.css';
 import { initSentry } from './sentry';
 import { applyTheme, watchSystemTheme } from './theme';
 import { applyLookPrefs } from './prefs';
+import { installWindowDrag } from './window-drag';
 
 applyTheme();
 applyLookPrefs();
 watchSystemTheme();
+installWindowDrag();
 void initSentry(); // yalnız demo derlemesinde ve DSN varsa etkin
 
 /**

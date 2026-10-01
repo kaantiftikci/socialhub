@@ -843,6 +843,16 @@ Dil: arayüz ve yorumlar Türkçe.
   FLIP (ilk 80 izlenir); `Roll` sayaçlar; `MvInd` kayan sekme göstergesi; `SyncTop` eşitleme çubuğu ("Eşitlendi" + kapanır); `ListSkeleton`
   (`listReady`); bildirim kartı `.qr-slot` + kalan süre çizgisi (üzerine gelince durur); Odak yanıtında kart onaya döner, sonra çıkar
   (başarı toast'u yalnız azaltılmış harekette). Karşıdan mesaj gelince "yazıyor" hemen kalkar. Gerçek Mac/WKWebView'da DOĞRULANMADI.
+- **Tüm verileri sil hızlı (01.10, Kaan: yavaş sıfırlanıyor, arayüz hataları)**: `registry.removeAll` hesapları HEMEN gizler (`store.hideAccounts`), platform
+  çıkışı + durdurma TÜM hesaplarda AYNI ANDA (çıkış ≤6 sn, durdurma ≤5 sn), hesap başına dilimli silme YOK; `store.wipeAll` tek işlem: messages/transcripts
+  tetikleyicileri düşürülüp sonra sqlite_master'daki SQL'leriyle geri kurulur, yabancı anahtar denetimi kapalı, bağlı tablolar (transcripts/embeddings/
+  translations/library_*) önce, FTS 'delete-all', secure_delete ON, VACUUM YOK; silinen kimlikler `purged` (geç gelen yazım hesabı diriltmez).
+  Klasörler `.silinecek-*` adıyla taşınıp arka planda silinir (açılışta kalanlar temizlenir). İkinci /api/reset isteği süren silmeyi bekler (409 yok).
+  Ölçüm: 250 bin şifreli mesaj 2,2 sn (eskiden dakikalar). Arayüz: `mivelo-wiping` olayı → App `.wipe-screen` kilidi, olaylar ve hata bildirimleri
+  yok sayılır, bitince yeniden yükleme. Test: profile-reset.test.ts.
+- **Pencere sürükleme (01.10, Kaan)** `apps/web/src/window-drag.ts` (yalnız Tauri + Mac; titleBarStyle Overlay): üst 52 px şerit ve kenar çubuğunun
+  boş yerleri; fare 4 px kayınca `startDragging` (tıklamalar bozulmaz), çift tık `toggleMaximize` (izin `core:window:allow-toggle-maximize`).
+  Düğme/bağlantı/girdi/rol öğeleri, `.grip`, `.no-drag` ve açılır pencere (`[role=dialog]`) içi sürüklemez. Gerçek Mac'te DOĞRULANMADI.
 - **Dokümantasyon** `docs/dokumantasyon.html` → `docs/Mivelo-Dokumantasyon.pdf` (`CHROMIUM=<chrome yolu> node docs/build-pdf.mjs`); özellik eklenince güncelle.
 
 ## Sunucu/arayüz sözleşmesi

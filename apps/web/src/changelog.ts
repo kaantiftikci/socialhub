@@ -16,6 +16,21 @@ export interface ChangeEntry {
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    id: '2026-10-01a',
+    date: '2026-10-01',
+    title: 'Daha hızlı sıfırlama, sürüklenen pencere',
+    items: [
+      {
+        title: 'Tüm verileri sil artık saniyeler sürüyor',
+        text: 'Uygulamalardan çıkış aynı anda yapılıyor ve veriler tek seferde temizleniyor. Bu sırada ekranda “Veriler siliniyor” kartı görünüyor; yarım kalmış ekranlar ve hata uyarıları çıkmıyor.',
+      },
+      {
+        title: 'Pencereyi kenarından taşı',
+        text: 'Mac’te Mivelo penceresini üst kenardan ya da sol menünün boş yerlerinden tutup sürükleyebilirsin. Üst kenara çift tıklamak pencereyi büyütür ya da eski boyutuna döndürür.',
+      },
+    ],
+  },
+  {
     id: '2026-09-30f',
     date: '2026-09-30',
     title: 'Baştan sona yeni hareketler',
