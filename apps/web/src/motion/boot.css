@@ -25,20 +25,8 @@
 /* ---- Güncelleme ve izin kartları: giriş/çıkış WAAPI ile ---- */
 .update-card, .perm-card { animation: none; }
 
-/* ---- "AI ile ara" kenar ışığı (SearchPalette BeamBorder; Kaan 01.10, libraries.dev/beam benzeri) ----
-   SVG dikdörtgende renkli kesik çizgiler çevre boyunca SABİT hızla, yavaş (9 sn/tur) kayar. .edge ince ve hafif yumuşatılmış;
-   .glow kalın + bulanık ama kart taşanı kestiği için yalnız kenarın içine çok hafif yansır. */
-.palette { position: relative; isolation: isolate; }
-.palette > :not(.pal-beam) { position: relative; z-index: 1; }
+/* ---- "AI ile ara" kenar ışığı: border-beam (libraries.dev Beam) .pal-beam-wrap; kart taşanı kesmesin diye sarmalayıcı dışarıda ---- */
+.pal-beam-wrap { width: min(680px, 94vw); border-radius: 20px; }
+.pal-beam-wrap > .palette { width: 100%; }
 .pal-in:last-child { border-bottom-color: transparent; }
 .palette.ai { border-color: transparent; }
-.pal-beam { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 2; animation: palBeamIn .6s var(--m-in) both; }
-.pal-beam svg { position: absolute; inset: 0; display: block; overflow: visible; }
-.pal-beam rect { animation: palBeamRun 9s linear infinite; }
-.pal-beam .edge { filter: blur(.6px); }
-.pal-beam .glow { opacity: .14; filter: blur(7px); }
-:root[data-theme="dark"] .pal-beam .glow { opacity: .2; }
-@keyframes palBeamRun { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -100; } }
-@keyframes palBeamIn { from { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .pal-beam rect { animation: none; } }
-html.reduce-motion .pal-beam rect { animation: none; }

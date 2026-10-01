@@ -3,6 +3,8 @@ import { api } from './api';
 import { PLATFORMS, type Chat, type Message, type Platform } from './types';
 import { Avatar, Chip, Icon, fmtTime } from './ui';
 import { mlApi, type SemanticResult } from './ml-api';
+import { BorderBeam } from 'border-beam';
+import { onThemeChange, resolvedTheme } from './theme';
 import { DUR, EASE, animate, reducedMotion } from './motion/motion';
 import { MvInd } from './motion/MvInd';
 
@@ -57,6 +59,8 @@ export function SearchPalette({ chats, onClose, onOpenChat, onOpenMessage }: { c
   const [active, setActive] = useState(0);
   const [only, setOnly] = useState<Platform | null>(null);
   // Anlamsal (doğal dil) arama: yerel gömme modeliyle; tercih bu tarayıcıda hatırlanır
+  const [theme, setTheme] = useState(() => resolvedTheme());
+  useEffect(() => onThemeChange(setTheme), []);
   const [semantic, setSemantic] = useState(() => {
     try {
       return localStorage.getItem(SEM_KEY) === '1';
@@ -226,9 +230,9 @@ export function SearchPalette({ chats, onClose, onOpenChat, onOpenMessage }: { c
   let idx = only ? 0 : chatHits.length;
   return (
     <div className="overlay palette-wrap pal-anim" ref={wrapRef} onMouseDown={onClose}>
+      {/* "AI ile ara" açıkken kenarda dolaşan ışık: libraries.dev Beam (border-beam, MIT); kapalıyken söner (aynı öğe, odak kaybolmaz) */}
+      <BorderBeam className="pal-beam-wrap" size="md" colorVariant="colorful" strength={0.7} active={semantic} theme={theme} onMouseDown={(e) => e.stopPropagation()}>
       <div className={`palette ${semantic ? 'ai' : ''}`} ref={palRef} role="dialog" aria-label="Her yerde ara" onMouseDown={(e) => e.stopPropagation()} onKeyDown={onKey}>
-        {/* "AI ile ara" açıkken kenarda dolaşan renkli ışık (libraries.dev/beam benzeri) */}
-        {semantic && <BeamBorder />}
         <div className="pal-in">
           <Icon name="search" size={17} />
           <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder={semantic ? 'Doğal dille ara — "geçen ay Ahmet’in gönderdiği fatura"' : 'Tüm uygulamalarda ara — kişi, mesaj, dosya adı…'} aria-label="Arama" spellCheck={false} />
@@ -369,71 +373,8 @@ export function SearchPalette({ chats, onClose, onOpenChat, onOpenMessage }: { c
         </div>
         )}
       </div>
+      </BorderBeam>
     </div>
   );
 }
 
-/**
- * Kenar ışığı: kutunun çevresinde SABİT hızla, yavaş tempoda dolaşan renkli hüzme (SVG dikdörtgen + kesik çizgi kayması; açısal dönüş
- * dar kenarlarda hızlanıp geniş kenarlarda yavaşlıyordu — Kaan 01.10). Renkler yalnız kenarda; içe yalnız kenar boyunca çok hafif yansır.
- */
-function BeamBorder() {
-  const ref = useRef<HTMLSpanElement>(null);
-  const [box, setBox] = useState<{ w: number; h: number; r: number } | null>(null);
-  useEffect(() => {
-    const el = ref.current?.parentElement;
-    if (!el) return;
-    const measure = () => setBox({ w: el.clientWidth, h: el.clientHeight, r: parseFloat(getComputedStyle(el).borderTopLeftRadius) || 20 });
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  // hüzme: renk dilimleri yan yana, uçlar soluk (kuyruk/baş); toplam çevrenin ~%26'sı
-  const SEG = [
-    ['#3ddc84', 0.35, 4],
-    ['#3ddc84', 1, 4],
-    ['#22d3ee', 1, 4.5],
-    ['#6c8cff', 1, 4.5],
-    ['#8b5cf6', 1, 4.5],
-    ['#ec4899', 0.6, 4.5],
-  ] as const;
-  let at = 0;
-  const segs = SEG.map(([c, o, len]) => {
-    const s = { c, o, len, off: at };
-    at += len;
-    return s;
-  });
-  const rect = (sw: number, cls: string) =>
-    box && (
-      <g className={cls}>
-        {segs.map((g, i) => (
-          <rect
-            key={i}
-            x={0.75}
-            y={0.75}
-            width={Math.max(0, box.w - 1.5)}
-            height={Math.max(0, box.h - 1.5)}
-            rx={Math.max(0, box.r - 0.75)}
-            pathLength={100}
-            fill="none"
-            stroke={g.c}
-            strokeOpacity={g.o}
-            strokeWidth={sw}
-            // parçanın yeri desenin içinde (önce boşluk): hepsi aynı kaymayla birlikte dolaşır
-            strokeDasharray={`0 ${g.off} ${g.len} ${100 - g.off - g.len}`}
-          />
-        ))}
-      </g>
-    );
-  return (
-    <span className="pal-beam" ref={ref} aria-hidden="true">
-      {box && (
-        <svg width={box.w} height={box.h} viewBox={`0 0 ${box.w} ${box.h}`}>
-          {rect(10, 'glow')}
-          {rect(1.6, 'edge')}
-        </svg>
-      )}
-    </span>
-  );
-}
