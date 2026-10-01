@@ -882,6 +882,20 @@ Dil: arayüz ve yorumlar Türkçe.
 - **Pencere sürükleme (01.10, Kaan)** `apps/web/src/window-drag.ts` (yalnız Tauri + Mac; titleBarStyle Overlay): üst 52 px şerit ve kenar çubuğunun
   boş yerleri; fare 4 px kayınca `startDragging` (tıklamalar bozulmaz), çift tık `toggleMaximize` (izin `core:window:allow-toggle-maximize`).
   Düğme/bağlantı/girdi/rol öğeleri, `.grip`, `.no-drag` ve açılır pencere (`[role=dialog]`) içi sürüklemez. Gerçek Mac'te DOĞRULANMADI.
+- **7 sevilen küçük özellik (01.10, Kaan: "ilk 7 uygula")**: (1) **Gönderimi geri al** `Conversation.tsx` `undo` state: Enter'da iyimser balon
+  hemen, `api.send` `prefs.undoSec` (0/5/10, vars. 5) sn gecikir; `.undo-bar` "Geri al" (⌘Z boş yazma alanında) metni ve yanıt hedefini geri getirir,
+  "Hemen gönder"/yeni gönderim/sohbet değişimi `flushUndo`. (2) **Kendime not** `connectors/notes.ts` `NotesConnector` (platform `mivelo`,
+  category `self`; index.ts bootAll sonrası yoksa `registry.add('mivelo')`; SINGLE; yalnız metin, `canMedia` kapalı; demoda `seedNotes`
+  `NOTES_CHAT_ID`); arayüzde hesap listesinde görünmez (`realAccounts` boş durum için), sol menü "Kendime not" (`notesChat`). (3) **Yıldız**
+  `messages.starred` sütunu + kısmi indeks, `store.setStarred/listStarred`, `POST /api/messages/:id/star`, `GET /api/starred`; balon üstü
+  `.rtrig` yıldız (`act.star`, `popStar`), saatte `.bt-star`; görünüm `Starred.tsx` (`view 'starred'`, `starRev` message.upsert'te artar).
+  (4) **Sesli mesaj hızı** `AudioClip` 1×/1,5×/2× (`mivelo.voiceRate`, tüm sesli mesajlarda ortak). (5) **Okunmadı olarak işaretle**
+  `store.setUnread` (unread ≥1, read_upto geri), `POST /api/chats/:id/unread`; App `onMarkUnread` önce `visibleChatRef`/`selectedRef`'i
+  boşaltıp sohbeti kapatır (chat.upsert'teki "açık sohbete okunmamış geldi → yeniden oku" tetiklenmesin). (6) **Süreli sessiz**
+  `ChatFlags.mutedUntil` (flags JSON'da; `rowToChatBase` süre dolunca okurken muted'ı kaldırır, geçmiş bitişle yazılırsa sessiz sayılmaz);
+  sağ panel "Sessize al" → `.act-pick` 8 saat / 1 hafta / Her zaman, "Sesi aç" satırında kalan süre (`muteLeft`). (7) **Rahatsız etme + Odak modu**
+  `prefs.dnd {on,from,to,weekend}` / `prefs.focus {on,platforms}`, `quietReason(platform)` App message.upsert bildirim koşulunda (kart/ses yok,
+  rozet ve liste güncellenir); Ayarlar → Bildirimler `QuietHours` (saat aralığı, hafta sonu, uygulama çipleri). Test: star-unread-mute.test.ts.
 - **Dokümantasyon** `docs/dokumantasyon.html` → `docs/Mivelo-Dokumantasyon.pdf` (`CHROMIUM=<chrome yolu> node docs/build-pdf.mjs`); özellik eklenince güncelle.
 
 ## Sunucu/arayüz sözleşmesi

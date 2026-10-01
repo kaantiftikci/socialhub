@@ -21,7 +21,8 @@ import { ConnectModal } from './Connect';
 import { Focus } from './Focus';
 import { onThemeChange, resolvedTheme, setThemePref } from './theme';
 import { SettingsModal, type SettingsTab } from './Settings';
-import { getPrefs, usePrefs } from './prefs';
+import { getPrefs, quietReason, usePrefs } from './prefs';
+import { Starred } from './Starred';
 import { SearchPalette } from './SearchPalette';
 import { QuickReplyStack, QuickSend, rememberBackground, takeBackground, useRevealOnFocus } from './QuickSend';
 import { MarketTodayCard } from './MarketSummary';
@@ -32,7 +33,7 @@ import { WhatsNew } from './WhatsNew';
 import { hideWindow, MOD_KEY, isTauri, notify as desktopNotify, requestWebNotify, onDesktopEvent, playPing, setBadge, windowFocused, coreInfo, playNotifySound, platformNotifyOn, soundsEnabled, bannersEnabled, groupsNotify, unlockAudio } from './desktop';
 import { DEMO_OFFLINE, PROFILE_HANDLE, PROFILE_NAME, PROFILE_PHOTO, STATIC_DEMO, applyProfile, setFallbackProfileName } from './profile';
 
-export type View = 'inbox' | 'focus' | 'calendar' | 'wrapped' | 'media' | 'muted' | 'hidden';
+export type View = 'inbox' | 'focus' | 'calendar' | 'wrapped' | 'media' | 'starred' | 'muted' | 'hidden';
 const FLAG_VIEWS: Array<{ view: View; flag: 'muted' | 'hidden'; label: string; icon: string; empty: string }> = [
   { view: 'muted', flag: 'muted', label: 'Sessiz', icon: 'mute', empty: 'Sessize alınmış sohbet yok. Sağ paneldeki Eylemler’den sessize alabilirsin.' },
   { view: 'hidden', flag: 'hidden', label: 'Gizli', icon: 'eyeoff', empty: 'Gizlenmiş sohbet yok.' },
@@ -76,6 +77,8 @@ export default function App() {
   const chatsRef = useRef(chats);
   chatsRef.current = chats;
   const [selected, setSelected] = useState<string | null>(NAV0.selected ?? null);
+  /** İşaretliler görünümü: her mesaj güncellemesinde artar (yıldız değişimi de message.upsert) */
+  const [starRev, setStarRev] = useState(0);
   const [messages, setMessages] = useState<Message[]>([]);
   const [view, setView] = useState<View>((NAV0.view as string) === 'archived' ? 'inbox' : NAV0.view ?? 'inbox');
   const [filter, setFilter] = useState<Filter>(NAV0.filter ?? 'all');
@@ -351,6 +354,8 @@ export default function App() {
     return () => window.removeEventListener('mivelo-profile', on);
   }, []);
   const selectedRef = useRef<string | null>(null);
+  const viewRef = useRef(view);
+  viewRef.current = view;
   selectedRef.current = selected;
   /** Ekranda gerçekten açık sohbet: Takvim/Odak görünümünde seçim korunur ama sohbet görünmez (okundu/bildirim için) */
   const visibleChatRef = useRef<string | null>(null);
@@ -734,6 +739,7 @@ export default function App() {
           break;
         }
         case 'message.upsert': {
+          if (viewRef.current === 'starred') setStarRev((n) => n + 1);
           // demette sohbet aynı çerçevede gelir; sohbet bu arada silindiyse (birleştirme) listedeki kopyası kullanılır
           const chat = ev.chat ?? chatsRef.current.get(ev.message.chatId);
           if (ev.chat) queueChat(ev.chat);
@@ -743,7 +749,8 @@ export default function App() {
           if (chat && ev.live && !ev.message.fromMe && !chat.muted && !chat.hidden && Date.now() - bootTs > 60_000 && Date.now() - ev.message.ts < 120_000) {
             void windowFocused().then((focused) => {
               // uygulamanın bildirimi kapalıysa ne kart ne ses; Ayarlar → Bildirimler "Mivelo öndeyken de bildir" kapalıysa öndeyken sessiz
-              if ((!focused || ev.message.chatId !== visibleChatRef.current) && (!focused || getPrefs().notifyInFocus) && platformNotifyOn(chat.platform) && (chat.kind === 'direct' || groupsNotify())) {
+              // Rahatsız etme saatleri / Odak modu (Ayarlar → Bildirimler): kart ve ses yok, rozet ve liste yine güncellenir
+              if ((!focused || ev.message.chatId !== visibleChatRef.current) && (!focused || getPrefs().notifyInFocus) && platformNotifyOn(chat.platform) && (chat.kind === 'direct' || groupsNotify()) && !quietReason(chat.platform)) {
                 const body = (ev.message.text || ev.message.attachments?.[0]?.name || 'Yeni mesaj').slice(0, 400);
                 batchNotify(chat, body, focused);
               }
@@ -886,6 +893,8 @@ export default function App() {
    */
   const inboxChats = useMemo(() => activeChats.filter((c) => !c.meta?.archived && !c.muted && !c.hidden && !(c.platform === 'imessage' && c.meta?.folder === 'junk') && !(PLATFORMS[c.platform].category === 'mail' && (c.meta?.folder === 'junk' || c.meta?.folder === 'sent'))), [activeChats]);
   /** Sessiz / Gizli görünümleri (yerel bayraklar) */
+  /** "Kendime not" sohbeti (çekirdek connectors/notes.ts; demoda static-demo seedNotes) */
+  const notesChat = useMemo(() => allChats.find((c) => c.platform === 'mivelo') ?? null, [allChats]);
   const flagged = useMemo(() => {
     const by = (k: 'muted' | 'hidden') => allChats.filter((c) => c[k]).sort((a, b) => b.lastMessageAt - a.lastMessageAt);
     return { muted: by('muted'), hidden: by('hidden') };
@@ -1188,6 +1197,8 @@ export default function App() {
     const idx = new Map(chanOrder.map((id, i) => [id, i]));
     return [...accounts].sort((a, b) => (idx.get(a.id) ?? 1e9) - (idx.get(b.id) ?? 1e9));
   }, [accounts, chanOrder]);
+  /** Kendime not (category 'self') hesap sayılmaz: boş durum / "uygulama bağla" metinleri ona bakmaz */
+  const realAccounts = accounts.filter((a) => PLATFORMS[a.platform]?.category !== 'self');
   const chatAccounts = orderedAccounts.filter((a) => !PLATFORMS[a.platform].category);
   const mailAccounts = orderedAccounts.filter((a) => PLATFORMS[a.platform].category === 'mail');
   const shopAccounts = orderedAccounts.filter((a) => PLATFORMS[a.platform].category === 'shop');
@@ -1404,17 +1415,21 @@ export default function App() {
           <NavItem icon="calendar" label="Takvim" title="Mivelo takvimi: mesajlardan eklenenler ve kendi etkinliklerin" count={todayEvents} active={view === 'calendar'} onClick={() => setView('calendar')} />
           <NavItem icon="chart" label="Miveloji" title="Mesajlaşma alışkanlıklarının aylık ve yıllık raporu (yalnız bu cihazda hesaplanır)" count={0} active={view === 'wrapped'} onClick={() => setView('wrapped')} />
           <NavItem icon="image" label="Medya" title="Tüm uygulamalardan fotoğraf, video, dosya ve bağlantılar" count={0} active={view === 'media'} onClick={() => setView('media')} />
+          <NavItem icon="star" label="İşaretliler" title="Yıldızladığın mesajlar (tüm uygulamalardan)" count={0} active={view === 'starred'} onClick={() => setView('starred')} />
+          {notesChat && (
+            <NavItem icon="note" label="Kendime not" title="Yalnız bu cihazda duran not sohbeti: bağlantı, kod, hatırlatma" count={0} active={view === 'inbox' && selected === notesChat.id} onClick={() => (setView('inbox'), selectPlatform(null), setSelected(notesChat.id))} />
+          )}
           {FLAG_VIEWS.filter((f) => f.view === 'muted' || flagged[f.flag].length > 0).map((f) => (
             <NavItem key={f.view} icon={f.icon} label={f.label} count={flagged[f.flag].length} active={view === f.view} onClick={() => setView(f.view)} />
           ))}
         </div>
         <div className="side-scroll">
-          {(chatAccounts.length > 0 || accounts.length === 0) && (
+          {(chatAccounts.length > 0 || realAccounts.length === 0) && (
             <div className="section-head">
               <span className="label">Uygulamalar</span>
             </div>
           )}
-          {accounts.length === 0 && (
+          {realAccounts.length === 0 && (
             <button className="chan b" onClick={() => setConnectOpen(true)} style={{ color: 'var(--v-txt)' }}>
               <Icon name="plus" size={15} sw={2} /> İlk uygulamanı bağla
             </button>
@@ -1492,6 +1507,8 @@ export default function App() {
             onOpenChat={(chatId) => (setView('inbox'), setSelected(chatId), setFocusMsg(null))}
             onWaiting={() => goInbox('waiting')}
           />
+        ) : view === 'starred' ? (
+          <Starred rev={starRev} notify={notify} onMenu={isMobile ? () => setNavOpen(true) : undefined} onOpenMessage={(chatId, id, ts) => (setView('inbox'), setSelected(chatId), setFocusMsg({ chatId, id, ts }))} />
         ) : view === 'media' ? (
           <MediaLibrary
             notify={notify}
@@ -1739,6 +1756,14 @@ export default function App() {
                 notify={notify}
                 onTags={(tags) => api.setTags(current.id, tags).then((c) => setChats((p) => new Map(p).set(c.id, c))).catch((e) => notify(e.message, true))}
                 onFlags={(f) => setFlags(current.id, f)}
+                onMarkUnread={() => {
+                  const id = current.id;
+                  // önce kapat: chat.upsert "açık sohbete okunmamış geldi" diye hemen geri okumasın (ref'ler çizimden önce güncellenir)
+                  visibleChatRef.current = null;
+                  selectedRef.current = null;
+                  setSelected(null);
+                  api.markUnread(id).then((c) => setChats((p) => new Map(p).set(c.id, c))).catch((e) => notify(e.message, true));
+                }}
                 seed={seed?.id === current.id ? seed : null}
                 relatedQuestion={relatedQuestion}
                 onSeedUsed={() => setSeed(null)}
@@ -1820,9 +1845,9 @@ export default function App() {
                 <div className="empty" style={{ margin: 'auto', maxWidth: 380 }}>
                   <Logo size={40} />
                   <p style={{ marginTop: 12, fontSize: 15, color: 'var(--text2)' }}>
-                    {accounts.length === 0 ? 'Başlamak için bir uygulama bağla.' : 'Soldan bir sohbet seç.'}
+                    {realAccounts.length === 0 ? 'Başlamak için bir uygulama bağla.' : 'Soldan bir sohbet seç.'}
                   </p>
-                  {accounts.length === 0 && (
+                  {realAccounts.length === 0 && (
                     <button className="btn primary b" onClick={() => setConnectOpen(true)}>
                       <Icon name="plus" size={15} sw={2} /> Uygulama bağla
                     </button>

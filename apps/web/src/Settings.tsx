@@ -13,7 +13,7 @@ import { isTauri } from './desktop';
 import { signOut } from './LicenseGate';
 import { PermissionSettings } from './Onboarding';
 import { LocalAiPane } from './LocalAiPane';
-import { AboutPane, AccountsPane, DevicesPane, GeneralPane, HelpPane, HighlightCtx, KeysPane, LookPane, NotifyBehavior, Row, StoragePane, Switch } from './SettingsPanes';
+import { AboutPane, AccountsPane, DevicesPane, GeneralPane, HelpPane, HighlightCtx, KeysPane, LookPane, NotifyBehavior, QuietHours, Row, StoragePane, Switch } from './SettingsPanes';
 import type { LicenseStatus, Profile } from './api';
 import { EASE, animate } from './motion/motion';
 
@@ -26,9 +26,9 @@ type Section = { k: Tab; l: string; ic: string; c: string };
 const SETTINGS_INDEX: Partial<Record<Tab, string[]>> = {
   profile: ['Ad soyad', 'Kullanıcı adı', 'E-posta', 'Telefon', 'Profil fotoğrafı'],
   accounts: ['Uygulama bağla', 'Yeniden bağlan', 'Hesabı kaldır'],
-  general: ['Enter ile gönder', 'Yazım denetimi', 'Gizli okuma', 'Rozet sayısı'],
+  general: ['Enter ile gönder', 'Yazım denetimi', 'Gönderimi geri al', 'Gizli okuma', 'Rozet sayısı'],
   look: ['Tema', 'Gece modu', 'Yazı ve arayüz boyutu', 'Hareketleri azalt'],
-  notify: ['Bildirim sesleri', 'Ses düzeyi', 'Masaüstü bildirimleri', 'Deneme bildirimi', 'Grup ve kanal bildirimleri', 'Mivelo öndeyken de bildir', 'Art arda gelenleri birleştir', 'Okunmadıysa yeniden hatırlat', 'Gün sonu özeti'],
+  notify: ['Bildirim sesleri', 'Ses düzeyi', 'Masaüstü bildirimleri', 'Deneme bildirimi', 'Grup ve kanal bildirimleri', 'Mivelo öndeyken de bildir', 'Art arda gelenleri birleştir', 'Okunmadıysa yeniden hatırlat', 'Rahatsız etme', 'Belirli saatlerde sessiz', 'Odak modu', 'Gün sonu özeti'],
   apps: ['Zil sesi', 'Uygulama ses düzeyi'],
   keys: ['Klavye kısayolları'],
   devices: ['Telefondan erişim', 'Bu cihaz', 'QR kod'],
@@ -313,6 +313,7 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
               </button>
             </div>
               <NotifyBehavior />
+              <QuietHours accounts={accounts} />
             </>
           )}
           {tab === 'apps' &&

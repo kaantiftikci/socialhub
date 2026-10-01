@@ -7,7 +7,7 @@ import os from 'node:os';
 import QRCode from 'qrcode';
 import { DATA_DIR } from './config.js';
 import { ScheduledQueue } from './scheduled.js';
-import type { CalEvent } from './model.js';
+import type { ChatFlags, CalEvent } from './model.js';
 import { addToDeviceCalendar, deviceCalendarApp, listDeviceCalendars, type DeviceCalendarError } from './calendar-device.js';
 import { WebSocketServer, WebSocket } from 'ws';
 import { markActive } from './activity.js';
@@ -666,12 +666,34 @@ export function createServer(store: Store, registry: Registry, port: number): ht
   route('POST', '/api/chats/:id/flags', (_r, _s, p, body) => {
     const id = dec(p.id);
     const b = (body ?? {}) as Record<string, unknown>;
-    const flags: Record<string, boolean> = {};
-    for (const k of ['pinned', 'archived', 'muted', 'hidden']) if (typeof b[k] === 'boolean') flags[k] = b[k] as boolean;
+    const flags: ChatFlags = {};
+    for (const k of ['pinned', 'archived', 'muted', 'hidden'] as const) if (typeof b[k] === 'boolean') flags[k] = b[k] as boolean;
+    // süreli sessiz: {muted:true, mutedUntil:<ms>}; null/0 = süresiz
+    if ('mutedUntil' in b) flags.mutedUntil = typeof b.mutedUntil === 'number' && b.mutedUntil > 0 ? b.mutedUntil : undefined;
     const chat = store.setFlags(id, flags);
     if (!chat) throw new HttpError(404, 'Sohbet yok');
     bus.emit({ type: 'chat.upsert', chat });
     return chat;
+  });
+  // Okunmadı olarak işaretle (yerel; platforma gitmez). Açık sohbet arayüzde kapatılır ki yeniden okunmasın
+  route('POST', '/api/chats/:id/unread', (_r, _s, p) => {
+    const chat = store.setUnread(dec(p.id));
+    if (!chat) throw new HttpError(404, 'Sohbet yok');
+    bus.emit({ type: 'chat.upsert', chat });
+    return chat;
+  });
+  // Yıldızlı mesajlar (yerel)
+  route('POST', '/api/messages/:id/star', (_r, _s, p, body) => {
+    const on = !!(body as { starred?: boolean } | undefined)?.starred;
+    const m = store.setStarred(dec(p.id), on);
+    if (!m) throw new HttpError(404, 'Mesaj yok');
+    const chat = store.getChat(m.chatId);
+    if (chat) bus.emit({ type: 'message.upsert', message: m, chat });
+    return m;
+  });
+  route('GET', '/api/starred', (req) => {
+    const limit = Number(new URL(req.url ?? '/', 'http://x').searchParams.get('limit')) || 200;
+    return store.listStarred(limit);
   });
   // Bağlantı önizlemesi (Open Graph); güvenli getirici link-preview.ts
   route('GET', '/api/preview', async (req) => {

@@ -4,8 +4,8 @@
  * geçmiş yükleme (backfill) ile canlı akış çakıştığında kayıt tekrarlanmaz.
  */
 
-export type Platform = 'whatsapp' | 'telegram' | 'slack' | 'linkedin' | 'x' | 'imessage' | 'instagram' | 'messenger' | 'tiktok' | 'gmail' | 'outlook' | 'yahoo' | 'yandex' | 'icloud' | 'imap' | 'shopier' | 'trendyol' | 'hepsiburada' | 'etsy' | 'shopify' | 'n11' | 'amazon' | 'pttavm' | 'demo';
-export const ALL_PLATFORMS: readonly Platform[] = ['whatsapp', 'telegram', 'slack', 'linkedin', 'x', 'imessage', 'instagram', 'messenger', 'tiktok', 'gmail', 'outlook', 'yahoo', 'yandex', 'icloud', 'imap', 'shopier', 'trendyol', 'hepsiburada', 'etsy', 'shopify', 'n11', 'amazon', 'pttavm', 'demo'];
+export type Platform = 'whatsapp' | 'telegram' | 'slack' | 'linkedin' | 'x' | 'imessage' | 'instagram' | 'messenger' | 'tiktok' | 'gmail' | 'outlook' | 'yahoo' | 'yandex' | 'icloud' | 'imap' | 'shopier' | 'trendyol' | 'hepsiburada' | 'etsy' | 'shopify' | 'n11' | 'amazon' | 'pttavm' | 'mivelo' | 'demo';
+export const ALL_PLATFORMS: readonly Platform[] = ['whatsapp', 'telegram', 'slack', 'linkedin', 'x', 'imessage', 'instagram', 'messenger', 'tiktok', 'gmail', 'outlook', 'yahoo', 'yandex', 'icloud', 'imap', 'shopier', 'trendyol', 'hepsiburada', 'etsy', 'shopify', 'n11', 'amazon', 'pttavm', 'mivelo', 'demo'];
 export const MAIL_PLATFORMS: Platform[] = ['gmail', 'outlook', 'yahoo', 'yandex', 'icloud', 'imap'];
 
 export type AccountStatus = 'disconnected' | 'connecting' | 'pairing' | 'connected' | 'error';
@@ -57,6 +57,8 @@ export interface Chat {
   pinned?: boolean;
   archived?: boolean;
   muted?: boolean;
+  /** Süreli sessiz: bu zamana (ms) kadar; geçince muted kalkar (okurken hesaplanır) */
+  mutedUntil?: number;
   hidden?: boolean;
   /** Takip hatırlatıcısı: `at` zamanına kadar karşı taraftan (`since` sonrasında) yanıt gelmezse hatırlat */
   followUp?: FollowUp;
@@ -72,7 +74,7 @@ export interface FollowUp {
 }
 
 /** Yerel sohbet bayrakları (sabitle/arşivle/sessize al/gizle) */
-export type ChatFlags = Pick<Chat, 'pinned' | 'archived' | 'muted' | 'hidden'>;
+export type ChatFlags = Pick<Chat, 'pinned' | 'archived' | 'muted' | 'hidden' | 'mutedUntil'>;
 
 export interface Participant {
   id: string;
@@ -111,6 +113,8 @@ export interface Message {
   edited?: boolean;
   /** Mesaj herkesten silindi (metin "🚫 Bu mesaj silindi", ekler boş) */
   deleted?: boolean;
+  /** Yıldızlı (yerel; platforma yansımaz) */
+  starred?: boolean;
 }
 
 /** Herkesten silinen mesajın metni (WhatsApp/Telegram/Slack/Instagram ortak; arayüz 🚫 baş ikonunu SYSTEM_LEAD ile çizer) */

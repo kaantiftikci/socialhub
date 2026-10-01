@@ -116,6 +116,8 @@ async function main(): Promise<void> {
     }
   });
   await registry.bootAll();
+  // "Kendime not" yerel kanalı (connectors/notes.ts): yoksa bir kez eklenir, sonraki açılışlarda bootAll başlatır
+  if (!registry.list().some((a) => a.platform === 'mivelo')) await registry.add('mivelo', { label: 'Kendime not' }).catch((e) => bus.log('warn', `Kendime not kanalı açılamadı: ${(e as Error).message}`));
   // yerel AI (konuşma tanıma + anlamsal arama) çalışma zamanı ve modelleri: kanallar açıldıktan sonra arka planda kendiliğinden kurulur
   setMlLicenseCheck(() => !LICENSE_REQUIRED || licensed());
   startMlAutoInstall(75_000);

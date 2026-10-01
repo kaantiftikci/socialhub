@@ -106,6 +106,11 @@ const liveApi = {
   deleteMessage: (messageId: string) => call<Message>('POST', `/messages/${enc(messageId)}/delete`),
   editMessage: (messageId: string, text: string) => call<Message>('POST', `/messages/${enc(messageId)}/edit`, { text }),
   setFlags: (chatId: string, flags: ChatFlags) => call<Chat>('POST', `/chats/${enc(chatId)}/flags`, flags),
+  /** Okunmadı olarak işaretle (yerel) */
+  markUnread: (chatId: string) => call<Chat>('POST', `/chats/${enc(chatId)}/unread`),
+  /** Yıldızla / yıldızı kaldır; İşaretliler listesi */
+  setStarred: (messageId: string, starred: boolean) => call<Message>('POST', `/messages/${enc(messageId)}/star`, { starred }),
+  starred: (limit = 200) => call<Array<{ message: Message; chat: Chat }>>('GET', `/starred?limit=${limit}`),
   preview: (url: string) => call<LinkPreview>('GET', `/preview?url=${enc(url)}`),
   markRead: (chatId: string) => call('POST', `/chats/${enc(chatId)}/read${getPrefs().silentRead ? '?silent=1' : ''}`),
   setTags: (chatId: string, tags: string[]) => call<Chat>('POST', `/chats/${enc(chatId)}/tags`, { tags }),

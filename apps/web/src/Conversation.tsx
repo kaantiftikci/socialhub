@@ -5,7 +5,7 @@ import { EmojiPicker } from './emoji';
 import { api, USE_STATIC } from './api';
 import { requireAiConsent } from './consent-store';
 import { EventEditor } from './CalendarView';
-import { API_BASE, isTauri, mediaUrl, openExternal } from './desktop';
+import { API_BASE, MOD_KEY, isTauri, mediaUrl, openExternal } from './desktop';
 import { DEFAULT_TAGS, EDIT_LIMIT_MS, QUOTE_TEXT_PLATFORMS, parseQuoteLine, quoteLine, EDIT_PLATFORMS, PLATFORMS, REPLY_PLATFORMS, UNSEND_LIMIT_MS, UNSEND_PLATFORMS, isOrderPage, questionOrderRef, shopKind, QUICK_REACTIONS, REACT_PLATFORMS, TAG_COLORS, openInAppLink, type Attachment, type CalendarDraft, type Chat, type ChatFlags, type DraftResult, type LinkPreview, type Message, type Platform, type Reaction } from './types';
 import { guessWhen } from './when';
 import { useAiPrefs } from './ai-prefs';
@@ -87,6 +87,16 @@ const schedListeners = new Set<() => void>();
  */
 const CORE_SCHED = !USE_STATIC;
 let coreSched: ScheduledSend[] = [];
+/** Sessize al süreleri (WhatsApp/Telegram gibi): etiket, süre ms (0 = süresiz) */
+const MUTE_CHOICES: Array<[string, number]> = [['8 saat', 8 * 3600_000], ['1 hafta', 7 * 86_400_000], ['Her zaman', 0]];
+function muteLeft(until: number): string {
+  const ms = until - Date.now();
+  if (ms <= 0) return 'süre doldu';
+  const h = Math.round(ms / 3600_000);
+  if (h < 1) return `${Math.max(1, Math.round(ms / 60_000))} dk kaldı`;
+  if (h < 36) return `${h} sa kaldı`;
+  return `${Math.round(h / 24)} gün kaldı`;
+}
 /** Gönderilen balonun kalkış süresi (yazma alanından yerine) */
 const SEND_MS = 420;
 
@@ -232,6 +242,7 @@ export function Conversation({
   onTags,
   showDetails = true,
   onToggleDetails,
+  onMarkUnread,
   onOpenChat,
   onLoadOlder,
   focusMessageId,
@@ -256,6 +267,8 @@ export function Conversation({
   onTags: (tags: string[]) => void;
   showDetails?: boolean;
   onToggleDetails?: () => void;
+  /** Okunmadı olarak işaretle (App: işaretler ve sohbeti kapatır) */
+  onMarkUnread?: () => void;
   onOpenChat?: (c: Chat) => void;
   /** Depodaki daha eski mesajları (100'er) yükle */
   /** Genel aramadan gelindi: bu mesaja kaydır ve kısa süre vurgula */
@@ -564,6 +577,9 @@ export function Conversation({
   const [reactPick, setReactPick] = useState<{ id: string; top: number; left: number } | null>(null);
   /** Hızlı tepki çubuğu açık olan mesaj (üstüne gelince yalnız 😊 düğmesi görünür; tıklayınca çubuk açılır) */
   const [barFor, setBarFor] = useState<string | null>(null);
+  /** Sessize al → süre seçimi açık mı */
+  const [muteAsk, setMuteAsk] = useState(false);
+  useEffect(() => setMuteAsk(false), [chat.id]);
   /** Takvime ekle penceresi (ön doldurulmuş) */
   const [calFor, setCalFor] = useState<CalendarDraft | null>(null);
   /** Metinden takvim taslağı: tarih/saat tahmini + başlık (ilk satır, kısaltılmış) */
@@ -601,7 +617,7 @@ export function Conversation({
   const reactAsText = !REACT_PLATFORMS.has(chat.platform) && QUOTE_TEXT_PLATFORMS.has(chat.platform);
   const canReact = REACT_PLATFORMS.has(chat.platform) || reactAsText;
   // takip hatırlatıcısı pazaryeri dışında her sohbette (sağ paneldeki ile aynı)
-  const canFollow = PLATFORMS[chat.platform].category !== 'shop';
+  const canFollow = PLATFORMS[chat.platform].category !== 'shop' && PLATFORMS[chat.platform].category !== 'self';
   const byRemote = useMemo(() => new Map(messages.map((m) => [m.remoteId, m])), [messages]);
   /** Gönderen → profil fotoğrafı: bazı mesajlarda fotoğraf yoksa aynı kişinin başka mesajından ya da üye listesinden */
   const avatarOf = useMemo(() => {
@@ -651,7 +667,7 @@ export function Conversation({
   /** E-posta kanalları: balon yerine ileti kartları ve e-posta yanıt alanı */
   const isMail = platform.category === 'mail' && !timeline; // birleşik zaman çizelgesi e-posta düzeninde çizilmez
   // Pazaryeri yanıtları (Trendyol/HB/n11 soru-cevap, sipariş notu) yalnız metin: dosya ve ses gönderilemez
-  const canMedia = platform.category !== 'shop';
+  const canMedia = platform.category !== 'shop' && platform.category !== 'self'; // Kendime not: yalnız metin (dosya yolu yok)
   /** Sohbet notu: hızlı ve yerel (localStorage, sohbet kimliğine göre); sohbet değişince yeniden okunur */
   const noteKey = `kavsak.note.${chat.id}`;
   const sampleNote = typeof chat.meta?.note === 'string' ? chat.meta.note : '';
@@ -1155,8 +1171,10 @@ export function Conversation({
   // Balon listesi yalnız mesajlar/sohbet/açık menüler değişince yeniden kurulur: yazma alanındaki her tuş vuruşunda
   // (text durumu bu bileşende) ve App'in ilgisiz çizimlerinde 300-1000 balon baştan üretilmesin. Tıklama işleyicileri
   // her çizimde yenilenen işlevleri act ref'inden okur (bayat kapanış olmaz).
-  const act = useRef({ react, startEdit, unsend, setFollowUp, calFromText, notify, retryOut, discardOut });
-  act.current = { react, startEdit, unsend, setFollowUp, calFromText, notify, retryOut, discardOut };
+  /** Yıldızla / kaldır (yerel; platforma gitmez). Kayıt message.upsert ile döner */
+  const star = (m: Message) => api.setStarred(m.id, !m.starred).catch((e: Error) => notify(e.message, true));
+  const act = useRef({ react, startEdit, unsend, setFollowUp, calFromText, notify, retryOut, discardOut, star });
+  act.current = { react, startEdit, unsend, setFollowUp, calFromText, notify, retryOut, discardOut, star };
   const bubbleList = useMemo(
     () =>
       groups.map((g) =>
@@ -1263,6 +1281,7 @@ export function Conversation({
                           {(() => {
                             const timeEl = !isReact ? (
                               <time className="bt" dateTime={new Date(m.ts).toISOString()} title={fmtStamp(m.ts)}>
+                                {m.starred && <span className="bt-star"><Icon name="starfill" size={10} /></span>}
                                 {m.edited && !m.deleted && <span className="edited">düzenlendi</span>}
                                 {timeline && <TlMark p={timeline.platformOf(m.chatId)} />}
                                 {fmtTime(m.ts)}
@@ -1333,6 +1352,11 @@ export function Conversation({
                             !!m.text && (
                               <button key="c" type="button" className="rtrig cal" aria-label="Takvime ekle" title="Takvime ekle" onClick={() => (setCalFor({ ...act.current.calFromText(m.text, `${m.fromMe ? 'Ben' : m.senderName}: ${m.text}`), messageId: m.id }), setBarFor(null))}>
                                 <Icon name="calendar" size={14} />
+                              </button>
+                            ),
+                            !foreign && (
+                              <button key="s" type="button" className={`rtrig ${m.starred ? 'rtrig-on star-on' : ''}`} aria-label={m.starred ? 'Yıldızı kaldır' : 'Yıldızla'} title={m.starred ? 'Yıldızı kaldır' : 'Yıldızla (İşaretliler görünümünde toplanır)'} onClick={(ev) => (!m.starred && popStar(ev.currentTarget.querySelector('svg')), act.current.star(m))}>
+                                <Icon name={m.starred ? 'starfill' : 'star'} size={14} />
                               </button>
                             ),
                             canFollow && (
@@ -1540,9 +1564,43 @@ export function Conversation({
       setDraft(null);
       setReplyTarget(null);
       pressSend();
+      // Gönderimi geri al (Ayarlar → Genel): Enter'dan sonra N sn beklenir; bu sürede "Geri al" metni yazma alanına döndürür
+      const sec = getPrefs().undoSec;
+      if (sec > 0) {
+        flushUndo();
+        const timer = window.setTimeout(() => {
+          setUndo((u) => (u?.id === id ? null : u));
+          void dispatch(id, params);
+        }, sec * 1000);
+        setUndo({ id, params, timer, sec, reply: rt && !reaction ? rt : null });
+        return;
+      }
     }
     return dispatch(id, params);
   }
+  /** Geri al penceresindeki gönderim: {id, params, timer}; yeni gönderim ya da sohbet değişimi öncekini hemen yollar (flushUndo) */
+  const [undo, setUndo] = useState<{ id: string; params: OutSend; timer: number; sec: number; reply: Message | null } | null>(null);
+  const undoRef = useRef(undo);
+  undoRef.current = undo;
+  function flushUndo() {
+    const u = undoRef.current;
+    if (!u) return;
+    clearTimeout(u.timer);
+    setUndo(null);
+    void dispatch(u.id, u.params);
+  }
+  function undoSend() {
+    const u = undoRef.current;
+    if (!u) return;
+    clearTimeout(u.timer);
+    setUndo(null);
+    setOutbox((x) => x.filter((o) => o.id !== u.id));
+    setText((t) => (t.trim() ? t : u.params.typed));
+    if (u.reply) setReplyTarget(u.reply);
+    requestAnimationFrame(() => taRef.current?.focus());
+  }
+  // sohbet değişince / pencere kapanınca bekleyen gönderim hemen gider (kaybolmasın)
+  useEffect(() => () => flushUndo(), [chat.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Giden mesajı platforma yollar (iyimser balon `id`); hata olursa balon "Gönderilemedi · Yeniden dene" ile kalır */
   async function dispatch(id: string, p: OutSend) {
@@ -1594,6 +1652,11 @@ export function Conversation({
   }
 
   function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'z' && undoRef.current && !text.trim()) {
+      e.preventDefault();
+      undoSend();
+      return;
+    }
     if (e.key === 'Escape' && editTarget) {
       e.preventDefault(); // sohbet kapanmasın, yalnız düzenleme iptal
       cancelEdit();
@@ -1845,6 +1908,19 @@ export function Conversation({
         </div>
 
         <div className={`composer ${draftShown ? 'ai' : ''} ${isMail ? 'mail' : ''}`}>
+          {undo && (
+            <div className="undo-bar" role="status" key={undo.id} style={{ ['--undo-s' as string]: `${undo.sec}s` }}>
+              <span className="undo-line" />
+              <Icon name="clock" size={13} />
+              <span>Gönderiliyor…</span>
+              <button type="button" className="b" onClick={undoSend} title={`Geri al (${MOD_KEY}Z)`}>
+                <Icon name="undo" size={13} /> Geri al
+              </button>
+              <button type="button" className="b now" onClick={flushUndo} title="Beklemeden gönder">
+                Hemen gönder
+              </button>
+            </div>
+          )}
           {composerExtra}
           {isMail && (
             <div className="mail-reply-head">
@@ -2098,9 +2174,32 @@ export function Conversation({
               <button type="button" className={`act b ${chat.pinned ? 'on' : ''}`} onClick={() => onFlags({ pinned: !chat.pinned })}>
                 <Icon name="pin" size={15} /> <span>{chat.pinned ? 'Sabitlemeyi kaldır' : 'Üstte sabitle'}</span>
               </button>
-              <button type="button" className={`act b ${chat.muted ? 'on' : ''}`} onClick={() => onFlags({ muted: !chat.muted })}>
-                <Icon name="mute" size={15} /> <span>{chat.muted ? 'Sesi aç' : 'Sessize al'}</span>
-              </button>
+              {chat.muted ? (
+                <button type="button" className="act b on" onClick={() => onFlags({ muted: false, mutedUntil: undefined })}>
+                  <Icon name="mute" size={15} /> <span>Sesi aç</span>
+                  <em className="act-sub">{chat.mutedUntil ? muteLeft(chat.mutedUntil) : 'süresiz sessiz'}</em>
+                </button>
+              ) : muteAsk ? (
+                <div className="act-pick" role="group" aria-label="Ne kadar süre sessiz">
+                  {MUTE_CHOICES.map(([label, ms]) => (
+                    <button key={label} type="button" className="b" onClick={() => (setMuteAsk(false), onFlags({ muted: true, mutedUntil: ms ? Date.now() + ms : undefined }))}>
+                      {label}
+                    </button>
+                  ))}
+                  <button type="button" className="b x" onClick={() => setMuteAsk(false)} aria-label="Vazgeç">
+                    <Icon name="x" size={12} />
+                  </button>
+                </div>
+              ) : (
+                <button type="button" className="act b" onClick={() => setMuteAsk(true)}>
+                  <Icon name="mute" size={15} /> <span>Sessize al</span>
+                </button>
+              )}
+              {onMarkUnread && PLATFORMS[chat.platform].category !== 'self' && (
+                <button type="button" className="act b" onClick={onMarkUnread} title="Sohbet listeye okunmamış olarak döner (platforma gitmez)">
+                  <Icon name="mailunread" size={15} /> <span>Okunmadı olarak işaretle</span>
+                </button>
+              )}
               <button type="button" className={`act b ${chat.hidden ? 'on' : ''}`} onClick={() => onFlags({ hidden: !chat.hidden })}>
                 <Icon name="eyeoff" size={15} /> <span>{chat.hidden ? 'Gizlemeyi kaldır' : 'Gizle'}</span>
               </button>
@@ -3120,6 +3219,9 @@ function followText(name: string, f: NonNullable<Chat['followUp']>): string {
 }
 
 /** Zil sallanması (takip hatırlatıcısı açılınca) */
+function popStar(el: Element | null | undefined) {
+  animate(el, [{ transform: 'scale(1)' }, { transform: 'scale(1.5) rotate(-12deg)', offset: 0.4 }, { transform: 'scale(1)' }], { duration: 380, easing: EASE.pop });
+}
 function shakeBell(el: Element | null | undefined) {
   const o = '50% 15%';
   animate(el, [{ transform: 'rotate(0)', transformOrigin: o }, { transform: 'rotate(16deg)', transformOrigin: o, offset: 0.15 }, { transform: 'rotate(-13deg)', transformOrigin: o, offset: 0.35 }, { transform: 'rotate(8deg)', transformOrigin: o, offset: 0.55 }, { transform: 'rotate(-4deg)', transformOrigin: o, offset: 0.75 }, { transform: 'rotate(0)', transformOrigin: o }], { duration: 620, easing: 'ease-out' });
@@ -3354,6 +3456,43 @@ function isPageLink(u?: string): boolean {
   return !!u && /^https?:\/\//i.test(u) && !isMediaFile(u);
 }
 
+/** Sesli mesaj: 1× / 1,5× / 2× hız (WhatsApp/Telegram gibi); seçim tüm sesli mesajlarda ortak, localStorage */
+const RATES = [1, 1.5, 2] as const;
+const RATE_KEY = 'mivelo.voiceRate';
+let voiceRate: number = (() => {
+  try {
+    const v = Number(localStorage.getItem(RATE_KEY));
+    return RATES.includes(v as (typeof RATES)[number]) ? v : 1;
+  } catch {
+    return 1;
+  }
+})();
+function AudioClip({ src }: { src: string }) {
+  const ref = useRef<HTMLAudioElement>(null);
+  const [rate, setRate] = useState(voiceRate);
+  useEffect(() => {
+    if (ref.current) ref.current.playbackRate = rate;
+  }, [rate]);
+  const cycle = () => {
+    const next = RATES[(RATES.indexOf(rate as (typeof RATES)[number]) + 1) % RATES.length];
+    voiceRate = next;
+    try {
+      localStorage.setItem(RATE_KEY, String(next));
+    } catch {
+      /* depo kapalı */
+    }
+    setRate(next);
+  };
+  return (
+    <>
+      <audio ref={ref} src={src} controls preload="metadata" onPlay={(e) => (e.currentTarget.playbackRate = voiceRate)} />
+      <button type="button" className={`rate b ${rate !== 1 ? 'on' : ''}`} onClick={cycle} title="Dinleme hızı" aria-label={`Dinleme hızı ${rate}×`}>
+        {String(rate).replace('.', ',')}×
+      </button>
+    </>
+  );
+}
+
 /**
  * Mesaj balonundaki ek (hiçbiri yeni sekme açmaz; tıklayınca uygulama içi medya penceresi):
  * - audio → <audio controls> (link)
@@ -3370,7 +3509,7 @@ function AttachmentView({ a, onOpen }: { a: Attachment; onOpen: (a: Attachment, 
     return (
       <span className="att-audio">
         <Icon name="mic" size={14} />
-        <audio src={link} controls preload="metadata" />
+        <AudioClip src={link} />
       </span>
     );
   }

@@ -43,6 +43,7 @@ export const BRAND_MARKUP: Partial<Record<Platform, string>> = {
   ...Object.fromEntries(LIGHT_TILE.map((p) => [p, `${BRAND_SVG[p] ?? ''}${TILE_EDGE}`])),
   yandex: faMarkup(faYandex, '#FFFFFF', '#FC3F1D', 0.5),
   demo: MIVELO_MARKUP,
+  mivelo: MIVELO_MARKUP,
 };
 
 /** Marka simgesinin tek başına SVG'si (ör. demo giriş penceresine data: adresiyle); PNG'li markalarda undefined */

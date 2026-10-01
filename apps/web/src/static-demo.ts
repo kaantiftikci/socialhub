@@ -214,9 +214,27 @@ function seed(): void {
   messages = [];
   seedK = 0;
   // yeni üye: ASLA örnek veri yok (bağladığı uygulamalar boş kanal olarak görünür)
+  seedNotes(now);
   if (freshUser) return;
   for (const acc of accounts) if (acc.status === 'connected') seedAccount(acc, now);
   seedScheduled(now);
+}
+
+/** "Kendime not" (çekirdekteki connectors/notes.ts gibi): hesap listesinde görünmez (category 'self'), sol menüden açılır */
+const NOTES_ACC = 'notes';
+export const NOTES_CHAT_ID = `${NOTES_ACC}/notes`;
+function seedNotes(now: number): void {
+  if (!accounts.some((a) => a.id === NOTES_ACC)) accounts = [...accounts, { id: NOTES_ACC, platform: 'mivelo', label: 'Kendime not', status: 'connected', createdAt: 1_750_000_000_000 }];
+  const chat: Chat = { id: NOTES_CHAT_ID, accountId: NOTES_ACC, platform: 'mivelo', remoteId: 'notes', name: 'Kendime not', kind: 'direct', unread: 0, lastMessageAt: 0, lastPreview: '', lastFromMe: true, tags: [], handle: 'Yalnız sende' };
+  chats.push(chat);
+  if (freshUser) return;
+  const lines = ['Kargo firması: 0850 … (müşteri hizmetleri) — iade kodu 4 gün geçerli', 'Perşembe toplantı notları: fiyat listesini güncelle, Ayşe’ye kataloğu gönder', 'https://mivelo.app/indir'];
+  lines.forEach((text, i) => {
+    const ts = now - (lines.length - i) * 5 * 3_600_000;
+    messages.push({ id: `${chat.id}#n${i}`, chatId: chat.id, remoteId: `n${i}`, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts, status: 'read' });
+    chat.lastMessageAt = ts;
+    chat.lastPreview = text;
+  });
 }
 
 /**
@@ -645,7 +663,8 @@ export const staticApi = {
   accountInput: async (_id: string, _kind: 'phone' | 'code' | 'password', _value: string) => {
     throw new Error(DEMO_BLOCK);
   },
-  chats: async () => chats.map((c) => ({ ...c })),
+  // süreli sessiz bitti: çekirdek okurken kaldırır; demoda burada
+  chats: async () => chats.map((c) => (c.mutedUntil && c.mutedUntil <= Date.now() ? { ...c, muted: undefined, mutedUntil: undefined } : { ...c })),
   messages: async (chatId: string, limit = 100, before?: number) =>
     messages
       .filter((m) => m.chatId === chatId && (before == null || m.ts < before))
@@ -715,10 +734,32 @@ export const staticApi = {
     const cur = chatOf(chatId);
     const next: Chat = { ...cur };
     for (const k of ['pinned', 'archived', 'muted', 'hidden'] as const) if (typeof flags[k] === 'boolean') next[k] = flags[k] || undefined;
+    if ('mutedUntil' in flags) next.mutedUntil = typeof flags.mutedUntil === 'number' && flags.mutedUntil > Date.now() ? flags.mutedUntil : undefined;
+    if (!next.muted) next.mutedUntil = undefined;
     chats = chats.map((c) => (c.id === chatId ? next : c));
     emit({ type: 'chat.upsert', chat: next });
     return next;
   },
+  markUnread: async (chatId: string): Promise<Chat> => {
+    const cur = chatOf(chatId);
+    const next: Chat = { ...cur, unread: Math.max(1, cur.unread) };
+    chats = chats.map((c) => (c.id === chatId ? next : c));
+    emit({ type: 'chat.upsert', chat: next });
+    return next;
+  },
+  setStarred: async (messageId: string, starred: boolean): Promise<Message> => {
+    const m = messages.find((x) => x.id === messageId);
+    if (!m) throw new Error('Mesaj yok');
+    m.starred = starred || undefined;
+    emit({ type: 'message.upsert', message: { ...m }, chat: chatOf(m.chatId) });
+    return { ...m };
+  },
+  starred: async (limit = 200) =>
+    messages
+      .filter((m) => m.starred)
+      .sort((a, b) => b.ts - a.ts)
+      .slice(0, limit)
+      .map((message) => ({ message: { ...message }, chat: chatOf(message.chatId) })),
   preview: async (url: string): Promise<LinkPreview> => {
     // Demo: çekirdek yok; bilinen örnek adresler için sabit kart, diğerleri kartsız
     try {

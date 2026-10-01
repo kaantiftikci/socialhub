@@ -10,6 +10,7 @@ import { WhatsAppConnector } from './connectors/whatsapp.js';
 import { TelegramConnector } from './connectors/telegram.js';
 import { SlackConnector, parseSlackToken } from './connectors/slack.js';
 import { DemoConnector } from './connectors/demo.js';
+import { NotesConnector } from './connectors/notes.js';
 import { IMessageConnector } from './connectors/imessage.js';
 import { BrowserConnector } from './connectors/browser/bridge.js';
 import { linkedin } from './connectors/browser/linkedin.js';
@@ -281,7 +282,7 @@ export class Registry {
 
   private async addNow(platform: Platform, opts: { token?: string; label?: string }): Promise<Account> {
     // Tek hesaplı platformlar: ikinci kez "Bağlan" denirse kopya hesap açma, var olanı yeniden başlat
-    const SINGLE: Platform[] = ['whatsapp', 'telegram', 'slack', 'imessage', 'linkedin', 'x', 'instagram', 'messenger', 'tiktok', 'shopier', 'trendyol', 'hepsiburada', 'etsy', 'shopify', 'n11', 'amazon', 'pttavm'];
+    const SINGLE: Platform[] = ['whatsapp', 'telegram', 'slack', 'imessage', 'linkedin', 'x', 'instagram', 'messenger', 'tiktok', 'shopier', 'trendyol', 'hepsiburada', 'etsy', 'shopify', 'n11', 'amazon', 'pttavm', 'mivelo'];
     const existing = SINGLE.includes(platform) ? this.list().find((a) => a.platform === platform) : undefined;
     if (existing) {
       if (opts.token) fs.writeFileSync(path.join(sessionDir(existing.id), 'token'), opts.token, { mode: 0o600 });
@@ -491,6 +492,9 @@ export class Registry {
       }
       case 'demo':
         c = new DemoConnector(account, this.store);
+        break;
+      case 'mivelo':
+        c = new NotesConnector(account, this.store);
         break;
       case 'imessage':
         c = new IMessageConnector(account, this.store);

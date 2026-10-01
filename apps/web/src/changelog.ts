@@ -16,6 +16,37 @@ export interface ChangeEntry {
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    id: '2026-10-01g',
+    date: '2026-10-01',
+    title: 'Küçük ama sevilen şeyler',
+    items: [
+      {
+        title: 'Gönderimi geri al',
+        text: 'Enter’a bastıktan sonra 5 saniye içinde “Geri al” dersen mesaj gitmez, yazma alanına döner. Süreyi Ayarlar → Genel’den 10 saniye yapabilir ya da kapatabilirsin.',
+      },
+      {
+        title: 'Kendime not',
+        text: 'Sol menüde yeni bir sohbet: bağlantı, kod, hatırlatma… ne yazarsan yalnız bu cihazda durur, hiçbir uygulamaya gitmez.',
+      },
+      {
+        title: 'Yıldızla ve İşaretliler',
+        text: 'Mesajın üstüne gelince çıkan yıldıza bas; adres, karar, kargo kodu gibi sonra lazım olacaklar sol menüdeki İşaretliler’de tüm uygulamalardan toplanır.',
+      },
+      {
+        title: 'Sesli mesajı hızlı dinle',
+        text: 'Sesli mesajın yanındaki 1× düğmesi 1,5× ve 2× arasında geçer; seçimin tüm sesli mesajlarda kalır.',
+      },
+      {
+        title: 'Süreli sessiz ve okunmadı işareti',
+        text: 'Sessize al artık 8 saat / 1 hafta / her zaman soruyor, süre bitince ses kendiliğinden açılır. Sağ panelden “Okunmadı olarak işaretle” ile sohbeti sonra dönmek üzere listede bırakabilirsin.',
+      },
+      {
+        title: 'Rahatsız etme ve Odak modu',
+        text: 'Ayarlar → Bildirimler: belirli saatlerde (örneğin 23:00–08:00) ve hafta sonu bildirim çıkmaz; Odak modunda yalnız seçtiğin uygulamalar bildirir. Okunmamış sayısı yine güncellenir.',
+      },
+    ],
+  },
+  {
     id: '2026-10-01f',
     date: '2026-10-01',
     title: 'Canlı mesajlaşma',

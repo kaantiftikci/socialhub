@@ -109,6 +109,13 @@ export function GeneralPane() {
         <Row title="Yazım denetimi" hint="Yanlış yazılan kelimelerin altı çizilir">
           <Switch label="Yazım denetimi" on={p.spellcheck} onChange={pref('spellcheck')} />
         </Row>
+        <Row title="Gönderimi geri al" hint={p.undoSec ? `Enter'dan sonra ${p.undoSec} sn içinde “Geri al” (${MOD_KEY}Z) metni yazma alanına döndürür` : 'Mesaj Enter’a basınca hemen gider'}>
+          <select value={p.undoSec} aria-label="Gönderimi geri al süresi" onChange={(e) => setPrefs({ undoSec: Number(e.target.value) as Prefs['undoSec'] })}>
+            <option value={0}>Kapalı</option>
+            <option value={5}>5 saniye</option>
+            <option value={10}>10 saniye</option>
+          </select>
+        </Row>
       </div>
       <GroupTitle>Gizlilik</GroupTitle>
       <div className="set-group">
@@ -205,6 +212,54 @@ export function NotifyBehavior() {
             <option value={60}>1 saat</option>
           </select>
         </Row>
+      </div>
+    </>
+  );
+}
+
+// ---------------- Rahatsız etme + Odak modu (Bildirimler bölümü) ----------------
+export function QuietHours({ accounts }: { accounts: Account[] }) {
+  const p = usePrefs();
+  const platforms = [...new Set(accounts.map((a) => a.platform))].filter((x) => PLATFORMS[x] && PLATFORMS[x].category !== 'self');
+  const chosen = new Set(p.focus.platforms);
+  const toggle = (x: string) => {
+    const next = new Set(chosen);
+    if (next.has(x)) next.delete(x);
+    else next.add(x);
+    setPrefs({ focus: { ...p.focus, platforms: [...next] } });
+  };
+  return (
+    <>
+      <GroupTitle>Rahatsız etme</GroupTitle>
+      <div className="set-group">
+        <Row title="Belirli saatlerde sessiz" hint="Bu saatler arasında bildirim kartı çıkmaz, ses çalmaz; okunmamış sayısı ve liste yine güncellenir">
+          <Switch label="Belirli saatlerde sessiz" on={p.dnd.on} onChange={(v) => setPrefs({ dnd: { ...p.dnd, on: v } })} />
+        </Row>
+        <Row title="Saatler" dim={!p.dnd.on}>
+          <span className="set-times">
+            <input type="time" value={p.dnd.from} disabled={!p.dnd.on} aria-label="Başlangıç" onChange={(e) => setPrefs({ dnd: { ...p.dnd, from: e.target.value || '23:00' } })} />
+            <span>–</span>
+            <input type="time" value={p.dnd.to} disabled={!p.dnd.on} aria-label="Bitiş" onChange={(e) => setPrefs({ dnd: { ...p.dnd, to: e.target.value || '08:00' } })} />
+          </span>
+        </Row>
+        <Row title="Hafta sonu tamamen sessiz" hint="Cumartesi ve Pazar günü boyunca" dim={!p.dnd.on}>
+          <Switch label="Hafta sonu sessiz" disabled={!p.dnd.on} on={p.dnd.weekend} onChange={(v) => setPrefs({ dnd: { ...p.dnd, weekend: v } })} />
+        </Row>
+      </div>
+      <GroupTitle>Odak modu</GroupTitle>
+      <div className="set-group">
+        <Row title="Yalnız seçili uygulamalardan bildir" hint={p.focus.on ? (chosen.size ? 'Seçili olmayan uygulamaların mesajları sessizce gelir' : 'Hiçbiri seçili değil: hepsi bildirir; aşağıdan seç') : 'Örneğin mesaide yalnız Slack ve e-posta, akşam yalnız WhatsApp'}>
+          <Switch label="Odak modu" on={p.focus.on} onChange={(v) => setPrefs({ focus: { ...p.focus, on: v } })} />
+        </Row>
+        {platforms.length > 0 && (
+          <div className={`set-chips ${p.focus.on ? '' : 'dim'}`} role="group" aria-label="Odakta bildirecek uygulamalar">
+            {platforms.map((x) => (
+              <button key={x} type="button" className={`chipbtn b ${chosen.has(x) ? 'on' : ''}`} disabled={!p.focus.on} onClick={() => toggle(x)} aria-pressed={chosen.has(x)}>
+                <Chip platform={x} size={14} /> {PLATFORMS[x].name}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </>
   );

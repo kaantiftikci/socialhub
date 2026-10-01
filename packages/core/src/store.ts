@@ -130,6 +130,10 @@ export class Store {
     if (!cols.has('html')) this.db.exec('ALTER TABLE messages ADD COLUMN html TEXT'); // e-posta özgün HTML gövdesi
     if (!cols.has('edited')) this.db.exec('ALTER TABLE messages ADD COLUMN edited INTEGER'); // gönderildikten sonra düzenlendi
     if (!cols.has('deleted')) this.db.exec('ALTER TABLE messages ADD COLUMN deleted INTEGER'); // herkesten silindi
+    if (!cols.has('starred')) {
+      this.db.exec('ALTER TABLE messages ADD COLUMN starred INTEGER'); // yıldızlı (yerel)
+      this.db.exec('CREATE INDEX IF NOT EXISTS messages_starred ON messages(starred, ts) WHERE starred = 1');
+    }
     const ccols = new Set((this.stmt('PRAGMA table_info(chats)').all() as Array<{ name: string }>).map((c) => c.name));
     if (!ccols.has('handle')) this.db.exec('ALTER TABLE chats ADD COLUMN handle TEXT');
     if (!ccols.has('link')) this.db.exec('ALTER TABLE chats ADD COLUMN link TEXT');
@@ -757,10 +761,42 @@ export class Store {
   setFlags(id: string, flags: ChatFlags): Chat | undefined {
     const c = this.getChat(id);
     if (!c) return undefined;
-    const next: ChatFlags = { pinned: c.pinned, archived: c.archived, muted: c.muted, hidden: c.hidden };
+    const next: ChatFlags = { pinned: c.pinned, archived: c.archived, muted: c.muted, hidden: c.hidden, mutedUntil: c.mutedUntil };
     for (const k of ['pinned', 'archived', 'muted', 'hidden'] as const) if (typeof flags[k] === 'boolean') next[k] = flags[k] || undefined;
+    // süreli sessiz: muted ile birlikte bitiş zamanı; muted kapanınca ya da null gelince süre de silinir
+    if ('mutedUntil' in flags) {
+      const u = typeof flags.mutedUntil === 'number' ? Math.round(flags.mutedUntil) : undefined;
+      if (u && u <= Date.now()) next.muted = undefined; // geçmiş bitiş: sessiz sayılmaz
+      next.mutedUntil = u && u > Date.now() ? u : undefined;
+    }
+    if (!next.muted) next.mutedUntil = undefined;
     const clean = Object.fromEntries(Object.entries(next).filter(([, v]) => v));
     this.stmt('UPDATE chats SET flags = ? WHERE id = ?').run(Object.keys(clean).length ? JSON.stringify(clean) : null, id);
+    return this.getChat(id);
+  }
+
+  /** Mesajı yıldızla / yıldızı kaldır (yerel) */
+  setStarred(id: string, on: boolean): Message | undefined {
+    this.stmt('UPDATE messages SET starred = ? WHERE id = ?').run(on ? 1 : null, id);
+    return this.getMessage(id);
+  }
+
+  /** Yıldızlı mesajlar, en yeni önce (sohbetiyle) */
+  listStarred(limit = 200): Array<{ message: Message; chat: Chat }> {
+    const rows = this.stmt('SELECT * FROM messages WHERE starred = 1 ORDER BY ts DESC LIMIT ?').all(Math.max(1, Math.min(1000, limit))) as unknown[];
+    const out: Array<{ message: Message; chat: Chat }> = [];
+    for (const r of rows) {
+      const message = rowToMessage(r);
+      const chat = this.getChat(message.chatId);
+      if (chat && !this.removing.has(chat.accountId)) out.push({ message, chat });
+    }
+    return out;
+  }
+
+  /** Okunmadı olarak işaretle: en az 1 okunmamış, okuma noktası son mesajın önüne çekilir (platforma yansımaz) */
+  setUnread(id: string): Chat | undefined {
+    if (!this.getChatLite(id)) return undefined;
+    this.stmt('UPDATE chats SET unread = CASE WHEN unread > 0 THEN unread ELSE 1 END, read_upto = MIN(COALESCE(read_upto, 0), last_message_at - 1) WHERE id = ?').run(id);
     return this.getChat(id);
   }
 
@@ -1194,6 +1230,12 @@ function rowToChat(r: unknown): Chat {
 }
 
 function rowToChatBase(x: Record<string, unknown>): Chat {
+  const flags = x.flags ? safeJson<ChatFlags>(x.flags as string, {}) : {};
+  // süreli sessiz bitti: okurken kalkar (sohbet yazılınca kalıcı da temizlenir)
+  if (flags.mutedUntil && flags.mutedUntil <= Date.now()) {
+    delete flags.muted;
+    delete flags.mutedUntil;
+  }
   return {
     id: String(x.id),
     accountId: String(x.account_id),
@@ -1213,7 +1255,7 @@ function rowToChatBase(x: Record<string, unknown>): Chat {
     link: (x.link as string | null) ?? undefined,
     participants: undefined,
     meta: x.meta ? safeJson<Chat['meta']>(x.meta as string, undefined) : undefined,
-    ...(x.flags ? safeJson<ChatFlags>(x.flags as string, {}) : {}),
+    ...flags,
     followUp: x.followup ? (safeJson<FollowUp | null>(x.followup as string, null) ?? undefined) : undefined,
     lastStatus: typeof x.last_status === 'string' ? (x.last_status as Message['status']) : undefined,
   };
@@ -1240,6 +1282,7 @@ function rowToMessage(r: unknown): Message {
     hasHtml: x.html ? true : undefined,
     edited: Number(x.edited) === 1 ? true : undefined,
     deleted: Number(x.deleted) === 1 ? true : undefined,
+    starred: Number(x.starred) === 1 ? true : undefined,
   };
 }
 

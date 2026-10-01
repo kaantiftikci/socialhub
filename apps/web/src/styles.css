@@ -2615,3 +2615,49 @@ html.reduce-motion *, html.reduce-motion *::before, html.reduce-motion *::after 
 /* Kenar çubuğu profil satırı: tıklayınca Ayarlar → Profil */
 .me-open { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; padding: 4px; margin: -4px; border: 0; background: none; color: inherit; font: inherit; text-align: left; border-radius: 10px; cursor: pointer; }
 .me-open:hover { background: var(--raise); }
+
+/* ---- Gönderimi geri al (yazma alanının üstünde; çizgi süre boyunca kısalır) ---- */
+.undo-bar { position: relative; display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 6px 10px; border-radius: 10px; background: var(--raise); color: var(--text2); font-size: 12.5px; overflow: hidden; }
+.undo-bar .undo-line { position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; background: var(--v); transform-origin: left; animation: undoLine var(--undo-s, 5s) linear forwards; }
+@keyframes undoLine { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+.undo-bar button { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--line); background: var(--card); color: var(--v-txt); font: inherit; font-weight: 600; cursor: pointer; }
+.undo-bar button.now { margin-left: auto; color: var(--text3); font-weight: 500; }
+.undo-bar button:hover { border-color: var(--v-hl); }
+/* ---- Sesli mesaj hızı ---- */
+.att-audio audio { flex: 1 1 auto; min-width: 140px; }
+.att-audio .rate { position: relative; z-index: 3; flex: 0 0 auto; min-width: 34px; height: 22px; padding: 0 6px; border-radius: 7px; border: 1px solid var(--line); background: var(--card); color: var(--text2); font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; }
+.att-audio .rate.on { color: var(--v-txt); border-color: var(--v-hl); }
+.grp.me .att-audio .rate { background: rgba(255, 255, 255, 0.18); border-color: rgba(255, 255, 255, 0.35); color: #fff; }
+/* ---- Yıldız ---- */
+.rtrig.star-on { color: #d99a00; border-color: #e8c25a; }
+.bt .bt-star { display: inline-flex; color: #d99a00; margin-right: 2px; }
+.grp.me .bt .bt-star { color: #ffe08a; }
+/* ---- Eylemler: süreli sessiz + alt satır ---- */
+.act .act-sub { margin-left: auto; font-style: normal; font-size: 11px; color: var(--text3); }
+.act-pick { display: flex; align-items: center; gap: 4px; padding: 3px 6px; }
+.act-pick button { height: 28px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--card); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
+.act-pick button:hover { border-color: var(--v-hl); color: var(--v-txt); }
+.act-pick button.x { width: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; color: var(--text3); }
+/* ---- Ayarlar: saat aralığı + uygulama çipleri ---- */
+.set-times { display: inline-flex; align-items: center; gap: 6px; }
+.set-times input[type='time'] { height: 30px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--field); color: var(--text); font: inherit; }
+.set-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 14px 12px; }
+.set-chips.dim { opacity: 0.5; }
+.chipbtn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px 0 7px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); color: var(--text2); font: inherit; font-size: 12.5px; cursor: pointer; }
+.chipbtn.on { border-color: var(--v); color: var(--v-txt); background: var(--v-soft, var(--raise)); }
+.chipbtn:disabled { cursor: default; }
+/* ---- İşaretliler görünümü ---- */
+.st-view { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+.st-body { flex: 1; overflow: auto; padding: 8px 26px 30px; }
+.st-day h2 { font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text3); margin: 18px 0 6px; }
+.st-item { display: flex; align-items: flex-start; gap: 10px; padding: 9px 10px; border-radius: 12px; cursor: pointer; }
+.st-item:hover { background: var(--raise); }
+.st-main { flex: 1; min-width: 0; }
+.st-top { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text3); }
+.st-top b { color: var(--text); font-weight: 600; }
+.st-top time { margin-left: auto; }
+.st-text { margin: 3px 0 0; font-size: 13.5px; color: var(--text); white-space: pre-wrap; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.st-x { color: #d99a00; opacity: 0; }
+.st-item:hover .st-x { opacity: 1; }
+.st-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; max-width: 380px; margin: 60px auto; text-align: center; color: var(--text3); }
+.app.mobile .st-body { padding: 4px 12px 24px; }

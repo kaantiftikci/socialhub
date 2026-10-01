@@ -1,5 +1,5 @@
-export type Platform = 'whatsapp' | 'telegram' | 'slack' | 'linkedin' | 'x' | 'imessage' | 'instagram' | 'messenger' | 'tiktok' | 'gmail' | 'outlook' | 'yahoo' | 'yandex' | 'icloud' | 'imap' | 'shopier' | 'trendyol' | 'hepsiburada' | 'etsy' | 'shopify' | 'n11' | 'amazon' | 'pttavm' | 'demo';
-export type Category = 'chat' | 'mail' | 'shop';
+export type Platform = 'whatsapp' | 'telegram' | 'slack' | 'linkedin' | 'x' | 'imessage' | 'instagram' | 'messenger' | 'tiktok' | 'gmail' | 'outlook' | 'yahoo' | 'yandex' | 'icloud' | 'imap' | 'shopier' | 'trendyol' | 'hepsiburada' | 'etsy' | 'shopify' | 'n11' | 'amazon' | 'pttavm' | 'mivelo' | 'demo';
+export type Category = 'chat' | 'mail' | 'shop' | 'self';
 export type AccountStatus = 'disconnected' | 'connecting' | 'pairing' | 'connected' | 'error';
 
 export interface Account {
@@ -41,12 +41,14 @@ export interface Chat {
   pinned?: boolean;
   archived?: boolean;
   muted?: boolean;
+  /** Süreli sessiz: bu zamana (ms) kadar; geçince sesi açılır */
+  mutedUntil?: number;
   hidden?: boolean;
   /** Takip hatırlatıcısı: `at` zamanına kadar yanıt gelmezse hatırlat; `due` = süre doldu, yanıt yok */
   followUp?: { at: number; since: number; due?: boolean };
 }
 
-export type ChatFlags = Pick<Chat, 'pinned' | 'archived' | 'muted' | 'hidden'>;
+export type ChatFlags = Pick<Chat, 'pinned' | 'archived' | 'muted' | 'hidden' | 'mutedUntil'>;
 
 export interface Reaction {
   emoji: string;
@@ -106,6 +108,8 @@ export interface Message {
   edited?: boolean;
   /** Herkesten silindi (metin "🚫 Bu mesaj silindi") */
   deleted?: boolean;
+  /** Yıldızlı (yerel; İşaretliler görünümü) */
+  starred?: boolean;
 }
 
 /** Mesaja alıntılı yanıt verilebilen platformlar (sağa kaydır / Yanıtla); Slack'te yanıt iş parçacığına gider */
@@ -242,6 +246,7 @@ export const PLATFORMS: Record<Platform, { name: string; code: string; color: st
   shopify: { name: 'Shopify', code: 'SP', color: '#5E8E3E', method: 'Siparişler', available: true, mode: 'token', category: 'shop' },
   n11: { name: 'n11', code: 'N11', color: '#5D3EBC', method: 'Siparişler ve müşteri soruları', available: true, mode: 'token', category: 'shop' },
   amazon: { name: 'Amazon', code: 'AMZ', color: '#FF9900', method: 'Siparişler', available: true, mode: 'token', category: 'shop' },
+  mivelo: { name: 'Kendime not', code: 'MV', color: '#6c47ff', method: 'Yalnız bu cihazda', available: false, mode: 'native', category: 'self' },
   demo: { name: 'Demo', code: 'DM', color: '#8C889B', method: 'Örnek veri', available: true, mode: 'demo' },
 };
 

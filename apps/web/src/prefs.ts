@@ -23,9 +23,15 @@ export interface Prefs {
   batchSec: 0 | 10 | 30 | 60;
   /** Bildirimi gelen sohbet N dk sonra hâlâ okunmadıysa bir kez daha hatırlat (0 = hiç) */
   repeatMin: 0 | 5 | 15 | 30 | 60;
+  /** Gönderimi geri al penceresi (sn): Enter'dan sonra bu süre içinde "Geri al" (0 = hemen gönder) */
+  undoSec: 0 | 5 | 10;
+  /** Rahatsız etme: bu saatler arasında (ve isteğe bağlı hafta sonu) bildirim kartı ve ses yok; rozet sayılır */
+  dnd: { on: boolean; from: string; to: string; weekend: boolean };
+  /** Odak modu: yalnız seçili uygulamalardan bildirim (boş liste = hepsi) */
+  focus: { on: boolean; platforms: string[] };
 }
 
-export const DEFAULT_PREFS: Prefs = { enterSends: true, spellcheck: true, silentRead: false, badge: 'messages', zoom: 100, reduceMotion: false, notifyInFocus: true, batchSec: 0, repeatMin: 0 };
+export const DEFAULT_PREFS: Prefs = { enterSends: true, spellcheck: true, silentRead: false, badge: 'messages', zoom: 100, reduceMotion: false, notifyInFocus: true, batchSec: 0, repeatMin: 0, undoSec: 5, dnd: { on: false, from: '23:00', to: '08:00', weekend: false }, focus: { on: false, platforms: [] } };
 const KEY = 'mivelo.prefs';
 
 let cache: Prefs | null = null;
@@ -37,6 +43,20 @@ export function getPrefs(): Prefs {
     cache = { ...DEFAULT_PREFS };
   }
   return cache;
+}
+
+/** Rahatsız etme ya da Odak modu şu an bildirimi susturuyor mu? ('dnd' | 'focus' | null) */
+export function quietReason(platform?: string, now = new Date()): 'dnd' | 'focus' | null {
+  const p = getPrefs();
+  if (p.dnd.on) {
+    const day = now.getDay();
+    if (p.dnd.weekend && (day === 0 || day === 6)) return 'dnd';
+    const hm = (t: string) => { const [h, m] = t.split(':').map(Number); return (h || 0) * 60 + (m || 0); };
+    const cur = now.getHours() * 60 + now.getMinutes(), a = hm(p.dnd.from), b = hm(p.dnd.to);
+    if (a === b ? false : a < b ? cur >= a && cur < b : cur >= a || cur < b) return 'dnd';
+  }
+  if (p.focus.on && platform && p.focus.platforms.length && !p.focus.platforms.includes(platform)) return 'focus';
+  return null;
 }
 
 export function setPrefs(patch: Partial<Prefs>): void {
