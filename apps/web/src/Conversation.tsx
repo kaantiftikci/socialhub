@@ -87,6 +87,9 @@ const schedListeners = new Set<() => void>();
  */
 const CORE_SCHED = !USE_STATIC;
 let coreSched: ScheduledSend[] = [];
+/** Gönderilen balonun kalkış süresi (yazma alanından yerine) */
+const SEND_MS = 420;
+
 export function refreshScheduled(): void {
   if (!CORE_SCHED) return;
   api
@@ -900,7 +903,7 @@ export function Conversation({
   // ---- Hareket (motion/conversation.css, .claude/skills/motion-design): yeni balon girişi, tik değişimi, tepki uçuşu, herkesten
   // sil, gönderilemedi, yazıyor → mesaj. Hepsi görsel katman: API çağrıları beklemez. Sohbet açılırken ve yeniden çizimde eski
   // balonlar oynamaz; yalnız sondan geriye yeni kimlikler (≤60) ve son 60 mesajın durumu karşılaştırılır (3000+ mesajda döngü yok).
-  const fx = useRef<{ chat: string; seen: Set<string>; status: Map<string, Message['status']>; outIds: string[]; typingAt: number; typingRect?: { w: number; h: number } }>({
+  const fx = useRef<{ chat: string; seen: Set<string>; status: Map<string, Message['status']>; outIds: string[]; typingAt: number; typingRect?: { w: number; h: number }; sendFx?: Map<string, { at: number; frames: Keyframe[]; group: boolean }> }>({
     chat: '',
     seen: new Set(),
     status: new Map(),
@@ -966,8 +969,18 @@ export function Conversation({
     const animateIn = fresh.length <= 6;
     for (const m of fresh) {
       if (m.fromMe && !m.id.startsWith('out-') && vanished.length) {
-        const st = f.status.get(vanished.shift()!);
+        const old = vanished.shift()!;
+        const st = f.status.get(old);
         if (st) f.status.set(m.id, st);
+        // gerçek kayıt iyimser balonun yerine yeni DOM öğesiyle gelir: kalkış animasyonu kaldığı yerden sürsün (kesilip zıplamasın)
+        const sf = f.sendFx?.get(old);
+        f.sendFx?.delete(old);
+        if (sf && performance.now() - sf.at < SEND_MS) {
+          const w = wrapOf(m.id);
+          const t = sf.group ? w?.closest<HTMLElement>('.grp') : w;
+          const a = animate(t, sf.frames, { duration: SEND_MS, easing: EASE.in });
+          if (a) a.currentTime = performance.now() - sf.at;
+        }
         continue;
       }
       if (animateIn) enterFx(m);
@@ -1020,13 +1033,57 @@ export function Conversation({
     // grubun ilk balonuysa grup (avatar/gönderen adıyla) birlikte gelir
     const target = grp && grp.querySelector('.bwrap') === w ? grp : w;
     const origin = m.fromMe ? '100% 100%' : '0 100%';
-    animate(
-      target,
-      m.fromMe
-        ? [{ opacity: 0, transform: 'translateY(18px) scale(.96)', transformOrigin: origin }, { opacity: 1, transform: 'none', transformOrigin: origin }]
-        : [{ opacity: 0, transform: 'translate(-14px, 6px) scale(.94)', transformOrigin: origin }, { opacity: 1, transform: 'none', transformOrigin: origin }],
-      { duration: DUR.std, easing: EASE.in },
-    );
+    // ortam katmanı: alttaysan eski balonlar yeni balonun boyu kadar sıçramaz, yukarı süzülür
+    glideUp(target);
+    if (m.fromMe) {
+      // gönderme: balon yazma alanından kalkar (dikey yol ≤ 1/3 ekran), hafif aşıp yerine oturur
+      const ta = taRef.current?.getBoundingClientRect();
+      const r = (bub ?? w).getBoundingClientRect();
+      const box = msgsRef.current?.clientHeight ?? 600;
+      const dy = ta ? Math.max(16, Math.min(box / 3, ta.top + ta.height / 2 - (r.top + r.height / 2))) : 22;
+      const dx = ta ? Math.max(-40, Math.min(0, ta.left + 24 - r.left)) * 0.4 : 0;
+      const frames: Keyframe[] = [
+        { opacity: 0, transform: `translate(${dx}px, ${dy}px) scale(.9)`, transformOrigin: origin },
+        { opacity: 1, transform: 'translate(0, -3px) scale(1.012)', transformOrigin: origin, offset: 0.68 },
+        { opacity: 1, transform: 'none', transformOrigin: origin },
+      ];
+      animate(target, frames, { duration: SEND_MS, easing: EASE.in });
+      if (m.id.startsWith('out-')) (f.sendFx ??= new Map()).set(m.id, { at: performance.now(), frames, group: target === grp });
+    } else {
+      // gelme: sol alttan (avatarın köşesinden) büyüyerek gelir, küçük bir yay ve hafif aşma
+      animate(
+        target,
+        [
+          { opacity: 0, transform: 'translate(-12px, 10px) scale(.92)', transformOrigin: origin },
+          { opacity: 1, transform: 'translate(0, -2px) scale(1.01)', transformOrigin: origin, offset: 0.7 },
+          { opacity: 1, transform: 'none', transformOrigin: origin },
+        ],
+        { duration: 340, easing: EASE.in },
+      );
+      // ikincil: yeni grubun avatarı balondan biraz sonra "pıt" diye belirir
+      if (target === grp) animate(grp.querySelector('.avatar'), [{ opacity: 0, transform: 'scale(.5)' }, { opacity: 1, transform: 'none' }], { duration: 260, delay: 70, easing: EASE.pop, fill: 'backwards' });
+    }
+    // ikincil: saat/tik balon oturduktan sonra belirir
+    animate(w.querySelector('.bt'), [{ opacity: 0, transform: 'translateY(3px)' }, { opacity: 1, transform: 'none' }], { duration: 200, delay: 160, easing: EASE.std, fill: 'backwards' });
+  }
+  /** Yeni balon altta eklenince (en alttaysan) görünen eski içerik yeni balonun boyu kadar aşağıdan yukarı süzülür (anlık sıçrama yerine) */
+  function glideUp(target: HTMLElement) {
+    const box = msgsRef.current;
+    if (!box || !stickRef.current) return;
+    const prev = target.previousElementSibling;
+    const gap = prev ? Math.max(0, target.getBoundingClientRect().top - prev.getBoundingClientRect().bottom) : 0;
+    const h = Math.min(box.clientHeight / 3, target.offsetHeight + gap);
+    if (h < 4) return;
+    const top = box.getBoundingClientRect().top;
+    const els: Element[] = [];
+    for (let node: Element | null = target; node && node !== box && els.length < 14; node = node.parentElement) {
+      for (let sib = node.previousElementSibling; sib && els.length < 14; sib = sib.previousElementSibling) {
+        if (sib.classList.contains('avatar')) continue; // avatar grubun altına bağlı: yerinde kalır
+        if (sib.getBoundingClientRect().bottom < top - h) break; // görünmeyenler zaten görünmez
+        els.push(sib);
+      }
+    }
+    for (const el of els) animate(el, [{ transform: `translateY(${h}px)` }, { transform: 'none' }], { duration: 340, easing: EASE.in });
   }
   /** Tik değişimi: saat → tek tik çizilir → ikinci tik kayarak gelir → görüldüde renk (CSS geçişi) + küçük zıplama */
   function tickFx(m: Message, prev: Message['status']) {

@@ -16,6 +16,21 @@ export interface ChangeEntry {
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    id: '2026-10-01f',
+    date: '2026-10-01',
+    title: 'Canlı mesajlaşma',
+    items: [
+      {
+        title: 'Gönderirken',
+        text: 'Enter’a bastığında mesajın yazma alanından kalkıp sohbete yerleşir; önceki mesajlar sıçramadan yukarı süzülür. Saat ve tik balon oturduktan sonra belirir.',
+      },
+      {
+        title: 'Yeni mesaj gelince',
+        text: 'Gelen mesaj karşı tarafın köşesinden büyüyerek gelir, yeni konuşmacının fotoğrafı ardından belirir. Hareketleri azalt açıksa animasyonlar kapanır.',
+      },
+    ],
+  },
+  {
     id: '2026-10-01e',
     date: '2026-10-01',
     title: 'Daha sade menü',
