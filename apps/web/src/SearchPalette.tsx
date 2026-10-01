@@ -5,6 +5,15 @@ import { Avatar, Chip, Icon, fmtTime } from './ui';
 import { mlApi, type SemanticResult } from './ml-api';
 import { BorderBeam } from 'border-beam';
 import { onThemeChange, resolvedTheme } from './theme';
+
+/** Kenar ışığı ayarları: açık zeminde soluk kalıyordu (Kaan 01.10) → tam güç, daha doygun ve koyu renk, biraz daha geniş parıltı */
+const DARK_BEAM = { strength: 0.7 } as const;
+const LIGHT_BEAM = {
+  strength: 1,
+  saturation: 1.8,
+  // paketin açık tema varsayılanı: kenar çizgisi %12, iç parıltı %26, dış ışık %34 opaklık → ≈%60 / %40 / %55
+  style: { ['--beam-stroke-opacity' as string]: 5, ['--beam-inner-opacity' as string]: 1.5, ['--beam-bloom-opacity' as string]: 1.6 },
+} as const;
 import { DUR, EASE, animate, reducedMotion } from './motion/motion';
 import { MvInd } from './motion/MvInd';
 
@@ -231,7 +240,7 @@ export function SearchPalette({ chats, onClose, onOpenChat, onOpenMessage }: { c
   return (
     <div className="overlay palette-wrap pal-anim" ref={wrapRef} onMouseDown={onClose}>
       {/* "AI ile ara" açıkken kenarda dolaşan ışık: libraries.dev Beam (border-beam, MIT); kapalıyken söner (aynı öğe, odak kaybolmaz) */}
-      <BorderBeam className="pal-beam-wrap" size="md" colorVariant="colorful" strength={0.7} active={semantic} theme={theme} onMouseDown={(e) => e.stopPropagation()}>
+      <BorderBeam className="pal-beam-wrap" size="md" colorVariant="colorful" active={semantic} theme={theme} {...(theme === 'light' ? LIGHT_BEAM : DARK_BEAM)} onMouseDown={(e) => e.stopPropagation()}>
       <div className={`palette ${semantic ? 'ai' : ''}`} ref={palRef} role="dialog" aria-label="Her yerde ara" onMouseDown={(e) => e.stopPropagation()} onKeyDown={onKey}>
         <div className="pal-in">
           <Icon name="search" size={17} />
