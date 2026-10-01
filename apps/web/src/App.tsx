@@ -1450,7 +1450,7 @@ export default function App() {
           <Avatar name={PROFILE_NAME || 'Mivelo'} size={32} url={PROFILE_PHOTO} />
           <span style={{ flexGrow: 1, minWidth: 0 }}>
             <span className="n">{PROFILE_NAME || 'Mivelo'}</span>
-            <span className="s">{PROFILE_HANDLE ? `@${PROFILE_HANDLE} · ` : ''}{accounts.length} uygulama</span>
+            {PROFILE_HANDLE && <span className="s">@{PROFILE_HANDLE}</span>}
           </span>
           <button
             className="btn ghost sm icon b theme-tg"
