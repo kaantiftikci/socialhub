@@ -150,3 +150,6 @@ html.reduce-motion .qs-wrap .palette.qs, html.reduce-motion .qs-wrap.closing { a
 
 /* "mivelo" yazısı her yerde aynı yazı tipi (kenar çubuğu, açılış, giriş/lisans/onay kartları) */
 .brand .word, .brand > span, .sp-word { font-family: var(--font-brand); }
+
+/* kenar çubuğu "Ara" satırındaki kısayol ipucu */
+.nav-item .nav-kbd { margin-left: auto; font: 500 11px/1 var(--font, inherit); color: var(--text3); padding: 3px 6px; border-radius: 6px; background: var(--bg2); border: 1px solid var(--line); }

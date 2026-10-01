@@ -1395,6 +1395,7 @@ export default function App() {
         </button>
         <div className="nav">
           <MvInd sel=".nav-item.active" dep={`${view}|${filter}|${platformFilter ?? ''}|${tagFilter ?? ''}`} />
+          <NavItem icon="search" label="Ara" title="Tüm uygulamalarda sohbet ve mesaj ara" hint={`${MOD}K`} count={0} active={false} onClick={() => setPaletteOpen(true)} />
           <NavItem icon="inbox" label="Gelen kutusu" count={totals.unread} active={view === 'inbox' && filter === 'all' && !platformFilter && !tagFilter} onClick={() => goInbox('all')} />
           <NavItem icon="sparkle" label="Odak" badge="AI" count={focusWaiting.length} active={view === 'focus'} onClick={() => setView('focus')} />
           <NavItem icon="archive" label="Okunmamış" count={totals.unread} active={view === 'inbox' && filter === 'unread' && !platformFilter && !tagFilter} onClick={() => goInbox('unread')} />
@@ -2285,7 +2286,7 @@ function groupByDay(list: Chat[]): Array<[string, Chat[]]> {
   return [...out.entries()];
 }
 
-function NavItem({ icon, label, count, active, onClick, badge, title }: { icon: string; label: string; count: number; active: boolean; onClick: () => void; badge?: string; title?: string }) {
+function NavItem({ icon, label, count, active, onClick, badge, title, hint }: { icon: string; label: string; count: number; active: boolean; onClick: () => void; badge?: string; title?: string; hint?: string }) {
   return (
     <button className={`nav-item b ${active ? 'active' : ''}`} onClick={onClick} title={title}>
       <Icon name={icon} size={17} color={active ? 'var(--v)' : 'var(--text3)'} />
@@ -2294,6 +2295,7 @@ function NavItem({ icon, label, count, active, onClick, badge, title }: { icon: 
         {badge && <span className="pill lime" style={{ fontSize: 10, padding: '1px 5px', borderRadius: 5 }}>{badge}</span>}
       </span>
       {count > 0 && <Roll className="count" value={fmtCount(count)} />}
+      {hint && <kbd className="nav-kbd">{hint}</kbd>}
     </button>
   );
 }
