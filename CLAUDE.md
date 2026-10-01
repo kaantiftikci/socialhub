@@ -832,11 +832,11 @@ Dil: arayüz ve yorumlar Türkçe.
 - **Hareketler (30.09, Kaan onayladı; önizleme artifact'ları "Mivelo Animasyon Önizleme" 20 sahne + "Mivelo Yükleme Ekranı" A)**: ortak
   `apps/web/src/motion/tokens.css` (--m-ease/--m-in/--m-out/--m-pop/--m-quick|std|slow; azaltılmış harekette 1 ms) + `motion/motion.ts`
   (EASE, DUR, reducedMotion(): sistem + `html.reduce-motion`, animate(), flipFirst/flipPlay). Alan başına CSS: `motion/boot.css`
-  (BootScreen, tema, ⌘K, Bağlan, güncelleme/izin kartı), `motion/app.css` (App/QuickSend/Focus), `motion/conversation.css`, `motion/extras.css`
+  (tema, ⌘K, Bağlan, güncelleme/izin kartı), `motion/app.css` (App/QuickSend/Focus), `motion/conversation.css`, `motion/extras.css`
   (takvim, Ayarlar, Medya, kişi, pazaryeri, geri bildirim, yerel AI). styles.css'teki eski animasyonlar bu dosyalarda daha özgül seçiciyle
-  geçersiz kılınır (styles.css'e dokunulmadı). **BootScreen.tsx** (App `.booting` yerine; `bootShown` açılışta true, `ready = !booting && listReady`,
-  350 ms içinde hazırsa animasyonsuz kalkar; platform renkli noktalar raylardan logoya akar, logo `.sidebar .brand > svg`'ye uçar; 20 sn sonra
-  "İlk açılışta 1-2 dakika" notu). Tema `setThemePref` View Transitions ile tıklanan noktadan daire (ilk yükleme/sistem değişimi animasyonsuz).
+  geçersiz kılınır (styles.css'e dokunulmadı). **Açılış (01.10, Kaan: akışlı yükleme ekranı KALDIRILDI, yalnız eski logo animasyonu)**: App açılışta `Splash` (Onboarding.tsx, quick:
+  logo oluşur + "mivelo") gösterir, `ready = (!booting && listReady) || 8 sn`, yavaş kapanır (`slowOut` 0,7 sn). Lisans/giriş ekranının Splash'ı açıksa
+  (`splashLive` sayacı) App onu devralır: `formed` (logo hazır çizili, aynı kip/boyut, ikinci kez oynamaz). BootScreen.tsx silindi. Tema `setThemePref` View Transitions ile tıklanan noktadan daire (ilk yükleme/sistem değişimi animasyonsuz).
   Sohbet: yalnız yeni gelen ≤6 balon canlanır (açılışta 0), tik değişimi son 60 mesajda ref'le; **gönderilemeyen mesaj artık silinmez**:
   balonda "Gönderilemedi · Yeniden dene · Kaldır" (sohbet açıksa; `dispatch/retryOut/discardOut`); tepki emojisi çipe uçar; Lightbox küçük
   resimden FLIP; takip şeridi yanıt gelince yeşile dönüp kapanır. Liste `useListMotion`: yalnız 1-3 sohbet üste çıkınca, görünen satırlarda

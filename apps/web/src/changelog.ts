@@ -16,6 +16,17 @@ export interface ChangeEntry {
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    id: '2026-10-01b',
+    date: '2026-10-01',
+    title: 'Sade açılış',
+    items: [
+      {
+        title: 'Açılışta yalnız logo',
+        text: 'Mivelo açılırken yalnız logo oluşuyor; sohbetler hazır olunca yavaşça kayboluyor ve uygulama görünüyor.',
+      },
+    ],
+  },
+  {
     id: '2026-10-01a',
     date: '2026-10-01',
     title: 'Daha hızlı sıfırlama, sürüklenen pencere',

@@ -1,28 +1,5 @@
 /* boot animasyonları — bkz. motion/tokens.css */
 
-/* ---- Açılış bekleme ekranı (BootScreen.tsx, Varyant A "Akış") ---- */
-.boot-screen { position: fixed; inset: 0; z-index: 400; overflow: hidden; color: var(--text); container-type: size; }
-.boot-screen .bs-bg { position: absolute; inset: 0; background: var(--bg); }
-.boot-screen .bs-glow { position: absolute; left: 50%; top: 42%; width: 60%; aspect-ratio: 1; margin-left: -30%; transform: translateY(-50%); border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--v) 16%, transparent) 0%, transparent 62%); pointer-events: none; }
-:root[data-theme="dark"] .boot-screen .bs-glow { background: radial-gradient(circle, color-mix(in srgb, var(--v) 28%, transparent) 0%, transparent 62%); }
-.boot-screen .bs-flow { position: absolute; inset: 0; width: 100%; height: 100%; }
-.boot-screen .bs-rail { fill: none; stroke: var(--line); stroke-width: 1.2; stroke-dasharray: 2 6; }
-:root[data-theme="dark"] .boot-screen .bs-rail { stroke: var(--line3, var(--line)); }
-.boot-screen .bs-out { fill: none; stroke: var(--v); stroke-width: 1.6; opacity: .35; }
-.boot-screen .bs-mark { position: absolute; left: 50%; top: 42%; width: clamp(64px, 10cqw, 96px); aspect-ratio: 1; transform: translate(-50%, -50%); z-index: 3; will-change: transform; }
-.boot-screen .bs-mark svg { display: block; width: 100%; height: 100%; overflow: visible; transform-origin: center; }
-.boot-screen .bs-dot { transform-box: fill-box; transform-origin: center; }
-.boot-screen .bs-word { position: absolute; left: 0; right: 0; top: calc(42% + clamp(32px, 5cqw, 48px) + 14px); text-align: center; font-weight: 800; font-size: clamp(18px, 3vw, 26px); letter-spacing: -.03em; color: var(--text); }
-.boot-screen .bs-stat { position: absolute; left: 0; right: 0; top: calc(42% + clamp(32px, 5cqw, 48px) + 56px); display: flex; flex-direction: column; align-items: center; gap: 8px; }
-.boot-screen .bs-txt { position: relative; height: 18px; width: 100%; font-size: 12.5px; color: var(--text2); }
-.boot-screen .bs-txt span { position: absolute; left: 0; right: 0; text-align: center; white-space: nowrap; }
-.boot-screen .bs-track { width: min(160px, 40%); height: 3px; border-radius: 2px; background: var(--bg2); overflow: hidden; position: relative; }
-:root[data-theme="dark"] .boot-screen .bs-track { background: var(--line); }
-.boot-screen .bs-track i { position: absolute; inset: 0; background: var(--v); transform-origin: left; transform: scaleX(0); border-radius: 2px; }
-.boot-screen .bs-hint { font-size: 11.5px; color: var(--text3); opacity: 0; max-width: 90%; text-align: center; padding: 0 16px; }
-@media (prefers-reduced-motion: reduce) { .boot-screen .bs-glow { display: none; } }
-html.reduce-motion .boot-screen .bs-glow { display: none; }
-
 /* ---- Tema geçişi (theme.ts): yeni tema tıklanan noktadan daire olarak yayılır (View Transitions) ---- */
 :root.theme-vt::view-transition-old(root),
 :root.theme-vt::view-transition-new(root) { animation: none; mix-blend-mode: normal; }

@@ -1,4 +1,4 @@
-import { BootScreen } from './BootScreen';
+import { Splash, splashLive } from './Onboarding';
 import { FeedbackButton } from './Feedback';
 import { PersonChannelBar, SendVia, useUnifiedTimeline } from './UnifiedTimeline';
 import { peopleOnEvent, refreshPeople } from './people-store';
@@ -152,15 +152,16 @@ export default function App() {
     if (!isMobile) setNavOpen(false);
   }, [isMobile]);
   const [booting, setBooting] = useState<false | 'core' | 'data'>(false);
-  const [bootSince] = useState(() => Date.now());
-  // yükleme ekranı (BootScreen): açılışta takılı; liste gelince logo kenar çubuğuna uçup kalkar (hızlı açılışta animasyonsuz)
+  // açılış: logo animasyonla oluşur, sohbetler gelince yavaşça kapanır (Kaan, 01.10: akış/yükleme ekranı istemedi).
+  // Lisans/giriş ekranının açılış animasyonu açıksa onu devralır (logo hazır çizili, aynı boyutta; ikinci kez oynamaz).
+  // Çekirdek uzun sürerse (ilk açılış 1-2 dk) 8 sn sonra yine kapanır: üstteki çubuk "Çekirdek başlatılıyor" der.
+  const [bootSplash] = useState(() => (splashLive.n > 0 ? { formed: true, mode: splashLive.mode } : { formed: false, mode: 'quick' as const }));
   const [bootShown, setBootShown] = useState(true);
-  const [bootSlow, setBootSlow] = useState(false);
+  const [bootGiveUp, setBootGiveUp] = useState(false);
   useEffect(() => {
-    if (!bootShown) return;
-    const t = window.setTimeout(() => setBootSlow(true), Math.max(0, 20_000 - (Date.now() - bootSince)));
+    const t = window.setTimeout(() => setBootGiveUp(true), 8000);
     return () => window.clearTimeout(t);
-  }, [bootShown, bootSince]);
+  }, []);
   // gece/gündüz düğmesi: görünen tema (sistem teması değişince de güncellenir)
   const [theme, setThemeState] = useState<'light' | 'dark'>(() => resolvedTheme());
   useEffect(() => onThemeChange(setThemeState), []);
@@ -1475,7 +1476,7 @@ export default function App() {
         </div>
       )}
       {bootShown && (
-        <BootScreen stage={booting === 'data' ? 'data' : 'core'} slowHint={bootSlow} ready={!booting && listReady} onDone={() => setBootShown(false)} />
+        <Splash mode={bootSplash.mode} formed={bootSplash.formed} slowOut ready={(!booting && listReady) || bootGiveUp} onDone={() => setBootShown(false)} />
       )}
       <div className="surface" ref={surfaceRef}>
         {view === 'wrapped' ? (

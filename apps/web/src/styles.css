@@ -1661,6 +1661,10 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 /* ilk kareler akana dek (uygulama altta ilk çizimini yaparken) animasyon bekler: yoksa ilk yarım saniye kare atlıyordu */
 .splash:not(.go) .sp-mark, .splash:not(.go) .sp-mark *, .splash:not(.go) .sp-word, .splash:not(.go) .sp-ring, .splash:not(.go) .sp-stage::before { animation-play-state: paused; }
 .splash.quick { transition-duration: .42s; }
+/* App'in bekleme logosu: dış açılış animasyonunu devralır (logo hazır çizili), yavaş kapanır */
+.splash.formed .sp-word, .splash.formed .sp-ring { animation: none; }
+.splash.formed .sp-stage::before { animation: none; opacity: .55; }
+.splash.slow-out, .splash.quick.slow-out.out .sp-stage { transition-duration: .7s; }
 .splash.out { opacity: 0; pointer-events: none; }
 .sp-stage { position: relative; display: grid; place-items: center; transition: transform .7s cubic-bezier(.4,0,.2,1); will-change: transform; }
 /* gölge ayrı katmanda, yalnız saydamlığı değişir (eski drop-shadow filtresi her karede yeniden hesaplanıyordu → donuk) */

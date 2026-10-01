@@ -334,6 +334,9 @@ export function SetupScreen({ onDone }: { onDone: () => void }) {
   );
 }
 
+/** Ekranda açık açılış animasyonu sayısı ve kipi (App'in bekleme logosu bunu devralır) */
+export const splashLive: { n: number; mode: 'full' | 'quick' } = { n: 0, mode: 'quick' };
+
 /** Animasyonlu Mivelo işareti (kare büyür, kıvrım çizilir, lime nokta belirir) */
 export function SplashMark({ size = 96, animate = true }: { size?: number; animate?: boolean }) {
   return (
@@ -350,7 +353,13 @@ export function SplashMark({ size = 96, animate = true }: { size?: number; anima
  * alttaki uygulama görünür. full: lisans etkinleşince / kurulumdan sonra (≈3,8 sn); quick: sonraki açılışlarda (≈1,8 sn). Alt yazı yok (Kaan).
  * ready=false iken (lisans durumu daha gelmedi) en kısa süre dolsa da kapanmaz.
  */
-export function Splash({ mode, ready = true, onDone }: { mode: 'full' | 'quick'; ready?: boolean; onDone: () => void }) {
+export function Splash({ mode, ready = true, formed = false, slowOut = false, onDone }: { mode: 'full' | 'quick'; ready?: boolean; formed?: boolean; slowOut?: boolean; onDone: () => void }) {
+  // açık açılış animasyonları (App kendi bekleme logosunu bunun üstüne çizmesin, devralsın)
+  useEffect(() => {
+    splashLive.n++;
+    splashLive.mode = mode;
+    return () => void splashLive.n--;
+  }, [mode]);
   const [minDone, setMinDone] = useState(false);
   const [out, setOut] = useState(false);
   // iki kare bekle: uygulama altta ilk çizimini bitirsin, animasyon akan karelerle başlasın
@@ -365,21 +374,21 @@ export function Splash({ mode, ready = true, onDone }: { mode: 'full' | 'quick';
   const reduce = typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   useEffect(() => {
     // 29.09 (Kaan): önce 2,8 sn kısa, 5,5 sn uzun geldi → full ≈3,8 sn, quick ≈1,8 sn
-    const hold = reduce ? (mode === 'full' ? 1000 : 350) : mode === 'full' ? 3100 : 1400;
+    const hold = formed ? 0 : reduce ? (mode === 'full' ? 1000 : 350) : mode === 'full' ? 3100 : 1400;
     const t = window.setTimeout(() => setMinDone(true), hold);
     return () => window.clearTimeout(t);
   }, [mode, reduce]);
   useEffect(() => {
     if (!minDone || !ready) return;
     setOut(true);
-    const t = window.setTimeout(() => done.current(), reduce ? 250 : mode === 'full' ? 700 : 420);
+    const t = window.setTimeout(() => done.current(), reduce ? 250 : mode === 'full' || slowOut ? 700 : 420);
     return () => window.clearTimeout(t);
-  }, [minDone, ready, mode, reduce]);
+  }, [minDone, ready, mode, reduce, slowOut]);
   return (
-    <div className={`splash ${mode} ${go ? 'go' : ''} ${out ? 'out' : ''}`} role="presentation" data-testid="splash">
+    <div className={`splash ${mode} ${go ? 'go' : ''} ${out ? 'out' : ''} ${formed ? 'formed' : ''} ${slowOut ? 'slow-out' : ''}`} role="presentation" data-testid="splash">
       <div className="sp-stage">
         <span className="sp-ring" />
-        <SplashMark size={mode === 'full' ? 104 : 84} />
+        <SplashMark size={mode === 'full' ? 104 : 84} animate={!formed} />
       </div>
       <div className="sp-word">mivelo</div>
     </div>
