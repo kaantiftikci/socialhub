@@ -231,8 +231,8 @@ export function SearchPalette({ chats, onClose, onOpenChat, onOpenMessage }: { c
           <Icon name="search" size={17} />
           <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder={semantic ? 'Doğal dille ara — "geçen ay Ahmet’in gönderdiği fatura"' : 'Tüm uygulamalarda ara — kişi, mesaj, dosya adı…'} aria-label="Arama" spellCheck={false} />
           {busy && <span className="spin" />}
-          <button type="button" className={`pal-mode b ${semantic ? 'on' : ''}`} onClick={() => (toggleSemantic(), inputRef.current?.focus())} aria-pressed={semantic} title="Anlamsal arama: kelimesi kelimesine değil, anlamca yakın mesajlar (cihazında)">
-            <Icon name="sparkle" size={13} /> Anlamsal
+          <button type="button" className={`pal-mode b ${semantic ? 'on' : ''}`} onClick={() => (toggleSemantic(), inputRef.current?.focus())} aria-pressed={semantic} title="Yapay zekâ ile ara: kelimesi kelimesine değil, anlamca yakın mesajları bulur (bilgisayarında çalışır)">
+            <Icon name="sparkle" size={13} /> AI ile ara
           </button>
           <span className="kbd">Esc</span>
         </div>
@@ -253,7 +253,7 @@ export function SearchPalette({ chats, onClose, onOpenChat, onOpenMessage }: { c
                   </span>
                 ))}
                 {sem.mode === 'text' ? (
-                  <em>{sem.index.ready ? (sem.index.enabled ? 'Dizin henüz boş; tam metin sonuçları' : 'Anlamsal dizin kapalı (Ayarlar → Yerel AI modelleri); tam metin sonuçları') : 'Anlamsal arama modeli indirilmemiş (Ayarlar → Yerel AI modelleri); tam metin sonuçları'}</em>
+                  <em>{sem.index.ready ? (sem.index.enabled ? 'Dizin henüz boş; tam metin sonuçları' : 'AI ile arama kapalı (Ayarlar → Yerel AI modelleri); tam metin sonuçları') : 'AI ile arama modeli henüz inmedi (Ayarlar → Yerel AI modelleri); tam metin sonuçları'}</em>
                 ) : (
                   <em>Anlamca yakın mesajlar{sem.index.pct < 100 ? ` · dizin %${sem.index.pct}` : ''}</em>
                 )}
@@ -287,15 +287,9 @@ export function SearchPalette({ chats, onClose, onOpenChat, onOpenMessage }: { c
             )}
           </div>
         )}
+        {term && (
         <div className={`pal-list ${items.length ? 'has-sel' : ''}`} ref={listRef}>
           <div className="pal-sel" ref={selRef} aria-hidden="true" />
-          {!term && (
-            <div className="pal-empty">
-              <Icon name="search" size={22} />
-              <b>Her yerde ara</b>
-              <span>WhatsApp, Instagram, Gmail, Slack… bağlı tüm uygulamaların mesajlarında ve dosya adlarında. Aç/kapat: ⌘K / Ctrl+K</span>
-            </div>
-          )}
           {!only && chatHits.length > 0 && (
             <>
               <div className="pal-h">Sohbetler</div>
@@ -359,6 +353,8 @@ export function SearchPalette({ chats, onClose, onOpenChat, onOpenMessage }: { c
             </div>
           ))}
         </div>
+        )}
+        {term && (
         <div className="pal-foot">
           <span>
             <span className="kbd">↑</span>
@@ -369,6 +365,7 @@ export function SearchPalette({ chats, onClose, onOpenChat, onOpenMessage }: { c
           </span>
           <span>Mesaja gidip vurgular</span>
         </div>
+        )}
       </div>
     </div>
   );

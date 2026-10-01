@@ -32,7 +32,7 @@ const SETTINGS_INDEX: Partial<Record<Tab, string[]>> = {
   keys: ['Klavye kısayolları'],
   devices: ['Telefondan erişim', 'Bu cihaz', 'QR kod'],
   ai: ['Anthropic anahtarı', 'Özetler', 'Taslaklar', 'Aksiyon çıkarma'],
-  localai: ['Sesli mesajı yazıya dök', 'Anlamsal arama', 'Model indir'],
+  localai: ['Sesli mesajı yazıya dök', 'AI ile arama', 'Model indir'],
   perms: ['Tam Disk Erişimi', 'Mikrofon', 'Takvim izni'],
   storage: ['Kaplanan alan', 'İndirilen medyayı temizle', 'Geçici dosyaları temizle', 'Sohbetlere göre'],
   help: ['Sık sorulan sorular', 'Sorun bildir', 'Öneride bulun'],

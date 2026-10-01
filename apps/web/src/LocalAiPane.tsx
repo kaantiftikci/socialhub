@@ -10,7 +10,7 @@ import { refreshMlStatus, useMlStatus } from './ml-client';
  */
 const DESC: Record<ModelKey, string> = {
   whisper: 'WhatsApp, Telegram ve iMessage sesli mesajlarının altında metin; metin aramada da bulunur.',
-  embed: '"Geçen ay Ahmet’in gönderdiği fatura" gibi doğal dille arama (⌘K → Anlamsal).',
+  embed: '"Geçen ay Ahmet’in gönderdiği fatura" gibi doğal dille arama (⌘K → AI ile ara).',
 };
 
 function Row({ title, hint, children, dim }: { title: string; hint?: ReactNode; children: ReactNode; dim?: boolean }) {
@@ -200,7 +200,7 @@ export function LocalAiPane({ notify }: { notify: (t: string, err?: boolean) => 
           <Switch label="Sesli mesajları kendiliğinden yazıya dök" disabled={!ready('whisper')} on={st.settings.autoTranscribe} onChange={(v) => void save({ autoTranscribe: v })} />
         </Row>
         <Row
-          title="Anlamsal arama dizini"
+          title="AI ile arama dizini"
           hint={
             !ready('embed') ? (
               'Önce anlamsal arama modelini indir'
@@ -214,7 +214,7 @@ export function LocalAiPane({ notify }: { notify: (t: string, err?: boolean) => 
           }
           dim={!ready('embed')}
         >
-          <Switch label="Anlamsal arama dizini" disabled={!ready('embed')} on={st.settings.semanticIndex} onChange={(v) => void save({ semanticIndex: v })} />
+          <Switch label="AI ile arama dizini" disabled={!ready('embed')} on={st.settings.semanticIndex} onChange={(v) => void save({ semanticIndex: v })} />
         </Row>
         {st.settings.semanticIndex && ready('embed') && ix.pct < 100 && (
           <Progress pct={ix.pct} thin resetKey="index" />

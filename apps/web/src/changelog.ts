@@ -16,6 +16,21 @@ export interface ChangeEntry {
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    id: '2026-10-01d',
+    date: '2026-10-01',
+    title: 'Aramaya tek tıkla ulaş',
+    items: [
+      {
+        title: 'Sol menüde Ara',
+        text: 'Genel arama artık sol menünün en üstünde. Açılınca yalnız arama çubuğu görünür; yazdıkça tüm uygulamalardaki sonuçlar gelir. ⌘K / Ctrl+K kısayolu da çalışır.',
+      },
+      {
+        title: 'AI ile ara',
+        text: 'Arama çubuğundaki “AI ile ara”yı açıp “geçen ay gelen fatura” gibi yazman yeterli. Kelimesi geçmese de anlamca yakın mesajlar bulunur; arama bilgisayarında çalışır.',
+      },
+    ],
+  },
+  {
     id: '2026-10-01c',
     date: '2026-10-01',
     title: 'Yerel AI hazır geliyor',

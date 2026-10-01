@@ -16,7 +16,7 @@ const emit = (ev: CoreEvent) => emitter?.(ev);
 
 const SIZES: Record<ModelKey, [string, string, number]> = {
   whisper: ['Xenova/whisper-small', 'Konuşma tanıma (Whisper small)', 250],
-  embed: ['Xenova/multilingual-e5-small', 'Anlamsal arama (multilingual-e5-small)', 135],
+  embed: ['Xenova/multilingual-e5-small', 'AI ile arama (multilingual-e5-small)', 135],
 };
 const state: Record<ModelKey, { state: MlModel['state']; pct: number }> = { whisper: { state: 'ready', pct: 100 }, embed: { state: 'ready', pct: 100 } };
 
