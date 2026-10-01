@@ -24,3 +24,23 @@
 
 /* ---- Güncelleme ve izin kartları: giriş/çıkış WAAPI ile ---- */
 .update-card, .perm-card { animation: none; }
+
+/* ---- "AI ile ara" kenar ışığı (SearchPalette .palette.ai; Kaan 01.10, libraries.dev/beam benzeri) ----
+   Büyük kare bir konik gradyan yalnız transform ile döner; .edge kenara maskelenir (ince hüzme), .glow bulanık ve soluk (içte parıltı). */
+.palette { position: relative; isolation: isolate; }
+.palette > :not(.pal-beam) { position: relative; z-index: 1; }
+.pal-in:last-child { border-bottom-color: transparent; }
+.pal-beam { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; overflow: hidden; z-index: 0; animation: palBeamIn var(--m-slow) var(--m-in) both; }
+.pal-beam i { position: absolute; left: 50%; top: 50%; width: 160%; aspect-ratio: 1; translate: -50% -50%;
+  background: conic-gradient(from 0deg, transparent 0deg, transparent 150deg, #3ddc84 200deg, #22d3ee 240deg, #6c8cff 275deg, #8b5cf6 305deg, #ec4899 335deg, transparent 360deg);
+  animation: palBeamSpin 3.2s linear infinite; will-change: transform; }
+.pal-beam.edge { z-index: 2; padding: 1.5px;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+.pal-beam.glow { opacity: .22; filter: blur(18px); }
+:root[data-theme="dark"] .pal-beam.glow { opacity: .3; }
+.palette.ai { border-color: transparent; }
+@keyframes palBeamSpin { to { transform: rotate(360deg); } }
+@keyframes palBeamIn { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .pal-beam i { animation: none; } }
+html.reduce-motion .pal-beam i { animation: none; }

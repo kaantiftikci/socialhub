@@ -226,7 +226,18 @@ export function SearchPalette({ chats, onClose, onOpenChat, onOpenMessage }: { c
   let idx = only ? 0 : chatHits.length;
   return (
     <div className="overlay palette-wrap pal-anim" ref={wrapRef} onMouseDown={onClose}>
-      <div className="palette" ref={palRef} role="dialog" aria-label="Her yerde ara" onMouseDown={(e) => e.stopPropagation()} onKeyDown={onKey}>
+      <div className={`palette ${semantic ? 'ai' : ''}`} ref={palRef} role="dialog" aria-label="Her yerde ara" onMouseDown={(e) => e.stopPropagation()} onKeyDown={onKey}>
+        {/* "AI ile ara" açıkken kenarda dönen renkli ışık (libraries.dev/beam benzeri): ince kenar hüzmesi + içte yumuşak parıltı */}
+        {semantic && (
+          <>
+            <span className="pal-beam glow" aria-hidden="true">
+              <i />
+            </span>
+            <span className="pal-beam edge" aria-hidden="true">
+              <i />
+            </span>
+          </>
+        )}
         <div className="pal-in">
           <Icon name="search" size={17} />
           <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder={semantic ? 'Doğal dille ara — "geçen ay Ahmet’in gönderdiği fatura"' : 'Tüm uygulamalarda ara — kişi, mesaj, dosya adı…'} aria-label="Arama" spellCheck={false} />

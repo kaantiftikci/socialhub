@@ -509,7 +509,7 @@ Dil: arayüz ve yorumlar Türkçe.
 - **Takip hatırlatıcısı**: `chats.followup` {at, since, due}; `POST /api/chats/:id/followup {at|null}`. Sunucu dakikada bir
   `store.checkFollowUps()`: `since` sonrası karşı taraftan mesaj gelirse kendiliğinden kapanır, süre dolunca bir kez
   `chat.followup` olayı (bildirim). Arayüz: sağ panel "Takip hatırlatıcısı", sohbet üstü şerit, listede "Takip" sekmesi.
-- **Genel arama** (⌘K / Ctrl+K ya da kenar çubuğunun en üstündeki "Ara", `SearchPalette.tsx`; açılınca YALNIZ arama çubuğu, liste yazınca; anlamsal kip arayüzde "AI ile ara"): görünüm/filtreden bağımsız; sohbet adları + FTS5 mesaj metni + ek adları
+- **Genel arama** (⌘K / Ctrl+K ya da kenar çubuğunun en üstündeki "Ara", `SearchPalette.tsx`; açılınca YALNIZ arama çubuğu, liste yazınca; anlamsal kip arayüzde "AI ile ara"; açıkken `.palette.ai` kenarında dönen renkli ışık `.pal-beam` edge+glow, motion/boot.css, yalnız transform): görünüm/filtreden bağımsız; sohbet adları + FTS5 mesaj metni + ek adları
   (`store.search` LIKE yedeği; `/api/search?limit=` ≤200). "N uygulamada M sonuç", uygulama çipleriyle süzme; mesaja tıklayınca sohbet açılır,
   gerekirse eski mesajlar yüklenir (`focusMsg`), `data-mid` balon ortalanıp `.flash` ile vurgulanır. Liste başındaki arama kutusu ayrıca duruyor.
 - WhatsApp arşivi: `meta.archived` (geçmiş paketi `archived`, `chats.update {archived}`, bağlanınca regular_low tam eşitleme; unarchiveChats
