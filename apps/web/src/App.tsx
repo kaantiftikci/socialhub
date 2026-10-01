@@ -1522,7 +1522,7 @@ export default function App() {
                     <span className="word">mivelo</span>
                   </span>
                   <span style={{ flexGrow: 1 }} />
-                  <button className={`btn icon b b2 ${listSearch || query ? 'soft' : ''}`} aria-label="Sohbetlerde ara" title="Sohbetlerde ara" onClick={() => (setListSearch(!listSearch), listSearch && setQuery(''))}>
+                  <button className="btn icon b b2" aria-label="Ara" title="Tüm uygulamalarda ara" onClick={() => setPaletteOpen(true)}>
                     <Icon name="search" size={15} sw={2} />
                   </button>
                 </div>
@@ -1540,9 +1540,6 @@ export default function App() {
                       <Icon name="pen" size={15} sw={2} />
                     </button>
                   )}
-                  <button className={`btn icon b b2 ${listSearch || query ? 'soft' : ''}`} aria-label="Sohbetlerde ara" title="Sohbetlerde ara" onClick={() => (setListSearch(!listSearch), listSearch && setQuery(''))}>
-                    <Icon name="search" size={15} sw={2} />
-                  </button>
                 </div>
 
                 {listSearch && (
