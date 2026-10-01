@@ -44,9 +44,10 @@ function period(range: StatsRange, at: string | undefined, now: number): { from:
   return { from: new Date(n.getFullYear() - 2, n.getMonth() - 3, 1).getTime(), end: now + 1, at: '', label: 'Tüm zamanlar' };
 }
 
-/** Platformların tipik payı (demo) */
-const PLATFORM_WEIGHT: Partial<Record<Platform, number>> = { whatsapp: 0.4, instagram: 0.15, telegram: 0.1, slack: 0.09, gmail: 0.06, imessage: 0.07, linkedin: 0.04, x: 0.03, messenger: 0.03, tiktok: 0.02, outlook: 0.02 };
-/** Saatlik yoğunluk eğrisi (00-23): sabah hafif, öğleden sonra ve akşam 21-23 tepe */
+/** Platformların tipik payı (demo). En küçük pay bile ay başında ayrı raporu doldurur (Miveloji uygulama çipleri). */
+const PLATFORM_WEIGHT: Partial<Record<Platform, number>> = { whatsapp: 0.4, instagram: 0.15, telegram: 0.1, slack: 0.09, gmail: 0.06, imessage: 0.07, linkedin: 0.05, x: 0.04, messenger: 0.04, tiktok: 0.035, outlook: 0.035, icloud: 0.03 };
+/** Ay başında (ör. 1 Ekim) dönem 1 gün → demo raporu boş kalmasın: bu ayın hacmi en az bu kadar günlükmüş gibi */
+const MIN_VOLUME_DAYS = 16;
 const HOUR_CURVE = [0.9, 0.6, 0.3, 0.15, 0.08, 0.1, 0.25, 0.6, 1.1, 1.6, 2.0, 2.1, 2.0, 1.9, 2.1, 2.2, 2.1, 2.0, 2.1, 2.4, 2.7, 3.0, 2.8, 1.8];
 const DAY_CURVE = [1.0, 1.05, 1.12, 1.0, 1.08, 0.82, 0.78];
 const EMOJIS: Array<[string, number]> = [['😂', 1], ['❤', 0.74], ['🙏', 0.52], ['🔥', 0.41], ['👍', 0.37], ['🥹', 0.26], ['✨', 0.19], ['😅', 0.16], ['🎉', 0.11]];
@@ -64,58 +65,89 @@ export function emptyStats(range: StatsRange, at?: string, now = Date.now()): Wr
 export function demoStats(ctx: DemoCtx, range: StatsRange, at?: string, now = Date.now(), platform?: string): WrappedStats {
   const p = period(range, at, now);
   const to = Math.min(p.end, now);
-  const talk = ctx.chats.filter((c) => PLATFORMS[c.platform]?.category !== 'shop' && (!platform || c.platform === platform));
+  // istenmeyen / silinen sohbetler (iMessage İstenmeyen, e-posta Gereksiz) rapora girmez
+  const allTalk = ctx.chats.filter((c) => PLATFORMS[c.platform]?.category !== 'shop' && c.meta?.folder !== 'junk' && !c.meta?.deleted);
+  const talk = allTalk.filter((c) => !platform || c.platform === platform);
   if (ctx.fresh || ctx.messages.length < 5 || !talk.length || to <= p.from) return emptyStats(range, at, now);
-  const r = rng(`${range}:${p.at}:${platform ?? ''}`);
   const days = Math.max(1, Math.ceil((to - p.from) / DAY));
-  const total = Math.max(3, Math.round(days * (70 + r() * 22) * (platform ? Math.min(1, (PLATFORM_WEIGHT[platform as Platform] ?? 0.03) * 1.3) : 1)));
-  const sent = Math.round(total * (0.44 + r() * 0.06));
-  const received = total - sent;
-
-  // platform dağılımı: demodaki bağlı uygulamalar, tipik paylarla
-  const plats = [...new Set(talk.map((c) => c.platform))];
-  const w = plats.map((pl) => (PLATFORM_WEIGHT[pl] ?? 0.025) * (0.85 + r() * 0.3));
+  // Tüm uygulamaların toplamı ve platform payları her zaman AYNI tohumla: bir uygulamaya tıklanınca o uygulamanın sayısı,
+  // "Tüm uygulamalar"daki halka dilimiyle tutarlı (eskiden süzülünce toplam gün × pay ile küçülüyor, ay başında yalnız WhatsApp doluyordu)
+  const r0 = rng(`${range}:${p.at}`);
+  const volDays = range === 'month' ? Math.max(days, MIN_VOLUME_DAYS) : days;
+  const grand = Math.max(3, Math.round(volDays * (70 + r0() * 22)));
+  const plats = [...new Set(allTalk.map((c) => c.platform))];
+  const w = plats.map((pl) => (PLATFORM_WEIGHT[pl] ?? 0.03) * (0.85 + r0() * 0.3));
   const wsum = w.reduce((a, b) => a + b, 0);
-  let left = total;
-  const platforms = plats
-    .map((pl, i) => ({ pl, n: Math.round((total * w[i]) / wsum) }))
+  let left = grand;
+  const allPlatforms = plats
+    .map((pl, i) => ({ pl, n: Math.round((grand * w[i]) / wsum) }))
     .sort((a, b) => b.n - a.n)
     .map((x, i, arr) => {
       const n = i === arr.length - 1 ? Math.max(0, left) : x.n;
       left -= n;
-      const s = Math.round(n * (sent / total));
-      return { platform: x.pl, sent: s, received: n - s, total: n };
+      return { pl: x.pl, n };
+    });
+  const r = rng(`${range}:${p.at}:${platform ?? ''}`);
+  const total = platform ? Math.max(24, allPlatforms.find((x) => x.pl === platform)?.n ?? 0) : grand;
+  const sent = Math.round(total * (0.44 + r() * 0.06));
+  const received = total - sent;
+  const platforms = (platform ? [{ pl: platform as Platform, n: total }] : allPlatforms)
+    .map((x) => {
+      const s = Math.round(x.n * (sent / total));
+      return { platform: x.pl, sent: s, received: x.n - s, total: x.n };
     })
     .filter((x) => x.total > 0);
 
+  const isMail = (c: Chat) => PLATFORMS[c.platform]?.category === 'mail';
   const person = (c: Chat, n: number, reply?: number): WrappedPerson => {
     const s = Math.round(n * (0.45 + r() * 0.1));
-    return { chatId: c.id, name: c.name, platform: c.platform, avatarUrl: c.avatarUrl, sent: s, received: n - s, total: n, medianReplyMs: reply };
+    // e-posta dizisinin adı konu satırı: kişi listesinde karşı tarafın adı görünsün
+    const name = isMail(c) ? (c.participants?.[0]?.name ?? c.handle ?? c.name) : c.name;
+    return { chatId: c.id, name, platform: c.platform, avatarUrl: c.avatarUrl, sent: s, received: n - s, total: n, medianReplyMs: reply };
   };
-  const direct = talk.filter((c) => c.kind === 'direct' && PLATFORMS[c.platform]?.category !== 'mail').map((c) => ({ c, k: r() }));
+  // kişiler: birebir sohbetler; e-postada aynı kişinin birden çok dizisi tek satır (ilk dizi). Tüm uygulamalar görünümünde e-posta
+  // dizileri sohbet uygulamalarının arkasında kalır (gerçek raporda da e-posta trafiği azdır)
+  const seenMail = new Set<string>();
+  const direct = talk
+    .filter((c) => c.kind === 'direct')
+    .filter((c) => {
+      if (!isMail(c)) return true;
+      const key = (c.handle ?? c.name).toLocaleLowerCase('tr-TR');
+      if (seenMail.has(key) || /^(fatura|bulten|siparis|destek|notlar|it|muhasebe|noreply)@/.test(key)) return false;
+      seenMail.add(key);
+      return true;
+    })
+    .map((c) => ({ c, k: r() + (!platform && isMail(c) ? 1 : 0) }));
   direct.sort((a, b) => a.k - b.k);
-  let top = total * (0.1 + r() * 0.03);
+  let top = total * (platform ? 0.18 + r() * 0.04 : 0.1 + r() * 0.03);
   const people = direct.slice(0, 8).map(({ c }) => {
-    const pp = person(c, Math.max(4, Math.round(top)), Math.round((40 + r() * 600) * 1000));
+    const pp = person(c, Math.max(2, Math.round(top)), Math.round((40 + r() * 600) * 1000));
     top *= 0.7 + r() * 0.1;
     return pp;
   });
-  let gtop = total * 0.08;
+  let gtop = total * (platform ? 0.14 : 0.08);
   const groups = talk
     .filter((c) => c.kind !== 'direct')
     .slice(0, 4)
     .map((c) => {
-      const g = person(c, Math.max(3, Math.round(gtop)));
+      const g = person(c, Math.max(2, Math.round(gtop)));
       gtop *= 0.62;
       return g;
     });
-  const fastest = people.length > 1 ? { ...people[1], medianReplyMs: 38_000 + Math.round(r() * 20_000) } : undefined;
-  if (fastest) people[1] = fastest;
+  const fastest = people.length > 1 ? { ...people[1], medianReplyMs: 38_000 + Math.round(r() * 20_000) } : people[0] ? { ...people[0], medianReplyMs: 52_000 } : undefined;
+  if (fastest) people[people.length > 1 ? 1 : 0] = fastest;
 
   const heat: number[] = [];
   for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) heat.push(HOUR_CURVE[h] * DAY_CURVE[d] * (0.8 + r() * 0.4));
   const hsum = heat.reduce((a, b) => a + b, 0);
-  for (let i = 0; i < heat.length; i++) heat[i] = Math.round((heat[i] / hsum) * total);
+  // en büyük kalan yöntemi: hücreler toplamı tam olarak `total` (küçük uygulamada her hücre 0'a yuvarlanıp ısı haritası boş kalıyordu)
+  const exact = heat.map((v) => (v / hsum) * total);
+  for (let i = 0; i < heat.length; i++) heat[i] = Math.floor(exact[i]);
+  let rest = total - heat.reduce((a, b) => a + b, 0);
+  for (const i of exact.map((v, i) => ({ i, f: v - Math.floor(v) })).sort((a, b) => b.f - a.f).map((x) => x.i)) {
+    if (rest-- <= 0) break;
+    heat[i]++;
+  }
   const hours = Array.from({ length: 24 }, (_, h) => heat.filter((_, i) => i % 24 === h).reduce((a, b) => a + b, 0));
   const byDay = Array.from({ length: 7 }, (_, d) => heat.slice(d * 24, d * 24 + 24).reduce((a, b) => a + b, 0));
   const bh = hours.indexOf(Math.max(...hours));
@@ -138,7 +170,7 @@ export function demoStats(ctx: DemoCtx, range: StatsRange, at?: string, now = Da
     current: p.end > now,
     computedAt: now,
     tookMs: 3,
-    totals: { sent, received, total, chats: talk.length, people: Math.max(people.length, Math.round(days * 0.9)), activeDays: Math.min(days, Math.round(days * (0.78 + r() * 0.15))), days },
+    totals: { sent, received, total, chats: talk.length, people: platform ? Math.max(people.length, direct.length) : Math.max(people.length, Math.round(volDays * 0.9)), activeDays: Math.min(days, Math.round(days * (0.78 + r() * 0.15))), days },
     platforms,
     people,
     groups,
@@ -150,13 +182,16 @@ export function demoStats(ctx: DemoCtx, range: StatsRange, at?: string, now = Da
       const cr = rng(`${range}:${p.at}:${platform ?? ''}:c${i}`);
       const plats = platforms.map((x) => ({ platform: x.platform, n: Math.round(n * (x.total / Math.max(1, total)) * (0.6 + cr() * 0.8)) })).filter((x) => x.n > 0).sort((a, b) => b.n - a.n).slice(0, 4);
       const pool = [...people, ...groups];
-      const picks = pool.map((x) => ({ x, k: cr() * (x.total || 1) })).sort((a, b) => b.k - a.k).slice(0, 4);
-      let left = n;
-      const ppl = picks.map(({ x }, j) => {
-        const v = j === picks.length - 1 ? Math.max(1, Math.round(left * 0.5)) : Math.max(1, Math.round(left * (0.35 + cr() * 0.2)));
-        left = Math.max(1, left - v);
-        return { chatId: x.chatId, name: x.name, platform: x.platform, avatarUrl: x.avatarUrl, kind: groups.includes(x) ? 'group' : 'direct', n: v };
-      }).sort((a, b) => b.n - a.n);
+      // hücredeki mesaj sayısı kadar kişi (en çok 4) ve kişilerin toplamı hücreyi aşmaz (1 mesajlık hücrede 4 kişi görünüyordu)
+      const picks = pool.map((x) => ({ x, k: cr() * (x.total || 1) })).sort((a, b) => b.k - a.k).slice(0, Math.min(4, n));
+      const wts = picks.map((_, j) => (0.5 + cr() * 0.5) / (j + 1));
+      const wsumC = wts.reduce((a, b) => a + b, 0) || 1;
+      const share = Math.max(picks.length, Math.round(n * (0.6 + cr() * 0.3)));
+      // her kişiye 1, kalanı ağırlıkla (toplam tam `share`)
+      const extra = share - picks.length;
+      const vals = wts.map((w) => 1 + Math.floor((w / wsumC) * extra));
+      if (vals.length) for (let left = share - vals.reduce((a, b) => a + b, 0), j = 0; left > 0; left--, j = (j + 1) % vals.length) vals[j]++;
+      const ppl = picks.map(({ x }, j) => ({ chatId: x.chatId, name: x.name, platform: x.platform, avatarUrl: x.avatarUrl, kind: groups.includes(x) ? 'group' : 'direct', n: vals[j] })).sort((a, b) => b.n - a.n);
       return { sent: Math.round(n * (sent / Math.max(1, total))), platforms: plats, people: ppl };
     }),
     busiestHour: { hour: bh, count: hours[bh] },
@@ -166,7 +201,7 @@ export function demoStats(ctx: DemoCtx, range: StatsRange, at?: string, now = Da
     night: { hour: nh, count: hours[nh], share: Math.round((nights.reduce((a, b) => a + b, 0) / total) * 1000) / 1000 },
     profile: { kind: 'night', nightShare: 0.17, morningShare: 0.05 },
     change: p.prevLabel ? { total: changeOf(range === 'year' ? 23.6 : p.end > now ? 12.4 : -4.1), sent: changeOf(p.end > now ? 15.2 : -2.3), received: changeOf(p.end > now ? 9.8 : -6.0), prevTotal: Math.round(total / 1.12), prevLabel: p.prevLabel } : null,
-    waiting: ctx.chats.filter((c) => c.kind === 'direct' && c.unread > 0 && !c.lastFromMe && PLATFORMS[c.platform]?.category !== 'shop').length,
+    waiting: talk.filter((c) => c.kind === 'direct' && c.unread > 0 && !c.lastFromMe).length,
   };
 }
 

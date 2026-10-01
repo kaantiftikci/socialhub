@@ -216,6 +216,34 @@ function seed(): void {
   // yeni üye: ASLA örnek veri yok (bağladığı uygulamalar boş kanal olarak görünür)
   if (freshUser) return;
   for (const acc of accounts) if (acc.status === 'connected') seedAccount(acc, now);
+  seedScheduled(now);
+}
+
+/**
+ * Örnek zamanlanmış mesajlar (statik demoda kuyruk tarayıcıda: Conversation.tsx `kavsak.scheduled`). Yalnız örnek veri yolunda ve
+ * bu tarayıcıda bir kez (`mivelo.demoSched`); kullanıcı kaldırırsa geri gelmez. demo-isolation başka üyenin girişinde ikisini de siler.
+ */
+function seedScheduled(now: number): void {
+  try {
+    if (localStorage.getItem('mivelo.demoSched')) return;
+    const find = (platform: Platform, remoteId: string) => chats.find((c) => c.platform === platform && c.remoteId === remoteId)?.id;
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(9, 30, 0, 0);
+    const items = [
+      [find('whatsapp', 'ayse'), 'Kargo takip numaranız: 7340 4821 1180. Kapıya teslim notu eklendi.', now + 3 * 3_600_000],
+      [find('whatsapp', 'ekip'), 'Günaydın! Kampanya maili 10:00’da çıkıyor, son okumayı yaptım.', tomorrow.getTime()],
+      [find('linkedin', 'selin'), 'Merhaba Selin, perşembe görüşmesi için gündemi paylaşıyorum.', tomorrow.getTime() + 2 * 3_600_000],
+    ]
+      .filter((x): x is [string, string, number] => !!x[0])
+      .map(([chatId, text, at], i) => ({ id: `demo-sched-${i}`, chatId, text, at }));
+    if (!items.length) return;
+    const prev = JSON.parse(localStorage.getItem('kavsak.scheduled') || '[]') as unknown[];
+    localStorage.setItem('kavsak.scheduled', JSON.stringify([...(Array.isArray(prev) ? prev : []), ...items]));
+    localStorage.setItem('mivelo.demoSched', '1');
+  } catch {
+    /* depo kapalı: zamanlanmış örnek yok */
+  }
 }
 
 /** Tek hesabın örnek sohbetlerini EKLE (var olan sohbetlere, okundu/etiket/gönderilen mesajlara dokunmaz) */
@@ -286,9 +314,13 @@ function seedAccount(acc: Account, now = Date.now()): void {
               : undefined;
           // demo siparişinin tarihi, ilk olay satırıyla aynı gün olsun (zaman çizelgesi tutarlı)
           const order = s.order ? { ...s.order, dateCreated: new Date(lastAt - (s.lines.length - 1) * 18 * 60_000).toISOString() } : undefined;
-          const m = { ...(s.summary?.length ? { summary: s.summary } : {}), ...(s.note ? { note: s.note } : {}), ...(order ? { order } : {}), ...(question ? { question } : {}) };
+          const m = { ...(s.meta ?? {}), ...(s.summary?.length ? { summary: s.summary } : {}), ...(s.note ? { note: s.note } : {}), ...(order ? { order } : {}), ...(question ? { question } : {}) };
           return Object.keys(m).length ? m : undefined;
         })(),
+        ...(s.flags?.archived ? { archived: true } : {}),
+        ...(s.flags?.muted ? { muted: true } : {}),
+        // takip hatırlatıcısı: süresi dolmuşsa "due" (listede Takip sekmesinde kırmızı), değilse yaklaşan
+        ...(s.followUpH != null ? { followUp: { at: now + s.followUpH * 3_600_000, since: lastAt, ...(s.followUpH < 0 ? { due: true } : {}) } } : {}),
         participants: s.handle && PLATFORMS[acc.platform].category === 'mail' ? [{ id: s.handle, name: s.contact ?? s.handle.split('@')[0] ?? s.handle, handle: s.handle, avatarUrl: demoAsset(`avatars/${s.avatar}`) }] : undefined,
       });
     });
@@ -463,6 +495,7 @@ function demoEvents(): CalEvent[] {
   };
   const byName = (n: string) => chats.find((c) => c.name === n);
   const mk = (title: string, start: string, extra: Partial<CalEvent> = {}): CalEvent => ({ id: `ev-${Math.random().toString(36).slice(2, 9)}`, title, start, durationMin: 60, allDay: !start.includes('T'), createdAt: Date.now(), ...extra });
+  const byChat = (platform: Platform, remoteId: string) => chats.find((c) => c.platform === platform && c.remoteId === remoteId)?.id;
   const ayse = byName('Ayşe Demir');
   const ekip = byName('Satış Ekibi');
   calEvents = [
@@ -472,6 +505,22 @@ function demoEvents(): CalEvent[] {
     mk('KDV beyannamesi', at(4)),
     mk('Haftalık stok sayımı', at(6, '09:30'), { durationMin: 90 }),
     mk('Fatura kesimi · Demir Studio', at(-2, '11:00'), { chatId: ayse?.id }),
+    // ayın geri kalanı ve geçen hafta da dolu görünsün: farklı uygulamalardaki sohbetlere bağlı etkinlikler
+    mk('Selin Arslan · danışmanlık görüşmesi', at(3, '14:00'), { durationMin: 30, chatId: byChat('linkedin', 'selin'), location: 'Görüntülü görüşme', remindMin: 15 }),
+    mk('Webhook imzası · staging kontrolü', at(1, '09:30'), { durationMin: 30, chatId: byChat('telegram', 'can') }),
+    mk('Ürün çekimi · ece', at(8, '13:00'), { durationMin: 180, chatId: byChat('x', 'ece'), location: 'Stüdyo' }),
+    mk('Teklif imzası · Nova', at(9, '11:00'), { chatId: byChat('outlook', 'teklif'), remindMin: 60 }),
+    mk('Reels yayını · selin.tasarim', at(12), { chatId: byChat('instagram', 'selin') }),
+    mk('Lansman provası', at(13, '19:00'), { durationMin: 90, chatId: byChat('messenger', 'nisa') }),
+    mk('Sprint planlaması', at(15, '10:00'), { durationMin: 60, chatId: byChat('slack', 'mert'), location: 'Toplantı odası' }),
+    mk('Toptan sipariş teslimi · Kerem Usta', at(18, '15:00'), { chatId: byChat('linkedin', 'kerem') }),
+    mk('Aile yemeği', at(20, '13:00'), { durationMin: 120, chatId: byChat('imessage', 'aile') }),
+    mk('Ay sonu mutabakat', at(24, '16:00'), { durationMin: 45, chatId: byChat('gmail', 'fatura') }),
+    mk('melis.style · tanıtım videosu yayını', at(26, '20:00'), { durationMin: 15, chatId: byChat('tiktok', 'melis') }),
+    mk('Kargo anlaşması yenileme', at(29), {}),
+    mk('Haftalık stok sayımı', at(-1, '09:30'), { durationMin: 90 }),
+    mk('Satış ekibi haftalık', at(-5, '10:00'), { durationMin: 45, chatId: ekip?.id }),
+    mk('Eylül kapanış raporu', at(-8)),
   ];
   return calEvents;
 }
@@ -483,6 +532,18 @@ function demoIcs(ev: CalendarDraft): string {
   const esc = (x: string) => x.replace(/[\\;,]/g, (c) => '\\' + c).replace(/\n/g, '\\n');
   return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Mivelo//TR', 'BEGIN:VEVENT', `UID:${Date.now()}@mivelo`, start, `SUMMARY:${esc(ev.title)}`, 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
 }
+
+/** Demo bağlantı kartları: alan adı → [site, başlık, açıklama] (yalnız örnek alan adları; gerçek sayfa istenmez) */
+const DEMO_LINK_CARDS: Record<string, [string, string, string]> = {
+  'kargotakip.example.com': ['Kargo takip', 'Gönderi durumu: dağıtımda', 'Şube çıkışı yapıldı, tahmini teslim bugün 18:00’e kadar.'],
+  'meet.example.com': ['Görüntülü görüşme', 'Toplantı bağlantısı', 'Tarayıcıdan katılın; kurulum gerekmez.'],
+  'docs.example.com': ['Dokümanlar', 'Kurulum adımları', 'Adım adım yapılandırma rehberi ve örnek istekler.'],
+  'moodboard.example.com': ['Moodboard', 'Çekim referansları', '24 kare · ışık, renk ve kompozisyon notlarıyla.'],
+  'teklif.example.com': ['Teklif', 'Operasyon kurulumu · revize teklif', 'Altı haftalık plan, eğitim günleri ve ödeme takvimi.'],
+  'pano.example.com': ['Pano', 'Destek kuyruğu', 'Açık 14 · bugün kapanan 22 · ortalama ilk yanıt 11 dk.'],
+  'blog.example.com': ['Blog', 'Kargo gecikmeleri: Eylül notları (taslak)', 'Sevkiyat verisiyle gecikmelerin nedenleri ve çözüm önerileri.'],
+  'example.com': ['Örnek mağaza', 'Ürün sayfası', 'Keten koleksiyonu · beden tablosu ve stok bilgisi.'],
+};
 
 export const staticApi = {
   license: async () => ({ required: false, valid: true }),
@@ -665,6 +726,9 @@ export const staticApi = {
       const host = new URL(url).hostname.replace(/^www\./, '');
       if (host === 'partners.beehiiv.com') return { url, site: 'beehiiv', title: 'Mivelo × beehiiv · lansman ortak tanıtımı', description: 'Lansman haftasında beehiiv yazar bültenine yerleşim.' };
       if (host === 'mivelo.app') return { url, site: 'Mivelo', title: 'Mivelo — tüm mesajların tek gelen kutusunda', description: 'WhatsApp, Telegram, Slack, Instagram, e-posta ve pazaryerleri tek yerde.' };
+      // örnek sohbetlerdeki example.com bağlantıları (Medya → Bağlantılar ve balondaki kart)
+      const card = DEMO_LINK_CARDS[host];
+      if (card) return { url, site: card[0], title: card[1], description: card[2] };
     } catch {
       /* geçersiz */
     }

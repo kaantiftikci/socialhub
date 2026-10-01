@@ -22,6 +22,12 @@ export interface Script {
   questionOrderNo?: string;
   /** E-posta: karşı tarafın adı (katılımcı adı; yoksa adresin @ öncesi) — kişi birleştirme adla eşleştirir */
   contact?: string;
+  /** Ek sohbet meta'sı (ör. iMessage/e-posta klasörü: { folder: 'unknown' | 'junk' | 'deleted' }) */
+  meta?: Record<string, unknown>;
+  /** Mivelo arşivi / sessiz (kenar çubuğundaki Arşiv · Sessiz görünümleri) */
+  flags?: { archived?: boolean; muted?: boolean };
+  /** Takip hatırlatıcısı: şimdiden kaç saat sonra (eksi = süresi dolmuş, yanıt bekliyor) */
+  followUpH?: number;
   lines: Line[];
 }
 
@@ -59,6 +65,7 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
         [false, 'Mert: Bu hafta 31 siparişteyiz, geçen haftaya göre 8 fazla.'],
         [false, 'Zeynep: Kampanya görseli hazır, metni hâlâ bekliyorum.'],
         [true, 'Metni bu akşam kapatıyorum. İndirim yalnızca keten seride olsun.'],
+        [false, 'Mert: ', [voice(12)]],
         [false, 'Mert: Kupon kodu KETEN15. Stok tablosunu ekledim.'],
         [false, 'Mert: Güncel stok.', [csv('stok-keten.csv')]],
         [false, 'Zeynep: Stories için kare kırpım da lazım, yatay yetmiyor.'],
@@ -78,7 +85,8 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
         [false, '401. Örnek istek ve hata gövdesi PDF’te.'],
         [false, 'İmza örneği.', [pdf('webhook-imza.pdf', 96_300)]],
         [true, 'Tamam, doğrulamayı bu akşam eklerim. Saat farkı için tolerans var mı?'],
-        [false, 'Beş dakika. Daha geniş olursa tekrar oynatılabiliyor.'],
+        [false, 'Beş dakika. Daha geniş olursa tekrar oynatılabiliyor. Ayrıntı: https://docs.example.com/webhook/imza'],
+        [false, '', [voice(9)]],
         [true, 'Anlaşıldı. Staging’e gece basarım, sabah birlikte bakarız.'],
         [false, 'Sabah 09:30 uygun. Toplantı notunu da kanala bırakırım.'],
         [true, 'Orada olurum.'],
@@ -119,7 +127,7 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
         [true, 'Mağaza cevaplarına da aynı PDF’i ekleyin, sözle anlatmayalım.'],
         [false, 'Ece: Shopier’daki iade sorusu da aynı tabloya bakıyor, oraya da koyayım.'],
         [true, 'Koy. Üç iş günü içinde cevap sözümüz var, aşmayalım.'],
-        [false, 'Ece: Bugünkü kuyruk 14 soru. Akşama sıfırlarım.'],
+        [false, 'Ece: Bugünkü kuyruk 14 soru. Akşama sıfırlarım. Pano: https://pano.example.com/destek-kuyrugu'],
       ],
     },
   ],
@@ -134,7 +142,7 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
         [true, 'Haftalık plan.', [pdf('danismanlik-plan.pdf', 156_000)]],
         [false, 'Perşembe 14:00’te 30 dakika ayırabilir misiniz?'],
         [true, 'Uygun. Görüşmede mevcut kuyruğunuzu da görmek isterim.'],
-        [false, 'Takvim davetini gönderdim. Görüşürüz.'],
+        [false, 'Takvim davetini gönderdim: https://meet.example.com/selin-danismanlik — görüşürüz.'],
       ],
     },
     {
@@ -159,7 +167,7 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
         [true, 'Notlar.', [pdf('kargo-notlari.pdf', 72_100)]],
         [false, 'Alıntılayabilir miyim, adınızla?'],
         [true, 'Evet. “Mivelo operasyon notu” diye geçsin yeter.'],
-        [false, 'Yarın sabah paylaşırım, linki buradan da atarım.'],
+        [false, 'Yarın sabah paylaşırım, taslak şurada: https://blog.example.com/kargo-yazisi-taslak'],
         [true, 'Tamam, bakarım.'],
       ],
     },
@@ -184,6 +192,7 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
         [false, 'Akşam marketten dönerken şarj aletini alır mısın?'],
         [true, 'Alırım. Hangi uç, USB-C mi?'],
         [false, 'USB-C. Mümkünse iki metrelik olsun.'],
+        [false, '', [voice(17)]],
         [true, 'Tamam. Faturayı da isteyeyim, garanti için.'],
         [false, 'İste. Bir de ekmek.'],
         [true, 'Ekmek tamam. Çıkınca yazarım.'],
@@ -227,6 +236,7 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
         [false, 'Boyum 178, kilo 74. Hangi beden rahat olur?'],
         [true, 'Sana 38 olur. Tabloyu bırakıyorum.'],
         [true, 'Beden tablosu.', [pdf('beden-tablosu.pdf', 110_200)]],
+        [false, '', [voice(23)]],
         [false, 'Kumaşın yakın fotoğrafı da var mı, keten mi pamuk mu?'],
         [true, 'Yüzde yüz keten. Yakın kare ve kısa video:'],
         [true, 'Kumaş.', [pic('keten-kumas.jpg', 'kumas.jpg')]],
@@ -246,7 +256,7 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
         [true, 'Saat 15’e kadar onaylarsan bugün çıkar. Ürün fotoğrafı:'],
         [true, 'Ekru gömlek.', [pic('gomlek-ekru.jpg', 'gomlek.jpg')]],
         [false, 'Bu renk iyi. Adresimi sipariş notuna yazdım.'],
-        [true, 'Gördüm. Çıkınca takip linkini buradan atarım.'],
+        [true, 'Gördüm. Çıkınca takip linkini buradan atarım: https://kargotakip.example.com/takip/elif-ekru'],
         [false, 'Teşekkürler, bekliyorum.'],
       ],
     },
@@ -258,6 +268,7 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
         [true, 'Sunum.', [pdf('lansman-sunum.pdf', 1_240_000)]],
         [false, 'Aldım. Kapanış slaytındaki tarih 15 Ekim olarak kalsın mı?'],
         [true, 'Kalsın. Basın bülteni de aynı tarihe bağlı.'],
+        [false, '', [voice(14)]],
         [false, 'Tamam, akşam 7’deki provada beraber bakarız.'],
       ],
     },
@@ -270,7 +281,7 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
         [true, 'Teşekkürler! Yeni sezon bu hafta sitede.'],
         [false, 'Kısa bir tanıtım videosu çekmek isterim, ürün gönderebilir misiniz?'],
         [true, 'Olur. Beden ve renk tercihin?'],
-        [false, 'M beden, ekru. Paylaşım cuma akşamı olur.'],
+        [false, 'M beden, ekru. Paylaşım cuma akşamı olur. Profilim: https://www.tiktok.com/@melis.style'],
         [false, 'Geçen haftaki çekimim.', [vid('tanitim.mp4', 'cicek.mp4', 'elbise.jpg', 2_310_000)]],
       ],
     },
@@ -278,7 +289,7 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
       remoteId: 'can', name: 'can.kosu', kind: 'direct', tags: ['müşteri'], unread: 0, handle: '@can.kosu', avatar: 'can.jpg',
       lines: [
         [false, 'Canlı yayında gösterdiğiniz kupa hâlâ satışta mı?'],
-        [true, 'Satışta. Bağlantıyı bırakıyorum, stokta 6 adet var.'],
+        [true, 'Satışta. Bağlantı: https://www.example.com/urun/seramik-kupa — stokta 6 adet var.'],
         [true, 'Kupa.', [pic('kupa.jpg', 'kupa.jpg')]],
         [false, 'Harika, ikisini sepete ekledim.'],
       ],
@@ -297,7 +308,7 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
       ],
     },
     {
-      remoteId: 'toplanti', name: 'Toplantı özeti — lansman', kind: 'direct', tags: ['ekip'], unread: 0, handle: 'melis@nova.example', avatar: 'melis.jpg',
+      remoteId: 'toplanti', name: 'Toplantı özeti — lansman', kind: 'direct', tags: ['ekip'], unread: 0, handle: 'melis@nova.example', avatar: 'melis.jpg', contact: 'Melis Aydın',
       lines: [
         [false, 'Lansman 15 Ekim. Basın bülteni bu hafta çıksın istedik.\n\nGündem ekte.\n\nMelis', [pdf('toplanti-gundem.pdf', 66_400)]],
         [true, 'Bülteni yarına bırakıyorum. Alıntı izinleri tamam.'],
@@ -354,7 +365,7 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
   ],
   icloud: [
     {
-      remoteId: 'okan', name: 'Okan', kind: 'direct', tags: ['kişisel'], unread: 1, handle: 'okan@icloud.example', avatar: 'emre.jpg',
+      remoteId: 'okan', name: 'Okan', kind: 'direct', tags: ['kişisel'], unread: 1, handle: 'okan@icloud.example', avatar: 'emre.jpg', contact: 'Okan Er',
       lines: [
         [false, 'Hafta sonu için evin anahtarını nereye bıraktığını yazmamışsın.'],
         [true, 'Komşuda, 4 numarada. Notu da fotoğrafladım.'],
@@ -570,7 +581,7 @@ export const SCRIPTS: Partial<Record<Platform, Script[]>> = {
       ],
     },
     {
-      remoteId: 'iade-beden', name: 'İade · beden uyumsuz', kind: 'direct', tags: ['müşteri'], unread: 1, handle: 'Emre K.', avatar: 'emre.jpg',
+      remoteId: 'iade-beden', name: 'İade · beden uyumsuz', kind: 'direct', tags: ['müşteri'], unread: 1, handle: 'Emre K.', avatar: 'emre.jpg', questionOrderNo: '112-4402918-7730415',
       lines: [
         [false, 'Gömlek dar geldi, iade etmek istiyorum. Sipariş 112-4402918-773.'],
         // art arda fotoğraflar → arayüzde tek albüm balonu (4 kare + "+1")
@@ -699,7 +710,7 @@ function extraScripts(platform: Platform, used: Set<string>): Script[] {
     }
     if (mail) {
       const pack = mailThread(topic, f.name, no);
-      out.push({ ...base, name: pack.name, kind: 'direct', tags: pack.tags, lines: pack.lines });
+      out.push({ ...base, name: pack.name, kind: 'direct', tags: pack.tags, lines: pack.lines, contact: f.name });
       return;
     }
     if (i === 2) {
@@ -740,6 +751,7 @@ function chatThread(i: number, name: string, no: number): { tags: string[]; line
         [false, 'Hangi firma? Adres değişikliği yapabilir miyim, ofise gelsin.'],
         [true, 'Yurtiçi. Adresi güncelledim, fişi de bırakıyorum.'],
         [true, 'Kargo fişi.', [pdf(`kargo-${no}.pdf`, 62_400)]],
+        [true, `Takip sayfası: https://kargotakip.example.com/takip/7340${no}`],
         [false, 'Teşekkürler. Çıkınca takip numarasını da yazar mısınız?'],
         [true, 'Numara sisteme düşünce buradan ileteceğim.'],
       ],
@@ -750,7 +762,7 @@ function chatThread(i: number, name: string, no: number): { tags: string[]; line
         [false, 'Bu model bana dar gelir mi? Normalde M alıyorum.'],
         [true, 'Kalıp regular. M giyiyorsanız M alın, bir büyük almanıza gerek yok.'],
         [false, 'Boyum 172. Tabloyu atabilir misiniz?'],
-        [true, 'Tablo ektedir. 170–176 arası M rahat duruyor.'],
+        [true, 'Tablo ektedir. 170–176 arası M rahat duruyor. Sitede de var: https://www.example.com/beden-tablosu'],
         [true, 'Beden tablosu.', [pdf(`beden-${no}.pdf`, 98_200)]],
         [false, 'Kumaşın yakını da var mı?'],
         [true, 'Var.', [pic('kumas.jpg', 'kumas.jpg')]],
@@ -764,7 +776,8 @@ function chatThread(i: number, name: string, no: number): { tags: string[]; line
         [true, 'Yarın 11:00 uygun. Gündemi kısa tutalım.'],
         [false, 'Gündem taslağını ekledim.'],
         [false, 'Gündem.', [pdf(`gundem-${no}.pdf`, 54_100)]],
-        [true, 'Baktım. Kargo maddesini üste alalım.'],
+        [false, '', [voice(9)]],
+        [true, 'Baktım. Kargo maddesini üste alalım. Bağlantı: https://meet.example.com/haftalik-${no}'],
         [false, 'Aldım. Daveti güncelliyorum.'],
       ],
     },
@@ -775,6 +788,7 @@ function chatThread(i: number, name: string, no: number): { tags: string[]; line
         [true, 'Uygun. Referans kare ve kısa videoyu bırakıyorum.'],
         [true, 'Referans.', [pic('referans.jpg', 'elbise.jpg')]],
         [true, 'Kısa video.', [vid(`cekim-${no}.mp4`, 'cicek.mp4', 'elbise.jpg', 1_128_375)]],
+        [false, `Moodboard burada: https://moodboard.example.com/cekim-${no}`],
         [false, 'Bu açı iyi. Tarih için perşembe olur mu?'],
         [true, 'Perşembe öğleden sonra uygun.'],
       ],
@@ -785,6 +799,7 @@ function chatThread(i: number, name: string, no: number): { tags: string[]; line
         [false, 'Ürün kutusu ezik geldi. Fotoğrafını çektim.'],
         [false, 'Fotoğraf.', [pic('kutu.jpg', 'kupa.jpg')]],
         [true, 'Üzüldük. Değişim ya da iade, hangisini istersiniz?'],
+        [false, '', [voice(11)]],
         [false, 'Değişim olsun, aynı ürün tekrar gelsin.'],
         [true, 'Yeni paket yarın çıkar. İade formu gerekmez, fotoğraf yeterli.'],
         [false, 'Tamam, takip kodunu bekliyorum.'],
@@ -795,6 +810,7 @@ function chatThread(i: number, name: string, no: number): { tags: string[]; line
       tags: ['kişisel'],
       lines: [
         [false, 'Akşamki yemeği 8’e çekebilir miyiz?'],
+        [false, '', [voice(7)]],
         [true, '8 iyi. Ben biraz erken çıkarım.'],
         [false, 'Listede hâlâ süt var, bakkala uğrarsın.'],
         [true, 'Uğrarım. Anahtar sende mi?'],
@@ -853,7 +869,7 @@ function mailThread(i: number, name: string, no: number): { name: string; tags: 
       tags: ['ekip'],
       lines: [
         [false, `Gündem ektedir. Saat 11:00, süre yarım saat.\n\n${name}`, [pdf(`gundem-${no}.pdf`, 52_000)]],
-        [true, 'Kargo maddesini üste aldım. Sunumu da ekliyorum.'],
+        [true, 'Kargo maddesini üste aldım. Sunumu da ekliyorum. Görüşme bağlantısı: https://meet.example.com/lansman-${no}'],
         [true, 'Sunum.', [pdf(`sunum-${no}.pdf`, 240_000)]],
         [false, 'İkinci slayt yeterli. Yarın kısa tutalım.'],
       ],
@@ -862,7 +878,7 @@ function mailThread(i: number, name: string, no: number): { name: string; tags: 
       name: `Teklif revizyonu ${no}`,
       tags: ['fırsat'],
       lines: [
-        [false, `Revize teklif ektedir. Eğitim günü ikiye indi.\n\n${name}`, [pdf(`teklif-${no}.pdf`, 188_000)]],
+        [false, `Revize teklif ektedir. Eğitim günü ikiye indi. Özet sayfa: https://teklif.example.com/${no}\n\n${name}`, [pdf(`teklif-${no}.pdf`, 188_000)]],
         [true, 'Uygun. Sözleşme taslağını da isteriz.'],
         [false, 'Taslak ektedir.', [pdf(`sozlesme-${no}.pdf`, 210_000)]],
         [true, 'Hukuk yarına bakar. İmzayı bu hafta kapatırız.'],
@@ -873,7 +889,7 @@ function mailThread(i: number, name: string, no: number): { name: string; tags: 
       tags: ['müşteri'],
       lines: [
         [false, `Davet postası yine spamde. Kayıt ektedir.\n\n${name}`, [pdf(`kayit-${no}.pdf`, 48_600)]],
-        [true, 'SPF satırını eklemeniz gerekiyor. Yarın sabah test edelim.'],
+        [true, 'SPF satırını eklemeniz gerekiyor, adımlar şurada: https://docs.example.com/eposta/spf-kaydi — yarın sabah test edelim.'],
         [false, 'Ekledik. 09:30 uygun.'],
         [true, 'Takvime yazdım.'],
       ],
@@ -886,7 +902,7 @@ function mailThread(i: number, name: string, no: number): { name: string; tags: 
         [true, 'Ürün görselini de görebilir miyim, renk tutsun.'],
         [false, 'Görsel ektedir.', [pic('urun.jpg', 'gomlek.jpg')]],
         [true, 'Bu renk doğru. Faturayı e-posta ile istiyorum.'],
-        [false, 'E-fatura kesilince bu zincire düşecek.'],
+        [false, `E-fatura kesilince bu zincire düşecek. Gönderi takibi: https://kargotakip.example.com/takip/${no}`],
       ],
     },
     {
@@ -1201,6 +1217,88 @@ for (const platform of Object.keys(SCRIPTS) as Platform[]) {
     chats[at].unread = parts[i] ?? 0;
   });
 }
+
+/**
+ * Boş görünen alanlar için ek örnekler (yalnız örnek veri yolu: kayıtla gelen yeni üye hiçbirini görmez):
+ * iMessage klasörleri (Bilinmeyen · İstenmeyen · Silinenler = meta.deleted), e-posta Gereksiz klasörü, kenar çubuğunda Arşiv · Sessiz,
+ * listede Takip sekmesi. Okunmamış sayıları kanal rozetini değiştirmesin diye 0 (bilinmeyen gönderen hariç).
+ */
+SCRIPTS.imessage!.push(
+  {
+    remoteId: 'bilinmeyen-ilan', name: '+90 500 000 00 41', kind: 'direct', tags: [], unread: 1, handle: '+90 500 000 00 41', avatar: 'emre.jpg', meta: { folder: 'unknown' },
+    lines: [
+      [false, 'Merhaba, ilandaki keten gömlek için yazıyorum. Numaranızı mağaza sayfasından aldım.'],
+      [false, 'M beden ekru hâlâ var mı? Yarın elden teslim alabilirim.'],
+    ],
+  },
+  {
+    remoteId: 'bilinmeyen-kurye', name: '+90 500 000 00 52', kind: 'direct', tags: [], unread: 0, handle: '+90 500 000 00 52', avatar: 'burak.jpg', meta: { folder: 'unknown' },
+    lines: [
+      [false, 'İyi günler, kuryeyim. Paketiniz için kapıdayım, zil çalışmıyor galiba.'],
+      [false, 'Komşunuza bıraktım, 3 numara.'],
+    ],
+  },
+  {
+    remoteId: 'spam-hediye', name: 'KAMPANYA', kind: 'direct', tags: [], unread: 0, handle: 'KAMPANYA', avatar: 'fatura.jpg', meta: { folder: 'junk' },
+    lines: [[false, 'Tebrikler! 500 TL hediye çeki kazandınız. Hemen kullanmak için: https://hediye-ceki.example.net/al?k=8812 (Bu mesaj örnek istenmeyen içeriktir)']],
+  },
+  {
+    remoteId: 'spam-kargo', name: '+90 500 000 00 77', kind: 'direct', tags: [], unread: 0, handle: '+90 500 000 00 77', avatar: 'duyuru.jpg', meta: { folder: 'junk' },
+    lines: [[false, 'Kargonuz adreste teslim edilemedi. Adres doğrulaması için 24 saat içinde: https://kargo-dogrula.example.net/tr (örnek oltalama mesajı)']],
+  },
+  {
+    remoteId: 'silinen-otopark', name: 'Site Yönetimi', kind: 'direct', tags: [], unread: 0, handle: '+90 500 000 00 63', avatar: 'duyuru.jpg', meta: { deleted: true },
+    lines: [
+      [false, 'Otopark boyası cumartesi 09:00–14:00 arası yapılacaktır. Araçlarınızı dışarı park ediniz.'],
+      [true, 'Bilgi için teşekkürler.'],
+    ],
+  },
+);
+const JUNK_MAIL: Array<[Platform, string, string, string]> = [
+  ['gmail', 'Hesabınızda olağandışı giriş', 'guvenlik@hesap-uyari.example.net', 'Hesabınıza yeni bir cihazdan giriş yapıldı. Siz değilseniz hemen doğrulayın: https://hesap-uyari.example.net/dogrula\n\n(Örnek oltalama e-postası; Gereksiz klasörüne düştü.)'],
+  ['gmail', 'Son gün: %90 indirim!', 'firsat@bulten-kampanya.example.net', 'Sadece bugün tüm ürünlerde %90 indirim. Kaçırmayın: https://bulten-kampanya.example.net/son-gun'],
+  ['outlook', 'Fatura ödemeniz gecikti', 'tahsilat@odeme-merkezi.example.net', 'Ödenmemiş faturanız bulunmaktadır. Ekteki bağlantıdan ödeyin: https://odeme-merkezi.example.net/fatura\n\n(Örnek istenmeyen e-posta.)'],
+  ['icloud', 'Apple Kimliği askıya alındı', 'destek@kimlik-dogrulama.example.net', 'Kimliğiniz geçici olarak askıya alındı. Yeniden etkinleştirmek için: https://kimlik-dogrulama.example.net/giris\n\n(Örnek oltalama e-postası.)'],
+];
+for (const [platform, name, handle, text] of JUNK_MAIL)
+  SCRIPTS[platform]?.push({ remoteId: `junk-${handle.split('@')[1].split('.')[0]}`, name, kind: 'direct', tags: [], unread: 0, handle, avatar: 'fatura.jpg', contact: handle.split('@')[0], meta: { folder: 'junk' }, lines: [[false, text]] });
+
+// Mivelo arşivi ve sessiz (sağ panel → Eylemler ile yapılanların örneği)
+SCRIPTS.linkedin!.push({
+  remoteId: 'eski-ilan', name: 'Oya Tekin', kind: 'direct', tags: [], unread: 0, handle: 'Oya Tekin', avatar: 'elif.jpg', flags: { archived: true },
+  lines: [
+    [false, 'Junior tasarımcı ilanı için başvurum değerlendirildi mi?'],
+    [true, 'Merhaba Oya, pozisyon geçen ay kapandı. Bir sonraki ilanda haber veririz.'],
+    [false, 'Anladım, teşekkürler.'],
+  ],
+});
+SCRIPTS.slack!.push({
+  remoteId: 'eski-kanal', name: '#yaz-kampanyasi', kind: 'channel', tags: [], unread: 0, avatar: 'duyuru.jpg', flags: { archived: true },
+  lines: [
+    [false, 'Zeynep: Yaz kampanyası kapandı, son rapor ekte.'],
+    [false, 'Zeynep: Rapor.', [pdf('yaz-kampanyasi-rapor.pdf', 142_000)]],
+    [true, 'Teşekkürler, kanalı arşivliyorum.'],
+  ],
+});
+SCRIPTS.telegram!.push({
+  remoteId: 'apartman', name: 'Apartman Sakinleri', kind: 'group', tags: ['kişisel'], unread: 0, avatar: 'ekip.jpg', flags: { muted: true },
+  lines: [
+    [false, 'Yönetici: Asansör bakımı perşembe 10:00’da.'],
+    [false, 'Daire 4: Kargo dolabına benim paketim karışmış olabilir, bakan oldu mu?'],
+    [false, 'Daire 7: Bende değil, girişteki rafa bakın.'],
+    [true, 'Benim de bir kutum var, akşam alırım.'],
+  ],
+});
+
+// Takip hatırlatıcıları: biri yaklaşan, biri süresi dolmuş (yanıt gelmedi), biri e-postada
+const followUp = (platform: Platform, remoteId: string, h: number) => {
+  const sc = SCRIPTS[platform]?.find((x) => x.remoteId === remoteId);
+  if (sc) sc.followUpH = h;
+};
+followUp('linkedin', 'kerem', -3);
+followUp('x', 'burak', 20);
+followUp('outlook', 'teklif', 46);
+followUp('instagram', 'selin', 70);
 
 /** Yahoo ve diğer e-posta demoda bağlı gelmez. Sohbet, e-posta ve alışveriş örnekleri kalır. */
 const DEMO_SKIP: Platform[] = ['yahoo', 'yandex', 'imap'];

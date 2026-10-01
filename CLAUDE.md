@@ -153,6 +153,13 @@ Dil: arayüz ve yorumlar Türkçe.
   ile doğrudan bağlanır. Eskiden her şey anında "Bağlı" oluyordu.
   Demoda örnek AI açık (`demo-ai.ts`: sohbete özel taslak/özet/aksiyon/olay, model çağrısı yok); pazaryeri sipariş kartı `Script.order`.
   Tek dosya demo (`npm run demo:html`) profil adı "Mivelo".
+  **Demo verisi her alanda dolu (01.10, Kaan: Miveloji'de yalnız WhatsApp doluydu)**: kök neden `demoStats` süzülünce toplamı gün × platform payıyla
+  küçültüyordu → ay başında (1 gün) yalnız WhatsApp `MIN_MESSAGES` 20'yi geçiyordu. Şimdi toplam ve paylar tek tohumdan (çip = halka dilimi), ay hacmi
+  en az 16 gün (`MIN_VOLUME_DAYS`), ısı haritası en büyük kalanla, e-posta kişileri karşı tarafın adıyla (otomatik/Gereksiz hariç). Ek örnekler
+  (demo-scripts.ts, yalnız örnek veri yolu; fresh üye görmez): her uygulamada sesli mesaj (süreye göre metin, demo-ml `VOICE_BY_SECS`) + example.com
+  bağlantıları (kart `DEMO_LINK_CARDS`), iMessage Bilinmeyen/İstenmeyen/Silinenler, e-posta Gereksiz, Mivelo Arşiv/Sessiz (`Script.flags`), Takip
+  (`followUpH`), Amazon sipariş sorusu, ay boyu takvim etkinlikleri, zamanlanmış örnekler (`seedScheduled`, bir kez `mivelo.demoSched`), Odak'ta ilk 3
+  taslak + "Verdiğin sözler" statik demoda kendiliğinden (Focus.tsx `USE_STATIC`).
 - **Tanıtım videosu (reels 1080×1920, ~68 sn; TM() zaman eşlemesi: 5,5 sn sonrası ×1,25 + GAPS araları: AI özeti, sağ panel, takip/zamanlama hareketli grafikleri)** `scripts/promo/`: videodaki arayüz GERÇEK tek dosya demo (iframe, Playwright sanal saati
   `clock.runFor`; imleç/klavye gerçek girişler, CSS animasyonları video zamanına bağlı `syncAnims`; ıskalanan tıklamada DOM güvencesi).
   `reel.html` kompozisyon (tek nesne biçim değiştirir: bildirim hapı → logo → pencere → logo → CTA; Apple tarzı açık zemin, kelime kelime

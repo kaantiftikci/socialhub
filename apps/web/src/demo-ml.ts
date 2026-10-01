@@ -37,9 +37,25 @@ const VOICE_TEXT: Record<string, string> = {
 const VOICE_FALLBACK = 'Bu sesli mesaj masaüstü uygulamasında cihazında yazıya dökülür; metin burada görünür ve aramada bulunur.';
 const transcripts = new Map<string, Transcript>();
 
+/**
+ * Örnek sesli mesajlar süreye göre ayrı metin taşır ("Sesli mesaj · 0:12" → 12). Tek dosyalık demoda bağlantı blob: adresi
+ * olduğundan dosya adı eşleşmez; süre adı her iki demoda da aynı.
+ */
+const VOICE_BY_SECS: Record<number, string> = {
+  5: VOICE_TEXT['sesli-mesaj.wav'],
+  7: 'Selam, akşam yemeğini sekize alıyorum. Gelirken ekmek alırsan iyi olur, bir de anahtarın sende olduğundan emin ol.',
+  9: 'Toplantıdan önce kısaca söyleyeyim: kargo maddesini üste alalım, geri kalanını on beş dakikada bitiririz. Gündem dosyası ekte.',
+  11: 'Kutu ezik geldi, içindeki kupanın kulpu da çatlamış. Değişim olursa sevinirim, iade istemiyorum, aynı üründen bir tane daha yeter.',
+  12: 'Arkadaşlar kısaca özet geçiyorum: bu hafta otuz bir sipariş, kampanya görseli hazır. Kupon kodu KETEN15, stok tablosunu birazdan ekliyorum.',
+  14: 'Sunumun son sayfasındaki rakamı güncelledim. Akşam yedideki provada tarihleri bir daha kontrol edelim, basın bülteniyle aynı olsun.',
+  17: 'Bir de şunu unutma, kablo iki metrelik olsun. Faturayı da al, garanti için lazım. Eve gelince zili iki kere çal.',
+  23: 'Merhaba, kumaşın yakın fotoğrafını görebilir miyim? Ketense ütü istiyor mu merak ettim. Bir de bu akşama kadar sipariş verirsem indirim geçerli mi?',
+};
 const voiceText = (m: Message): string | undefined => {
   const a = m.attachments?.find((x) => x.kind === 'audio');
   if (!a) return undefined;
+  const secs = /0:(\d{2})/.exec(a.name ?? '')?.[1];
+  if (secs && VOICE_BY_SECS[Number(secs)]) return VOICE_BY_SECS[Number(secs)];
   const file = Object.keys(VOICE_TEXT).find((f) => (a.link ?? '').includes(f.replace('.wav', '')));
   return file ? VOICE_TEXT[file] : VOICE_FALLBACK;
 };

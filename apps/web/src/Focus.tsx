@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { EASE, animate, reducedMotion } from './motion/motion';
-import { api } from './api';
+import { api, USE_STATIC } from './api';
 import { PLATFORMS, type Chat, type DraftResult } from './types';
 import { Avatar, Chip, Icon, IconText, ago, agoLong, stripLeadIcon } from './ui';
 import { PROFILE_NAME, PROFILE_PHOTO, profileFirstName } from './profile';
@@ -52,7 +52,8 @@ export function Focus({
   // Ayarlar → AI → "Odak'ta taslakları kendiliğinden hazırla" açıksa ilk 3 bekleyen için önceden hazırlanır.
   useEffect(() => {
     // açık rıza yoksa kendiliğinden gönderme (rıza ilk elle "Taslak yaz"da sorulur)
-    if (!ai || !aiP.focusAuto || (!aiP.drafts && !aiP.actions) || !getConsent().ai) return;
+    // statik demo: örnek AI tarayıcıda (model çağrısı/veri gönderimi yok) → ilk 3 taslak ve "Verdiğin sözler" hazır gelir
+    if (!ai || (!aiP.drafts && !aiP.actions) || (!USE_STATIC && (!aiP.focusAuto || !getConsent().ai))) return;
     for (const c of waiting.slice(0, 3)) {
       if (drafts[c.id]) continue;
       setDrafts((d) => ({ ...d, [c.id]: 'loading' }));
@@ -62,7 +63,7 @@ export function Focus({
         .catch(() => setDrafts((d) => ({ ...d, [c.id]: 'error' })));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ai, aiP.focusAuto, aiP.drafts, aiP.actions, waiting.map((c) => c.id).join(',')]);
+  }, [ai, aiP.focusAuto, aiP.drafts, aiP.actions, waiting.slice(0, 3).map((c) => c.id).join(',')]);
 
   const actions = useMemo(() => {
     const out: Array<{ chat: Chat; text: string }> = [];
