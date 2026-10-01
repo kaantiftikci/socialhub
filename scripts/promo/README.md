@@ -47,7 +47,7 @@ Odak + zamanlama → gündüz/gece → Miveloji → kapanış.
 
 ```bash
 npm run demo:html
-node scripts/promo/render.mjs <varlık> mivelo-reel2.mp4 --comp reel2.html --warm 62 --scale 2
+node scripts/promo/render.mjs <varlık> mivelo-reel2.mp4 --comp reel2.html --warm 62   # --scale 2 KULLANMA: bildirim kartı sahnesi (9-12 sn) bozuluyor
 ```
 
 - `--warm 62`: bildirim kartı uygulama açıldıktan 60 sn sonra çıkar; kayıttan önce sanal saat ilerletilir.
