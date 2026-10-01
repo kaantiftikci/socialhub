@@ -575,6 +575,7 @@ cue(7.8, 'morph2');
    S2 · 9–13.4 · Bildirimden yanıt (uygulamayı açmadan)
    ════════════════════════════════════════════════════════════════════ */
 say(8.95, 13.25, { k: 'Bildirim', l: ['Uygulamayı açmadan', '[yanıtla.]'], y: 270, size: 80 });
+inApp(0, () => window.frames[0].__miveloDemo?.quiet?.(true));
 // açılış süresinde biriken eski bildirim kartlarını kapat (8 sn'lik süreleri sahnenin ortasında dolmasın)
 inApp(8.7, () => doc()?.querySelectorAll('.qr-card .x').forEach((b) => b.click()));
 inApp(9.1, () => window.frames[0].__miveloDemo?.incoming('Ayşe Demir', 'Kargo ne zaman çıkar?'));

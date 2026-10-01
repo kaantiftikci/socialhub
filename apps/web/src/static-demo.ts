@@ -425,7 +425,9 @@ function pushIncoming(chat: Chat, text: string): void {
   emit({ type: 'message.upsert', message, chat: next, live: true });
 }
 if (STATIC_DEMO) {
+  let liveQuiet = false; // tanıtım videosu kendi mesajlarını düşürürken kendiliğinden gelenler araya girmesin
   setInterval(() => {
+    if (liveQuiet) return;
     const pool = chats.filter((c) => REACT_PLATFORMS.has(c.platform) && c.kind !== 'channel');
     if (!pool.length) return;
     liveTick++;
@@ -440,6 +442,9 @@ if (STATIC_DEMO) {
       const chat = chats.find((c) => c.name === name) ?? chats.find((c) => c.name.includes(name));
       if (chat) pushIncoming(chat, text);
       return !!chat;
+    },
+    quiet: (on = true) => {
+      liveQuiet = on;
     },
   };
 }
