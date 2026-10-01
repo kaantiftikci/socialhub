@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Çerez ve Yerel Depolama · Mivelo</title>
+<meta name="description" content="Mivelo çerez ve yerel depolama bildirimi.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28'%3E%3Crect width='28' height='28' rx='9' fill='%236C47FF'/%3E%3Cpath d='M8 8c4.5 0 6 3 6 6s1.5 6 6 6M8 20c4.5 0 6-3 6-6' stroke='%23fff' stroke-width='2.3' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='20' cy='8' r='2.5' fill='%23D4FF3F'/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<style>
+  :root{--bg:#FBFBFD;--ink:#16151B;--ink-2:#44424D;--ink-3:#6E6C78;--line:#E6E5EC;--brand:#6C47FF;--brand-soft:#F1EDFF;--card:#FFFFFF;--warn:#8A5A00;--warn-bg:#FFF7E6;--warn-line:#F3DDAE}
+  *{box-sizing:border-box}
+  html{scroll-padding-top:72px}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Inter',system-ui,sans-serif;font-size:16.5px;line-height:1.65;-webkit-font-smoothing:antialiased;overflow-wrap:break-word}
+  header{position:sticky;top:0;z-index:5;background:rgba(251,251,253,.8);backdrop-filter:saturate(180%) blur(16px);-webkit-backdrop-filter:saturate(180%) blur(16px);border-bottom:1px solid rgba(0,0,0,.05)}
+  .bar{max-width:760px;margin:0 auto;padding:14px 20px;display:flex;align-items:center;gap:10px}
+  .logo{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Inter',system-ui,sans-serif;display:inline-flex;align-items:center;gap:9px;font-weight:600;font-size:17px;letter-spacing:-.02em;color:inherit;text-decoration:none}
+  .bar .sp{flex-grow:1} .bar a.back{font-size:14px;color:var(--ink-3);text-decoration:none} .bar a.back:hover{color:var(--ink)}
+  main{max-width:760px;margin:0 auto;padding:44px 20px 90px}
+  .docs{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 30px;padding:0;list-style:none}
+  .docs a{display:inline-flex;align-items:center;height:30px;padding:0 12px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--ink-2);font-size:13px;text-decoration:none}
+  .docs a:hover{color:var(--ink);border-color:#D6D3E0}
+  .docs a[aria-current]{background:var(--ink);border-color:var(--ink);color:#fff}
+  h1{font-size:clamp(34px,6vw,50px);letter-spacing:-.04em;line-height:1.05;margin:0 0 10px;font-weight:700}
+  .upd{color:var(--ink-3);font-size:14px;margin:0 0 30px}
+  h2{font-size:21px;letter-spacing:-.02em;margin:38px 0 8px;line-height:1.3}
+  h3{font-size:17px;letter-spacing:-.01em;margin:24px 0 6px}
+  p,li,dd{color:var(--ink-2)} ul,ol{padding-left:22px} li{margin:5px 0}
+  a{color:var(--brand)}
+  b,strong{color:var(--ink)}
+  .box{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 18px;margin:18px 0}
+  .box p:first-child{margin-top:0}.box p:last-child{margin-bottom:0}
+  .warn{background:var(--warn-bg);border-color:var(--warn-line)}
+  .warn b{color:var(--warn)}
+  .acts{display:grid;gap:12px;margin:16px 0}
+  .act{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 18px}
+  .act h3{margin:0 0 8px;font-size:16px}
+  .act dl{margin:0;display:grid;grid-template-columns:150px 1fr;gap:6px 14px;font-size:14.5px;line-height:1.55}
+  .act dt{color:var(--ink-3);font-weight:500}
+  .act dd{margin:0}
+  .lic{width:100%;border-collapse:collapse;font-size:14.5px;margin:12px 0}
+  .lic th,.lic td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  .lic th{color:var(--ink-3);font-weight:500;font-size:13px}
+  .lic td:first-child{color:var(--ink);font-weight:500}
+  .tbl{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;background:var(--brand-soft);padding:1px 5px;border-radius:6px;color:var(--ink)}
+  footer{max-width:760px;margin:0 auto;padding:0 20px 40px;color:var(--ink-3);font-size:13px;line-height:1.9}
+  footer a{color:var(--ink-3);margin-right:12px}
+  footer a:hover{color:var(--ink)}
+  @media (max-width:560px){body{font-size:16px}.act dl{grid-template-columns:1fr;gap:2px}.act dt{margin-top:6px}main{padding-top:32px}}
+</style>
+</head>
+<body>
+<header><div class="bar"><a class="logo" href="./"><svg width="26" height="26" viewBox="0 0 28 28" aria-hidden="true"><rect width="28" height="28" rx="9" fill="#6C47FF"/><path d="M8 8c4.5 0 6 3 6 6s1.5 6 6 6M8 20c4.5 0 6-3 6-6" stroke="#fff" stroke-width="2.3" fill="none" stroke-linecap="round"/><circle cx="20" cy="8" r="2.5" fill="#D4FF3F"/></svg>Mivelo</a><span class="sp"></span><a class="back" href="./">← Ana sayfa</a></div></header>
+<main>
+<nav aria-label="Yasal metinler"><ul class="docs"><li><a href="kosullar.html">Koşullar ve EULA</a></li><li><a href="gizlilik.html">Gizlilik</a></li><li><a href="kvkk.html">KVKK Aydınlatma</a></li><li><a href="acik-riza.html">Açık Rıza</a></li><li><a href="cerez.html" aria-current="page">Çerezler</a></li><li><a href="lisanslar.html">Açık kaynak</a></li></ul></nav>
+<h1>Çerez ve Yerel Depolama Bildirimi</h1>
+<p class="upd">Sürüm 2026-10-01 · Yürürlük tarihi: 1 Ekim 2026</p>
+<div class="box"><p><b>Kısaca:</b> mivelo.app <b>çerez kullanmaz</b>, reklam ya da takip aracı barındırmaz. Tarayıcının yerel deposunu yalnızca formları yeniden sormamak gibi kolaylıklar için kullanırız. Demo sitesinde yalnızca oturum çerezi vardır.</p></div>
+
+<p>Bu bildirim mivelo.app, demo.mivelo.app ve Mivelo masaüstü uygulamasında tarayıcı çerezlerinin ve yerel depolamanın (localStorage) nasıl kullanıldığını anlatır. Kişisel verilerin işlenmesine ilişkin ayrıntılar <a href="kvkk.html">KVKK Aydınlatma Metni</a>'ndedir.</p>
+
+<h2>1. mivelo.app (web sitesi, indirme sayfası)</h2>
+<ul>
+  <li><b>Çerez yok.</b> Ziyaret sayacı çerezsiz çalışır: sayfa açıldığında yalnızca sayfa, geldiğin kaynak ve cihaz türü gönderilir; tekil ziyaretçi sayımı için IP adresin ve tarayıcı bilgin günlük değişen gizli bir anahtarla tek yönlü özetlenir. Ham IP adresi sayaçta tutulmaz.</li>
+  <li><b>Yerel depolama:</b> indirme sayfasında kayıt olduğunda adın, soyadın, e-posta adresin ve onayladığın metin sürümleri (<code>mivelo.reg</code>) bu tarayıcıda saklanır; böylece sonraki indirmelerde form yeniden açılmaz. Bekleme listesi sayacı için yalnızca bir sayı (<code>mv_joined</code>) tutulabilir. Bu bilgiler bize gönderilmez; tarayıcının site verilerini silerek kaldırabilirsin.</li>
+  <li><b>Yönetim paneli</b> (yalnızca Mivelo ekibi): giriş için zorunlu oturum çerezi.</li>
+  <li><b>Yazı tipleri:</b> sayfalar yazı tipini Google Fonts'tan yükler; Google bu istekte IP adresini görebilir.</li>
+</ul>
+
+<h2>2. demo.mivelo.app</h2>
+<ul>
+  <li><b>Oturum çerezi</b> (zorunlu): giriş yaptığında oturumunu korur; çıkışta ya da tarayıcı kapanınca sona erer.</li>
+  <li><b>Yerel depolama:</b> tema, ses ve panel tercihleri ile demoda yaptığın değişiklikler (bağladığın örnek uygulamalar, kişi birleştirmeleri vb.) tarayıcında tutulur. Aynı tarayıcıyı paylaşan kişilerin verileri karışmasın diye çıkışta kullanıcıya özel kayıtlar silinir.</li>
+  <li><b>Hata takibi:</b> demoda oluşan hatalar, kişisel bilgi içermeyecek şekilde Sentry'ye iletilir; çerez kullanılmaz.</li>
+</ul>
+
+<h2>3. Masaüstü uygulaması</h2>
+<ul>
+  <li>Uygulama arayüzü tercihlerini (tema, bildirim ve ses ayarları, kurulum durumu, onaylarının bir kopyası) bilgisayarındaki yerel depoda tutar.</li>
+  <li>Bağladığın platformların oturum çerezleri, Mivelo'nun bilgisayarındaki kendi tarayıcı profilinde (<code>~/.mivelo/sessions</code>) saklanır ve yalnızca o platforma bağlanmak için kullanılır. Bu çerezler o platformlarındır ve onların politikalarına tabidir.</li>
+  <li>Bu veriler bize gönderilmez. Ayarlar → Hesap ve veriler → Tüm verileri sil ile ya da <code>~/.mivelo</code> klasörünü silerek kaldırabilirsin.</li>
+</ul>
+
+<h2>4. Tercihlerin</h2>
+<p>Zorunlu olmayan çerez kullanmadığımız için bir çerez onayı penceresi göstermiyoruz. Yerel depolamayı tarayıcı ayarlarından ("Site verilerini sil") her zaman temizleyebilirsin; bu durumda formlar yeniden sorulur ve tercihlerin varsayılana döner.</p>
+</main>
+<footer>© 2026 Mivelo · <a href="kosullar.html">Koşullar ve EULA</a> <a href="gizlilik.html">Gizlilik</a> <a href="kvkk.html">KVKK Aydınlatma</a> <a href="acik-riza.html">Açık Rıza</a> <a href="cerez.html">Çerezler</a> <a href="lisanslar.html">Açık kaynak</a> <a href="mailto:hello@mivelo.app">hello@mivelo.app</a></footer>
+</body>
+</html>

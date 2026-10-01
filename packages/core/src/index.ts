@@ -7,6 +7,7 @@ import { DEMO_MODE, PORT, ensureDirs, DATA_DIR } from './config.js';
 import { pruneMediaCache } from './media-prune.js';
 import { getDbKey } from './dbkey.js';
 import { startStallWatch } from './stall-watch.js';
+import { setMlLicenseCheck, startMlAutoInstall } from './ml/auto-install.js';
 import { LICENSE_REQUIRED, licensed, onLicenseChange, startLicenseChecks, whenLicensed } from './license.js';
 
 // libsignal (WhatsApp şifre kütüphanesi) çözülemeyen eski/yinelenen paketleri doğrudan console.error ile basar;
@@ -115,6 +116,9 @@ async function main(): Promise<void> {
     }
   });
   await registry.bootAll();
+  // yerel AI (konuşma tanıma + anlamsal arama) çalışma zamanı ve modelleri: kanallar açıldıktan sonra arka planda kendiliğinden kurulur
+  setMlLicenseCheck(() => !LICENSE_REQUIRED || licensed());
+  startMlAutoInstall(75_000);
   // medya önbelleği budaması kanallar açıldıktan 5 dk sonra (açılışı yavaşlatmasın), sonra günde bir
   const prune = () => void pruneMediaCache(store).catch(() => undefined);
   setTimeout(prune, 5 * 60_000).unref();

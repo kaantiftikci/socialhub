@@ -4,6 +4,8 @@ import { isTauri, openExternal } from './desktop';
 import { SetupScreen, Splash, SplashMark, setupDone } from './Onboarding';
 import { setProfileName } from './profile';
 import { Icon, Logo } from './ui';
+import { loadConsent, saveConsent, useConsent } from './consent-store';
+import { AiConsentHost, ConsentChecks, ConsentScreen, allRequiredChecked, type ConsentChecked } from './Consent';
 
 const SIGNED_OUT = 'mivelo.signedOut';
 function readSignedOut(): boolean {
@@ -56,6 +58,13 @@ export function LicenseGate({ children }: { children: ReactNode }) {
   const [setup, setSetup] = useState(() => isTauri && !setupDone());
   const [splash, setSplash] = useState<'full' | 'quick' | null>(isTauri ? 'quick' : null);
   const [signedOut, setSignedOut] = useState(readSignedOut);
+  // yasal onaylar (Koşullar/EULA, KVKK, risk): yalnız masaüstünde zorunlu; yüklenene dek açılış animasyonu sürer
+  const consent = useConsent();
+  const [csReady, setCsReady] = useState(!isTauri);
+  useEffect(() => {
+    if (isTauri) void loadConsent().finally(() => setCsReady(true));
+    else void loadConsent(); // yerel web: AI rızası kapısı için önbellek
+  }, []);
   const refresh = useCallback((check = false) => {
     api
       .license(check)
@@ -85,8 +94,9 @@ export function LicenseGate({ children }: { children: ReactNode }) {
     setSignedOut(false);
     setSplash('full');
   };
-  const ok = !!st && (!st.required || st.valid);
-  if (st && !ok)
+  const ok = !!st && (!st.required || st.valid) && csReady;
+  const needConsent = isTauri && csReady && consent.needed.length > 0;
+  if (st && csReady && !(!st.required || st.valid))
     return (
       <LicenseScreen
         status={st}
@@ -99,6 +109,8 @@ export function LicenseGate({ children }: { children: ReactNode }) {
       />
     );
   if (ok && signedOut) return <SignedOutScreen onEnter={enter} />;
+  // lisans geçerli ama koşulların yeni sürümü onaylanmamış (güncelleme sonrası ya da eski kurulum)
+  if (ok && needConsent) return <ConsentScreen needed={consent.needed} onDone={() => setSplash('quick')} />;
   if (ok && setup)
     return (
       <SetupScreen
@@ -112,6 +124,7 @@ export function LicenseGate({ children }: { children: ReactNode }) {
     <>
       {ok && children}
       {splash && <Splash key={splash} mode={splash} ready={ok} onDone={() => setSplash(null)} />}
+      <AiConsentHost />
     </>
   );
 }
@@ -139,11 +152,17 @@ function LicenseScreen({ status, signedOut, onDone }: { status: LicenseStatus; s
   const [busy, setBusy] = useState(false);
   // kendi isteğiyle çıkan kullanıcıya "lisans kaldırıldı" hatası gösterilmez
   const [err, setErr] = useState(signedOut ? '' : (status.reason ?? ''));
+  // etkinleştirmeden önce zorunlu onaylar (yalnız eksik ya da sürümü değişenler; önceden işaretli değil)
+  const needed = useConsent().needed;
+  const [checked, setChecked] = useState<ConsentChecked>({});
+  const consentOk = allRequiredChecked(checked, needed);
   const submit = async () => {
-    if (!key.trim() || busy) return;
+    if (!key.trim() || busy || !consentOk) return;
     setBusy(true);
     setErr('');
     try {
+      // onay önce kaydedilir: çekirdek etkinleştirmede kabul edilen koşul sürümünü lisans sunucusuna iletir
+      if (needed.length && (await saveConsent({ accept: needed })).needed.length) throw new Error('Onaylar kaydedilemedi; yeniden dene');
       onDone(await api.activateLicense(key.trim()));
     } catch (e) {
       setErr((e as Error).message);
@@ -185,12 +204,13 @@ function LicenseScreen({ status, signedOut, onDone }: { status: LicenseStatus; s
           autoComplete="off"
           aria-label="Lisans anahtarı"
         />
+        {needed.length > 0 && <ConsentChecks value={checked} onChange={setChecked} keys={needed} />}
         {err && (
           <div className="auth-error" role="alert">
             <Icon name="alert" size={14} sw={2} /> {err}
           </div>
         )}
-        <button className="btn primary b" type="submit" disabled={busy || key.replace(/[^A-Z0-9]/g, '').length < 19}>
+        <button className="btn primary b" type="submit" disabled={busy || !consentOk || key.replace(/[^A-Z0-9]/g, '').length < 19}>
           {busy ? 'Doğrulanıyor…' : signedOut ? 'Giriş yap' : 'Etkinleştir'}
         </button>
         <p className="lic-help">

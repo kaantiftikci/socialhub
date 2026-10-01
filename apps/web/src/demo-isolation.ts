@@ -1,10 +1,11 @@
 /**
  * Web demoda aynı tarayıcıyı paylaşan kullanıcılar birbirinin verisini görmesin: tarayıcı deposundaki kullanıcıya özel kayıtlar
  * (zamanlanmış mesajlar, gezinme durumu/açık sohbet, söz onayları, son emojiler, kanal sırası, ayrıntı paneli…) başka bir üye
- * giriş yaptığında ve çıkışta silinir. Yalnız cihaz tercihleri kalır (tema, ses düzeyi/zil sesleri, panel genişlikleri, AI anahtarları).
+ * giriş yaptığında ve çıkışta silinir. Yalnız cihaz tercihleri kalır (tema, Ayarlar → Genel/Görünüm/Bildirimler `mivelo.prefs`, ses düzeyi/zil sesleri, grup bildirimi,
+ * panel genişlikleri, AI anahtarları).
  */
 const OWNER = 'mivelo.demoOwner';
-const KEEP = /^(mivelo\.(theme|aiPrefs)|kavsak\.(token|core|volume|panes|soundsOn|bannersOn|sound|sound\..+|vol\..+|tone\..+))$/;
+const KEEP = /^(mivelo\.(theme|aiPrefs|prefs)|kavsak\.(token|core|volume|panes|soundsOn|bannersOn|groupsOn|sound|sound\..+|vol\..+|tone\..+))$/;
 
 function wipe(store: Storage): void {
   const drop: string[] = [];

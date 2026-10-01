@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { STATIC_DEMO } from './profile';
 import { reducedMotion } from './motion/motion';
 import { Icon } from './ui';
+import { LegalLink } from './Consent';
+import { LEGAL_URLS } from './consent-store';
 
 /**
  * Geri bildirim düğmesi (sağ alt): hata / öneri / talep + fotoğraf/video dosyası (ekran görüntüsü dahil; yapıştırılabilir) →
@@ -206,6 +208,10 @@ export function FeedbackButton() {
                 <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/webm,video/quicktime" multiple hidden onChange={(e) => (add(Array.from(e.target.files ?? [])), (e.target.value = ''))} />
               </div>
               {err && <div className="fb-err">{err}</div>}
+              <p className="fb-legal">
+                Gönderdiğin metin ve dosyalar hataları gidermek için mivelo.app sunucusunda saklanır; ekranda başkalarına ait bilgiler varsa gizlemeni öneririz.{' '}
+                <LegalLink href={LEGAL_URLS.kvkk}>Aydınlatma Metni</LegalLink>
+              </p>
               <button className="btn primary b fb-send" onClick={() => void submit()} disabled={busy || message.trim().length < 3}>
                 {busy ? <span className="spin" /> : <Icon name="send" size={14} sw={2} />} Gönder
               </button>

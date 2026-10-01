@@ -38,6 +38,14 @@ export function setAiPrefs(patch: Partial<AiPrefs>) {
   subs.forEach((f) => f());
 }
 
+// başka sekmede değişirse bu sekme de güncellenir
+if (typeof window !== 'undefined')
+  window.addEventListener('storage', (e) => {
+    if (e.key !== KEY && e.key !== null) return;
+    cache = null;
+    subs.forEach((f) => f());
+  });
+
 export function useAiPrefs(): AiPrefs {
   return useSyncExternalStore(
     (f) => (subs.add(f), () => void subs.delete(f)),

@@ -3,60 +3,161 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Koşullar · Mivelo</title>
-<meta name="description" content="Mivelo kapalı beta ve bekleme listesi kullanım koşulları.">
+<title>Kullanım Koşulları ve EULA · Mivelo</title>
+<meta name="description" content="Mivelo Kullanım Koşulları ve Son Kullanıcı Lisans Sözleşmesi.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28'%3E%3Crect width='28' height='28' rx='9' fill='%236C47FF'/%3E%3Cpath d='M8 8c4.5 0 6 3 6 6s1.5 6 6 6M8 20c4.5 0 6-3 6-6' stroke='%23fff' stroke-width='2.3' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='20' cy='8' r='2.5' fill='%23D4FF3F'/%3E%3C/svg%3E">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <style>
-  :root{--bg:#FBFBFD;--ink:#16151B;--ink-2:#44424D;--ink-3:#6E6C78;--line:#E6E5EC;--brand:#6C47FF}
+  :root{--bg:#FBFBFD;--ink:#16151B;--ink-2:#44424D;--ink-3:#6E6C78;--line:#E6E5EC;--brand:#6C47FF;--brand-soft:#F1EDFF;--card:#FFFFFF;--warn:#8A5A00;--warn-bg:#FFF7E6;--warn-line:#F3DDAE}
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Inter',system-ui,sans-serif;font-size:16.5px;line-height:1.65;-webkit-font-smoothing:antialiased}
-  header{position:sticky;top:0;background:rgba(251,251,253,.8);backdrop-filter:saturate(180%) blur(16px);-webkit-backdrop-filter:saturate(180%) blur(16px);border-bottom:1px solid rgba(0,0,0,.05)}
+  html{scroll-padding-top:72px}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Inter',system-ui,sans-serif;font-size:16.5px;line-height:1.65;-webkit-font-smoothing:antialiased;overflow-wrap:break-word}
+  header{position:sticky;top:0;z-index:5;background:rgba(251,251,253,.8);backdrop-filter:saturate(180%) blur(16px);-webkit-backdrop-filter:saturate(180%) blur(16px);border-bottom:1px solid rgba(0,0,0,.05)}
   .bar{max-width:760px;margin:0 auto;padding:14px 20px;display:flex;align-items:center;gap:10px}
-  .logo{display:inline-flex;align-items:center;gap:9px;font-weight:600;font-size:17px;letter-spacing:-.02em;color:inherit;text-decoration:none}
+  .logo{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Inter',system-ui,sans-serif;display:inline-flex;align-items:center;gap:9px;font-weight:600;font-size:17px;letter-spacing:-.02em;color:inherit;text-decoration:none}
   .bar .sp{flex-grow:1} .bar a.back{font-size:14px;color:var(--ink-3);text-decoration:none} .bar a.back:hover{color:var(--ink)}
-  main{max-width:760px;margin:0 auto;padding:56px 20px 90px}
-  h1{font-size:clamp(36px,6vw,52px);letter-spacing:-.04em;line-height:1.05;margin:0 0 10px;font-weight:700}
-  .upd{color:var(--ink-3);font-size:14px;margin:0 0 36px}
-  h2{font-size:21px;letter-spacing:-.02em;margin:38px 0 8px}
-  p,li{color:var(--ink-2)} ul{padding-left:20px} li{margin:4px 0}
+  main{max-width:760px;margin:0 auto;padding:44px 20px 90px}
+  .docs{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 30px;padding:0;list-style:none}
+  .docs a{display:inline-flex;align-items:center;height:30px;padding:0 12px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--ink-2);font-size:13px;text-decoration:none}
+  .docs a:hover{color:var(--ink);border-color:#D6D3E0}
+  .docs a[aria-current]{background:var(--ink);border-color:var(--ink);color:#fff}
+  h1{font-size:clamp(34px,6vw,50px);letter-spacing:-.04em;line-height:1.05;margin:0 0 10px;font-weight:700}
+  .upd{color:var(--ink-3);font-size:14px;margin:0 0 30px}
+  h2{font-size:21px;letter-spacing:-.02em;margin:38px 0 8px;line-height:1.3}
+  h3{font-size:17px;letter-spacing:-.01em;margin:24px 0 6px}
+  p,li,dd{color:var(--ink-2)} ul,ol{padding-left:22px} li{margin:5px 0}
   a{color:var(--brand)}
-  .box{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px 18px;margin:18px 0}
-  footer{max-width:760px;margin:0 auto;padding:0 20px 40px;color:var(--ink-3);font-size:13px}
+  b,strong{color:var(--ink)}
+  .box{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 18px;margin:18px 0}
+  .box p:first-child{margin-top:0}.box p:last-child{margin-bottom:0}
+  .warn{background:var(--warn-bg);border-color:var(--warn-line)}
+  .warn b{color:var(--warn)}
+  .acts{display:grid;gap:12px;margin:16px 0}
+  .act{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 18px}
+  .act h3{margin:0 0 8px;font-size:16px}
+  .act dl{margin:0;display:grid;grid-template-columns:150px 1fr;gap:6px 14px;font-size:14.5px;line-height:1.55}
+  .act dt{color:var(--ink-3);font-weight:500}
+  .act dd{margin:0}
+  .lic{width:100%;border-collapse:collapse;font-size:14.5px;margin:12px 0}
+  .lic th,.lic td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  .lic th{color:var(--ink-3);font-weight:500;font-size:13px}
+  .lic td:first-child{color:var(--ink);font-weight:500}
+  .tbl{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;background:var(--brand-soft);padding:1px 5px;border-radius:6px;color:var(--ink)}
+  footer{max-width:760px;margin:0 auto;padding:0 20px 40px;color:var(--ink-3);font-size:13px;line-height:1.9}
+  footer a{color:var(--ink-3);margin-right:12px}
+  footer a:hover{color:var(--ink)}
+  @media (max-width:560px){body{font-size:16px}.act dl{grid-template-columns:1fr;gap:2px}.act dt{margin-top:6px}main{padding-top:32px}}
 </style>
 </head>
 <body>
 <header><div class="bar"><a class="logo" href="./"><svg width="26" height="26" viewBox="0 0 28 28" aria-hidden="true"><rect width="28" height="28" rx="9" fill="#6C47FF"/><path d="M8 8c4.5 0 6 3 6 6s1.5 6 6 6M8 20c4.5 0 6-3 6-6" stroke="#fff" stroke-width="2.3" fill="none" stroke-linecap="round"/><circle cx="20" cy="8" r="2.5" fill="#D4FF3F"/></svg>Mivelo</a><span class="sp"></span><a class="back" href="./">← Ana sayfa</a></div></header>
 <main>
-<h1>Koşullar</h1>
-<p class="upd">Son güncelleme: 26 Eylül 2026</p>
-<div class="box"><b>Kısaca:</b> Mivelo kapalı betada. Kendi hesaplarını, o uygulamaların kurallarına uyarak kullanırsın; toplu ya da istenmeyen mesaj göndermek için kullanılamaz.</div>
+<nav aria-label="Yasal metinler"><ul class="docs"><li><a href="kosullar.html" aria-current="page">Koşullar ve EULA</a></li><li><a href="gizlilik.html">Gizlilik</a></li><li><a href="kvkk.html">KVKK Aydınlatma</a></li><li><a href="acik-riza.html">Açık Rıza</a></li><li><a href="cerez.html">Çerezler</a></li><li><a href="lisanslar.html">Açık kaynak</a></li></ul></nav>
+<h1>Kullanım Koşulları ve Son Kullanıcı Lisans Sözleşmesi</h1>
+<p class="upd">Sürüm 2026-10-01 · Yürürlük tarihi: 1 Ekim 2026</p>
+<div class="box"><p><b>Kısaca:</b> Mivelo'yu kendi hesaplarınla, o uygulamaların kurallarına uyarak kullanırsın. Bazı uygulamalar resmi bir bağlantı yolu sunmadığı için Mivelo onlara resmi olmayan yöntemlerle bağlanır; bu, <b>hesabının kısıtlanması ya da kapatılması riskini</b> taşır ve bu riski kabul ederek bağlantı kurarsın. Mivelo "olduğu gibi" sunulur.</p></div>
 
-<h2>1. Kapalı beta</h2>
-<p>Mivelo şu anda kapalı beta aşamasındadır. Özellikler değişebilir, geçici olarak çalışmayabilir ya da kaldırılabilir. Beta süresince ücretsizdir; fiyatlandırma genel kullanıma açılmadan önce duyurulur.</p>
+<p>Bu Kullanım Koşulları ve Son Kullanıcı Lisans Sözleşmesi ("Sözleşme"), <b>[Ad Soyad / Ünvan]</b> ([Açık adres]; "Mivelo", "biz") ile Mivelo masaüstü uygulamasını, web sitesini ve ilgili hizmetleri kullanan kişi ("sen", "Kullanıcı") arasındadır. Uygulamayı indirirken kayıt formundaki onay kutusunu işaretleyerek, uygulamayı ilk açtığında onay ekranını kabul ederek ya da hizmetleri kullanarak bu Sözleşme'yi kabul etmiş olursun. Kabul etmiyorsan uygulamayı kurma ve kullanma.</p>
 
-<h2>2. Bekleme listesi</h2>
-<p>Listeye katılmak bir davet garantisi vermez. Davetler sıraya ve kapasiteye göre gruplar halinde gönderilir. Davet linkiyle sıranda öne geçebilirsin; sahte ya da toplu kayıtlar tespit edilirse silinir.</p>
-
-<h2>3. Bağlanan uygulamalar</h2>
+<h2 id="tanimlar">1. Tanımlar</h2>
 <ul>
-  <li>Mivelo; WhatsApp, Instagram, Gmail, Trendyol ve diğer uygulamalara <b>senin hesabınla, senin bilgisayarından</b> bağlanır. Bu uygulamaların kendi kullanım koşulları geçerlidir ve onlara uymak senin sorumluluğundadır.</li>
-  <li>Bazı uygulamalar için resmi bir kişisel hesap bağlantısı sunulmadığından Mivelo, o uygulamanın web ya da bağlı cihaz arayüzünü kullanır. Uygulamalar zaman zaman bu tür bağlantıları kısıtlayabilir; Mivelo bu riski azaltmak için istekleri seyrek ve ölçülü tutar, ancak bir uygulamanın hesabına uygulayacağı kısıtlamalardan sorumlu tutulamaz.</li>
-  <li>Adı geçen uygulamalar ve markalar sahiplerine aittir; Mivelo bu şirketlerle bağlantılı değildir ve onlar tarafından onaylanmamıştır.</li>
+  <li><b>Uygulama</b>: Mivelo masaüstü uygulaması (macOS ve Windows paketleri), güncellemeleri ve beraberindeki bileşenler.</li>
+  <li><b>Lisans Anahtarı</b>: Uygulamayı etkinleştirmek için sana e-postayla gönderilen <code>MVL-</code> ile başlayan anahtar.</li>
+  <li><b>Hizmetler</b>: mivelo.app web sitesi, bekleme listesi, indirme sayfası, lisans ve güncelleme sunucuları, demo sitesi ve destek.</li>
+  <li><b>Üçüncü Taraf Platformlar</b>: Uygulamaya bağladığın WhatsApp, Telegram, Instagram, Messenger, X, LinkedIn, Slack, TikTok, iMessage, e-posta sağlayıcıları ve pazaryerleri gibi hizmetler.</li>
 </ul>
 
-<h2>4. Kabul edilebilir kullanım</h2>
-<p>Mivelo'yu toplu, istenmeyen ya da otomatik mesaj göndermek, başkalarının hesaplarına izinsiz erişmek veya yasa dışı amaçlarla kullanamazsın. Yapay zekâ taslakları hiçbir zaman kendiliğinden gönderilmez; gönderdiğin her mesajın sorumluluğu sana aittir.</p>
+<h2 id="ehliyet">2. Ehliyet</h2>
+<p>Uygulamayı kullanmak için 18 yaşını doldurmuş ve sözleşme yapma ehliyetine sahip olmalısın. Uygulamayı bir şirket ya da işletme adına kullanıyorsan, o işletme adına bu Sözleşme'yi kabul etmeye yetkili olduğunu beyan edersin.</p>
 
-<h2>5. Sorumluluğun sınırı</h2>
-<p>Mivelo "olduğu gibi" sunulur. Verilerin kendi bilgisayarında tutulduğundan düzenli yedek almanı öneririz. Yasaların izin verdiği ölçüde, Mivelo'nun kullanımından doğan dolaylı zararlardan sorumlu değiliz.</p>
+<h2 id="lisans">3. Lisansın kapsamı</h2>
+<ul>
+  <li>Bu Sözleşme'ye uyman koşuluyla sana, Uygulamayı kendi kişisel amaçların ya da kendi işletmenin iç işleri için kullanman üzere <b>münhasır olmayan, devredilemeyen, alt lisans verilemeyen, geri alınabilir ve süreli</b> bir kullanım hakkı veririz.</li>
+  <li><b>Süre:</b> Lisans, anahtarla birlikte bildirilen süre boyunca geçerlidir (ör. 30 gün). Süre bitince ya da lisans iptal edilince Uygulama kilitlenir; bilgisayarındaki verilerin silinmez.</li>
+  <li><b>Cihaz sınırı:</b> Bir Lisans Anahtarı, anahtarla birlikte bildirilen sayıda cihazda (aksi bildirilmedikçe 2) etkinleştirilebilir. Cihaz değiştirirken eski cihazda çıkış yaparak hakkı boşaltabilirsin. Uygulama lisansı belirli aralıklarla doğrular; internete bağlanamazsa son başarılı doğrulamadan itibaren 14 gün çalışmaya devam eder.</li>
+  <li><b>Ücret:</b> Kapalı beta süresince Uygulama ücretsizdir. İleride ücretli sürüme geçilirse fiyatlar önceden duyurulur; geçerli lisans süren için geriye dönük ücret talep edilmez.</li>
+  <li>Bu Sözleşme ile sana açıkça verilmeyen tüm haklar saklıdır. Uygulamanın kaynak kodunun herkese açık bir depoda bulunması, depoda ayrıca belirtilmedikçe sana bu Sözleşme dışında bir hak vermez (açık kaynak bileşenler için <a href="#acik-kaynak">8. madde</a>).</li>
+</ul>
 
-<h2>6. Uygulanacak hukuk</h2>
-<p>Bu koşullar Türkiye Cumhuriyeti yasalarına tabidir.</p>
+<h2 id="yasaklar">4. Yapamayacakların</h2>
+<ul>
+  <li>Lisans Anahtarını başkalarıyla paylaşmak, satmak, kiralamak ya da yayımlamak;</li>
+  <li>lisans doğrulamasını, cihaz sınırını ya da başka bir koruma önlemini atlatmak veya devre dışı bırakmak;</li>
+  <li>Uygulamayı toplu, istenmeyen ya da otomatik mesaj (spam) göndermek, başkalarının hesaplarına izinsiz erişmek, kişileri taciz etmek veya yasa dışı amaçlarla kullanmak;</li>
+  <li>Üçüncü Taraf Platformların güvenlik önlemlerini (doğrulama, hız sınırı, captcha vb.) aşmak amacıyla kullanmak;</li>
+  <li>Mivelo adını, logosunu ya da Uygulamayı Mivelo'nun ürünüymüş gibi değiştirilmiş hâliyle dağıtmak.</li>
+</ul>
+<p>Açık kaynak bileşenlerin kendi lisanslarının sana tanıdığı haklar bu maddeyle kısıtlanmaz.</p>
 
-<h2>7. İletişim</h2>
+<h2 id="platformlar">5. Üçüncü Taraf Platformlar ve resmi olmayan bağlantı riski</h2>
+<div class="box warn">
+<p><b>Önemli:</b> WhatsApp, Instagram, Messenger, X, LinkedIn, TikTok ve (tarayıcı oturumuyla bağlandığında) Slack, kişisel hesaplar için resmi bir mesajlaşma bağlantısı sunmaz. Mivelo bu hizmetlere, senin oturumunla ve senin bilgisayarından; o hizmetin web arayüzü, bağlı cihaz arayüzü, tarayıcı otomasyonu ya da açık kaynak bağlantı köprüleri (mautrix) aracılığıyla bağlanır. Bu yöntemler ilgili platformun kullanım koşullarına aykırı sayılabilir.</p>
+<p>Platform; bu tür bir bağlantıyı tespit ederek hesabına <b>uyarı, geçici kısıtlama, doğrulama talebi, mesaj gönderme yasağı ya da kalıcı kapatma</b> uygulayabilir; bazı mesajlar alınamayabilir ya da geç gelebilir. Mivelo istekleri seyrek ve ölçülü tutarak bu riski azaltmaya çalışır, ancak <b>riski ortadan kaldıramaz ve hiçbir platformun hesabına işlem yapmayacağını garanti etmez</b>.</p>
+</div>
+<ul>
+  <li>Bir hesabı Mivelo'ya bağlamak senin kararındır. Bağlamadan önce ilgili platformun koşullarını okumak, bu riski değerlendirmek ve işin ya da geçimin için kritik hesapları bağlayıp bağlamamaya karar vermek senin sorumluluğundadır.</li>
+  <li><b>Bu yöntemlerle bağladığın hesaplara platformların uygulayacağı kısıtlama, kapatma ve bunlardan doğan veri, gelir veya müşteri kaybından Mivelo sorumlu değildir</b>; sorumluluk kullanıcıya aittir. Bu, Mivelo'nun kastı veya ağır ihmali hâllerini kapsamaz.</li>
+  <li>Telegram, e-posta (IMAP ya da sağlayıcının kendi giriş sayfası), iMessage (macOS'un kendi Mesajlar uygulaması) ve pazaryerleri (Trendyol, Hepsiburada, n11, Amazon, Etsy, Shopify, ePttAVM; senin oluşturduğun API anahtarlarıyla resmi entegrasyon arayüzleri) kendi yöntemleriyle bağlanır. Bu hizmetlerin entegrasyon ve API koşullarına uymak da senin sorumluluğundadır.</li>
+  <li>Platformlar arayüzlerini değiştirdiğinde bazı özellikler habersiz çalışmayabilir; bunu düzeltmeye çalışırız ancak bir süre taahhüt etmeyiz.</li>
+  <li>Adı geçen platformlar ve markalar sahiplerine aittir. Mivelo bu şirketlerle bağlantılı değildir; onlar tarafından geliştirilmemiş, onaylanmamış ya da desteklenmemiştir.</li>
+</ul>
+
+<h2 id="icerik">6. İçeriğin ve başkalarına ait veriler</h2>
+<ul>
+  <li>Mesajların ve dosyaların bilgisayarında kalır; içerik üzerinde hiçbir hak iddia etmeyiz.</li>
+  <li>Gönderdiğin her mesajın ve içeriğin sorumluluğu sana aittir. Yapay zekâ taslakları hiçbir zaman kendiliğinden gönderilmez.</li>
+  <li>Mesajlarında başka kişilere ait kişisel veriler bulunur. Uygulamayı işletmen adına (ör. pazaryeri müşterilerinle yazışmak için) kullanıyorsan bu veriler bakımından veri sorumlusu sensin; 6698 sayılı KVKK başta olmak üzere ilgili mevzuata uymak senin yükümlülüğündür.</li>
+  <li>Verilerin bilgisayarında tutulduğu için yedeklemek senin sorumluluğundadır.</li>
+</ul>
+
+<h2 id="ai">7. Yapay zekâ özellikleri</h2>
+<ul>
+  <li>Bulut yapay zekâ özellikleri isteğe bağlıdır, kendi Anthropic API anahtarınla çalışır ve <a href="acik-riza.html">açık rızana</a> bağlıdır. Anthropic ile aranızdaki ilişki Anthropic'in koşullarına tabidir; ücretleri de senin hesabına yansır.</li>
+  <li>Yapay zekâ çıktıları hatalı, eksik ya da uygunsuz olabilir; kullanmadan önce kontrol etmek senin sorumluluğundadır.</li>
+  <li>Yerel yapay zekâ modelleri üçüncü taraflarca geliştirilmiştir ve kendi lisanslarına tabidir.</li>
+</ul>
+
+<h2 id="acik-kaynak">8. Açık kaynak bileşenler</h2>
+<p>Uygulama, açık kaynak lisanslarla dağıtılan bileşenler içerir. Bu bileşenler bu Sözleşme'ye değil, <b>kendi lisanslarına</b> tabidir ve bu Sözleşme'deki hiçbir hüküm o lisansların sana tanıdığı hakları kısıtlamaz. Özellikle bağlantı köprüsü (<code>mivelo-bridge</code>) mautrix köprülerini içerdiğinden <b>GNU Affero Genel Kamu Lisansı v3 (AGPL-3.0)</b> altındadır ve kaynak kodu herkese açıktır. Liste ve kaynak kodu bağlantıları <a href="lisanslar.html">Açık Kaynak Lisansları</a> sayfasındadır.</p>
+
+<h2 id="fikri">9. Fikri mülkiyet</h2>
+<p>Mivelo adı, logosu, tasarımı ve açık kaynak bileşenler dışındaki yazılım üzerindeki tüm haklar bize aittir. Önerilerini ve geri bildirimlerini ürünü geliştirmek için herhangi bir yükümlülük doğmaksızın kullanabiliriz.</p>
+
+<h2 id="guncelleme">10. Güncellemeler ve hizmetin değişmesi</h2>
+<p>Uygulama yeni sürümleri denetler ve onayınla kurar. Mivelo kapalı beta aşamasındadır; özellikler değişebilir, geçici olarak çalışmayabilir ya da kaldırılabilir. Hizmetleri önceden duyurarak sona erdirebiliriz.</p>
+
+<h2 id="garanti">11. Garantinin reddi</h2>
+<p>Uygulama ve Hizmetler, yürürlükteki mevzuatın izin verdiği en geniş ölçüde <b>"olduğu gibi" ve "mevcut hâliyle"</b> sunulur. Uygulamanın kesintisiz, hatasız ya da güvenli çalışacağını, belirli bir amaca uygun olduğunu, Üçüncü Taraf Platformlara erişimin süreceğini veya hiçbir veri kaybı olmayacağını garanti etmeyiz. Tüketici olarak 6502 sayılı Tüketicinin Korunması Hakkında Kanun'dan doğan emredici hakların saklıdır.</p>
+
+<h2 id="sorumluluk">12. Sorumluluğun sınırlandırılması</h2>
+<ul>
+  <li>Mevzuatın izin verdiği ölçüde; kâr, gelir, müşteri, veri ya da itibar kaybı, hesap kısıtlaması veya kapatılması dahil dolaylı, arızi ve sonuç zararlardan sorumlu değiliz.</li>
+  <li>Her durumda toplam sorumluluğumuz, zarara yol açan olaydan önceki 12 ayda Uygulama için bize ödediğin bedelle sınırlıdır; ücretsiz kullanımda bu tutar [Tutar] TL'dir.</li>
+  <li>Bu sınırlamalar, 6098 sayılı Türk Borçlar Kanunu'nun 115. maddesi uyarınca kast ve ağır ihmal hâllerini ve mevzuatın emredici hükümlerini kapsamaz.</li>
+</ul>
+
+<h2 id="tazmin">13. Tazminat</h2>
+<p>Bu Sözleşme'yi, Üçüncü Taraf Platformların koşullarını ya da mevzuatı ihlal etmen nedeniyle üçüncü kişilerin bize yönelteceği talepler ve bunlardan doğan makul masraflar için, kusurun oranında bizi tazmin etmeyi kabul edersin.</p>
+
+<h2 id="fesih">14. Sona erme</h2>
+<p>Uygulamada çıkış yapıp Uygulamayı kaldırarak Sözleşme'yi dilediğin an sona erdirebilirsin. Bu Sözleşme'yi ihlal etmen hâlinde Lisans Anahtarını iptal edebiliriz. Sona ermede Uygulamanın kullanım hakkı biter; bilgisayarındaki verilerin silinmez, dilersen kendin silebilirsin. 5, 6, 8, 11, 12, 13 ve 17. maddeler sona ermeden sonra da geçerlidir.</p>
+
+<h2 id="veri">15. Kişisel veriler</h2>
+<p>Kişisel verilerin <a href="kvkk.html">KVKK Aydınlatma Metni</a> ve <a href="gizlilik.html">Gizlilik Politikası</a>'na uygun olarak işlenir. Çerez ve yerel depolama kullanımı <a href="cerez.html">Çerez ve Yerel Depolama Bildirimi</a>'ndedir.</p>
+
+<h2 id="bekleme">16. Bekleme listesi ve demo</h2>
+<p>Bekleme listesine katılmak bir davet garantisi vermez; davetler sıraya ve kapasiteye göre gönderilir, sahte ya da toplu kayıtlar silinir. Demo sitesi örnek verilerle çalışan bir tanıtımdır; gerçek hesap bağlamaz.</p>
+
+<h2 id="hukuk">17. Uygulanacak hukuk ve yetki</h2>
+<p>Bu Sözleşme Türkiye Cumhuriyeti hukukuna tabidir. Uyuşmazlıklarda [İl] mahkemeleri ve icra daireleri yetkilidir. Tüketici sıfatıyla, 6502 sayılı Kanun uyarınca parasal sınırlar dahilinde yerleşim yerindeki ya da işlemin yapıldığı yerdeki tüketici hakem heyetine veya tüketici mahkemesine başvurma hakkın saklıdır.</p>
+
+<h2 id="degisiklik">18. Değişiklikler</h2>
+<p>Bu Sözleşme'yi güncelleyebiliriz. Yeni sürüm yayımlandığında sürüm tarihini değiştiririz ve Uygulama, kullanmaya devam etmeden önce yeni metni kabul etmeni ister.</p>
+
+<h2 id="iletisim">19. İletişim</h2>
 <p>Soruların için: <a href="mailto:hello@mivelo.app">hello@mivelo.app</a></p>
 </main>
-<footer>© 2026 Mivelo · <a href="gizlilik.html">Gizlilik</a> · <a href="kosullar.html">Koşullar</a> · <a href="mailto:hello@mivelo.app">hello@mivelo.app</a></footer>
+<footer>© 2026 Mivelo · <a href="kosullar.html">Koşullar ve EULA</a> <a href="gizlilik.html">Gizlilik</a> <a href="kvkk.html">KVKK Aydınlatma</a> <a href="acik-riza.html">Açık Rıza</a> <a href="cerez.html">Çerezler</a> <a href="lisanslar.html">Açık kaynak</a> <a href="mailto:hello@mivelo.app">hello@mivelo.app</a></footer>
 </body>
 </html>

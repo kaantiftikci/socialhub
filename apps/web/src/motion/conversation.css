@@ -93,12 +93,15 @@ aside.ctx > :nth-child(n+8) { animation-delay: 345ms; }
 @keyframes m-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes m-fade-out { from { opacity: 1; } to { opacity: 0; } }
 
+/* Zamanlanmış gönderim açılır kartı: düğmenin üstünden (sol alt köşeden) büyür */
+.conv .sched-pop { transform-origin: 0 100%; animation: m-menu-in 200ms var(--m-in) both; }
+
 /* Hareketleri azalt (sistem ya da Ayarlar → Görünüm): sürekli döngüler ve gecikmeli girişler durur */
 @media (prefers-reduced-motion: reduce) {
   .conv .typing-bub .tdots i, .conv .bub .bt .tick svg path, aside.ctx > * { animation: none !important; }
   .conv .typing-bub .tdots i { opacity: .7; }
-  .conv .rbar, .conv .rbar > button, .conv .composer .reply-bar, .conv .downbtn, .conv .msgs .typing-bub { animation-duration: 1ms !important; animation-delay: 0ms !important; }
+  .conv .rbar, .conv .rbar > button, .conv .composer .reply-bar, .conv .downbtn, .conv .msgs .typing-bub, .conv .sched-pop { animation-duration: 1ms !important; animation-delay: 0ms !important; }
 }
 html.reduce-motion .conv .typing-bub .tdots i, html.reduce-motion .conv .bub .bt .tick svg path, html.reduce-motion aside.ctx > * { animation: none !important; }
 html.reduce-motion .conv .typing-bub .tdots i { opacity: .7; }
-html.reduce-motion .conv .rbar, html.reduce-motion .conv .rbar > button, html.reduce-motion .conv .composer .reply-bar, html.reduce-motion .conv .downbtn, html.reduce-motion .conv .msgs .typing-bub { animation-duration: 1ms !important; animation-delay: 0ms !important; }
+html.reduce-motion .conv .rbar, html.reduce-motion .conv .rbar > button, html.reduce-motion .conv .composer .reply-bar, html.reduce-motion .conv .downbtn, html.reduce-motion .conv .msgs .typing-bub, html.reduce-motion .conv .sched-pop { animation-duration: 1ms !important; animation-delay: 0ms !important; }

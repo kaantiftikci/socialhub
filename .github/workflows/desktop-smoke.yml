@@ -56,6 +56,7 @@ jobs:
       - name: 2) Büyük şifreli veri + yarım kalmış hesap kaldırma — paketin kendi node'uyla çekirdek
         env:
           MIVELO_DATA_DIR: ${{ runner.temp }}/heavy
+          MIVELO_ML_AUTO: '0' # ölçüm sırasında yerel AI modelleri (≈420 MB) inmesin
           KAVSAK_DB_KEY: 7f3c9a1e5b2d4c6f8a0e1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f1a3c5e7b9d0f2a
         run: |
           C=/Applications/Mivelo.app/Contents/Resources/core

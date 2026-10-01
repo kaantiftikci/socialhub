@@ -1,0 +1,22 @@
+/* Yasal onaylar (Consent.tsx): lisans ekranı kutuları, onay ekranı, AI açık rıza penceresi, Onaylarım. Renkler yalnız token. */
+.cs-checks { display: flex; flex-direction: column; gap: 10px; margin: 2px 0 4px; }
+.cs-chk { display: flex !important; flex-direction: row !important; align-items: flex-start; gap: 10px !important; font-size: 12.5px !important; font-weight: 400 !important; line-height: 1.5; color: var(--text2) !important; cursor: pointer; text-align: left; }
+.cs-chk input[type='checkbox'] { flex-shrink: 0; width: 17px !important; height: 17px !important; min-height: 0; margin: 1px 0 0; padding: 0 !important; border-radius: 5px; accent-color: var(--v); box-shadow: none !important; cursor: pointer; }
+.cs-chk a, .cs-fine a, .cs-pane a, .cs-modal a { color: var(--v); text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; }
+.cs-chk b { font-weight: 600; color: var(--text); }
+.cs-fine { margin: 0 !important; font-size: 11.5px !important; line-height: 1.5 !important; color: var(--text3) !important; }
+.auth-card.cs-card { width: min(460px, 100%); }
+
+.overlay.cs-ov { z-index: 60; }
+.modal.cs-modal { width: min(460px, 94vw); padding: 22px 22px 18px; gap: 10px; overflow: auto; background: var(--card); }
+.cs-modal .cs-ic { width: 40px; height: 40px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; background: var(--v-soft); color: var(--v-txt); }
+.cs-modal h3 { margin: 4px 0 0; font-size: 19px; letter-spacing: -.4px; }
+.cs-modal p { margin: 0; font-size: 13px; line-height: 1.55; color: var(--text2); }
+.cs-modal ul { margin: 0; padding-left: 18px; font-size: 12.5px; line-height: 1.5; color: var(--text2); display: flex; flex-direction: column; gap: 4px; }
+.cs-modal .cs-chk { margin-top: 4px; padding: 10px 12px; border-radius: 12px; background: var(--bg2); }
+.cs-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+
+.cs-legal { margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--text3); text-align: center; }
+.cs-legal a { color: var(--text2); text-decoration: underline; text-underline-offset: 2px; }
+.fb-legal { margin: 0; font-size: 11px; line-height: 1.45; color: var(--text3); }
+.fb-legal a { color: var(--text2); text-decoration: underline; text-underline-offset: 2px; }

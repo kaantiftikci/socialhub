@@ -6,6 +6,8 @@ import { MOD_KEY, isTauri, openExternal } from './desktop';
 import { getThemePref, setThemePref, type ThemePref } from './theme';
 import { setPrefs, usePrefs, type Prefs } from './prefs';
 import { STATIC_DEMO } from './profile';
+import { ConsentPane } from './Consent';
+import { LEGAL_URLS } from './consent-store';
 
 /* Ayarlar penceresinin bölümleri (Settings.tsx kabuğu). Satırlar arama için başlıklarıyla SETTINGS_INDEX'te de listelenir. */
 
@@ -598,8 +600,12 @@ export function AboutPane() {
   const links: Array<[string, string, () => void]> = [
     ['Yenilikler', 'sparkle', () => window.dispatchEvent(new Event('mivelo-whats-new'))],
     ['Sorun bildir', 'alert', () => window.dispatchEvent(new Event('mivelo-feedback'))],
-    ['Gizlilik politikası', 'lock', () => void openExternal('https://mivelo.app/gizlilik.html')],
-    ['Kullanım koşulları', 'file', () => void openExternal('https://mivelo.app/kosullar.html')],
+    ['Kullanım Koşulları ve EULA', 'file', () => void openExternal(LEGAL_URLS.terms)],
+    ['Gizlilik politikası', 'lock', () => void openExternal(LEGAL_URLS.privacy)],
+    ['KVKK Aydınlatma Metni', 'shield', () => void openExternal(LEGAL_URLS.kvkk)],
+    ['Açık Rıza Metni (yapay zekâ)', 'sparkle', () => void openExternal(LEGAL_URLS.consent)],
+    ['Çerez ve yerel depolama', 'file', () => void openExternal(LEGAL_URLS.cookies)],
+    ['Açık kaynak lisansları', 'info', () => void openExternal(LEGAL_URLS.oss)],
     ['mivelo.app', 'external', () => void openExternal('https://mivelo.app')],
   ];
   return (
@@ -627,6 +633,8 @@ export function AboutPane() {
           </button>
         ))}
       </div>
+      <GroupTitle>Onaylarım</GroupTitle>
+      <ConsentPane />
       <p className="set-note">Mivelo tüm mesajlaşma uygulamalarını tek yerde toplar; verilerin yalnız bu bilgisayarda durur. © 2026 Mivelo</p>
     </>
   );

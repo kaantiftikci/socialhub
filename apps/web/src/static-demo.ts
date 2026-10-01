@@ -498,8 +498,16 @@ export const staticApi = {
     }
   },
   saveProfile: async (p: import('./api').Profile) => {
-    localStorage.setItem('mivelo.profile', JSON.stringify(p));
-    return p;
+    // çekirdekteki validateProfile'ın kısası: boşluklar kırpılır, kullanıcı adının başındaki @ atılır, boş alan saklanmaz
+    const out: import('./api').Profile = {};
+    for (const k of ['name', 'username', 'email', 'phone', 'photo'] as const) {
+      const v = (p[k] ?? '').trim();
+      if (v) out[k] = k === 'username' ? v.replace(/^@+/, '') : v;
+    }
+    if (out.username && !/^[a-zA-Z0-9._-]{2,30}$/.test(out.username)) throw new Error('Kullanıcı adı yalnız harf, rakam, nokta, alt çizgi ve tire içerebilir (2-30)');
+    if (out.email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(out.email)) throw new Error('E-posta adresi geçersiz');
+    localStorage.setItem('mivelo.profile', JSON.stringify(out));
+    return out;
   },
   resetAll: async (): Promise<{ ok: boolean; accounts: number }> => {
     throw new Error('Demoda kullanılamaz');

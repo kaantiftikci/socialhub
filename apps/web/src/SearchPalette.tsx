@@ -4,6 +4,7 @@ import { PLATFORMS, type Chat, type Message, type Platform } from './types';
 import { Avatar, Chip, Icon, fmtTime } from './ui';
 import { mlApi, type SemanticResult } from './ml-api';
 import { DUR, EASE, animate, reducedMotion } from './motion/motion';
+import { MvInd } from './motion/MvInd';
 
 /** transcript: eşleşen sesli mesaj metni; via: anlamsal aramada hangi koldan geldi */
 type Hit = { message: Message; chat: Chat; transcript?: string; via?: 'semantic' | 'text' | 'both' };
@@ -268,6 +269,7 @@ export function SearchPalette({ chats, onClose, onOpenChat, onOpenMessage }: { c
                   {groups.length} uygulamada {total >= LIMIT ? `${LIMIT}+` : total} sonuç
                 </b>
                 <span className="pal-chips">
+                  <MvInd sel="button.on" dep={only ?? ''} variant="chip" />
                   <button type="button" className={!only ? 'on' : ''} onClick={() => setOnly(null)}>
                     Tümü
                   </button>

@@ -1,9 +1,10 @@
 import { mediaUrl } from './desktop';
 import { publicAsset } from './demo-asset';
-import { useEffect, useId, useMemo, useState, type InputHTMLAttributes, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type InputHTMLAttributes, type MouseEvent as ReactMouseEvent } from 'react';
 import type { ReactNode } from 'react';
 import { PLATFORMS, TAG_COLORS, type Platform } from './types';
 import { BRAND_MARKUP } from './brand-icons';
+import { reducedMotion } from './motion/motion';
 
 const PATHS: Record<string, ReactNode> = {
   search: (<><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></>),
@@ -93,6 +94,25 @@ const PATHS: Record<string, ReactNode> = {
   settings: (<><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></>),
   brush: (<><path d="M9.5 14.5 18 6a2 2 0 1 1 2.8 2.8L12.3 17.3" /><path d="M7.5 15c-1.7 0-3 1.3-3 3 0 1.2-.8 2-2 2 1 .8 2.4 1.5 4 1.5 2.5 0 4-1.6 4-3.8 0-1.5-1.3-2.7-3-2.7z" /></>),
 };
+
+/**
+ * Kendi kendini kapatan pencereler için çıkış animasyonu: `close()` önce `closing` yapar (CSS `.overlay.closing` 160 ms), sonra
+ * `onClose`'u çağırır; hareketleri azalt açıksa hemen kapatır. İkinci çağrı yok sayılır.
+ */
+export function useExit(onClose: () => void, ms = 170): [boolean, () => void] {
+  const [closing, setClosing] = useState(false);
+  const fn = useRef(onClose);
+  fn.current = onClose;
+  const busy = useRef(false);
+  const close = useCallback(() => {
+    if (busy.current) return;
+    if (reducedMotion()) return fn.current();
+    busy.current = true;
+    setClosing(true);
+    window.setTimeout(() => fn.current(), ms);
+  }, [ms]);
+  return [closing, close];
+}
 
 /**
  * Kapanış animasyonu için: değer null olunca öğe hemen kalkmaz, `closing` ile ms kadar daha çizilir (son değer korunur).

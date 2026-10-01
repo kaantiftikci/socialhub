@@ -1,5 +1,7 @@
 /* Mivelo hareket kimliği (.claude/skills/motion-design): imza eğri, giriş/çıkış eğrileri, 3 süre. Yalnız transform/opacity animasyonu. */
 :root {
+  /* "mivelo" yazısı: web sitesindeki başlıkla ("Tüm mesajların. Tek bir yerde.") aynı yazı tipi */
+  --font-brand: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', system-ui, sans-serif;
   --m-ease: cubic-bezier(.2, 0, 0, 1);
   --m-in: cubic-bezier(.05, .7, .1, 1);
   --m-out: cubic-bezier(.3, 0, 1, 1);

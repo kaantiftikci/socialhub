@@ -10,6 +10,22 @@ declare(strict_types=1);
  */
 
 if (!function_exists('mv_members_update')) {
+    /** Yürürlükteki yasal metin sürümleri (kosullar.html / kvkk.html "Sürüm" satırıyla aynı kalmalı; indir sayfası da gönderir) */
+    define('MV_TERMS_VERSION', '2026-10-01');
+    define('MV_KVKK_VERSION', '2026-10-01');
+
+    /**
+     * İstekteki onay: {terms, kvkk} güncel sürümlerle aynı olmalı (ikisi de zorunlu; kutular önceden işaretli değil).
+     * Geçerliyse kayda yazılacak {terms, kvkk, at}, değilse null. Aydınlatma "okudum" beyanıdır, açık rıza değildir.
+     */
+    function mv_consent_from($c): ?array
+    {
+        if (!is_array($c) || ($c['terms'] ?? '') !== MV_TERMS_VERSION || ($c['kvkk'] ?? '') !== MV_KVKK_VERSION) {
+            return null;
+        }
+        return ['terms' => MV_TERMS_VERSION, 'kvkk' => MV_KVKK_VERSION, 'at' => gmdate('c')];
+    }
+
     function mv_members_path(): string
     {
         $d = dirname(__DIR__, 2) . '/mivelo-data';
@@ -134,7 +150,7 @@ if (!function_exists('mv_members_update')) {
 
     /**
      * Üye ekle ya da güncelle (e-postayla tekil). Var olanın adı boşsa doldurulur (üzerine yazılmaz); $file verilirse indirme
-     * geçmişine eklenir (son 20). $m: email, firstName, lastName, src, at?, ip?
+     * geçmişine eklenir (son 20). $m: email, firstName, lastName, src, at?, ip?, consent? ({terms, kvkk, at}: yeni sürüm kabul edildiyse güncellenir)
      */
     function mv_member_upsert(array &$members, array $m, string $file = ''): void
     {
@@ -156,6 +172,9 @@ if (!function_exists('mv_members_update')) {
             if (!empty($m['ip'])) {
                 $x['ip'] = (string) $m['ip'];
             }
+            if (!empty($m['consent']) && (($x['consent']['terms'] ?? '') !== $m['consent']['terms'] || ($x['consent']['kvkk'] ?? '') !== $m['consent']['kvkk'])) {
+                $x['consent'] = $m['consent'];
+            }
             if ($file !== '') {
                 $x['downloads'] = array_slice(array_merge($x['downloads'] ?? [], [['file' => $file, 'at' => $now]]), -20);
             }
@@ -174,6 +193,7 @@ if (!function_exists('mv_members_update')) {
             }
         }
         $members[] = ['email' => $email, 'firstName' => $first, 'lastName' => $last, 'name' => $name, 'dupOf' => $dupOf, 'src' => (string) ($m['src'] ?? 'indir'),
-            'at' => (int) ($m['at'] ?? $now), 'lastAt' => $now, 'ip' => (string) ($m['ip'] ?? ''), 'downloads' => $file !== '' ? [['file' => $file, 'at' => $now]] : []];
+            'at' => (int) ($m['at'] ?? $now), 'lastAt' => $now, 'ip' => (string) ($m['ip'] ?? ''), 'downloads' => $file !== '' ? [['file' => $file, 'at' => $now]] : []]
+            + (!empty($m['consent']) ? ['consent' => $m['consent']] : []);
     }
 }

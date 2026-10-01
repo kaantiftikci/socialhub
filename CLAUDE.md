@@ -255,6 +255,19 @@ Dil: arayüz ve yorumlar Türkçe.
   "Sunucu çekirdeği" kartı, demo `core_token`) denendi ve silindi: veri merkezi IP'si + aynı IP'de çok hesap → Instagram/Meta/LinkedIn/X ban riski,
   tüm oturumlar tek sunucuda (güvenlik/KVKK), gerçek giriş sayfası kullanıcının tarayıcısında açılamıyor (çerezler sunucuya taşınamaz). Gerçek
   kullanım = masaüstü paketleri (DMG/EXE, kullanıcının kendi cihazı ve IP'si). Demo sitesi yalnız tanıtım (örnek veri). `#core=` tünel yolu (REMOTE_CORE) duruyor.
+- **Yasal metinler ve onaylar (01.10)**: `apps/landing/` kosullar.html (Kullanım Koşulları + EULA: lisans/cihaz sınırı, resmi olmayan bağlantı
+  riski kullanıcıda, garanti reddi, sorumluluk sınırı TBK 115, AGPL notu, Türk hukuku), gizlilik.html, kvkk.html (md.10 aydınlatma: faaliyet kartları,
+  md.5 sebepler, md.9 aktarım, süreler, md.11 + başvuru), acik-riza.html (isteğe bağlı AI/yurt dışı, md.9/6-a), cerez.html, lisanslar.html; hepsi aynı şablonda
+  üst gezinme + altbilgi. Yer tutucular: [Ad Soyad / Ünvan], [Açık adres], [KEP adresi, varsa], [İl], [Tutar]. Sürüm `2026-10-01` şu yerlerde AYNI
+  kalmalı: core `consent.ts CONSENT_VERSIONS`, web `consent-store.ts`, `lib-members.php MV_TERMS_VERSION/MV_KVKK_VERSION`, `waitlist.php KVKK_VERSION`,
+  indir `CONSENT`, landing `KVKK_VERSION` (değişince uygulama + indirme sayfası yeniden sorar). Onaylar: indirme kaydı iki zorunlu kutu (koşullar kabul,
+  aydınlatma "okudum"; önceden işaretli değil) → register.php onaysız 400, üyede `consent{terms,kvkk,at}`; bekleme listesi aydınlatma kutusu → waitlist.php
+  onaysız 400, kayıtta `consent{kvkk,at}`; geri bildirim kısa aydınlatma satırı; demo girişinde bağlantılar. Masaüstü: LicenseGate lisans ekranında
+  3 zorunlu kutu (koşullar, KVKK, risk) etkinleştirmeden önce; lisans geçerli ama sürüm eskiyse `ConsentScreen`. Çekirdek `consent.ts`
+  `~/.mivelo/consent.json` 0600, `GET/POST /api/consent` (lisanssızken de açık; "Tüm verileri sil" dokunmaz), license.ts activate/check'e `terms` sürümü
+  → license.php etkinleştirmede `terms/termsAt`. AI açık rızası `requireAiConsent()` (Conversation taslak/özet, Focus, QuestionDraft, Ayarlar AI anahtarı;
+  Odak otomatik taslak rızasızken çalışmaz; statik demoda her zaman true) → `AiConsentHost` penceresi. Ayarlar → Hakkında: metin bağlantıları +
+  "Onaylarım" (`ConsentPane`, AI rızası ver/geri çek). Test: consent.test.ts, consent-license.test.ts.
 ## Connector'lar ve kritik bilgiler
 - **Beeper (mautrix) köprüsü (30.09, Kaan: resmi çözümü olmayanları Beeper gibi Matrix kütüphanelerine taşı)**: WhatsApp, Instagram,
   Messenger, X, LinkedIn, Slack artık `apps/bridge` (Go, `mivelo-bridge`) ile — Beeper'ın mautrix bağlayıcıları (whatsapp, meta
@@ -783,7 +796,7 @@ Dil: arayüz ve yorumlar Türkçe.
 - **Dosya kaydetme (masaüstü)** `POST /api/downloads` (`downloads.ts`, yalnız yerel, gövde ≤80 MB) → İndirilenler + Finder/Gezgin'de göster; arayüz `save-file.ts saveBlob`.
   `store.sql()` (Ajan C) B'nin modüllerince kullanılıyor.
 - **Yerel AI (30.09, `packages/core/src/ml/`)**: sesli mesajı yazıya dökme (`Xenova/whisper-small` q8 ≈250 MB), anlamsal arama (`Xenova/multilingual-e5-small` q8, 384 boyut,
-  int8 vektör `embeddings`, bellek içi kaba kuvvet + FTS ile RRF hibrit, tarih/kişi ipuçları `query.ts`), (çeviri 30.09'da tamamen KALDIRILDI; eski NLLB indirmesi açılışta diskten silinir; dil algılama modelsiz `lang.ts`, arayüz kopyası `lang-detect.ts` AYNI kalmalı). Modeller yalnız Ayarlar → Yerel AI modelleri'nde onayla `~/.mivelo/models`e iner; ayarlar `~/.mivelo/ml.json`.
+  int8 vektör `embeddings`, bellek içi kaba kuvvet + FTS ile RRF hibrit, tarih/kişi ipuçları `query.ts`), (çeviri 30.09'da tamamen KALDIRILDI; eski NLLB indirmesi açılışta diskten silinir; dil algılama modelsiz `lang.ts`, arayüz kopyası `lang-detect.ts` AYNI kalmalı). Modeller + çalışma zamanı ilk açılışta KENDİLİĞİNDEN iner (01.10, Kaan; `ml/auto-install.ts` `AutoInstaller`: index.ts bootAll'dan 75 sn sonra, whenLicensed sonrası + lisans denetimi; tek uçuş, sıralı whisper → embed; ağ hatasında 5 dk → katlanarak ≤6 sa; boş disk < ≈gereken×1,2+500 MB ise inmez, `nospace` 6 sa'de yeniden bakar; biten modelin özelliği açılır; yarıda kalan sonraki açılışta sürer) → `~/.mivelo/models`; Ayarlar → Yerel AI "Modelleri kendiliğinden kur" (ml.json `autoInstall`, vars. açık; açınca `declined` sıfırlanır), silinen/iptal edilen model `declined` → yeniden inmez; durum `/api/ml` `auto` (+ `ml.status`), LocalAiPane "arka planda kuruluyor %N"; `MIVELO_ML_AUTO=0` kapatır; demo kurulmuş gibi. Test ml-auto-install.test.ts. Elle indirme Ayarlar'da sürer; ayarlar `~/.mivelo/ml.json`.
   Çalışma zamanı pakette YOK: ilk indirmede npm'den sabit sürüm + sha512 (transformers 4.3.0 Node yapısı + onnxruntime-web wasm) → `~/.mivelo/ml/runtime/<sürüm>`;
   `Symbol.for('onnxruntime')` + `device:'auto'`; sharp/onnxruntime-node yerine boş taslak. onnxruntime-node KULLANILMAZ (darwin-x64 ikilisi yok, 113 MB). Çıkarım worker_thread'de
   (`engine.ts`, tek kuyruk, kullanıcı işi önce, 3 dk boşta işçi kapanır). Ses: Ogg/Opus `opus-decoder` (bağımlılık), WAV; diğerleri macOS afconvert, yoksa ffmpeg.
@@ -843,6 +856,11 @@ Dil: arayüz ve yorumlar Türkçe.
   FLIP (ilk 80 izlenir); `Roll` sayaçlar; `MvInd` kayan sekme göstergesi; `SyncTop` eşitleme çubuğu ("Eşitlendi" + kapanır); `ListSkeleton`
   (`listReady`); bildirim kartı `.qr-slot` + kalan süre çizgisi (üzerine gelince durur); Odak yanıtında kart onaya döner, sonra çıkar
   (başarı toast'u yalnız azaltılmış harekette). Karşıdan mesaj gelince "yazıyor" hemen kalkar. Gerçek Mac/WKWebView'da DOĞRULANMADI.
+  **Sekme/süzgeç geçişleri (01.10)**: `MvInd` artık `motion/MvInd.tsx` (`recentSlideDir()` = son kayışın yönü; `variant="chip"` hap gruplarında
+  gösterge seçilmemiş çiplerin üstünden kayar): Medya türleri + uygulama çipleri, Miveloji dönem/uygulama/paylaş biçimi, ⌘K sonuç çipleri, kişi kanal şeridi,
+  gönderim kanalı. Medya: eski içerik ters yöne kayarak solar (≥140 ms, `--ml-out`), yeni içerik seçimin yönünden kademeli; ilk yükleme iskeleti `.ml-skel`;
+  sonsuz kaydırmayla gelenler ≤24 kademeli. Miveloji kartları yönlü yeniden girer. `ui.tsx useExit` = kendi kapanan pencerelere çıkış (kişi bağla/öneriler,
+  Miveloji paylaş/hikâye). Boş durumlar, Odak kartları, zamanlanmış gönderim kartı CSS girişli (extras/conversation.css).
 - **Tüm verileri sil hızlı (01.10, Kaan: yavaş sıfırlanıyor, arayüz hataları)**: `registry.removeAll` hesapları HEMEN gizler (`store.hideAccounts`), platform
   çıkışı + durdurma TÜM hesaplarda AYNI ANDA (çıkış ≤6 sn, durdurma ≤5 sn), hesap başına dilimli silme YOK; `store.wipeAll` tek işlem: messages/transcripts
   tetikleyicileri düşürülüp sonra sqlite_master'daki SQL'leriyle geri kurulur, yabancı anahtar denetimi kapalı, bağlı tablolar (transcripts/embeddings/

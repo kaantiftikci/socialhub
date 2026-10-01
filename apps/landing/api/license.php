@@ -8,6 +8,8 @@ declare(strict_types=1);
  * POST JSON {action, …} — çağıran Mivelo çekirdeği (Node, Origin yok):
  *   activate {key, device, name, os, version} → {ok, activation, expiresAt, owner?}   (aynı cihaz yeniden etkinleştirirse aynı kayıt)
  *   check    {key, activation, device}         → {ok, expiresAt, owner?}               (uygulama 12 saatte bir; iptal/süre sonu burada anlaşılır)
+ *   terms (activate/check, isteğe bağlı): cihazda kabul edilen Kullanım Koşulları/EULA SÜRÜMÜ (YYYY-AA-GG) → etkinleştirme kaydında
+ *   terms + termsAt (ilk görüldüğü an). Kişisel veri değil; hangi sürümün kabul edildiğini kanıtlamak için.
  *   owner {name?, email?}: anahtarın e-postası (Admin → Lisanslar) + o e-postanın üye kaydındaki ad soyad → uygulamada profil adı.
  *   Yalnız anahtarı bilen (80 bit) cihaza döner.
  *   release  {key, activation}                 → {ok}                          (uygulamada "Lisansı kaldır": cihaz yeri boşalır)
@@ -132,6 +134,7 @@ $action = (string) ($body['action'] ?? '');
 $device = substr(preg_replace('/[^a-f0-9]/', '', strtolower((string) ($body['device'] ?? ''))), 0, 64);
 $activation = substr(preg_replace('/[^a-f0-9]/', '', strtolower((string) ($body['activation'] ?? ''))), 0, 64);
 $clip = fn ($v, $n) => mb_substr(trim(preg_replace('/[\x00-\x1f]/u', '', (string) $v)), 0, $n);
+$terms = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($body['terms'] ?? '')) ? (string) $body['terms'] : '';
 
 if ($key === '' || strlen($key) > 40) {
     fail(400, 'Lisans anahtarı gerekli');
@@ -139,7 +142,7 @@ if ($key === '' || strlen($key) > 40) {
 rate_guard(false);
 
 $ownerEmail = '';
-$res = with_store('licenses.json', ['keys' => []], function (array &$d) use ($key, $norm, $action, $device, $activation, $body, $clip, &$ownerEmail) {
+$res = with_store('licenses.json', ['keys' => []], function (array &$d) use ($key, $norm, $action, $device, $activation, $body, $clip, $terms, &$ownerEmail) {
     $now = time();
     foreach ($d['keys'] as &$k) {
         if ($norm($k['key'] ?? '') !== $key) {
@@ -161,6 +164,10 @@ $res = with_store('licenses.json', ['keys' => []], function (array &$d) use ($ke
                 if (($a['device'] ?? '') === $device) {
                     $a['lastAt'] = gmdate('c');
                     $a['version'] = $clip($body['version'] ?? '', 20);
+                    if ($terms !== '' && ($a['terms'] ?? '') !== $terms) {
+                        $a['terms'] = $terms;
+                        $a['termsAt'] = gmdate('c');
+                    }
                     return ['ok' => true, 'activation' => $a['id'], 'expiresAt' => $k['expiresAt'] ?? null];
                 }
             }
@@ -171,7 +178,8 @@ $res = with_store('licenses.json', ['keys' => []], function (array &$d) use ($ke
             }
             $id = bin2hex(random_bytes(16));
             $k['activations'][] = ['id' => $id, 'device' => $device, 'name' => $clip($body['name'] ?? '', 60), 'os' => $clip($body['os'] ?? '', 30),
-                'version' => $clip($body['version'] ?? '', 20), 'firstAt' => gmdate('c'), 'lastAt' => gmdate('c')];
+                'version' => $clip($body['version'] ?? '', 20), 'firstAt' => gmdate('c'), 'lastAt' => gmdate('c')]
+                + ($terms !== '' ? ['terms' => $terms, 'termsAt' => gmdate('c')] : []);
             $k['usedAt'] = $k['usedAt'] ?? gmdate('c');
             return ['ok' => true, 'activation' => $id, 'expiresAt' => $k['expiresAt'] ?? null];
         }
@@ -191,6 +199,11 @@ $res = with_store('licenses.json', ['keys' => []], function (array &$d) use ($ke
                 if (strtotime((string) ($a['lastAt'] ?? '')) < $now - 3600) {
                     $a['lastAt'] = gmdate('c');
                     $a['version'] = $clip($body['version'] ?? ($a['version'] ?? ''), 20);
+                }
+                // yeni koşul sürümü kabul edildiyse hemen yaz (saatlik sınırdan bağımsız)
+                if ($terms !== '' && ($a['terms'] ?? '') !== $terms) {
+                    $a['terms'] = $terms;
+                    $a['termsAt'] = gmdate('c');
                 }
                 return ['ok' => true, 'expiresAt' => $k['expiresAt'] ?? null];
             }

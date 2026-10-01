@@ -5,6 +5,7 @@ import { onPeopleEvent, usePeople } from './people-store';
 import { Chip, Icon } from './ui';
 import { PLATFORMS, type Chat, type Message, type Platform } from './types';
 import { staggerIn } from './PersonPanel';
+import { MvInd } from './motion/MvInd';
 
 /**
  * Birleşik zaman çizelgesi: sohbet bir kişiye bağlıysa (kişi birden çok kanalda) başlık altında kanal çipleri + "Tüm kanallar".
@@ -136,7 +137,7 @@ export function PersonChannelBar({ tl, current, onSelectChat }: { tl: UnifiedTim
   useLayoutEffect(() => {
     if (!pid || shownFor.current === pid) return;
     shownFor.current = pid;
-    staggerIn(ref.current, ':scope > *', 12);
+    staggerIn(ref.current, ':scope > :not(.mv-ind)', 12);
   }, [pid]);
   if (!tl.person) return null;
   return (
@@ -144,6 +145,7 @@ export function PersonChannelBar({ tl, current, onSelectChat }: { tl: UnifiedTim
       <button type="button" role="tab" aria-selected={tl.on} className={`pchan-it all b ${tl.on ? 'on' : ''}`} onClick={() => tl.setOn(!tl.on)} title="Bu kişinin tüm kanallarındaki mesajlar tek zaman çizelgesinde">
         <Icon name="users" size={13} sw={2} /> Tüm kanallar
       </button>
+      <MvInd sel=".pchan-it.on" dep={tl.on ? 'all' : current.id} variant="chip" />
       {tl.person.chats.map((c) => {
         const active = !tl.on && c.id === current.id;
         return (
@@ -183,6 +185,7 @@ export function SendVia({ tl }: { tl: UnifiedTimelineState }) {
     <div ref={ref} className="sendvia">
       <span className="k">Gönderilecek kanal</span>
       <span className="sv-list" role="radiogroup" aria-label="Gönderilecek kanal">
+        <MvInd sel=".sv-it.on" dep={cur.id} variant="chip" />
         {tl.person.chats.map((c) => (
           <button key={c.id} type="button" role="radio" aria-checked={c.id === cur.id} className={`sv-it b ${c.id === cur.id ? 'on' : ''}`} title={`${PLATFORMS[c.platform]?.name ?? c.platform} · ${c.name}`} onClick={() => tl.setSendChatId(c.id)}>
             <Chip platform={c.platform} size={16} />

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { api } from './api';
 import { peopleApi, type PersonChat, type PersonSuggestion } from './people-api';
 import { refreshPeople, usePeople } from './people-store';
-import { Avatar, Chip, Icon } from './ui';
+import { Avatar, Chip, Icon, useExit } from './ui';
 import { PLATFORMS, type Chat, type Platform } from './types';
 import { EASE, animate, reducedMotion } from './motion/motion';
 
@@ -179,7 +179,8 @@ export function PersonPanel({ chat, onSelectChat, notify }: { chat: Chat; onSele
 }
 
 /** Elle bağlama: sohbet arama seçicisi (birebir, pazaryeri dışı) */
-function LinkPicker({ chat, exclude, onPick, onClose }: { chat: Chat; exclude: Set<string>; onPick: (c: Chat) => void; onClose: () => void }) {
+function LinkPicker({ chat, exclude, onPick, onClose: close0 }: { chat: Chat; exclude: Set<string>; onPick: (c: Chat) => void; onClose: () => void }) {
+  const [closing, onClose] = useExit(close0);
   const [list, setList] = useState<Chat[] | null>(null);
   const [q, setQ] = useState(() => chat.name.split(/\s+/)[0] ?? '');
   const inRef = useRef<HTMLInputElement>(null);
@@ -206,7 +207,7 @@ function LinkPicker({ chat, exclude, onPick, onClose }: { chat: Chat; exclude: S
   }, [list, q, chat.platform]);
   // sağ panelin (animasyonlu, taşması kırpılan) içinde değil, sayfanın üstünde
   return createPortal(
-    <div className="overlay" onClick={onClose}>
+    <div className={`overlay ${closing ? 'closing' : ''}`} onClick={onClose}>
       <div className="modal people-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Sohbet bağla" onKeyDown={(e) => e.key === 'Escape' && (e.preventDefault(), onClose())}>
         <div className="pm-head">
           <div>
@@ -248,7 +249,8 @@ function LinkPicker({ chat, exclude, onPick, onClose }: { chat: Chat; exclude: S
 }
 
 /** Tüm birleştirme önerileri: Birleştir / Hayır; "Tümünü birleştir" yalnız güçlü (telefon/e-posta) eşleşmeler */
-export function SuggestionsModal({ onClose, notify, onSelectChat }: { onClose: () => void; notify: (t: string, err?: boolean) => void; onSelectChat?: (id: string) => void }) {
+export function SuggestionsModal({ onClose: close0, notify, onSelectChat }: { onClose: () => void; notify: (t: string, err?: boolean) => void; onSelectChat?: (id: string) => void }) {
+  const [closing, onClose] = useExit(close0);
   const { suggestions } = usePeople();
   const [busy, setBusy] = useState<string | null>(null);
   const strong = suggestions.filter((s) => s.strong);
@@ -271,7 +273,7 @@ export function SuggestionsModal({ onClose, notify, onSelectChat }: { onClose: (
   };
   // sağ panelin (animasyonlu, taşması kırpılan) içinde değil, sayfanın üstünde
   return createPortal(
-    <div className="overlay" onClick={onClose}>
+    <div className={`overlay ${closing ? 'closing' : ''}`} onClick={onClose}>
       <div className="modal people-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Birleştirme önerileri" onKeyDown={(e) => e.key === 'Escape' && (e.preventDefault(), onClose())}>
         <div className="pm-head">
           <div>

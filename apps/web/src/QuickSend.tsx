@@ -9,6 +9,7 @@ import {
 } from "react";
 import { api } from "./api";
 import { MOD_KEY } from "./desktop";
+import { getPrefs } from "./prefs";
 import { PLATFORMS, isOrderPage, type Chat } from "./types";
 import { Avatar, Chip, Icon, IconText } from "./ui";
 import { EASE, animate, reducedMotion } from "./motion/motion";
@@ -311,6 +312,7 @@ export function QuickSend({
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={onKeyMsg}
+              spellCheck={getPrefs().spellcheck}
               placeholder={
                 mail
                   ? `${to.name} dizisine yanıt yaz…`

@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { DATA_DIR } from './config.js';
 import { bus } from './bus.js';
+import { acceptedTermsVersion } from './consent.js';
 
 /**
  * Masaüstü paketi lisansı (Kaan'ın yönetim panelinde ürettiği anahtarlar; doğrulama mivelo.app/api/license.php).
@@ -169,7 +170,7 @@ export async function activateLicense(rawKey: string): Promise<LicenseStatus> {
   if (raw.length !== 16) throw new LicenseError('Anahtarı MVL-XXXX-XXXX-XXXX-XXXX biçiminde yaz', true, 400);
   const key = `MVL-${raw.match(/.{4}/g)!.join('-')}`;
   const device = hardwareId();
-  const r = await call('activate', { key, device, name: os.hostname().slice(0, 60), os: `${process.platform} ${os.release()}`, version: version() });
+  const r = await call('activate', { key, device, name: os.hostname().slice(0, 60), os: `${process.platform} ${os.release()}`, version: version(), terms: acceptedTermsVersion() });
   write({ key, activation: String(r.activation), device, hw: device, lastOk: Date.now(), expiresAt: r.expiresAt ?? null, owner: cleanOwner(r.owner) });
   reason = undefined;
   bus.log('info', 'Lisans etkinleştirildi');
@@ -201,7 +202,7 @@ export async function checkLicense(): Promise<void> {
     // sunucuya kayıttaki kimlik gider (etkinleştirme bu dizeyle eşli): ağ değişince "bu cihaza ait değil" deyip lisansı silmesin;
     // kopyalamaya karşı denetimi yerel hw karşılaştırması yapar
     if (s.hw && s.hw !== hardwareId()) return;
-    const r = await call('check', { key: s.key, activation: s.activation, device: s.device, version: version() });
+    const r = await call('check', { key: s.key, activation: s.activation, device: s.device, version: version(), terms: acceptedTermsVersion() });
     const owner = cleanOwner(r.owner) ?? s.owner;
     const changed = JSON.stringify(owner) !== JSON.stringify(s.owner);
     const was = licensed();

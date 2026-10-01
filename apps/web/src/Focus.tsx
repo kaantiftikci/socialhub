@@ -5,6 +5,9 @@ import { PLATFORMS, type Chat, type DraftResult } from './types';
 import { Avatar, Chip, Icon, IconText, ago, agoLong, stripLeadIcon } from './ui';
 import { PROFILE_NAME, PROFILE_PHOTO, profileFirstName } from './profile';
 import { useAiPrefs } from './ai-prefs';
+import { usePrefs } from './prefs';
+import { MOD_KEY } from './desktop';
+import { getConsent, requireAiConsent } from './consent-store';
 
 /**
  * Odak modu: yanıt bekleyenler (en yeniden eskiye), her biri için AI taslağı ve tek tıkla gönderme.
@@ -31,6 +34,7 @@ export function Focus({
   const [sending, setSending] = useState<string | null>(null);
   const [done, setDone] = useState<Record<string, boolean>>({});
   const aiP = useAiPrefs();
+  const prefs = usePrefs();
   const draftOn = ai && aiP.drafts;
 
   const hour = new Date().getHours();
@@ -47,7 +51,8 @@ export function Focus({
   // Taslaklar yalnız istenince ("Taslak yaz") üretilir: sohbet içeriği Anthropic'e ancak kullanıcı isteyince gider.
   // Ayarlar → AI → "Odak'ta taslakları kendiliğinden hazırla" açıksa ilk 3 bekleyen için önceden hazırlanır.
   useEffect(() => {
-    if (!ai || !aiP.focusAuto || (!aiP.drafts && !aiP.actions)) return;
+    // açık rıza yoksa kendiliğinden gönderme (rıza ilk elle "Taslak yaz"da sorulur)
+    if (!ai || !aiP.focusAuto || (!aiP.drafts && !aiP.actions) || !getConsent().ai) return;
     for (const c of waiting.slice(0, 3)) {
       if (drafts[c.id]) continue;
       setDrafts((d) => ({ ...d, [c.id]: 'loading' }));
@@ -325,7 +330,8 @@ export function Focus({
                       <button
                         className="btn sm b b2"
                         style={{ alignSelf: 'flex-start' }}
-                        onClick={() => {
+                        onClick={async () => {
+                          if (!(await requireAiConsent())) return;
                           setDrafts((x) => ({ ...x, [c.id]: 'loading' }));
                           api.draft(c.id).then((r) => setDrafts((x) => ({ ...x, [c.id]: r }))).catch(() => setDrafts((x) => ({ ...x, [c.id]: 'error' })));
                         }}
@@ -342,10 +348,12 @@ export function Focus({
                       ref={replyRef}
                       rows={2}
                       value={replyText}
-                      placeholder={`${c.name} için yanıt yaz… (Enter gönderir, Shift+Enter yeni satır)`}
+                      placeholder={`${c.name} için yanıt yaz… (${prefs.enterSends ? 'Enter gönderir, Shift+Enter yeni satır' : `${MOD_KEY}+Enter gönderir`})`}
+                      spellCheck={prefs.spellcheck}
                       onChange={(e) => setReplyText(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) (e.preventDefault(), void sendReply(c));
+                        // Ayarlar → Genel: Enter ile gönder kapalıysa ⌘/Ctrl+Enter gönderir (sohbet yazma alanıyla aynı)
+                        if (e.key === 'Enter' && !e.shiftKey && !e.altKey && !e.nativeEvent.isComposing && (prefs.enterSends || e.metaKey || e.ctrlKey)) (e.preventDefault(), void sendReply(c));
                         if (e.key === 'Escape') (e.stopPropagation(), setReplyFor(null));
                       }}
                     />

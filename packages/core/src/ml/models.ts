@@ -9,7 +9,7 @@ import { MODEL_KEYS, MODEL_SPECS, MlError, RUNTIME_ROOT, modelDir, type ModelKey
 import { TarExtract } from './tar.js';
 
 /**
- * Model ve çalışma zamanı indirmeleri (yalnız kullanıcı Ayarlar'da "İndir" deyince).
+ * Model ve çalışma zamanı indirmeleri: ilk açılışta arka planda kendiliğinden (auto-install.ts) ya da Ayarlar'da "İndir" ile.
  *
  * Çalışma zamanı neden pakette değil / neden onnxruntime-node değil:
  *  - onnxruntime-node 1.30 npm paketi 113 MB (sıkıştırılmış) ve tüm platform ikililerini birden taşıyor; darwin-x64 (Intel Mac
@@ -83,6 +83,8 @@ interface Job {
   abort: AbortController;
   done: number;
   total: number;
+  /** İş bitince çözülür; hata (MlError) ile reddedilir */
+  promise?: Promise<void>;
 }
 const jobs = new Map<ModelKey, Job>();
 const errors = new Map<ModelKey, string>();
@@ -241,7 +243,7 @@ export function startDownload(key: ModelKey): ModelStatus {
   const job: Job = { abort: new AbortController(), done: 0, total: MODEL_SPECS[key].approxMb * 1048576 + (runtimeReady() ? 0 : RUNTIME_APPROX_BYTES) };
   jobs.set(key, job);
   emitMlStatus(true);
-  void downloadModel(key, job)
+  job.promise = downloadModel(key, job)
     .then(() => bus.log('info', `Yerel AI: ${MODEL_SPECS[key].title} hazır`))
     .catch((e: unknown) => {
       const err = e instanceof MlError ? e : netError(e, MODEL_SPECS[key].title);
@@ -249,12 +251,21 @@ export function startDownload(key: ModelKey): ModelStatus {
         errors.set(key, err.message);
         bus.log('warn', `Yerel AI: ${MODEL_SPECS[key].title} indirilemedi — ${err.message}`);
       }
+      throw err;
     })
     .finally(() => {
       jobs.delete(key);
       emitMlStatus(true);
     });
+  job.promise.catch(() => undefined); // dinleyen yoksa işlenmemiş ret sayılmasın
   return modelStatus(key);
+}
+
+/** Modeli indirip bitmesini bekler (sürmekte olan indirmeye katılır); hata MlError (499 = iptal) */
+export async function installModel(key: ModelKey): Promise<void> {
+  if (modelReady(key)) return;
+  startDownload(key);
+  await jobs.get(key)?.promise;
 }
 
 export function cancelDownload(key: ModelKey): void {

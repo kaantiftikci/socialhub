@@ -4,7 +4,8 @@ import { DATA_DIR } from '../config.js';
 
 /**
  * Yerel ML (cihazda çalışan modeller): sesli mesajı yazıya dökme (Whisper), anlamsal arama (çok dilli gömme).
- * Her şey kullanıcının Ayarlar → Yerel AI modelleri'nden açıkça indirmesiyle gelir; hiçbiri pakette değildir.
+ * Hiçbiri pakette değildir: ilk açılışta (kanallar açıldıktan sonra) arka planda kendiliğinden iner (auto-install.ts; kullanıcı
+ * Ayarlar → Yerel AI'da kapatabilir), ya da oradan elle indirilir.
  *   ~/.mivelo/models/<org>/<model>/…   Hugging Face'ten inen model dosyaları (transformers.js yerel düzeni)
  *   ~/.mivelo/ml/runtime/<sürüm>/      çalışma zamanı (transformers.js + onnxruntime-web wasm; npm kayıt defterinden, bütünlük denetimli)
  *   ~/.mivelo/ml.json                  ayarlar
@@ -54,9 +55,13 @@ export interface MlSettings {
   semanticIndex: boolean;
   /** Çeviri hedef dili (arayüz dili) */
   translateTarget: string;
+  /** Çalışma zamanı + modeller ilk açılışta arka planda kendiliğinden kurulur (kullanıcı kapatabilir) */
+  autoInstall: boolean;
+  /** Kullanıcının sildiği / indirmesini iptal ettiği modeller: otomatik kurulum bunları yeniden indirmez */
+  declined: ModelKey[];
 }
 
-const DEFAULTS: MlSettings = { autoTranscribe: false, semanticIndex: false, translateTarget: 'tr' };
+const DEFAULTS: MlSettings = { autoTranscribe: true, semanticIndex: true, translateTarget: 'tr', autoInstall: true, declined: [] };
 let cached: MlSettings | undefined;
 
 export function mlSettings(): MlSettings {
@@ -75,6 +80,8 @@ function pick(x: Partial<MlSettings>): Partial<MlSettings> {
   if (typeof x.autoTranscribe === 'boolean') out.autoTranscribe = x.autoTranscribe;
   if (typeof x.semanticIndex === 'boolean') out.semanticIndex = x.semanticIndex;
   if (typeof x.translateTarget === 'string' && /^[a-z]{2}$/.test(x.translateTarget)) out.translateTarget = x.translateTarget;
+  if (typeof x.autoInstall === 'boolean') out.autoInstall = x.autoInstall;
+  if (Array.isArray(x.declined)) out.declined = [...new Set(x.declined.filter((k): k is ModelKey => (MODEL_KEYS as string[]).includes(k as string)))];
   return out;
 }
 

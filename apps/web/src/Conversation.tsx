@@ -3,6 +3,7 @@ import { trReactionText } from './reaction-text';
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { EmojiPicker } from './emoji';
 import { api, USE_STATIC } from './api';
+import { requireAiConsent } from './consent-store';
 import { EventEditor } from './CalendarView';
 import { API_BASE, isTauri, mediaUrl, openExternal } from './desktop';
 import { DEFAULT_TAGS, EDIT_LIMIT_MS, QUOTE_TEXT_PLATFORMS, parseQuoteLine, quoteLine, EDIT_PLATFORMS, PLATFORMS, REPLY_PLATFORMS, UNSEND_LIMIT_MS, UNSEND_PLATFORMS, isOrderPage, questionOrderRef, shopKind, QUICK_REACTIONS, REACT_PLATFORMS, TAG_COLORS, openInAppLink, type Attachment, type CalendarDraft, type Chat, type ChatFlags, type DraftResult, type LinkPreview, type Message, type Platform, type Reaction } from './types';
@@ -1422,6 +1423,8 @@ export function Conversation({
 
   /** summaryOnly: yalnız özet/aksiyon (sağ paneldeki "Özetle"); yanıtlanacak mesaj yokken kompozöre taslak düşmez */
   async function makeDraft(t: Tone = tone, summaryOnly = false) {
+    // bulut AI: ilk kullanımda yurt dışına aktarım açık rızası (Consent.tsx); vazgeçilirse hiçbir içerik gönderilmez
+    if (!(await requireAiConsent())) return;
     setTone(t);
     setDrafting(true);
     try {

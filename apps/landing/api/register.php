@@ -2,7 +2,8 @@
 declare(strict_types=1);
 
 /**
- * İndirme kaydı (mivelo.app/api/register.php): indirme sayfasında "İndir"e basınca açılan pencere → POST {firstName, lastName, email, file, website}
+ * İndirme kaydı (mivelo.app/api/register.php): indirme sayfasında "İndir"e basınca açılan pencere → POST {firstName, lastName, email, file, website,
+ * consent:{terms, kvkk}} (Kullanım Koşulları/EULA kabulü + KVKK Aydınlatma Metni okundu; sürümler lib-members MV_*_VERSION ile aynı olmalı, yoksa 400)
  * → {ok:true}; ardından sayfa dosyayı indirir. Kayıt lib-members.php ile ~/mivelo-data/members.json'a (src 'indir'); Admin →
  * Üyeler sayfasında görünür. Ad/soyad yalnız harf, e-posta biçim + geçici servis + alan adı (MX/A) denetimi (lib-members). Aynı e-posta yeniden
  * gelirse yeni kayıt açılmaz ({known:true}); aynı ad soyadla başka e-postadan gelen kayıt 'dupOf' ile işaretlenir.
@@ -50,6 +51,10 @@ $FILES = ['Mivelo-mac-arm64.dmg', 'Mivelo-mac-intel.dmg', 'Mivelo-windows-x64-se
 if (($err = mv_member_name_error($first, 'Ad')) !== '' || ($err = mv_member_name_error($last, 'Soyad')) !== '' || ($err = mv_member_email_error($email)) !== '') {
     fail(400, $err);
 }
+$consent = mv_consent_from($body['consent'] ?? null);
+if ($consent === null) {
+    fail(400, 'Devam etmek için Kullanım Koşulları’nı kabul edip KVKK Aydınlatma Metni’ni okuduğunu onayla.');
+}
 if ($file !== '' && !in_array($file, $FILES, true)) {
     $file = '';
 }
@@ -61,7 +66,7 @@ if (strpos($ip, ':') !== false && ($bin = @inet_pton($ip)) !== false && strlen($
 }
 
 try {
-    $res = mv_members_update(function (array &$members) use ($email, $first, $last, $file, $ip, $ipKey) {
+    $res = mv_members_update(function (array &$members) use ($email, $first, $last, $file, $ip, $ipKey, $consent) {
         $known = false;
         $recent = 0;
         $today = 0;
@@ -84,7 +89,7 @@ try {
         if (!$known && ($recent >= 10 || $today >= 1000)) {
             return 'limit';
         }
-        mv_member_upsert($members, ['email' => $email, 'firstName' => $first, 'lastName' => $last, 'src' => 'indir', 'ip' => $ip], $file);
+        mv_member_upsert($members, ['email' => $email, 'firstName' => $first, 'lastName' => $last, 'src' => 'indir', 'ip' => $ip, 'consent' => $consent], $file);
         return $known ? 'known' : 'ok';
     });
 } catch (Throwable $e) {

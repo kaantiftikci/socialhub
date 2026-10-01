@@ -34,9 +34,16 @@
 .set-modal .sw:not(:disabled):active::after { transform: scale(.88); }
 .set-modal .sw.on:not(:disabled):active::after { transform: translateX(16px) scale(.88); }
 
-/* ── Medya: süzgeç değişirken eski ızgara soluklaşır (çapraz solmanın ilk yarısı) ── */
-.ml-body > .ml-group { transition: opacity var(--m-quick) var(--m-ease); }
-.ml-body.swapping > .ml-group { opacity: .35; }
+/* ── Medya: sekme/çip/arama değişince eski içerik seçimin tersi yönüne kayarak solar (`--ml-out`, MediaLibrary.tsx); yeni içerik
+   JS'te seçimin yönünden kademeli gelir. Grupların anahtarı her geçişte değişir → çıkış geçişi yeni içeriğe taşınmaz ── */
+.ml-body > .ml-group, .ml-body > .ml-empty { transition: opacity var(--m-quick) var(--m-out), transform var(--m-quick) var(--m-out); }
+.ml-body.swapping > .ml-group, .ml-body.swapping > .ml-empty { opacity: 0; transform: var(--ml-out, none); pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .ml-body.swapping > .ml-group, .ml-body.swapping > .ml-empty { opacity: .35; transform: none; } }
+html.reduce-motion .ml-body.swapping > .ml-group, html.reduce-motion .ml-body.swapping > .ml-empty { opacity: .35; transform: none; }
+/* ilk yükleme iskeleti: küçük resim biçiminde parıltılı kareler (motion/app.css .mv-shim) */
+.ml-skel { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 6px; padding-top: 34px; }
+.ml-sk { display: block; aspect-ratio: 1; border-radius: 12px; animation: mxFadeIn var(--m-std) var(--m-ease) both, mvShim 1.2s linear infinite; }
+.app.mobile .ml-skel { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; padding-top: 30px; }
 
 /* ── Pazaryeri "Bugün" kartı: katlanır alan (yükseklik + solma, 260 ms) ── */
 .ms-fold { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows var(--m-std) var(--m-ease), opacity var(--m-std) var(--m-ease), margin-top var(--m-std) var(--m-ease); }
@@ -74,3 +81,29 @@ html.reduce-motion .fb-ok path { stroke-dashoffset: 0; animation: none; }
 
 /* Medya: eski genel `wrIn` her karoda (sonsuz kaydırmada da) oynuyordu → kapalı; giriş MediaLibrary.tsx'te yalnız ilk yükleme/süzgeçte */
 .ml-body .ml-tile, .ml-body .ml-row { animation: none; }
+
+/* ── Boş durum ekranları (Medya, Miveloji, ⌘K, hızlı gönder, Odak): simge taşarak, metin yükselerek ── */
+:is(.ml-empty, .wr-empty, .pal-empty) > * { animation: mxRise var(--m-std) var(--m-in) both; }
+:is(.ml-empty, .wr-empty) > :is(.ml-empty-ic, .wr-empty-ic), .pal-empty > svg:first-child { animation: mxOkPop var(--m-slow) var(--m-pop) both; }
+:is(.ml-empty, .wr-empty, .pal-empty) > :nth-child(2) { animation-delay: 60ms; }
+:is(.ml-empty, .wr-empty, .pal-empty) > :nth-child(3) { animation-delay: 110ms; }
+:is(.ml-empty, .wr-empty, .pal-empty) > :nth-child(n+4) { animation-delay: 160ms; }
+.focus-cols .empty.card, .qs-empty { animation: mxRise var(--m-std) var(--m-in) both; }
+
+/* ── Odak: yanıt bekleyen kartlar ilk görününce 40 ms arayla yükselir (gönderildi kartı JS'te) ── */
+.focus-cols .fcard:not(.fsent) { animation: mxRise var(--m-std) var(--m-in) backwards; }
+.focus-cols .fcard:nth-child(3) { animation-delay: 40ms; }
+.focus-cols .fcard:nth-child(4) { animation-delay: 80ms; }
+.focus-cols .fcard:nth-child(5) { animation-delay: 120ms; }
+.focus-cols .fcard:nth-child(n+6) { animation-delay: 160ms; }
+
+/* ── Miveloji: hikâye ve paylaş penceresi kapanırken (useExit) ── */
+.st-overlay.closing { animation: mxFadeOut calc(var(--m-std) * .75) var(--m-out) both; pointer-events: none; }
+.st-overlay.closing .st-box { animation: mxSetOut calc(var(--m-std) * .75) var(--m-out) both; }
+
+/* ── Hareketleri azalt: girişler anında ── */
+@media (prefers-reduced-motion: reduce) {
+  :is(.ml-empty, .wr-empty, .pal-empty) > *, .focus-cols .fcard, .focus-cols .empty.card, .qs-empty, .ml-sk, .st-overlay.closing, .st-overlay.closing .st-box { animation: none !important; }
+}
+html.reduce-motion :is(.ml-empty, .wr-empty, .pal-empty) > *, html.reduce-motion .focus-cols .fcard, html.reduce-motion .focus-cols .empty.card,
+html.reduce-motion .qs-empty, html.reduce-motion .ml-sk, html.reduce-motion .st-overlay.closing, html.reduce-motion .st-overlay.closing .st-box { animation: none !important; }

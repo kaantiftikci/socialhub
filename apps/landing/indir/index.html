@@ -48,7 +48,7 @@ svg{flex-shrink:0}
 .nav{position:fixed;inset:0 0 auto 0;z-index:60;height:60px;display:flex;align-items:center;background:rgba(247,247,249,.72);backdrop-filter:saturate(180%) blur(18px);-webkit-backdrop-filter:saturate(180%) blur(18px);border-bottom:1px solid transparent;transition:border-color .3s}
 .nav.scrolled{border-bottom-color:rgba(0,0,0,.06)}
 .nav .wrap{width:100%;display:flex;align-items:center;gap:26px}
-.logo{display:inline-flex;align-items:center;gap:9px;font-weight:600;font-size:17px;letter-spacing:-.02em;text-decoration:none}
+.logo{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Inter',system-ui,sans-serif;display:inline-flex;align-items:center;gap:9px;font-weight:600;font-size:17px;letter-spacing:-.02em;text-decoration:none}
 .logo .mark{display:block}
 .nav .links{display:flex;gap:26px;margin:0 auto}
 .nav .links a{font-size:14px;color:var(--ink-3);text-decoration:none;transition:color .2s}
@@ -588,7 +588,8 @@ footer a:hover{color:var(--ink)}
       </div>
       <label><span>E-posta</span><input name="email" type="email" autocomplete="email" autocapitalize="none" required maxlength="120" placeholder="ornek@eposta.com"></label>
       <input class="dlm-hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
-      <label class="dlm-chk"><input type="checkbox" name="ok"> <span><a href="/gizlilik.html" target="_blank" rel="noopener">Gizlilik Politikası</a>'nı okudum; bilgilerimin lisans anahtarı ve Mivelo duyuruları için kullanılmasını kabul ediyorum.</span></label>
+      <label class="dlm-chk"><input type="checkbox" name="terms"> <span><a href="/kosullar.html" target="_blank" rel="noopener">Kullanım Koşulları ve Son Kullanıcı Lisans Sözleşmesi</a>'ni okudum, kabul ediyorum.</span></label>
+      <label class="dlm-chk"><input type="checkbox" name="kvkk"> <span>Kişisel verilerimin işlenmesine ilişkin <a href="/kvkk.html" target="_blank" rel="noopener">KVKK Aydınlatma Metni</a>'ni okudum, bilgilendim.</span></label>
       <div class="dlm-err" id="dlmErr" role="alert"></div>
       <button type="submit" class="dlm-btn" id="dlmBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12M6 11l6 6 6-6M5 20h14"/></svg>Kayıt ol ve indir</button>
     </form>
@@ -606,7 +607,7 @@ footer a:hover{color:var(--ink)}
     <div class="row">
       <a class="logo" href="/" style="font-size:14px"><svg class="mark" width="22" height="22" viewBox="0 0 28 28" aria-hidden="true"><rect width="28" height="28" rx="9" fill="#6C47FF"/><path d="M8 8c4.5 0 6 3 6 6s1.5 6 6 6M8 20c4.5 0 6-3 6-6" stroke="#FFFFFF" stroke-width="2.3" fill="none" stroke-linecap="round"/><circle cx="20" cy="8" r="2.5" fill="#D4FF3F"/></svg>Mivelo</a>
       <span>© 2026</span><span class="sp"></span>
-      <a href="/gizlilik.html">Gizlilik</a><a href="/kosullar.html">Koşullar</a><a href="mailto:hello@mivelo.app">hello@mivelo.app</a>
+      <a href="/kosullar.html">Koşullar</a><a href="/gizlilik.html">Gizlilik</a><a href="/kvkk.html">KVKK</a><a href="/cerez.html">Çerezler</a><a href="/lisanslar.html">Açık kaynak</a><a href="mailto:hello@mivelo.app">hello@mivelo.app</a>
     </div>
   </div>
 </footer>
@@ -752,6 +753,8 @@ footer a:hover{color:var(--ink)}
   /* ---------- indirmeden önce kayıt: kartlardaki "İndir" → pencere → api/register.php → dosya iner ----------
      Bu tarayıcıda kayıt varsa (localStorage mivelo.reg) pencere açılmaz; indirme yine üyenin kaydına yazılır (keepalive). */
   var dlm=$('#dlm'), dlmForm=$('#dlmForm'), pending=null;
+  /* yürürlükteki metin sürümleri (api/lib-members.php MV_TERMS_VERSION / MV_KVKK_VERSION ile aynı); değişince kayıtlı tarayıcıda da pencere yeniden açılır */
+  var CONSENT={terms:'2026-10-01',kvkk:'2026-10-01'};
   var NAMES={'Mivelo-mac-arm64.dmg':'Mac · Apple Silicon','Mivelo-mac-intel.dmg':'Mac · Intel','Mivelo-windows-x64-setup.exe':'Windows'};
   function regGet(){ try{ return JSON.parse(localStorage.getItem('mivelo.reg')||'null'); }catch(e){ return null; } }
   function regSet(v){ try{ localStorage.setItem('mivelo.reg',JSON.stringify(v)); }catch(e){} }
@@ -760,6 +763,7 @@ footer a:hover{color:var(--ink)}
   function openDlm(a){
     pending={href:a.getAttribute('href'),file:a.getAttribute('data-file')};
     $('#dlmFile').textContent=(NAMES[pending.file]||'Mivelo')+' indirmesi';
+    var r=regGet(); if(r&&r.email){ dlmForm.elements.firstName.value=r.firstName||''; dlmForm.elements.lastName.value=r.lastName||''; dlmForm.elements.email.value=r.email; }
     dlmForm.hidden=false; $('#dlmDone').hidden=true; $('#dlmErr').textContent=''; $('#dlmBtn').disabled=false;
     dlm.hidden=false; document.body.style.overflow='hidden';
     setTimeout(function(){ try{ dlmForm.elements.firstName.focus({preventScroll:true}); }catch(e){} },60);
@@ -770,7 +774,7 @@ footer a:hover{color:var(--ink)}
   document.addEventListener('click',function(e){
     var a=e.target.closest('a[data-file]'); if(!a||a.classList.contains('off')) return;
     var r=regGet();
-    if(r&&r.email){ post({email:r.email,firstName:r.firstName,lastName:r.lastName,file:a.getAttribute('data-file')},true).catch(function(){}); return; }
+    if(r&&r.email&&r.consent&&r.consent.terms===CONSENT.terms&&r.consent.kvkk===CONSENT.kvkk){ post({email:r.email,firstName:r.firstName,lastName:r.lastName,file:a.getAttribute('data-file'),consent:CONSENT},true).catch(function(){}); return; }
     e.preventDefault(); openDlm(a);
   });
   dlmForm.addEventListener('submit',function(e){
@@ -784,14 +788,15 @@ footer a:hover{color:var(--ink)}
     if(!NAME.test(first)||!two(first)){ err.textContent='Ad yalnız harflerden oluşmalı (en az 2 harf).'; f.firstName.focus(); return; }
     if(!NAME.test(last)||!two(last)){ err.textContent='Soyad yalnız harflerden oluşmalı (en az 2 harf).'; f.lastName.focus(); return; }
     if(!/^[a-z0-9][a-z0-9._%+-]{0,63}@[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)*\.[a-z]{2,}$/.test(mail)){ err.textContent='Geçerli bir e-posta adresi yaz.'; f.email.focus(); return; }
-    if(!f.ok.checked){ err.textContent='Devam etmek için Gizlilik Politikası onayını işaretle.'; return; }
+    if(!f.terms.checked){ err.textContent='Devam etmek için Kullanım Koşulları’nı kabul et.'; f.terms.focus(); return; }
+    if(!f.kvkk.checked){ err.textContent='Devam etmek için KVKK Aydınlatma Metni’ni okuduğunu onayla.'; f.kvkk.focus(); return; }
     btn.disabled=true; btn.lastChild.textContent='Kaydediliyor…';
     var p=pending;
-    post({email:mail,firstName:first,lastName:last,file:p.file,website:f.website.value})
+    post({email:mail,firstName:first,lastName:last,file:p.file,website:f.website.value,consent:CONSENT})
       .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){ if(!r.ok||!j.ok) throw new Error(j.error||'Kayıt yapılamadı, biraz sonra tekrar dene.'); return j; }); })
       .then(function(j){
         $('#dlmDoneT').textContent=j.known?'Zaten kayıtlısın, indirme başladı':'İndirme başladı';
-        regSet({email:mail,firstName:first,lastName:last});
+        regSet({email:mail,firstName:first,lastName:last,consent:CONSENT});
         $('#dlmMail').textContent=mail; $('#dlmLink').href=p.href; $('#dlmLink').setAttribute('download','');
         dlmForm.hidden=true; $('#dlmDone').hidden=false;
         startDownload(p.href);

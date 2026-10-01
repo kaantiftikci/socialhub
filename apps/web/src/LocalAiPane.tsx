@@ -1,11 +1,12 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Icon } from './ui';
-import { mlApi, type MlModel, type MlSettings, type ModelKey } from './ml-api';
+import { mlApi, type MlAutoStatus, type MlModel, type MlSettings, type ModelKey } from './ml-api';
 import { refreshMlStatus, useMlStatus } from './ml-client';
 
 /**
  * Ayarlar → Yerel AI modelleri: cihazda çalışan modeller (konuşma tanıma, anlamsal arama).
- * Her model yalnız kullanıcı "İndir" deyip boyutu onaylayınca Hugging Face'ten iner; ilerleme canlı (ml.status olayı).
+ * Modeller ilk açılışta arka planda kendiliğinden kurulur (çekirdek ml/auto-install.ts; buradan kapatılabilir) ya da "İndir" ile
+ * elle iner; ilerleme canlı (ml.status olayı). Silinen/iptal edilen model otomatik kurulumla yeniden inmez.
  */
 const DESC: Record<ModelKey, string> = {
   whisper: 'WhatsApp, Telegram ve iMessage sesli mesajlarının altında metin; metin aramada da bulunur.',
@@ -132,6 +133,41 @@ function ModelCard({ m, runtimeMb, runtimeReady, demo, notify }: { m: MlModel; r
   );
 }
 
+/** "N dk sonra" / "saat 14:30'da" */
+function whenText(at?: number): string {
+  if (!at) return 'birazdan';
+  const min = Math.max(1, Math.round((at - Date.now()) / 60_000));
+  if (min < 60) return `${min} dk sonra`;
+  return `saat ${new Date(at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}’da`;
+}
+
+/** Otomatik kurulum durumu (kurulurken / yarıda kaldıysa / disk doluysa) */
+function AutoBanner({ a }: { a: MlAutoStatus }) {
+  if (!a.enabled) return null;
+  if (a.phase === 'running')
+    return (
+      <div className="set-group lai-auto">
+        <p className="set-note">
+          <span className="spin" /> Yerel AI modelleri arka planda kuruluyor %{a.pct}
+        </p>
+        <Progress pct={a.pct} thin resetKey="auto" />
+      </div>
+    );
+  if (a.phase === 'scheduled')
+    return (
+      <p className="set-note lai-auto">
+        <Icon name="download" size={14} /> Yerel AI modelleri {whenText(a.nextAt)} arka planda kendiliğinden kurulacak.
+      </p>
+    );
+  if (a.phase === 'retry' || a.phase === 'nospace')
+    return (
+      <div className="lai-err lai-auto">
+        <Icon name="alert" size={13} /> {a.phase === 'nospace' ? a.error : `Otomatik kurulum yarıda kaldı: ${a.error ?? 'bilinmeyen hata'} ${whenText(a.nextAt)} yeniden denenecek.`}
+      </div>
+    );
+  return null;
+}
+
 export function LocalAiPane({ notify }: { notify: (t: string, err?: boolean) => void }) {
   const st = useMlStatus();
   if (!st)
@@ -148,14 +184,18 @@ export function LocalAiPane({ notify }: { notify: (t: string, err?: boolean) => 
   return (
     <>
       <p className="set-note lai-intro">
-        <Icon name="shield" size={14} /> Bu modeller bilgisayarında çalışır: sesli mesajların ve mesajların hiçbir yere gönderilmez. Her biri yalnız sen indirince, bir kez iner.
+        <Icon name="shield" size={14} /> Bu modeller bilgisayarında çalışır: sesli mesajların ve mesajların hiçbir yere gönderilmez. Bir kez iner (ilk açılışta arka planda kendiliğinden), sonra internetsiz çalışır.
       </p>
+      {st.auto && !st.demo && <AutoBanner a={st.auto} />}
       <div className="lai-list">
         {st.models.map((m) => (
           <ModelCard key={m.key} m={m} runtimeMb={st.runtime.approxMb} runtimeReady={st.runtime.ready} demo={st.demo} notify={notify} />
         ))}
       </div>
       <div className="set-group">
+        <Row title="Modelleri kendiliğinden kur" hint={st.settings.autoInstall !== false ? 'Eksik modeller arka planda iner; sildiğin model yeniden inmez' : 'Kapalı: modeller yalnız sen “İndir” deyince iner'}>
+          <Switch label="Modelleri kendiliğinden kur" on={st.settings.autoInstall !== false} onChange={(v) => void save({ autoInstall: v })} />
+        </Row>
         <Row title="Sesli mesajları kendiliğinden yazıya dök" hint={ready('whisper') ? 'Yeni gelen sesli mesajlar arka planda metne çevrilir' : 'Önce konuşma tanıma modelini indir'} dim={!ready('whisper')}>
           <Switch label="Sesli mesajları kendiliğinden yazıya dök" disabled={!ready('whisper')} on={st.settings.autoTranscribe} onChange={(v) => void save({ autoTranscribe: v })} />
         </Row>

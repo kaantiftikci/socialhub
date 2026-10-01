@@ -22,6 +22,20 @@ export interface MlSettings {
   autoTranscribe: boolean;
   semanticIndex: boolean;
   translateTarget: string;
+  /** Modeller ilk açılışta arka planda kendiliğinden kurulur */
+  autoInstall: boolean;
+  declined?: ModelKey[];
+}
+/** Otomatik kurulum durumu (çekirdek ml/auto-install.ts) */
+export interface MlAutoStatus {
+  enabled: boolean;
+  phase: 'off' | 'idle' | 'scheduled' | 'running' | 'retry' | 'nospace' | 'done';
+  pct: number;
+  keys: ModelKey[];
+  error?: string;
+  nextAt?: number;
+  needMb?: number;
+  freeMb?: number;
 }
 export interface IndexStatus {
   enabled: boolean;
@@ -36,6 +50,8 @@ export interface MlStatus {
   runtime: { ready: boolean; approxMb: number };
   settings: MlSettings;
   index: IndexStatus;
+  /** Eski çekirdekte yok */
+  auto?: MlAutoStatus;
   languages: Record<string, string>;
   demo?: boolean;
 }

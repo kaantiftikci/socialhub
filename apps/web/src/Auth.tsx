@@ -8,6 +8,8 @@ import { Logo, PasswordInput } from './ui';
 import { REMOTE_CORE, clearRemoteCore } from './desktop';
 import App from './App';
 import { Splash } from './Onboarding';
+import { LegalLink } from './Consent';
+import { LEGAL_URLS } from './consent-store';
 
 export function DemoGate() {
   const [user, setUser] = useState<SessionUser | null | undefined>(undefined);
@@ -127,6 +129,10 @@ function AuthScreen({
         <button className="btn primary b" type="submit" disabled={busy}>
           {busy ? <span className="spin" /> : 'Giriş yap'}
         </button>
+        <p className="cs-legal">
+          Giriş yaparak <LegalLink href={LEGAL_URLS.terms}>Kullanım Koşulları</LegalLink>’nı kabul etmiş olursun. Kişisel verilerin için{' '}
+          <LegalLink href={LEGAL_URLS.kvkk}>Aydınlatma Metni</LegalLink> · <LegalLink href={LEGAL_URLS.cookies}>Çerezler</LegalLink>
+        </p>
         {REMOTE_CORE && (
           <div className="auth-remote">
             Gerçek çekirdek: <code>{REMOTE_CORE.replace(/^https?:\/\//, '')}</code>

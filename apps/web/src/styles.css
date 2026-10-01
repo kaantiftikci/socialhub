@@ -41,6 +41,8 @@
   --danger-bg: #fdecea;
   --danger-line: #f3c2c4;
   --danger-txt: #c42b30;
+  --danger-solid: #d93036;
+  --danger-solid-hover: #b8262b;
   --warn-bg: #fff5e6;
   --warn-line: #ffd9a8;
   --warn-txt: #6b4300;
@@ -554,7 +556,7 @@ a.att-card { cursor: pointer; }
 .menu button.danger:hover { background: var(--danger-bg); }
 .menu-confirm { display: flex; flex-direction: column; gap: 8px; padding: 8px 8px 4px; font-size: 12.5px; color: var(--text2); }
 .menu .menu-confirm button { height: 30px; width: auto; justify-content: center; }
-.btn.danger-solid { background: #d13c3c !important; color: #fff !important; border-color: #d13c3c !important; }
+.btn.danger-solid { background: var(--danger-solid) !important; color: #fff !important; border-color: var(--danger-solid) !important; }
 
 /* ---------- dar pencere: konuşma alanı hiç sıkışmasın ---------- */
 @media (max-width: 1100px) { .ctx, .resizer:has(+ .ctx) { display: none; } }
@@ -1214,6 +1216,8 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
   --danger-bg: #3a1719;
   --danger-line: #6b2a2e;
   --danger-txt: #ff9b9b;
+  --danger-solid: #e5484d;
+  --danger-solid-hover: #f2555a;
   --warn-bg: #2f2310;
   --warn-line: #5a4119;
   --warn-txt: #f3c27c;
@@ -1409,9 +1413,9 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .set-tab:hover { background: var(--bg2); color: var(--text); }
 .set-tab.on { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: var(--shadow-1); }
 .set-tab.on svg { color: var(--v); }
-.set-tab.set-logout { margin-top: auto; background: var(--danger-txt); color: #fff; font-weight: 600; }
+.set-tab.set-logout { margin-top: auto; background: var(--danger-solid); color: #fff; font-weight: 600; }
 .set-tab.set-logout svg { color: #fff; }
-.set-tab.set-logout:hover { background: var(--danger); color: #fff; }
+.set-tab.set-logout:hover { background: var(--danger-solid-hover); color: #fff; }
 .set-body { flex: 1; min-width: 0; overflow-y: auto; overscroll-behavior: contain; padding: 10px 14px 18px 22px; display: flex; flex-direction: column; gap: 14px; scrollbar-width: thin; scrollbar-color: var(--scroll) transparent; }
 .set-body > * { flex-shrink: 0; }
 .set-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; position: sticky; top: -10px; padding: 6px 0; background: var(--bg); z-index: 1; }
@@ -1705,10 +1709,10 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 /* Ayarlar → Hesap / Çıkış yap (Settings.tsx AccountPane) */
 .set-val { font-size: 13px; color: var(--text); font-weight: 600; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .set-val.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; letter-spacing: .3px; }
-.set-tab.set-logout.on { background: var(--danger); color: #fff; box-shadow: none; }
+.set-tab.set-logout.on { background: var(--danger-solid-hover); color: #fff; box-shadow: none; }
 .set-tab.set-logout.on svg { color: #fff; }
 .set-logout-card { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 20px; border: 1px solid var(--danger-line); border-radius: 18px; background: var(--danger-bg); }
-.set-logout-card .ic { width: 42px; height: 42px; border-radius: 13px; display: grid; place-items: center; background: var(--danger-txt); color: #fff; }
+.set-logout-card .ic { width: 42px; height: 42px; border-radius: 13px; display: grid; place-items: center; background: var(--danger-solid); color: #fff; }
 .set-logout-card b { font-size: 16px; }
 .set-logout-card p { margin: 0; font-size: 13px; line-height: 1.55; color: var(--text2); }
 .set-logout-card .row { display: flex; gap: 8px; align-self: flex-end; margin-top: 6px; }

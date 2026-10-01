@@ -22,7 +22,7 @@ const state: Record<ModelKey, { state: MlModel['state']; pct: number }> = { whis
 
 const SET_KEY = 'mivelo.mlDemo';
 function settings(): MlSettings {
-  const d: MlSettings = { autoTranscribe: true, semanticIndex: true, translateTarget: 'tr' };
+  const d: MlSettings = { autoTranscribe: true, semanticIndex: true, translateTarget: 'tr', autoInstall: true };
   try {
     return { ...d, ...(JSON.parse(localStorage.getItem(SET_KEY) || '{}') as Partial<MlSettings>) };
   } catch {
@@ -97,6 +97,8 @@ function status(): MlStatus {
     runtime: { ready: true, approxMb: 36 },
     settings: settings(),
     index: indexStatus(),
+    // demo: modeller ilk açılışta kendiliğinden kurulmuş gibi
+    auto: { enabled: settings().autoInstall, phase: settings().autoInstall ? 'done' : 'off', pct: 100, keys: ['whisper', 'embed'] },
     languages: LANG_NAMES,
   };
 }

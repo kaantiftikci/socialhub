@@ -27,6 +27,7 @@ import { MEDIA_HOSTS, PLATFORM_MEDIA_HOSTS, MEDIA_MAX } from './media-hosts.js';
 import { fetchPreview } from './link-preview.js';
 import { checkSend, persistSendGuard, resetSendGuard, SendBlocked } from './send-guard.js';
 import { PROFILE_FILE, ProfileError, readProfile, saveProfile } from './profile.js';
+import { ConsentError, consentState, saveConsent } from './consent.js';
 import { People, PeopleError } from './people.js';
 import { downloadUpdate, installUpdate, updateStatus } from './updater.js';
 import { EventBatcher, type WsBatch } from './ws-batch.js';
@@ -265,6 +266,18 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     localOnly(r);
     await releaseLicense();
     return licenseStatus();
+  });
+
+  // Yasal onaylar (Koşullar/EULA, KVKK aydınlatma, risk, AI açık rızası): lisanssızken de açık (lisans ekranında sorulur)
+  route('GET', '/api/consent', () => consentState());
+  route('POST', '/api/consent', (r, _s, _p, body) => {
+    localOnly(r);
+    try {
+      return saveConsent(body);
+    } catch (e) {
+      if (e instanceof ConsentError) throw new HttpError(400, e.message);
+      throw e;
+    }
   });
 
   // Uygulama içi güncelleme (paketli masaüstü): durum, arka planda indirme, kurulum (uygulama kapanıp yenisi açılır)
@@ -1094,7 +1107,7 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     const url = new URL(req.url ?? '/', 'http://x');
     try {
       // Paketli uygulama lisanssızken yalnız sağlık ve lisans uçları açık (arayüz lisans ekranını gösterir)
-      if (url.pathname.startsWith('/api/') && url.pathname !== '/api/health' && url.pathname !== '/api/license' && url.pathname !== '/api/shutdown' && !url.pathname.startsWith('/api/update') && !licenseStatus().valid) {
+      if (url.pathname.startsWith('/api/') && url.pathname !== '/api/health' && url.pathname !== '/api/license' && url.pathname !== '/api/consent' && url.pathname !== '/api/shutdown' && !url.pathname.startsWith('/api/update') && !licenseStatus().valid) {
         res.writeHead(402, { 'content-type': 'application/json' });
         return void res.end(JSON.stringify({ error: 'Lisans gerekli', license: true }));
       }

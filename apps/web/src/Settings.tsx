@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
+import { requireAiConsent } from './consent-store';
 import { PLATFORMS, type Account } from './types';
 import { Avatar, Chip, Icon, PasswordInput } from './ui';
 import { SOUNDS, getPlatformSound, getPlatformTone, getPlatformVolume, getVolume, groupsNotify, bannersEnabled, soundsEnabled, playNotifySound, playPing, setBannersEnabled, setGroupsNotify, setPlatformSound, setPlatformTone, setPlatformVolume, setSoundsEnabled, setVolume, webNotifyPermission, requestWebNotify, testNotify } from './desktop';
@@ -79,18 +80,27 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
   }, [onClose]);
   // profil kartı: profil (ad/foto) + lisans sahibi; Profil bölümünden çıkınca tazelenir
   const onProfile = tab === 'profile';
+  // kaydedince ('mivelo-profile') kart hemen tazelenir; eskiden yalnız Profil bölümünden çıkınca tazeleniyordu
+  const [profileRev, setProfileRev] = useState(0);
+  useEffect(() => {
+    const on = () => setProfileRev((x) => x + 1);
+    window.addEventListener('mivelo-profile', on);
+    return () => window.removeEventListener('mivelo-profile', on);
+  }, []);
   useEffect(() => {
     let off = false;
     void Promise.all([api.profile().catch(() => ({}) as Profile), STATIC_DEMO ? Promise.resolve(null) : (api.license().catch(() => null) as Promise<LicenseStatus | null>)]).then(([p, lic]) => {
       if (off) return;
       const name = p.name?.trim() || lic?.owner?.name || PROFILE_NAME || 'Mivelo';
-      const sub = p.email || lic?.owner?.email || (p.username ? `@${p.username.replace(/^@/, '')}` : 'Profilini düzenle');
+      const handle = p.username ? `@${p.username.replace(/^@/, '')}` : '';
+      const mail = p.email || lic?.owner?.email || '';
+      const sub = [handle, mail].filter(Boolean).join(' · ') || 'Profilini düzenle';
       setMe({ name, sub, photo: p.photo || undefined, licensed: !!lic?.required && !!lic.valid });
     });
     return () => {
       off = true;
     };
-  }, [onProfile]);
+  }, [onProfile, profileRev]);
 
   const changeTone = (platform: string, id: string) => {
     setPlatformTone(platform, id);
@@ -140,7 +150,7 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
     const f = fold(q.trim());
     if (!f) return [];
     const out: Array<{ k: Tab; title: string }> = [];
-    for (const s of [...(DEMO_OFFLINE ? [] : [{ k: 'profile' as Tab, l: 'Profil' }]), ...all]) {
+    for (const s of [{ k: 'profile' as Tab, l: 'Profil' }, ...all]) {
       if (fold(s.l).includes(f)) out.push({ k: s.k, title: '' });
       for (const t of SETTINGS_INDEX[s.k] ?? []) if (fold(t).includes(f)) out.push({ k: s.k, title: t });
     }
@@ -195,16 +205,15 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
             </div>
           ) : (
             <>
-              {!DEMO_OFFLINE && (
-                <button type="button" className={`set-me b ${tab === 'profile' ? 'on' : ''}`} onClick={() => go('profile')}>
-                  <Avatar name={me.name} size={34} url={me.photo} />
-                  <span className="who">
-                    <b>{me.name}</b>
-                    <em>{me.sub}</em>
-                  </span>
-                  <span className="pill">{STATIC_DEMO ? 'Demo' : me.licensed ? 'Lisanslı' : 'Ücretsiz'}</span>
-                </button>
-              )}
+              {/* tek dosya demoda da (profil tarayıcıda, static-demo.ts): eskiden gizliydi → demoda profil değiştirilemiyordu */}
+              <button type="button" className={`set-me b ${tab === 'profile' ? 'on' : ''}`} onClick={() => go('profile')}>
+                <Avatar name={me.name} size={34} url={me.photo} />
+                <span className="who">
+                  <b>{me.name}</b>
+                  <em>{me.sub}</em>
+                </span>
+                <span className="pill">{STATIC_DEMO ? 'Demo' : me.licensed ? 'Lisanslı' : 'Ücretsiz'}</span>
+              </button>
               <div className="set-sections" role="tablist" aria-label="Ayar bölümleri">
                 {GROUPS.map((g, gi) => (
                   <div key={gi} className="set-sec">
@@ -399,7 +408,9 @@ function AiKeyRow({ ai, onChange, notify }: { ai: boolean; onChange: (on: boolea
   useEffect(() => {
     api.aiKey().then(setInfo).catch(() => setInfo(null));
   }, [ai]);
-  const save = (key: string | null) => {
+  const save = async (key: string | null) => {
+    // anahtar girilirken AI açık rızası (yurt dışına aktarım) ayrıca istenir
+    if (key && !(await requireAiConsent())) return;
     setBusy(true);
     api
       .setAiKey(key)
@@ -491,6 +502,9 @@ function AccountPane({ mode, onReset, onCancel, notify }: { mode: 'view' | 'logo
         }
         wipeUserLocalData();
         try {
+          // web demoda cihaz tercihi sayılıp korunan ayarlar (demo-isolation KEEP) burada da silinir: "ayarlar" sözü tutulsun
+          localStorage.removeItem('mivelo.prefs');
+          localStorage.removeItem('kavsak.groupsOn');
           if (setup) localStorage.setItem('mivelo.setup', setup);
           if (perms) localStorage.setItem('mivelo.setupPerms', perms);
         } catch {
@@ -605,7 +619,7 @@ function squarePhoto(file: File): Promise<string> {
 
 const PROFILE_FIELDS: Array<[keyof Profile, string, string, string, string]> = [
   ['name', 'Ad soyad', 'Uygulamada görünen adın', 'Adın ve soyadın', 'name'],
-  ['username', 'Kullanıcı adı', 'Harf, rakam, nokta, alt çizgi', 'kullaniciadi', 'username'],
+  ['username', 'Kullanıcı adı', 'Harf, rakam, nokta, alt çizgi, tire', 'kullaniciadi', 'username'],
   ['email', 'E-posta', 'İletişim adresin', 'ornek@example.com', 'email'],
   ['phone', 'Telefon', 'Ülke koduyla', '+90 5xx xxx xx xx', 'tel'],
 ];

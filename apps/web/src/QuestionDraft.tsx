@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api, type QuestionDraftResult } from './api';
 import { PLATFORMS, type Chat } from './types';
 import { Icon } from './ui';
+import { requireAiConsent } from './consent-store';
 
 /** Ayarlar penceresini belirli bölümde aç (App dinler) */
 export function openSettingsTab(tab: 'ai' | 'notify'): void {
@@ -21,6 +22,7 @@ export function QuestionDraftBar({ chat, ai, onDraft, notify }: { chat: Chat; ai
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState<QuestionDraftResult | null>(null);
   const run = async () => {
+    if (!(await requireAiConsent())) return;
     setBusy(true);
     try {
       const r = await api.questionDraft(chat.id);

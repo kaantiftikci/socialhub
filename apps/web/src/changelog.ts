@@ -16,6 +16,25 @@ export interface ChangeEntry {
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    id: '2026-10-01c',
+    date: '2026-10-01',
+    title: 'Yerel AI hazır geliyor',
+    items: [
+      {
+        title: 'Konuşma tanıma ve anlamsal arama kendiliğinden kurulur',
+        text: 'Gereken modeller ilk açılıştan kısa süre sonra arka planda iner; bitince sesli mesajların altında yazısı belirir, aramada anlamca yakın mesajlar bulunur. Ayarlar → Yerel AI’dan ilerlemeyi görebilir ya da kapatabilirsin.',
+      },
+      {
+        title: 'Profil ve ayarlar anında',
+        text: 'Profilde yaptığın değişiklikler kaydeder kaydetmez kenar çubuğunda ve Ayarlar’da görünür. Enter ile gönder, yazım denetimi ve hareketleri azalt her yerde aynı davranır.',
+      },
+      {
+        title: 'Daha akıcı geçişler ve şeffaf koşullar',
+        text: 'Medya sekmeleri, Miveloji ve aramada seçim kayarak geçer. Kullanım koşulları, KVKK aydınlatma metni ve onaylarını Ayarlar → Hakkında’da görebilirsin.',
+      },
+    ],
+  },
+  {
     id: '2026-10-01b',
     date: '2026-10-01',
     title: 'Sade açılış',

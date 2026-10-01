@@ -1,3 +1,4 @@
+import { reducedMotion } from './motion/motion';
 import { memo, useEffect, useState } from 'react';
 import { CHANGELOG, type ChangeEntry } from './changelog';
 import { Icon, Logo } from './ui';
@@ -171,7 +172,7 @@ export const WhatsNew = memo(function WhatsNew({ ready }: { ready: boolean }) {
 function Counter({ to }: { to: number }) {
   const [n, setN] = useState(0);
   useEffect(() => {
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return setN(to);
+    if (reducedMotion()) return setN(to); // sistem ayarı ya da Ayarlar → Görünüm → Hareketleri azalt
     let i = 0;
     const t = window.setInterval(() => {
       i += 1;

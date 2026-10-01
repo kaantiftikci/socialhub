@@ -26,7 +26,7 @@ function loadStatus(): Promise<void> {
       notify();
       // indirme sürüyorsa olay kaçsa da ilerleme akar
       if (statusTimer) clearTimeout(statusTimer);
-      if (s.models.some((m) => m.state === 'downloading') || s.index.running) statusTimer = window.setTimeout(() => void refreshMlStatus(), 1500);
+      if (s.models.some((m) => m.state === 'downloading') || s.index.running || s.auto?.phase === 'running') statusTimer = window.setTimeout(() => void refreshMlStatus(), 1500);
     })
     .catch(() => undefined)
     .finally(() => (statusP = null));

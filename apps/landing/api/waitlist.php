@@ -2,7 +2,8 @@
 declare(strict_types=1);
 
 /**
- * Bekleme listesi: POST {email, ref} → {position, code}. Kayıtlar web kökünün dışında ~/mivelo-data/waitlist.json.
+ * Bekleme listesi: POST {email, ref, consent:{kvkk}} → {position, code}. consent.kvkk = okunan KVKK Aydınlatma Metni sürümü (zorunlu,
+ * KVKK_VERSION ile aynı olmalı; kayda {kvkk, at} yazılır). Kayıtlar web kökünün dışında ~/mivelo-data/waitlist.json.
  * Aynı e-posta ikinci kez gelirse yeni kayıt açılmaz; yanıt yeni kayıtla aynı biçimde ama uydurma (sıra = liste sonu, rastgele
  * kod): kimin listede olduğu ve başkasının davet kodu dışarı sızmaz. `ref` davet kodu; davet edenin `refs` sayacı artar.
  * Yazım admin/api.php ile aynı düzen: waitlist.json.lock üzerinde kilit, önce kodla, geçici dosya + rename.
@@ -40,6 +41,11 @@ $src = substr(preg_replace('/[^a-z0-9._-]/', '', strtolower((string) ($body['src
 if (trim((string) ($body['website'] ?? '')) !== '') {
     echo json_encode(['position' => 0, 'code' => substr(bin2hex(random_bytes(4)), 0, 6)]);
     exit;
+}
+// KVKK Aydınlatma Metni okundu beyanı (kvkk.html sürümüyle aynı kalmalı); botlardan sonra, biçimden önce denetlenir
+const KVKK_VERSION = '2026-10-01';
+if (!is_array($body['consent'] ?? null) || ($body['consent']['kvkk'] ?? '') !== KVKK_VERSION) {
+    fail(400, 'Devam etmek için KVKK Aydınlatma Metni’ni okuduğunu onayla.');
 }
 // Yalın adres biçimi: tırnaklı yerel kısımlar, < > " ve formül başlatan ilk karakterler (= + - @) reddedilir
 if (strlen($email) > 254 || !filter_var($email, FILTER_VALIDATE_EMAIL) || !preg_match('/^[a-z0-9][a-z0-9._%+-]{0,63}@[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)+$/', $email)) {
@@ -135,7 +141,7 @@ if ($exists) {
         }
         unset($e);
     }
-    $data['entries'][] = ['email' => $email, 'code' => $code, 'ref' => $ref, 'refs' => 0, 'at' => time(), 'ip' => $ip, 'src' => $src !== '' ? $src : ($ref !== '' ? 'davet' : 'doğrudan'), 'status' => 'waiting'];
+    $data['entries'][] = ['email' => $email, 'code' => $code, 'ref' => $ref, 'refs' => 0, 'at' => time(), 'ip' => $ip, 'src' => $src !== '' ? $src : ($ref !== '' ? 'davet' : 'doğrudan'), 'status' => 'waiting', 'consent' => ['kvkk' => KVKK_VERSION, 'at' => gmdate('c')]];
     // önce kodla (hata → dosyaya dokunma), sonra geçici dosya + rename (yarım yazım listeyi bozmaz)
     $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
     if ($json === false) {

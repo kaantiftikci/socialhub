@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as RPointerEvent, type ReactNode } from 'react';
+import { EASE, animate, reducedMotion } from './motion/motion';
+import { MvInd, recentSlideDir } from './motion/MvInd';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as RPointerEvent, type ReactNode } from 'react';
 import { api } from './api';
 import { PLATFORMS } from './types';
 import type { StatsRange, WrappedPerson, WrappedStats } from './insights-types';
-import { Avatar, Chip, Icon, Logo } from './ui';
+import { Avatar, Chip, Icon, Logo, useExit } from './ui';
 import { DAY_NAMES, DAY_SHORT, fmtChange, fmtDur, fmtNum, hourLabel, hourRange, personName, profileText } from './wrapped-format';
 import { renderCard, type CardFormat } from './wrapped-card';
 import { saveBlob, shareFile } from './save-file';
@@ -46,7 +48,8 @@ const ls = {
     }
   },
 };
-const reduceMotion = () => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+// sistem ayarı ya da Ayarlar → Görünüm → Hareketleri azalt (html.reduce-motion)
+const reduceMotion = () => typeof window !== 'undefined' && reducedMotion();
 
 /** Sayı sayarak artar (azaltılmış harekette doğrudan son değer) */
 function useCountUp(target: number, run = true, ms = 1300): number {
@@ -346,6 +349,23 @@ export function WrappedView({ notify, onMenu, onOpenChat, onWaiting }: { notify:
     };
   }, [period, reload, platform]);
   useEffect(() => setCell(null), [period, platform]);
+  // dönem/uygulama değişince yeni rapor kartları seçimin kaydığı yönden 30 ms arayla gelir (ilk açılışta CSS wrIn oynar)
+  const gridRef = useRef<HTMLDivElement>(null);
+  const slideDir = useRef(0);
+  const shownOnce = useRef(false);
+  useLayoutEffect(() => {
+    slideDir.current = recentSlideDir();
+  }, [period, platform]);
+  useLayoutEffect(() => {
+    const grid = gridRef.current;
+    if (!data || !grid) return;
+    if (!shownOnce.current) return void (shownOnce.current = true);
+    if (reducedMotion()) return;
+    const dx = slideDir.current * 14;
+    Array.from(grid.children)
+      .slice(0, 8)
+      .forEach((c, i) => animate(c, [{ opacity: 0, transform: dx ? `translateX(${dx}px)` : 'translateY(8px)' }, { opacity: 1, transform: 'none' }], { duration: 260, delay: i * 30, easing: EASE.in, fill: 'backwards' }));
+  }, [data]);
 
   const s = data;
   const empty = !!s && s.totals.total < MIN_MESSAGES;
@@ -374,10 +394,12 @@ export function WrappedView({ notify, onMenu, onOpenChat, onWaiting }: { notify:
               {label}
             </button>
           ))}
+          <MvInd sel="button.active" dep={period} track />
         </div>
       </div>
       {allPlats.length > 1 && (
         <div className="wr-apps" role="group" aria-label="Uygulama">
+          <MvInd sel=".ml-pchip.on" dep={platform ?? ''} track variant="chip" />
           <button className={`ml-pchip b ${!platform ? 'on' : ''}`} onClick={() => setPlatform(null)}>
             Tüm uygulamalar
           </button>
@@ -418,7 +440,7 @@ export function WrappedView({ notify, onMenu, onOpenChat, onWaiting }: { notify:
         </div>
       )}
       {s && !empty && !error && (
-        <div className={`wr-grid ${loading ? 'loading' : ''}`}>
+        <div ref={gridRef} className={`wr-grid ${loading ? 'loading' : ''}`}>
           {/* Toplam */}
           <div className="wr-card span2 wr-hero">
             <span className="wr-k on-dark">{s.label} boyunca</span>
@@ -885,7 +907,8 @@ function buildSlides(s: WrappedStats, hide: boolean): Slide[] {
   return out;
 }
 
-function Story({ s, hide, setHide, onClose, onShare }: { s: WrappedStats; hide: boolean; setHide: (v: boolean) => void; onClose: () => void; onShare: () => void }) {
+function Story({ s, hide, setHide, onClose: close0, onShare }: { s: WrappedStats; hide: boolean; setHide: (v: boolean) => void; onClose: () => void; onShare: () => void }) {
+  const [closing, onClose] = useExit(close0, 200);
   const slides = useMemo(() => buildSlides(s, hide), [s, hide]);
   const [i, setI] = useState(0);
   const [paused, setPaused] = useState(false);
@@ -922,7 +945,7 @@ function Story({ s, hide, setHide, onClose, onShare }: { s: WrappedStats; hide: 
   };
 
   return (
-    <div className="st-overlay" role="dialog" aria-modal="true" aria-label={`Miveloji hikâyesi: ${s.label}`}>
+    <div className={`st-overlay ${closing ? 'closing' : ''}`} role="dialog" aria-modal="true" aria-label={`Miveloji hikâyesi: ${s.label}`}>
       <div ref={boxRef} tabIndex={-1} className={`st-box tone-${slide.tone} ${paused ? 'paused' : ''}`}>
         <div className="st-bars" aria-hidden="true">
           {slides.map((sl, k) => (
@@ -976,7 +999,8 @@ function Story({ s, hide, setHide, onClose, onShare }: { s: WrappedStats; hide: 
 
 /* ───────────────────────── Paylaşım kartı ───────────────────────── */
 
-function ShareDialog({ s, hide, setHide, notify, onClose }: { s: WrappedStats; hide: boolean; setHide: (v: boolean) => void; notify: (t: string, err?: boolean) => void; onClose: () => void }) {
+function ShareDialog({ s, hide, setHide, notify, onClose: close0 }: { s: WrappedStats; hide: boolean; setHide: (v: boolean) => void; notify: (t: string, err?: boolean) => void; onClose: () => void }) {
+  const [closing, onClose] = useExit(close0);
   const [format, setFormat] = useState<CardFormat>('story');
   const [blob, setBlob] = useState<Blob | null>(null);
   const [url, setUrl] = useState<string | null>(null);
@@ -1023,7 +1047,7 @@ function ShareDialog({ s, hide, setHide, notify, onClose }: { s: WrappedStats; h
   };
   const canShare = typeof navigator !== 'undefined' && 'share' in navigator && 'canShare' in navigator;
   return (
-    <div className="overlay" onClick={onClose}>
+    <div className={`overlay ${closing ? 'closing' : ''}`} onClick={onClose}>
       <div className="modal wr-share" role="dialog" aria-label="Kartı paylaş" onClick={(e) => e.stopPropagation()}>
         <button className="btn icon b b2 modal-x" onClick={onClose} aria-label="Kapat">
           <Icon name="x" size={14} sw={2} />
@@ -1040,6 +1064,7 @@ function ShareDialog({ s, hide, setHide, notify, onClose }: { s: WrappedStats; h
               <button role="tab" aria-selected={format === 'square'} className={format === 'square' ? 'active' : ''} onClick={() => setFormat('square')}>
                 Kare 1:1
               </button>
+              <MvInd sel="button.active" dep={format} />
             </div>
             <label className="wr-switch">
               <span>

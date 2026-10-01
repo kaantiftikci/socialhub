@@ -50,6 +50,15 @@ export function setPrefs(patch: Partial<Prefs>): void {
   window.dispatchEvent(new Event('mivelo-prefs'));
 }
 
+// başka sekme/pencere (ör. web'de iki sekme) tercihi değiştirirse bu sekme de hemen uygular
+if (typeof window !== 'undefined')
+  window.addEventListener('storage', (e) => {
+    if (e.key !== KEY && e.key !== null) return;
+    cache = null;
+    applyLookPrefs();
+    window.dispatchEvent(new Event('mivelo-prefs'));
+  });
+
 export function usePrefs(): Prefs {
   const [p, setP] = useState(getPrefs);
   useEffect(() => {

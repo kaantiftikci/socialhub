@@ -8,6 +8,7 @@ import { disposeMl } from './engine.js';
 import { chatTranscripts } from './ml-store.js';
 import { allModelStatus, cancelDownload, emitMlStatus, removeModel, RUNTIME_APPROX_MB, runtimeReady, startDownload } from './models.js';
 import { SemanticIndex } from './semantic.js';
+import { mlAutoInstaller } from './auto-install.js';
 import { TranscribeService, type MediaSource } from './transcribe.js';
 import { LANG_NAMES } from './lang.js';
 
@@ -24,6 +25,10 @@ export function registerMlRoutes(route: Route, deps: { store: Store; media: Medi
   const semantic = new SemanticIndex(store);
   transcribe.start();
   semantic.start();
+  // otomatik kurulumla anlamsal model hazır olunca dizinleme hemen başlasın
+  mlAutoInstaller.onModelReady((k) => {
+    if (k === 'embed') semantic.kick(2_000);
+  });
   // 30.09: yerel çeviri modeli kaldırıldı — önceden indirilmişse (≈900 MB) diskten sil
   fs.promises.rm(path.join(MODELS_DIR, 'Xenova', 'nllb-200-distilled-600M'), { recursive: true, force: true }).catch(() => undefined);
 
@@ -48,6 +53,7 @@ export function registerMlRoutes(route: Route, deps: { store: Store; media: Medi
     runtime: { ready: runtimeReady(), approxMb: RUNTIME_APPROX_MB },
     settings: mlSettings(),
     index: semantic.status(),
+    auto: mlAutoInstaller.status(),
     languages: LANG_NAMES,
   });
 
@@ -57,7 +63,10 @@ export function registerMlRoutes(route: Route, deps: { store: Store; media: Medi
     '/api/ml/settings',
     wrap((_r, _s, _p, body) => {
       const prev = mlSettings();
-      const next = saveMlSettings((body ?? {}) as Record<string, unknown>);
+      const { declined: _d, autoInstall, ...rest } = (body ?? {}) as Record<string, unknown>;
+      // otomatik kurulum açılıp/kapanınca süren indirme durur ya da kısa süre sonra başlar
+      if (typeof autoInstall === 'boolean' && autoInstall !== prev.autoInstall) mlAutoInstaller.setEnabled(autoInstall);
+      const next = saveMlSettings(rest);
       if (next.semanticIndex && !prev.semanticIndex) semantic.kick(500);
       emitMlStatus(true);
       return status();
@@ -68,17 +77,29 @@ export function registerMlRoutes(route: Route, deps: { store: Store; media: Medi
     '/api/ml/models/:key/download',
     wrap((_r, _s, p) => {
       const k = key(p.key);
+      mlAutoInstaller.accept(k);
       const st = startDownload(k);
       return st;
     }),
   );
-  route('POST', '/api/ml/models/:key/cancel', wrap((_r, _s, p) => (cancelDownload(key(p.key)), status())));
+  route(
+    'POST',
+    '/api/ml/models/:key/cancel',
+    wrap((_r, _s, p) => {
+      const k = key(p.key);
+      mlAutoInstaller.decline(k); // kullanıcı istemedi: otomatik kurulum yeniden indirmesin
+      cancelDownload(k);
+      return status();
+    }),
+  );
   route(
     'DELETE',
     '/api/ml/models/:key',
     wrap((_r, _s, p) => {
       disposeMl(); // işçi modeli bellekte tutuyor olabilir
-      removeModel(key(p.key));
+      const k = key(p.key);
+      mlAutoInstaller.decline(k);
+      removeModel(k);
       return status();
     }),
   );

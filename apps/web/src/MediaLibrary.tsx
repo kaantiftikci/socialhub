@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import { api } from './api';
 import { mediaUrl } from './desktop';
 import { PLATFORMS, type Attachment, type LinkPreview, type Platform } from './types';
@@ -6,7 +6,8 @@ import type { LibFacets, LibItem, LibKind } from './insights-types';
 import { Chip, Icon } from './ui';
 import { MediaLightbox, isMediaFileUrl } from './Conversation';
 import { saveBlob } from './save-file';
-import { EASE, animate } from './motion/motion';
+import { EASE, animate, reducedMotion } from './motion/motion';
+import { MvInd, recentSlideDir } from './motion/MvInd';
 
 /**
  * Medya ve dosya kütüphanesi: tüm platformlardan fotoğraf, video, dosya, ses ve bağlantılar tek ekranda.
@@ -198,13 +199,25 @@ export function MediaLibrary({ notify, onMenu, onOpenMessage }: { notify: (t: st
   }, [reload]);
 
   const query = useMemo(() => ({ kind: tab === 'all' ? undefined : tab, platform: platform ?? undefined, chat: chat || undefined, q: q || undefined, limit: PAGE }), [tab, platform, chat, q]);
-  // giriş animasyonu: ilk yükleme 'rise' (görünen ilk 16 öğe 20 ms arayla), süzgeç değişimi 'fade' (çapraz solma);
-  // sonsuz kaydırmayla gelenler animasyonsuz. `swapping`: yeni süzgecin sonucu beklenirken eski ızgara soluklaşır.
-  const enterRef = useRef<'rise' | 'fade' | null>(null);
+  // Geçişler (Mivelo hareket kimliği, motion/):
+  // - ilk yükleme 'rise': iskeletin yerine görünen ilk 16 öğe 20 ms arayla yükselir
+  // - süzgeç değişimi 'swap': eski ızgara seçimin tersi yönüne kayarak solar (`swapping`, en az 140 ms), yeni içerik seçilen
+  //   sekmenin/çipin yönünden (arama değişiminde aşağıdan) görünen ilk 20 öğe 18 ms arayla gelir
+  // - sonsuz kaydırma 'more': yeni gelen öğeler (≤24) 15 ms arayla belirir
+  const enterRef = useRef<'rise' | 'swap' | 'more' | null>(null);
   const firstLoad = useRef(true);
+  const [loaded, setLoaded] = useState(false);
   const [swapping, setSwapping] = useState(false);
+  const [gen, setGen] = useState(0);
+  const dirRef = useRef(0);
+  const moreFrom = useRef(0);
+  // seçim göstergesi (MvInd track) bu çizimde kaydıysa yönü; arama/yenilemede 0
+  useLayoutEffect(() => {
+    dirRef.current = recentSlideDir();
+  }, [tab, platform, q]);
   useEffect(() => {
     const id = ++reqRef.current;
+    const t0 = performance.now();
     setLoading(true);
     setSel(new Set());
     if (!firstLoad.current) setSwapping(true);
@@ -212,26 +225,51 @@ export function MediaLibrary({ notify, onMenu, onOpenMessage }: { notify: (t: st
       .library(query)
       .then((p) => {
         if (id !== reqRef.current) return;
-        enterRef.current = firstLoad.current ? 'rise' : 'fade';
-        firstLoad.current = false;
-        setSwapping(false);
-        setItems(p.items);
-        setNext(p.next);
+        const apply = () => {
+          if (id !== reqRef.current) return;
+          enterRef.current = firstLoad.current ? 'rise' : 'swap';
+          if (!firstLoad.current) setGen((g) => g + 1);
+          firstLoad.current = false;
+          setLoaded(true);
+          setSwapping(false);
+          setItems(p.items);
+          setNext(p.next);
+          setLoading(false);
+        };
+        // çıkış solması görünsün: sonuç çok hızlı geldiyse kalan süre kadar bekle
+        const wait = firstLoad.current || reducedMotion() ? 0 : Math.max(0, 140 - (performance.now() - t0));
+        if (wait > 0) window.setTimeout(apply, wait);
+        else apply();
       })
-      .catch((e) => id === reqRef.current && (setSwapping(false), notify((e as Error).message, true)))
-      .finally(() => id === reqRef.current && setLoading(false));
+      .catch((e) => {
+        if (id !== reqRef.current) return;
+        setSwapping(false);
+        setLoaded(true);
+        setLoading(false);
+        notify((e as Error).message, true);
+      });
   }, [query, reload, notify]);
   const bodyRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const mode = enterRef.current;
     enterRef.current = null;
     const body = bodyRef.current;
-    if (!mode || !body) return;
-    if (mode === 'fade') {
-      body.querySelectorAll(':scope > .ml-group, :scope > .ml-empty').forEach((n) => animate(n, [{ opacity: 0.35 }, { opacity: 1 }], { duration: 200, easing: EASE.std }));
+    if (!mode || !body || reducedMotion()) return;
+    const bottom = body.getBoundingClientRect().bottom;
+    if (mode === 'more') {
+      const fresh = Array.from(body.querySelectorAll('.ml-tile, .ml-row')).slice(moreFrom.current, moreFrom.current + 24);
+      fresh.forEach((n, i) => animate(n, [{ opacity: 0, transform: 'translateY(8px) scale(.98)' }, { opacity: 1, transform: 'none' }], { duration: 240, delay: i * 15, easing: EASE.in, fill: 'backwards' }));
       return;
     }
-    const bottom = body.getBoundingClientRect().bottom;
+    if (mode === 'swap') {
+      const dx = dirRef.current * 16;
+      const from = dx ? `translateX(${dx}px)` : 'translateY(8px)';
+      const nodes = Array.from(body.querySelectorAll('.ml-gh, .ml-tile, .ml-row, .ml-empty'))
+        .filter((n) => n.getBoundingClientRect().top < bottom)
+        .slice(0, 20);
+      nodes.forEach((n, i) => animate(n, [{ opacity: 0, transform: from }, { opacity: 1, transform: 'none' }], { duration: 240, delay: (dx ? 20 : 0) + i * 18, easing: EASE.in, fill: 'backwards' }));
+      return;
+    }
     const tiles = Array.from(body.querySelectorAll('.ml-tile, .ml-row')).filter((n) => n.getBoundingClientRect().top < bottom).slice(0, 16);
     tiles.forEach((n, i) => animate(n, [{ opacity: 0, transform: 'translateY(10px) scale(.98)' }, { opacity: 1, transform: 'none' }], { duration: 260, delay: i * 20, easing: EASE.in, fill: 'backwards' }));
   }, [items]);
@@ -244,6 +282,8 @@ export function MediaLibrary({ notify, onMenu, onOpenMessage }: { notify: (t: st
       .library({ ...query, before: next })
       .then((p) => {
         if (id !== reqRef.current) return;
+        moreFrom.current = bodyRef.current?.querySelectorAll('.ml-tile, .ml-row').length ?? 0;
+        enterRef.current = 'more';
         setItems((old) => [...old, ...p.items.filter((x) => !old.some((o) => o.id === x.id))]);
         setNext(p.next);
       })
@@ -331,9 +371,11 @@ export function MediaLibrary({ notify, onMenu, onOpenMessage }: { notify: (t: st
               {facets && <span className="c">{(k === 'all' ? allCount : kinds[k] ?? 0).toLocaleString('tr-TR')}</span>}
             </button>
           ))}
+          <MvInd sel="button.active" dep={tab} track />
         </div>
         <div className="ml-row2">
           <div className="ml-plats" role="group" aria-label="Uygulama">
+            <MvInd sel=".ml-pchip.on" dep={`${platform ?? ''}|${facets?.platforms.length ?? 0}`} track variant="chip" />
             <button className={`ml-pchip b ${!platform ? 'on' : ''}`} onClick={() => setPlatform(null)}>
               Tümü
             </button>
@@ -376,9 +418,16 @@ export function MediaLibrary({ notify, onMenu, onOpenMessage }: { notify: (t: st
         </div>
       )}
 
-      <div ref={bodyRef} className={`ml-body ${swapping ? 'swapping' : ''}`}>
+      <div ref={bodyRef} className={`ml-body ${swapping ? 'swapping' : ''}`} style={{ '--ml-out': dirRef.current ? `translateX(${dirRef.current * -12}px)` : 'translateY(-4px)' } as CSSProperties}>
+        {!loaded && (
+          <div className="ml-skel" aria-hidden="true">
+            {Array.from({ length: 18 }, (_, i) => (
+              <span key={i} className="ml-sk mv-shim" />
+            ))}
+          </div>
+        )}
         {!loading && items.length === 0 && (
-          <div className="ml-empty">
+          <div key={`e${gen}`} className="ml-empty">
             <span className="ml-empty-ic">
               <Icon name={tab === 'all' ? 'image' : TABS.find(([k]) => k === tab)![2]} size={28} />
             </span>
@@ -387,7 +436,7 @@ export function MediaLibrary({ notify, onMenu, onOpenMessage }: { notify: (t: st
           </div>
         )}
         {groups.map((g) => (
-          <div key={g.label} className="ml-group">
+          <div key={`${gen}:${g.label}`} className="ml-group">
             <h3 className="ml-gh">{g.label}</h3>
             {asList ? (
               <div className="ml-list">

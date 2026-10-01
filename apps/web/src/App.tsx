@@ -9,7 +9,8 @@ import { PermissionBanner } from './PermissionBanner';
 import { trPreview } from './reaction-text';
 import { clearOpening as clearOpeningFor, markOpening, useLoginOpening } from './login-opening';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { DUR, EASE, animate, reducedMotion } from './motion/motion';
+import { EASE, animate, reducedMotion } from './motion/motion';
+import { MvInd, recentSlideDir } from './motion/MvInd';
 import { applyAccount, applyRead, mergeAccountsSnapshot, mergeChatsSnapshot, mergeFresh, newTouched, type Touched } from './sync-merge';
 import { api, connectEvents } from './api';
 import { pushMlEvent } from './ml-client';
@@ -29,7 +30,7 @@ import { WrappedView } from './Wrapped';
 import { MediaLibrary } from './MediaLibrary';
 import { WhatsNew } from './WhatsNew';
 import { hideWindow, MOD_KEY, isTauri, notify as desktopNotify, requestWebNotify, onDesktopEvent, playPing, setBadge, windowFocused, coreInfo, playNotifySound, platformNotifyOn, soundsEnabled, bannersEnabled, groupsNotify, unlockAudio } from './desktop';
-import { DEMO_OFFLINE, PROFILE_NAME, PROFILE_PHOTO, STATIC_DEMO, applyProfile, setFallbackProfileName } from './profile';
+import { DEMO_OFFLINE, PROFILE_HANDLE, PROFILE_NAME, PROFILE_PHOTO, STATIC_DEMO, applyProfile, setFallbackProfileName } from './profile';
 
 export type View = 'inbox' | 'focus' | 'calendar' | 'wrapped' | 'media' | 'archived' | 'muted' | 'hidden';
 const FLAG_VIEWS: Array<{ view: View; flag: 'archived' | 'muted' | 'hidden'; label: string; icon: string; empty: string }> = [
@@ -345,7 +346,7 @@ export default function App() {
   useEffect(() => {
     const on = () => tick((x) => x + 1);
     window.addEventListener('mivelo-profile', on);
-    if (!DEMO_OFFLINE) void api.profile().then(applyProfile).catch(() => undefined);
+    void api.profile().then(applyProfile).catch(() => undefined);
     return () => window.removeEventListener('mivelo-profile', on);
   }, []);
   const selectedRef = useRef<string | null>(null);
@@ -1449,7 +1450,7 @@ export default function App() {
           <Avatar name={PROFILE_NAME || 'Mivelo'} size={32} url={PROFILE_PHOTO} />
           <span style={{ flexGrow: 1, minWidth: 0 }}>
             <span className="n">{PROFILE_NAME || 'Mivelo'}</span>
-            <span className="s">{accounts.length} uygulama{STATIC_DEMO ? '' : ' · Pro'}</span>
+            <span className="s">{PROFILE_HANDLE ? `@${PROFILE_HANDLE} · ` : ''}{accounts.length} uygulama</span>
           </span>
           <button
             className="btn ghost sm icon b theme-tg"
@@ -2417,58 +2418,6 @@ const Roll = memo(function Roll({ value, className, ...rest }: { value: string; 
   );
 });
 
-/** Sekme geçişinin yönü (liste satırları o yöne kayarak gelir): gösterge kaydığında yazılır, liste aynı çizimde okur */
-let tabSlide = { dir: 0, at: 0 };
-
-/**
- * Kayan seçim göstergesi: kapsayıcıdaki (üst öğe) `sel` öğesinin arkasında durur; seçim (`dep`) değişince oraya kayar ve boyunu
- * alır (FLIP: yeni yerde çizilir, eski konum/ölçekten gelir). Sekme/menü genişliği değişirse (sayaç) yeniden yerleşir (animasyonsuz).
- * Kapsayıcıda seçili öğenin kendi zemini motion/app.css'te kapatılır (`:has(> .mv-ind)`).
- */
-function MvInd({ sel, dep, track = false }: { sel: string; dep: string; track?: boolean }) {
-  const ref = useRef<HTMLSpanElement>(null);
-  const last = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
-  const place = useCallback(
-    (anim: boolean) => {
-      const ind = ref.current;
-      const box = ind?.parentElement;
-      if (!ind || !box) return;
-      const t = box.querySelector<HTMLElement>(sel);
-      if (!t) {
-        ind.style.opacity = '0';
-        last.current = null;
-        return;
-      }
-      const r = { x: t.offsetLeft, y: t.offsetTop, w: t.offsetWidth, h: t.offsetHeight };
-      const p = last.current;
-      last.current = r;
-      ind.style.width = `${r.w}px`;
-      ind.style.height = `${r.h}px`;
-      ind.style.transform = `translate(${r.x}px, ${r.y}px)`;
-      ind.style.opacity = '1';
-      if (!anim) return;
-      if (!p) {
-        animate(ind, [{ opacity: 0 }, { opacity: 1 }], { duration: DUR.quick, easing: EASE.std });
-        return;
-      }
-      if (p.x === r.x && p.y === r.y && p.w === r.w && p.h === r.h) return;
-      if (track) tabSlide = { dir: Math.sign(r.x - p.x), at: performance.now() };
-      animate(ind, [{ transform: `translate(${p.x}px, ${p.y}px) scale(${p.w / r.w}, ${p.h / r.h})` }, { transform: `translate(${r.x}px, ${r.y}px)` }], { duration: 280, easing: EASE.std });
-    },
-    [sel, track],
-  );
-  useLayoutEffect(() => place(true), [dep, place]);
-  useEffect(() => {
-    const box = ref.current?.parentElement;
-    if (!box || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => place(false));
-    ro.observe(box);
-    for (const c of Array.from(box.children)) if (c !== ref.current) ro.observe(c);
-    return () => ro.disconnect();
-  }, [dep, place]);
-  return <span ref={ref} className="mv-ind" aria-hidden="true" />;
-}
-
 /**
  * Liste üstündeki eşitleme çubuğu: gösterilen değer hedefe yumuşakça yetişir (rAF, React'e dokunmadan) ve asla geri gitmez;
  * dolan kısımda parıltı. Eşitleme bitince çubuk yeşile döner, "Eşitlendi" yazar, ~1 sn sonra yüksekliği kapanarak kaybolur.
@@ -2620,7 +2569,7 @@ function useListMotion(rowsRef: React.RefObject<HTMLDivElement | null>, key: str
       return;
     }
     if (p.key !== key) {
-      const dir = performance.now() - tabSlide.at < 250 ? tabSlide.dir : 0;
+      const dir = recentSlideDir();
       const from = dir ? `translateX(${dir * 16}px)` : 'translateY(8px)';
       rows('.group-label, .row, .empty').forEach((r, i) => animate(r, [{ opacity: 0, transform: from }, { opacity: 1, transform: 'none' }], { duration: 240, delay: (dir ? 60 : 0) + i * 30, easing: EASE.in, fill: 'backwards' }));
       return;

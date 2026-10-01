@@ -7,6 +7,9 @@ export const DEMO_OFFLINE = import.meta.env.VITE_DEMO_OFFLINE === '1';
  * o yoksa işletim sistemindeki tam ad (/api/health `user`). Eskiden yerelde sabit "Kaan" yazıyordu → her kurulumda aynı ad.
  */
 export let PROFILE_NAME = '';
+/** Ayarlar → Profil kullanıcı adı (@'sız) ve e-posta: kenar çubuğu ve Ayarlar kartında görünür */
+export let PROFILE_HANDLE = '';
+export let PROFILE_EMAIL = '';
 /** Ayarlar → Profil fotoğrafı (data: adresi) */
 export let PROFILE_PHOTO: string | undefined;
 let nameFromLicense = false;
@@ -27,9 +30,11 @@ export function setFallbackProfileName(name: string | undefined): void {
   }
 }
 /** Ayarlar → Profil (çekirdekteki profile.json) uygulanır; arayüz 'mivelo-profile' olayıyla yeniden çizilir */
-export function applyProfile(p: { name?: string; photo?: string } | null | undefined): void {
+export function applyProfile(p: { name?: string; photo?: string; username?: string; email?: string } | null | undefined): void {
   customName = p?.name?.trim() ?? '';
   PROFILE_PHOTO = p?.photo || undefined;
+  PROFILE_HANDLE = p?.username?.trim().replace(/^@/, '') ?? '';
+  PROFILE_EMAIL = p?.email?.trim() ?? '';
   PROFILE_NAME = customName || baseName;
   try {
     window.dispatchEvent(new Event('mivelo-profile'));
