@@ -387,7 +387,6 @@ export function Splash({ mode, ready = true, formed = false, slowOut = false, on
   return (
     <div className={`splash ${mode} ${go ? 'go' : ''} ${out ? 'out' : ''} ${formed ? 'formed' : ''} ${slowOut ? 'slow-out' : ''}`} role="presentation" data-testid="splash">
       <div className="sp-stage">
-        <span className="sp-ring" />
         <SplashMark size={mode === 'full' ? 104 : 84} animate={!formed} />
       </div>
       <div className="sp-word">mivelo</div>

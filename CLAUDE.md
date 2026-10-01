@@ -89,6 +89,9 @@ Dil: arayüz ve yorumlar Türkçe.
   cihazda AI, gün sonu özeti), menüde İndir; arayüz değişince kareler demodan yeniden çekilmeli. Hareketler Mivelo eğrileriyle.
   Landing hero'su: görünüm sekmeleri yalnız sahnenin altındaki `#seg` ("Kendine göre ayarla"; sahnedeki yüzen kopya kaldırıldı); her sekme imleçle ufak bir görev
   oynatır (`TASKS` dizisi, kaplamalar 1440×900 kare koordinatlarında). Telefon/tablette de masaüstü penceresi gösterilir.
+  Orta genişlik (761–1180 px, 01.10 Kaan): "21 uygulama" solda metin sağda dock, "Günün değişir" (761–980) solda kart sağda metin (eskiden alt alta, yanları boş).
+  "Küçük şeyler" kutuları `.thing.in` ile oynar (kilit kapanır + halka, AI anahtarları sırayla açılır, hesap kayarak çıkar, Zamanla basılır, ses dalgası çalar, QR taranır).
+  "Yeni gelenler" 4 kutusu görününce bir kez oynar (sayılar 0'dan artar, satırlar sırayla, ses dalgası, arama yazılır). "Kendine göre ayarla" sekmeleri sayfayı KAYDIRMAZ.
   "21 uygulama" bölümü (`.dock` grupları Sosyal medya 9 · E-posta 5 · Pazaryerleri 7 — ePttAVM sarı "ePtt" SVG kutusu n11'den sonra): telefonda
   simge boyu `min(32px, (100vw-104px)/9)` TÜM gruplarda aynı → 9'lu grup tek satır (eski 8 sütunlu ızgarada TikTok alta kayıyordu).
 - **Yönetim paneli** `mivelo.app/admin` (`apps/landing/admin/`: `index.html` tek sayfa + `api.php`): bekleme listesi (durum
@@ -849,7 +852,7 @@ Dil: arayüz ve yorumlar Türkçe.
   (takvim, Ayarlar, Medya, kişi, pazaryeri, geri bildirim, yerel AI). styles.css'teki eski animasyonlar bu dosyalarda daha özgül seçiciyle
   geçersiz kılınır (styles.css'e dokunulmadı). **Açılış (01.10, Kaan: akışlı yükleme ekranı KALDIRILDI, yalnız eski logo animasyonu)**: App açılışta `Splash` (Onboarding.tsx, quick:
   logo oluşur + "mivelo") gösterir, `ready = (!booting && listReady) || 8 sn`, yavaş kapanır (`slowOut` 0,7 sn). Lisans/giriş ekranının Splash'ı açıksa
-  (`splashLive` sayacı) App onu devralır: `formed` (logo hazır çizili, aynı kip/boyut, ikinci kez oynamaz). BootScreen.tsx silindi. Tema `setThemePref` View Transitions ile tıklanan noktadan daire (ilk yükleme/sistem değişimi animasyonsuz).
+  (`splashLive` sayacı) App onu devralır: `formed` (logo hazır çizili, aynı kip/boyut, ikinci kez oynamaz). BootScreen.tsx silindi. Mor halka (`.sp-ring`) kaldırıldı; açılışta logonun kendisi `spBreath` ile yavaşça büyüyüp küçülür. Tema `setThemePref` View Transitions ile tıklanan noktadan daire (ilk yükleme/sistem değişimi animasyonsuz).
   Sohbet: yalnız yeni gelen ≤6 balon canlanır (açılışta 0), tik değişimi son 60 mesajda ref'le; **gönderilemeyen mesaj artık silinmez**:
   balonda "Gönderilemedi · Yeniden dene · Kaldır" (sohbet açıksa; `dispatch/retryOut/discardOut`); tepki emojisi çipe uçar; Lightbox küçük
   resimden FLIP; takip şeridi yanıt gelince yeşile dönüp kapanır. Liste `useListMotion`: yalnız 1-3 sohbet üste çıkınca, görünen satırlarda

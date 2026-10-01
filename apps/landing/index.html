@@ -621,6 +621,52 @@ footer .legal{margin-top:18px;font-size:12px;line-height:1.5;color:var(--ink-4);
 .nf-ill.anim.go .mk-d::after{content:'';position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.75) 50%,transparent 70%);transform:translateX(-100%);animation:mkShine 2.6s var(--ease) 2.1s infinite}
 @keyframes mkShine{0%{transform:translateX(-100%)}45%,100%{transform:translateX(100%)}}
 @media (prefers-reduced-motion:reduce){.nf-ill.anim *,.nf-ill.anim *::after,.nf-ill.anim .pp-card::after{transition:none!important;animation:none!important}.nf-ill.anim .mv-heat i{opacity:var(--o);transform:none}.nf-ill.anim .pp-m,.nf-ill.anim .pp-m i,.nf-ill.anim .vm-t,.nf-ill.anim .vm-t .w,.nf-ill.anim .mk-g div,.nf-ill.anim .mk-d,.nf-ill.anim .mv-card small,.nf-ill.anim .mv-card span{opacity:1;transform:none}.nf-ill.anim .pp-card::after{transform:none}}
+
+/* ---- 01.10 (Kaan): orta genişlikte (tablet/dar pencere) iki sütun — 21 uygulama: solda metin sağda dock; Günün değişir: solda kart sağda metin ---- */
+@media (min-width:761px) and (max-width:1180px){
+  .split.apps-split{grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:32px}
+  .apps-split .dock{flex-wrap:wrap;justify-content:center;gap:6px;padding:10px}
+  .apps-split .dk-app .ai,.apps-split .dk-app img{width:36px;height:36px;border-radius:10px}
+  .apps-split .dk-wid{order:-1;width:100%;justify-content:flex-start}
+  .apps-split .dk-sep{display:none}
+}
+@media (min-width:761px) and (max-width:980px){
+  .split.sw-rev{grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);gap:28px}
+  .sw-rev .sw-vis{order:-1}
+  .sw-rev .switch-card{padding:14px}
+}
+/* ---- Küçük şeyler kutuları: görününce oynar (.thing.in) ---- */
+.things .thing .ill>div{transition:transform .5s var(--ease-in),opacity .5s var(--ease-in)}
+.things .thing:not(.in) .ill>div{opacity:0;transform:translateY(14px) scale(.96)}
+.things .thing.in .ill>div{transition-delay:.15s}
+/* 1 kilit: kutu yerine oturur, kilit kolu kapanır, halka yayılır */
+.things .thing:nth-child(1) .ill>div{position:relative}
+.things .thing:nth-child(1) .ill svg path{transform:translateY(-3.5px);transition:transform .45s cubic-bezier(.175,.885,.32,1.275) .75s}
+.things .thing:nth-child(1).in .ill svg path{transform:none}
+.things .thing:nth-child(1) .ill>div::after{content:'';position:absolute;inset:-2px;border-radius:26px;border:2px solid var(--brand);opacity:0}
+.things .thing:nth-child(1).in .ill>div::after{animation:thRing 2.6s var(--ease) 1.1s infinite}
+@keyframes thRing{0%{opacity:.5;transform:scale(1)}70%,100%{opacity:0;transform:scale(1.45)}}
+/* 2 AI anahtarları: sırayla açılır (aksiyon çıkarma kapalı kalır) */
+.things .thing:nth-child(2) .sw{transition:background .3s var(--ease)}
+.things .thing:nth-child(2) .sw::after{transition:transform .35s cubic-bezier(.175,.885,.32,1.275)}
+.things .thing:nth-child(2):not(.in) .sw{background:#D6D4DE!important}
+.things .thing:nth-child(2):not(.in) .sw::after,.things .thing:nth-child(2) .ill>div>div:nth-child(3) .sw::after{transform:translateX(-13px)}
+.things .thing:nth-child(2).in .ill>div>div:nth-child(1) .sw,.things .thing:nth-child(2).in .ill>div>div:nth-child(1) .sw::after{transition-delay:.55s}
+.things .thing:nth-child(2).in .ill>div>div:nth-child(2) .sw,.things .thing:nth-child(2).in .ill>div>div:nth-child(2) .sw::after{transition-delay:.8s}
+.things .thing:nth-child(2).in .ill>div>div:nth-child(4) .sw,.things .thing:nth-child(2).in .ill>div>div:nth-child(4) .sw::after{transition-delay:1.05s}
+/* 3 istediğin an çık: ikinci hesap kayarak çıkar, sonra geri gelir (döngü) */
+.things .thing:nth-child(3).in .ill>div>div:nth-child(2){animation:thOut 5s var(--ease) 1.2s infinite}
+@keyframes thOut{0%,30%{opacity:1;transform:none}45%,80%{opacity:0;transform:translateX(40px)}95%,100%{opacity:1;transform:none}}
+/* 4 doğru saatte: tarih çipi gelir, Zamanla düğmesine basılır */
+.things .thing:nth-child(4) .ill>div>div:nth-child(2) span{transition:opacity .4s var(--ease-in),transform .4s var(--ease-in)}
+.things .thing:nth-child(4):not(.in) .ill>div>div:nth-child(2) span{opacity:0;transform:translateY(6px)}
+.things .thing:nth-child(4).in .ill>div>div:nth-child(2) span:first-child{transition-delay:.5s}
+.things .thing:nth-child(4).in .ill>div>div:nth-child(2) span:last-child{transition-delay:.75s;animation:thPress 4s var(--ease) 1.6s infinite}
+@keyframes thPress{0%,8%{transform:none}4%{transform:scale(.92)}}
+/* 6 QR: kareler taranır gibi belirir */
+.things .thing .qr i{transition:opacity .25s linear;transition-delay:var(--d,0s)}
+.things .thing:not(.in) .qr i{opacity:0}
+@media (prefers-reduced-motion:reduce){.things .thing .ill>div,.things .thing .ill>div *,.things .thing .ill>div::after{transition:none!important;animation:none!important}.things .thing:not(.in) .ill>div,.things .thing:not(.in) .qr i{opacity:1;transform:none}}
 </style>
 </head>
 <body>
@@ -1342,7 +1388,19 @@ var AV = {"kerem": "data:image/webp;base64,UklGRsIHAABXRUJQVlA4ILYHAAAQHgCdASpgA
 
   /* ---------- little illustrations ---------- */
   document.querySelectorAll('.wave').forEach(function(w){ var h=''; [6,12,18,10,22,14,8,16,20,9,13,6,11,17,7]. forEach(function(v,i){ h+='<i style="display:block;width:2.5px;height:'+v+'px;border-radius:2px;background:rgba(255,255,255,'+(i<6?1:.5)+')"></i>'; }); w.innerHTML=h; });
-  document.querySelectorAll('.qr').forEach(function(q){ var bits='1110101111010011101001101011110100101101011101110001011101101110'; q.innerHTML=bits.split('').map(function(b){ return '<i style="display:block;background:'+(b==='1'?'#16151B':'transparent')+';border-radius:1px"></i>'; }).join(''); });
+  document.querySelectorAll('.qr').forEach(function(q){ var bits='1110101111010011101001101011110100101101011101110001011101101110'; q.innerHTML=bits.split('').map(function(b,i){ return '<i style="display:block;background:'+(b==='1'?'#16151B':'transparent')+';border-radius:1px;--d:'+(.3+((i*37)%64)/64*.9).toFixed(2)+'s"></i>'; }).join(''); });
+  /* Küçük şeyler: sesli mesaj kartının dalgası görününce çalar */
+  (function(){
+    if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    document.querySelectorAll('.things .wave').forEach(function(w){
+      var card=w.closest('.thing'), bars=w.querySelectorAll('i'), n=bars.length, k=0, t=null;
+      var tm=w.nextSibling;
+      new IntersectionObserver(function(es){ es.forEach(function(e){
+        if(e.isIntersecting&&!t){ t=setInterval(function(){ k=(k+1)%(n+6); bars.forEach(function(b,i){ b.style.background='rgba(255,255,255,'+(i<k?1:.5)+')'; }); if(tm&&tm.nodeType===3) tm.textContent='0:'+String(Math.min(12,Math.round(k/n*12))).padStart(2,'0'); },170); }
+        else if(!e.isIntersecting&&t){ clearInterval(t); t=null; }
+      }); },{threshold:.3}).observe(card);
+    });
+  })();
 
   /* ---------- apps dock slider ---------- */
   (function(){
