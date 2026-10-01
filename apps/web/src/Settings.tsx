@@ -17,6 +17,7 @@ import { AboutPane, AccountsPane, DevicesPane, GeneralPane, HelpPane, HighlightC
 import type { LicenseStatus, Profile } from './api';
 import { EASE, animate } from './motion/motion';
 
+export type SettingsTab = Tab;
 type Tab = 'profile' | 'accounts' | 'general' | 'look' | 'notify' | 'apps' | 'keys' | 'devices' | 'ai' | 'localai' | 'perms' | 'storage' | 'help' | 'about' | 'account' | 'logout' | 'reset';
 type Lan = { enabled: boolean; urls: string[]; qr?: string } | null;
 type Section = { k: Tab; l: string; ic: string; c: string };
@@ -46,7 +47,7 @@ const fold = (x: string) => x.toLocaleLowerCase('tr').normalize('NFD').replace(/
  * Bölümler: Hesaplar · Genel · Görünüm · Bildirimler · Uygulama sesleri · Kısayollar | Cihazlar · AI · Yerel AI · İzinler |
  * Depolama · Yardım · Hakkında · Hesap ve veriler. Yeni bölümler SettingsPanes.tsx'te.
  */
-export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi, notify, lan, setLan, initialTab = 'notify', onConnect }: {
+export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi, notify, lan, setLan, initialTab = 'accounts', tabReq = 0, onConnect }: {
   closing: boolean;
   onClose: () => void;
   accounts: Account[];
@@ -57,9 +58,14 @@ export function SettingsModal({ closing, onClose, accounts, handleOf, ai, setAi,
   lan: Lan;
   setLan: (l: Lan) => void;
   initialTab?: Tab;
+  tabReq?: number;
   onConnect: (focus?: string) => void;
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
+  const firstReq = useRef(tabReq);
+  useEffect(() => {
+    if (tabReq !== firstReq.current) setTab(initialTab);
+  }, [tabReq]); // eslint-disable-line react-hooks/exhaustive-deps
   const [q, setQ] = useState('');
   const [hl, setHl] = useState<string | null>(null);
   const [me, setMe] = useState<{ name: string; sub: string; photo?: string; licensed: boolean }>({ name: PROFILE_NAME || 'Mivelo', sub: '', licensed: false });

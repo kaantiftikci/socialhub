@@ -83,7 +83,7 @@ await ctx.addInitScript(() => {
   Math.random = () => ((seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296);
   try {
     localStorage.setItem('mivelo.theme', 'light');
-    localStorage.setItem('mivelo.seenChangelog', '2026-10-01d'); // Yenilikler penceresi çıkmasın (changelog.ts'teki en üst kaydın id'si)
+    localStorage.setItem('mivelo.seenChangelog', '2026-10-01e'); // Yenilikler penceresi çıkmasın (changelog.ts'teki en üst kaydın id'si)
     localStorage.setItem('mivelo.searchSemantic', '1');
   } catch {}
   if (location.pathname.startsWith('/app/')) {

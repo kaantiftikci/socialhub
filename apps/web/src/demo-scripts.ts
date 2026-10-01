@@ -24,7 +24,7 @@ export interface Script {
   contact?: string;
   /** Ek sohbet meta'sı (ör. iMessage/e-posta klasörü: { folder: 'unknown' | 'junk' | 'deleted' }) */
   meta?: Record<string, unknown>;
-  /** Mivelo arşivi / sessiz (kenar çubuğundaki Arşiv · Sessiz görünümleri) */
+  /** Mivelo sessiz / gizli (kenar çubuğundaki Sessiz görünümü) */
   flags?: { archived?: boolean; muted?: boolean };
   /** Takip hatırlatıcısı: şimdiden kaç saat sonra (eksi = süresi dolmuş, yanıt bekliyor) */
   followUpH?: number;
@@ -1220,7 +1220,7 @@ for (const platform of Object.keys(SCRIPTS) as Platform[]) {
 
 /**
  * Boş görünen alanlar için ek örnekler (yalnız örnek veri yolu: kayıtla gelen yeni üye hiçbirini görmez):
- * iMessage klasörleri (Bilinmeyen · İstenmeyen · Silinenler = meta.deleted), e-posta Gereksiz klasörü, kenar çubuğunda Arşiv · Sessiz,
+ * iMessage klasörleri (Bilinmeyen · İstenmeyen · Silinenler = meta.deleted), e-posta Gereksiz klasörü, kenar çubuğunda Sessiz,
  * listede Takip sekmesi. Okunmamış sayıları kanal rozetini değiştirmesin diye 0 (bilinmeyen gönderen hariç).
  */
 SCRIPTS.imessage!.push(
@@ -1263,9 +1263,9 @@ const JUNK_MAIL: Array<[Platform, string, string, string]> = [
 for (const [platform, name, handle, text] of JUNK_MAIL)
   SCRIPTS[platform]?.push({ remoteId: `junk-${handle.split('@')[1].split('.')[0]}`, name, kind: 'direct', tags: [], unread: 0, handle, avatar: 'fatura.jpg', contact: handle.split('@')[0], meta: { folder: 'junk' }, lines: [[false, text]] });
 
-// Mivelo arşivi ve sessiz (sağ panel → Eylemler ile yapılanların örneği)
+// Mivelo sessiz (sağ panel → Eylemler ile yapılanların örneği)
 SCRIPTS.linkedin!.push({
-  remoteId: 'eski-ilan', name: 'Oya Tekin', kind: 'direct', tags: [], unread: 0, handle: 'Oya Tekin', avatar: 'elif.jpg', flags: { archived: true },
+  remoteId: 'eski-ilan', name: 'Oya Tekin', kind: 'direct', tags: [], unread: 0, handle: 'Oya Tekin', avatar: 'elif.jpg', flags: { muted: true },
   lines: [
     [false, 'Junior tasarımcı ilanı için başvurum değerlendirildi mi?'],
     [true, 'Merhaba Oya, pozisyon geçen ay kapandı. Bir sonraki ilanda haber veririz.'],
@@ -1273,7 +1273,7 @@ SCRIPTS.linkedin!.push({
   ],
 });
 SCRIPTS.slack!.push({
-  remoteId: 'eski-kanal', name: '#yaz-kampanyasi', kind: 'channel', tags: [], unread: 0, avatar: 'duyuru.jpg', flags: { archived: true },
+  remoteId: 'eski-kanal', name: '#yaz-kampanyasi', kind: 'channel', tags: [], unread: 0, avatar: 'duyuru.jpg', flags: { muted: true },
   lines: [
     [false, 'Zeynep: Yaz kampanyası kapandı, son rapor ekte.'],
     [false, 'Zeynep: Rapor.', [pdf('yaz-kampanyasi-rapor.pdf', 142_000)]],

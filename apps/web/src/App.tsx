@@ -20,7 +20,7 @@ import { Conversation, REACT_TEXT, refreshScheduled, startScheduledSends, status
 import { ConnectModal } from './Connect';
 import { Focus } from './Focus';
 import { onThemeChange, resolvedTheme, setThemePref } from './theme';
-import { SettingsModal } from './Settings';
+import { SettingsModal, type SettingsTab } from './Settings';
 import { getPrefs, usePrefs } from './prefs';
 import { SearchPalette } from './SearchPalette';
 import { QuickReplyStack, QuickSend, rememberBackground, takeBackground, useRevealOnFocus } from './QuickSend';
@@ -32,10 +32,9 @@ import { WhatsNew } from './WhatsNew';
 import { hideWindow, MOD_KEY, isTauri, notify as desktopNotify, requestWebNotify, onDesktopEvent, playPing, setBadge, windowFocused, coreInfo, playNotifySound, platformNotifyOn, soundsEnabled, bannersEnabled, groupsNotify, unlockAudio } from './desktop';
 import { DEMO_OFFLINE, PROFILE_HANDLE, PROFILE_NAME, PROFILE_PHOTO, STATIC_DEMO, applyProfile, setFallbackProfileName } from './profile';
 
-export type View = 'inbox' | 'focus' | 'calendar' | 'wrapped' | 'media' | 'archived' | 'muted' | 'hidden';
-const FLAG_VIEWS: Array<{ view: View; flag: 'archived' | 'muted' | 'hidden'; label: string; icon: string; empty: string }> = [
-  { view: 'archived', flag: 'archived', label: 'Arşiv', icon: 'archive', empty: 'Arşivlenmiş sohbet yok. Sağ paneldeki Eylemler’den arşivleyebilirsin.' },
-  { view: 'muted', flag: 'muted', label: 'Sessiz', icon: 'mute', empty: 'Sessize alınmış sohbet yok.' },
+export type View = 'inbox' | 'focus' | 'calendar' | 'wrapped' | 'media' | 'muted' | 'hidden';
+const FLAG_VIEWS: Array<{ view: View; flag: 'muted' | 'hidden'; label: string; icon: string; empty: string }> = [
+  { view: 'muted', flag: 'muted', label: 'Sessiz', icon: 'mute', empty: 'Sessize alınmış sohbet yok. Sağ paneldeki Eylemler’den sessize alabilirsin.' },
   { view: 'hidden', flag: 'hidden', label: 'Gizli', icon: 'eyeoff', empty: 'Gizlenmiş sohbet yok.' },
 ];
 export type Filter = 'all' | 'unread' | 'waiting' | 'followup';
@@ -78,7 +77,7 @@ export default function App() {
   chatsRef.current = chats;
   const [selected, setSelected] = useState<string | null>(NAV0.selected ?? null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [view, setView] = useState<View>(NAV0.view ?? 'inbox');
+  const [view, setView] = useState<View>((NAV0.view as string) === 'archived' ? 'inbox' : NAV0.view ?? 'inbox');
   const [filter, setFilter] = useState<Filter>(NAV0.filter ?? 'all');
   const [platformFilter, setPlatformFilter] = useState<Platform | null>(NAV0.platformFilter && PLATFORMS[NAV0.platformFilter] ? NAV0.platformFilter : null);
   const [tagFilter, setTagFilter] = useState<string | null>(NAV0.tagFilter ?? null);
@@ -322,7 +321,9 @@ export default function App() {
   const [quickSend, setQuickSend] = useState<{ chatId?: string; text?: string } | null>(null);
   const quickOpenRef = useRef(false);
   quickOpenRef.current = !!quickSend;
-  const [settingsTab, setSettingsTab] = useState<'notify' | 'ai'>('notify');
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('accounts');
+  /** Ayarlar açıkken profil satırına yeniden tıklanınca da istenen bölüme geçilsin */
+  const [settingsReq, setSettingsReq] = useState(0);
   const [menu, setMenu] = useState<{ x: number; y: number; account: Account; confirm?: boolean } | null>(null);
   const menuP = useClosing(menu);
   const connectP = useClosing(connectOpen || null, 200);
@@ -739,7 +740,7 @@ export default function App() {
           // karşıdan mesaj geldi: "yazıyor" hemen kalksın (gösterge balonu gerçek mesaja dönüşür)
           if (!ev.message.fromMe) setTyping((prev) => { if (!(ev.message.chatId in prev)) return prev; const next = { ...prev }; delete next[ev.message.chatId]; return next; });
           // yalnızca canlı gelen (eşitleme/geçmiş değil) ve yeni mesajlar bildirim çalsın
-          if (chat && ev.live && !ev.message.fromMe && !chat.muted && !chat.hidden && !chat.archived && Date.now() - bootTs > 60_000 && Date.now() - ev.message.ts < 120_000) {
+          if (chat && ev.live && !ev.message.fromMe && !chat.muted && !chat.hidden && Date.now() - bootTs > 60_000 && Date.now() - ev.message.ts < 120_000) {
             void windowFocused().then((focused) => {
               // uygulamanın bildirimi kapalıysa ne kart ne ses; Ayarlar → Bildirimler "Mivelo öndeyken de bildir" kapalıysa öndeyken sessiz
               if ((!focused || ev.message.chatId !== visibleChatRef.current) && (!focused || getPrefs().notifyInFocus) && platformNotifyOn(chat.platform) && (chat.kind === 'direct' || groupsNotify())) {
@@ -883,11 +884,11 @@ export default function App() {
    * Gelen kutusu, sayaçlar ve odak için sohbetler: arşivlenmiş (Telegram) ve klasörlenmiş (iMessage bilinmeyen/istenmeyen/SMS)
    * sohbetler dışarıda kalır; onlar yalnızca kendi sekmelerinde görünür.
    */
-  const inboxChats = useMemo(() => activeChats.filter((c) => !c.meta?.archived && !c.archived && !c.muted && !c.hidden && !(c.platform === 'imessage' && c.meta?.folder === 'junk') && !(PLATFORMS[c.platform].category === 'mail' && (c.meta?.folder === 'junk' || c.meta?.folder === 'sent'))), [activeChats]);
-  /** Arşiv / Sessiz / Gizli görünümleri (yerel bayraklar) */
+  const inboxChats = useMemo(() => activeChats.filter((c) => !c.meta?.archived && !c.muted && !c.hidden && !(c.platform === 'imessage' && c.meta?.folder === 'junk') && !(PLATFORMS[c.platform].category === 'mail' && (c.meta?.folder === 'junk' || c.meta?.folder === 'sent'))), [activeChats]);
+  /** Sessiz / Gizli görünümleri (yerel bayraklar) */
   const flagged = useMemo(() => {
-    const by = (k: 'archived' | 'muted' | 'hidden') => allChats.filter((c) => c[k]).sort((a, b) => b.lastMessageAt - a.lastMessageAt);
-    return { archived: by('archived'), muted: by('muted'), hidden: by('hidden') };
+    const by = (k: 'muted' | 'hidden') => allChats.filter((c) => c[k]).sort((a, b) => b.lastMessageAt - a.lastMessageAt);
+    return { muted: by('muted'), hidden: by('hidden') };
   }, [allChats]);
   const pinnedChats = useMemo(() => inboxChats.filter((c) => c.pinned).sort((a, b) => b.lastMessageAt - a.lastMessageAt), [inboxChats]);
   const setFlags = useCallback(
@@ -896,7 +897,7 @@ export default function App() {
         .setFlags(id, f)
         .then((c) => {
           setChats((p) => new Map(p).set(c.id, c));
-          const what = f.pinned === true ? 'Sabitlendi' : f.pinned === false ? 'Sabitleme kaldırıldı' : f.archived === true ? 'Arşivlendi' : f.archived === false ? 'Arşivden çıkarıldı' : f.muted === true ? 'Sessize alındı' : f.muted === false ? 'Ses açıldı' : f.hidden === true ? 'Gizlendi' : f.hidden === false ? 'Gizleme kaldırıldı' : 'Güncellendi';
+          const what = f.pinned === true ? 'Sabitlendi' : f.pinned === false ? 'Sabitleme kaldırıldı' : f.muted === true ? 'Sessize alındı' : f.muted === false ? 'Ses açıldı' : f.hidden === true ? 'Gizlendi' : f.hidden === false ? 'Gizleme kaldırıldı' : 'Güncellendi';
           notify(what);
         })
         .catch((e) => notify((e as Error).message, true));
@@ -1108,7 +1109,7 @@ export default function App() {
     }).then((u) => (cancelled ? u() : (un = u)));
     const openSettings = (e: Event) => {
       const tab = (e as CustomEvent<string>).detail;
-      setSettingsTab(tab === 'ai' ? 'ai' : 'notify');
+      setSettingsTab(tab === 'ai' ? 'ai' : 'accounts');
       setSettingsOpen(true);
     };
     window.addEventListener('mivelo-open-settings', openSettings);
@@ -1135,6 +1136,7 @@ export default function App() {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === ',') {
         // ⌘, (Windows'ta Ctrl+,): Ayarlar
         e.preventDefault();
+        setSettingsTab('accounts');
         setSettingsOpen(true);
         return;
       }
@@ -1402,7 +1404,7 @@ export default function App() {
           <NavItem icon="calendar" label="Takvim" title="Mivelo takvimi: mesajlardan eklenenler ve kendi etkinliklerin" count={todayEvents} active={view === 'calendar'} onClick={() => setView('calendar')} />
           <NavItem icon="chart" label="Miveloji" title="Mesajlaşma alışkanlıklarının aylık ve yıllık raporu (yalnız bu cihazda hesaplanır)" count={0} active={view === 'wrapped'} onClick={() => setView('wrapped')} />
           <NavItem icon="image" label="Medya" title="Tüm uygulamalardan fotoğraf, video, dosya ve bağlantılar" count={0} active={view === 'media'} onClick={() => setView('media')} />
-          {FLAG_VIEWS.filter((f) => f.view === 'archived' || flagged[f.flag].length > 0).map((f) => (
+          {FLAG_VIEWS.filter((f) => f.view === 'muted' || flagged[f.flag].length > 0).map((f) => (
             <NavItem key={f.view} icon={f.icon} label={f.label} count={flagged[f.flag].length} active={view === f.view} onClick={() => setView(f.view)} />
           ))}
         </div>
@@ -1448,11 +1450,13 @@ export default function App() {
           </div>
         )}
         <div className="me">
-          <Avatar name={PROFILE_NAME || 'Mivelo'} size={32} url={PROFILE_PHOTO} />
-          <span style={{ flexGrow: 1, minWidth: 0 }}>
-            <span className="n">{PROFILE_NAME || 'Mivelo'}</span>
-            {PROFILE_HANDLE && <span className="s">@{PROFILE_HANDLE}</span>}
-          </span>
+          <button type="button" className="me-open" title="Profil" onClick={() => (setSettingsTab('profile'), setSettingsReq((n) => n + 1), setSettingsOpen(true))}>
+            <Avatar name={PROFILE_NAME || 'Mivelo'} size={32} url={PROFILE_PHOTO} />
+            <span style={{ flexGrow: 1, minWidth: 0 }}>
+              <span className="n">{PROFILE_NAME || 'Mivelo'}</span>
+              {PROFILE_HANDLE && <span className="s">@{PROFILE_HANDLE}</span>}
+            </span>
+          </button>
           <button
             className="btn ghost sm icon b theme-tg"
             aria-label={theme === 'dark' ? 'Gündüz moduna geç' : 'Gece moduna geç'}
@@ -1461,7 +1465,7 @@ export default function App() {
           >
             <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={16} />
           </button>
-          <button className="btn ghost sm icon b" aria-label="Ayarlar" title="Ayarlar" onClick={() => (setSettingsTab('notify'), setSettingsOpen(!settingsOpen))}>
+          <button className="btn ghost sm icon b" aria-label="Ayarlar" title="Ayarlar" onClick={() => (setSettingsTab('accounts'), setSettingsOpen(!settingsOpen))}>
             <Icon name="sliders" size={16} />
           </button>
         </div>
@@ -1848,6 +1852,7 @@ export default function App() {
           lan={lan}
           setLan={setLanState}
           initialTab={settingsTab}
+          tabReq={settingsReq}
           onConnect={(focus) => {
             setSettingsOpen(false);
             setConnectFocus(focus ?? null);

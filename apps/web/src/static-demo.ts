@@ -317,7 +317,6 @@ function seedAccount(acc: Account, now = Date.now()): void {
           const m = { ...(s.meta ?? {}), ...(s.summary?.length ? { summary: s.summary } : {}), ...(s.note ? { note: s.note } : {}), ...(order ? { order } : {}), ...(question ? { question } : {}) };
           return Object.keys(m).length ? m : undefined;
         })(),
-        ...(s.flags?.archived ? { archived: true } : {}),
         ...(s.flags?.muted ? { muted: true } : {}),
         // takip hatırlatıcısı: süresi dolmuşsa "due" (listede Takip sekmesinde kırmızı), değilse yaklaşan
         ...(s.followUpH != null ? { followUp: { at: now + s.followUpH * 3_600_000, since: lastAt, ...(s.followUpH < 0 ? { due: true } : {}) } } : {}),

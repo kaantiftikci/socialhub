@@ -16,6 +16,21 @@ export interface ChangeEntry {
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    id: '2026-10-01e',
+    date: '2026-10-01',
+    title: 'Daha sade menü',
+    items: [
+      {
+        title: 'Arşiv kaldırıldı',
+        text: 'Mivelo’daki ayrı Arşiv bölümü kaldırıldı; daha önce arşivlediğin sohbetler gelen kutusuna döndü. Bir sohbeti gözden uzak tutmak için sağ paneldeki “Sessize al”ı kullanabilirsin, sessizdekiler sol menüdeki Sessiz bölümünde durur.',
+      },
+      {
+        title: 'Profiline tek tık',
+        text: 'Sol alttaki adına ya da fotoğrafına tıklayınca Ayarlar doğrudan Profil bölümünde açılır. Ayarlar düğmesiyle açtığında ise her seferinde menünün başından başlar.',
+      },
+    ],
+  },
+  {
     id: '2026-10-01d',
     date: '2026-10-01',
     title: 'Aramaya tek tıkla ulaş',

@@ -1282,14 +1282,38 @@ var AV = {"kerem": "data:image/webp;base64,UklGRsIHAABXRUJQVlA4ILYHAAAQHgCdASpgA
     groups.forEach(function(g){ g.btns.forEach(function(b,j){ b.setAttribute('aria-selected', j===i?'true':'false'); }); placePill(g,i); });
     if(changed){ note.style.opacity=0; setTimeout(function(){ note.textContent=notes[i]; note.style.opacity=1; },160); } else note.textContent=notes[i];
   }
-  /* sekmeye basınca: sayfa KAYDIRILMAZ (Kaan, 01.10: yukarı atınca sekme geçişi görünmüyordu); imleç o görünümde ufak bir görev yapar */
+  /* sekmeye basınca sayfa üstteki uygulama penceresine yumuşakça kayar (Kaan, 01.10: çok hızlı da çok yavaş da olmasın, geçiş görülsün);
+     kayma bitince imleç o görünümde ufak bir görev yapar. Pencere zaten tamamen görünüyorsa kaydırılmaz. */
+  var glide=0;
+  function stageTarget(){
+    if(desktop()) return wrap.offsetTop+wrap.offsetHeight-innerHeight; /* yapışkan sahnenin sonu: pencere tam oturmuş */
+    var r=device.getBoundingClientRect(); var vh=innerHeight;
+    if(r.top>=64 && r.bottom<=vh) return null;
+    return scrollY+r.top-Math.max(72,(vh-r.height)/2);
+  }
+  function glideTo(y,done){
+    var from=scrollY, d=y-from, my=++glide;
+    if(reduce||Math.abs(d)<4){ if(Math.abs(d)>=4) scrollTo(0,y); done(); return; }
+    var dur=Math.min(1000,Math.max(650,520+Math.abs(d)*.22)), t0=performance.now(), hs=document.documentElement.style;
+    var stop=function(){ glide++; off(); };
+    var off=function(){ hs.scrollBehavior=''; removeEventListener('wheel',stop); removeEventListener('touchstart',stop); };
+    hs.scrollBehavior='auto'; /* html{scroll-behavior:smooth} her karedeki scrollTo'yu ayrıca yumuşatıp kaymayı geciktiriyordu */
+    addEventListener('wheel',stop,{passive:true}); addEventListener('touchstart',stop,{passive:true});
+    (function step(now){
+      if(my!==glide) return;
+      var k=Math.min(1,(now-t0)/dur), e=k<.5?4*k*k*k:1-Math.pow(-2*k+2,3)/2;
+      scrollTo(0,from+d*e);
+      if(k<1) requestAnimationFrame(step); else { off(); done(); }
+    })(t0);
+  }
   function selectTab(i){
     heroStarted=true; setTab(i);
     tourId++; var my=tourId;
-    setTimeout(function(){ if(my===tourId) runTasks([i]); },0);
+    var y=stageTarget(), run=function(){ if(my===tourId) runTasks([i]); };
+    if(y==null) setTimeout(run,0); else glideTo(Math.max(0,y),function(){ setTimeout(run,120); });
   }
   groups.forEach(function(g){ g.btns.forEach(function(b,i){ b.addEventListener('click',function(){ selectTab(i); }); }); });
-  var to=document.getElementById('tryOdak'); if(to) to.addEventListener('click',function(e){ e.preventDefault(); var sg=document.getElementById('seg'); if(sg) scrollTo({top:scrollY+sg.getBoundingClientRect().top-innerHeight*.55,behavior:'smooth'}); setTimeout(function(){ selectTab(1); },550); });
+  var to=document.getElementById('tryOdak'); if(to) to.addEventListener('click',function(e){ e.preventDefault(); selectTab(1); });
   setTab(1); fixNoteH(); addEventListener('resize',function(){ setTab(tabIdx); fixNoteH(); });
   if(document.fonts) document.fonts.ready.then(function(){ setTab(tabIdx); fixNoteH(); });
   /* ---------- yukarı çık (mobil/tablet) ---------- */

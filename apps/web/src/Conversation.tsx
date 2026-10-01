@@ -265,7 +265,7 @@ export function Conversation({
   onBack?: () => void;
   /** Karşı taraf yazıyor: null hayır, '' evet, 'Ad' grupta kim */
   typing?: string | null;
-  /** Yerel bayraklar: sabitle/arşivle/sessize al/gizle */
+  /** Yerel bayraklar: sabitle/sessize al/gizle */
   onFlags?: (f: ChatFlags) => void;
   /** Başka ekrandan (Odak) açılırken kompozöre konacak metin ya da kendiliğinden üretilecek taslak */
   seed?: { text?: string; autoDraft?: boolean } | null;
@@ -2043,9 +2043,6 @@ export function Conversation({
               </button>
               <button type="button" className={`act b ${chat.muted ? 'on' : ''}`} onClick={() => onFlags({ muted: !chat.muted })}>
                 <Icon name="mute" size={15} /> <span>{chat.muted ? 'Sesi aç' : 'Sessize al'}</span>
-              </button>
-              <button type="button" className={`act b ${chat.archived ? 'on' : ''}`} onClick={() => onFlags({ archived: !chat.archived })}>
-                <Icon name={chat.archived ? 'unarchive' : 'archive'} size={15} /> <span>{chat.archived ? 'Arşivden çıkar' : 'Arşivle'}</span>
               </button>
               <button type="button" className={`act b ${chat.hidden ? 'on' : ''}`} onClick={() => onFlags({ hidden: !chat.hidden })}>
                 <Icon name="eyeoff" size={15} /> <span>{chat.hidden ? 'Gizlemeyi kaldır' : 'Gizle'}</span>

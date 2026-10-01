@@ -91,7 +91,7 @@ Dil: arayüz ve yorumlar Türkçe.
   oynatır (`TASKS` dizisi, kaplamalar 1440×900 kare koordinatlarında). Telefon/tablette de masaüstü penceresi gösterilir.
   Orta genişlik (761–1180 px, 01.10 Kaan): "21 uygulama" solda metin sağda dock, "Günün değişir" (761–980) solda kart sağda metin (eskiden alt alta, yanları boş).
   "Küçük şeyler" kutuları `.thing.in` ile oynar (kilit kapanır + halka, AI anahtarları sırayla açılır, hesap kayarak çıkar, Zamanla basılır, ses dalgası çalar, QR taranır).
-  "Yeni gelenler" 4 kutusu görününce bir kez oynar (sayılar 0'dan artar, satırlar sırayla, ses dalgası, arama yazılır). "Kendine göre ayarla" sekmeleri sayfayı KAYDIRMAZ.
+  "Yeni gelenler" 4 kutusu görününce bir kez oynar (sayılar 0'dan artar, satırlar sırayla, ses dalgası, arama yazılır). "Kendine göre ayarla" sekmesine basınca sayfa üstteki pencereye yumuşakça kayar (01.10 Kaan: `glideTo` 650–1000 ms, html smooth geçici kapalı, tekerlek/dokunma iptal eder; pencere zaten görünüyorsa kaymaz), imleç görevi kayma bitince.
   "21 uygulama" bölümü (`.dock` grupları Sosyal medya 9 · E-posta 5 · Pazaryerleri 7 — ePttAVM sarı "ePtt" SVG kutusu n11'den sonra): telefonda
   simge boyu `min(32px, (100vw-104px)/9)` TÜM gruplarda aynı → 9'lu grup tek satır (eski 8 sütunlu ızgarada TikTok alta kayıyordu).
 - **Yönetim paneli** `mivelo.app/admin` (`apps/landing/admin/`: `index.html` tek sayfa + `api.php`): bekleme listesi (durum
@@ -157,7 +157,7 @@ Dil: arayüz ve yorumlar Türkçe.
   küçültüyordu → ay başında (1 gün) yalnız WhatsApp `MIN_MESSAGES` 20'yi geçiyordu. Şimdi toplam ve paylar tek tohumdan (çip = halka dilimi), ay hacmi
   en az 16 gün (`MIN_VOLUME_DAYS`), ısı haritası en büyük kalanla, e-posta kişileri karşı tarafın adıyla (otomatik/Gereksiz hariç). Ek örnekler
   (demo-scripts.ts, yalnız örnek veri yolu; fresh üye görmez): her uygulamada sesli mesaj (süreye göre metin, demo-ml `VOICE_BY_SECS`) + example.com
-  bağlantıları (kart `DEMO_LINK_CARDS`), iMessage Bilinmeyen/İstenmeyen/Silinenler, e-posta Gereksiz, Mivelo Arşiv/Sessiz (`Script.flags`), Takip
+  bağlantıları (kart `DEMO_LINK_CARDS`), iMessage Bilinmeyen/İstenmeyen/Silinenler, e-posta Gereksiz, Mivelo Sessiz (`Script.flags`), Takip
   (`followUpH`), Amazon sipariş sorusu, ay boyu takvim etkinlikleri, zamanlanmış örnekler (`seedScheduled`, bir kez `mivelo.demoSched`), Odak'ta ilk 3
   taslak + "Verdiğin sözler" statik demoda kendiliğinden (Focus.tsx `USE_STATIC`).
 - **Tanıtım videosu (reels 1080×1920, ~68 sn; TM() zaman eşlemesi: 5,5 sn sonrası ×1,25 + GAPS araları: AI özeti, sağ panel, takip/zamanlama hareketli grafikleri)** `scripts/promo/`: videodaki arayüz GERÇEK tek dosya demo (iframe, Playwright sanal saati
@@ -522,6 +522,7 @@ Dil: arayüz ve yorumlar Türkçe.
 - **Zamanlanmış gönderim çekirdekte** (`scheduled.ts`, `~/.mivelo/scheduled.json`, 15 sn'de bir; `/api/scheduled` GET/POST/DELETE;
   olaylar `scheduled.update`/`scheduled.missed`). Çekirdek kapalıyken 15 dk'dan fazla geçen gönderilmez (kaçırıldı, 7 gün listede,
   Düzenle/Kaldır). Geçici hata 1 dk sonra yeniden (≤3), 400/404/429 kalıcı. Statik demoda tarayıcı kuyruğu (eski localStorage yolu).
+- **Mivelo arşivi KALDIRILDI (01.10, Kaan)**: kenar çubuğunda Arşiv görünümü ve sağ paneldeki Arşivle yok; eski `archived` bayrağı yok sayılır (sohbetler gelen kutusuna döner), Sessiz her zaman menüde. Platformun kendi arşivi (WhatsApp/Telegram "Sohbetler · Arşiv" sekmesi, `meta.archived`) DURUYOR. Sol alttaki profil satırı (`.me-open`) Ayarlar → Profil'i açar; ayar düğmesi/⌘, her açılışta ilk bölümden (Hesaplar) başlar.
 - Mesaj üstü düğmeler (`.rpos.p0/p1/p2`): tepki · takvim · takip (2 gün; `.act` açıkken). Bildirim: "Grup ve kanal bildirimleri" anahtarı.
 - **Görünümler**: ⌘1 Tümü, ⌘2… etiketler (Windows'ta Ctrl; `MOD_KEY`); ayrı çip satırı yok (sol kenar çubuğundaki Etiketler aynı işi görür,
   düğme ipucunda kısayol yazar); sıra `DEFAULT_TAGS` + kullanılanlar.

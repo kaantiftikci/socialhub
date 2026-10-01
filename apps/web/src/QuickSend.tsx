@@ -115,7 +115,6 @@ export function matchChats(chats: Chat[], q: string, limit = 8): Chat[] {
   const list = quickTargets(chats);
   if (!words.length)
     return [...list]
-      .filter((c) => !c.archived)
       .sort((a, b) => b.lastMessageAt - a.lastMessageAt)
       .slice(0, limit);
   const scored: Array<[Chat, number]> = [];
