@@ -268,7 +268,7 @@ Dil: arayüz ve yorumlar Türkçe.
 - **Yasal metinler ve onaylar (01.10)**: `apps/landing/` kosullar.html (Kullanım Koşulları + EULA: lisans/cihaz sınırı, resmi olmayan bağlantı
   riski kullanıcıda, garanti reddi, sorumluluk sınırı TBK 115, AGPL notu, Türk hukuku), gizlilik.html, kvkk.html (md.10 aydınlatma: faaliyet kartları,
   md.5 sebepler, md.9 aktarım, süreler, md.11 + başvuru), acik-riza.html (isteğe bağlı AI/yurt dışı, md.9/6-a), cerez.html, lisanslar.html; hepsi aynı şablonda
-  üst gezinme + altbilgi. Yer tutucular: [Ad Soyad / Ünvan], [Açık adres], [KEP adresi, varsa], [İl], [Tutar]. Sürüm `2026-10-01` şu yerlerde AYNI
+  üst gezinme + altbilgi. Ünvan (07.10): Mivelo Spor Malzemeleri Ticaret ve Limited Şirketi (tescil 6 Ekim 2026) kosullar/kvkk + tüm landing altbilgilerinde (© 2026 <ünvan>). Kalan yer tutucular: [Açık adres], [KEP adresi, varsa], [İl], [Tutar]. Sürüm `2026-10-01` şu yerlerde AYNI
   kalmalı: core `consent.ts CONSENT_VERSIONS`, web `consent-store.ts`, `lib-members.php MV_TERMS_VERSION/MV_KVKK_VERSION`, `waitlist.php KVKK_VERSION`,
   indir `CONSENT`, landing `KVKK_VERSION` (değişince uygulama + indirme sayfası yeniden sorar). Onaylar: indirme kaydı iki zorunlu kutu (koşullar kabul,
   aydınlatma "okudum"; önceden işaretli değil) → register.php onaysız 400, üyede `consent{terms,kvkk,at}`; bekleme listesi aydınlatma kutusu → waitlist.php
