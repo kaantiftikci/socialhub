@@ -1585,6 +1585,28 @@ body:has(.chan-ghost) { cursor: grabbing; user-select: none; -webkit-user-select
 .demo-login .btn { height: 38px; justify-content: center; }
 .demo-login-note { margin: 2px 0 0; font-size: 12px; line-height: 1.5; color: var(--text3); }
 .demo-qr-done { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 4px 0 8px; font-size: 12px; color: var(--text3); }
+
+/* Bağlan: resmi giriş akışı, Instagram/Messenger hesap seçimi, iCloud/Diğer e-posta formu, Telegram giriş yolu (Connect.tsx) */
+.cn-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+.cn-wait { display: flex; gap: 10px; align-items: flex-start; margin: 4px 0 0; font-size: 13.5px; line-height: 1.5; color: var(--text2); }
+.cn-wait .spin { margin-top: 3px; flex-shrink: 0; color: var(--v); }
+.cn-err { display: flex; gap: 8px; align-items: flex-start; margin: 4px 0 0; font-size: 13.5px; line-height: 1.5; color: var(--danger); overflow-wrap: anywhere; }
+.cn-err svg { margin-top: 2px; flex-shrink: 0; }
+.cn-note { display: flex; gap: 6px; align-items: flex-start; margin: 12px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--text3); }
+.cn-note svg { margin-top: 2px; flex-shrink: 0; }
+.cn-link { display: flex; width: fit-content; align-items: center; gap: 6px; margin-top: 12px; padding: 0; border: 0; background: none; font: inherit; font-size: 12.5px; font-weight: 500; color: var(--v-txt); cursor: pointer; }
+.cn-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.cn-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 12px; }
+.cn-choice { display: flex; gap: 12px; align-items: flex-start; padding: 14px; text-align: left; font: inherit; color: var(--text); background: var(--card); border: 1px solid var(--line); border-radius: 14px; cursor: pointer; transition: border-color var(--m-quick) var(--m-ease), background-color var(--m-quick) var(--m-ease); }
+.cn-choice:hover:not(:disabled) { border-color: var(--v-line); background: var(--v-soft); }
+.cn-choice:disabled { opacity: .6; cursor: default; }
+.cn-choice .ic { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; flex-shrink: 0; background: var(--v-soft); color: var(--v-txt); }
+.cn-choice b { display: block; font-size: 13.5px; font-weight: 600; line-height: 1.35; }
+.cn-choice small { display: block; margin-top: 3px; font-size: 12.5px; line-height: 1.4; color: var(--text3); }
+.cn-mailform { margin-top: 12px; flex-wrap: wrap; }
+.cn-mailform > input, .cn-mailform > .pw-field { flex: 1 1 200px; min-width: 0; }
+.cn-switch { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; font-size: 12.5px; line-height: 1.45; color: var(--text3); }
+.cn-switch span { flex: 1 1 220px; }
 .login-opening .btn { margin-left: 6px; }
 
 /* Paketli uygulama: yeni sürüm kartı (UpdateBanner.tsx) */

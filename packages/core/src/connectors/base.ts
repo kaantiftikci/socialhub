@@ -16,6 +16,8 @@ export interface StartOptions {
   login?: boolean;
   /** Giriş Mivelo içinde (canlı görüntü) değil, ayrı tarayıcı penceresinde */
   external?: boolean;
+  /** Telegram: QR yerine telefon numarası + kod ile resmi giriş */
+  phone?: boolean;
 }
 
 /** Mivelo içi giriş ekranına kullanıcı girdisi (görüntü koordinatları CSS pikseli) */

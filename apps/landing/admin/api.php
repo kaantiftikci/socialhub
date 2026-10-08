@@ -4,7 +4,8 @@ declare(strict_types=1);
 /**
  * Mivelo yönetim paneli API'si (mivelo.app/admin). Tüm veriler web kökünün dışında ~/mivelo-data:
  *   waitlist.json (bekleme listesi), stats/YYYY-MM.json (ziyaret sayacı), users.json (demo hesapları),
- *   admin.json (şifre değiştirildiyse karması + görevler), admin-auth.json (hatalı giriş sayaçları).
+ *   admin.json (şifre değiştirildiyse karması + görevler), admin-auth.json (hatalı giriş sayaçları),
+ *   oauth-clients.json (resmi giriş uygulamalarının istemci kimlik/gizleri; panel gizi yalnız maskeli gösterir).
  * Oturum: ayrı çerez (mvadmin, yol /admin, HttpOnly, SameSite=Strict), 12 saat boşta kalınca düşer.
  * Yazan her istek X-CSRF başlığı ister; 5 hatalı girişte IP 15 dakika kilitlenir.
  */
@@ -25,6 +26,7 @@ const LIC_MAIL_OLD = ['Mivelo lisans anahtarın hazır'];
 
 require_once __DIR__ . '/../api/lib-smtp.php';
 require_once __DIR__ . '/../api/lib-members.php';
+require_once __DIR__ . '/../api/lib-oauth.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
@@ -1409,6 +1411,30 @@ if ($a === 'smtp_probe' && $method === 'POST') {
     $report = "PHP kullanıcısı: {$user} · sunucu: " . php_uname('n') . ' · PHP ' . PHP_VERSION . ' · ' . gmdate('Y-m-d H:i') . " UTC\n" . implode("\n", $lines);
     $ticket = $ttOk ? '' : "Merhaba, aşağıdaki test web üzerinden, PHP ile, cPanel kullanıcımız ({$user}) olarak yapılmıştır (root değil). Aynı PHP süreci 443 portuyla dışarı çıkabildiği halde giden SMTP portları reddediliyor. Root ile yapılan nc testi CSF/WHM SMTP kısıtlamasından muaf olduğu için bu sorunu göstermez. Lütfen {$user} kullanıcısını CSF SMTP_ALLOWUSER listesine ekleyin ya da WHM > SMTP Restrictions için bu hesaba istisna tanımlayın.\n\n" . $report;
     out(['ok' => true, 'user' => $user, 'rows' => $rows, 'verdict' => $verdict, 'report' => $report, 'ticket' => $ticket]);
+}
+
+/* Resmi giriş uygulamaları (OAuth aracısı api/oauth.php): gizi asla geri dönmez, yalnız "••••1234" maskesi */
+if ($a === 'oauth_get') {
+    try {
+        $view = mv_oauth_admin_view(mv_oauth_clients());
+    } catch (Throwable $e) {
+        fail(500, 'Resmi giriş kaydı okunamadı: ' . $e->getMessage());
+    }
+    out(['providers' => $view, 'bounce' => MV_OAUTH_BOUNCE]);
+}
+
+if ($a === 'oauth_set' && $method === 'POST') {
+    try {
+        $err = mv_oauth_store_update('oauth-clients.json', function (array &$d) use ($body) {
+            return mv_oauth_admin_save($d, $body);
+        });
+        if ($err !== '') {
+            fail(400, $err);
+        }
+        out(['ok' => true, 'providers' => mv_oauth_admin_view(mv_oauth_clients()), 'bounce' => MV_OAUTH_BOUNCE]);
+    } catch (Throwable $e) {
+        fail(500, 'Resmi giriş kaydı yazılamadı: ' . $e->getMessage());
+    }
 }
 
 if ($a === 'password' && $method === 'POST') {

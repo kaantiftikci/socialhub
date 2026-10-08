@@ -747,7 +747,7 @@ Dil: arayüz ve yorumlar Türkçe.
   (Gmail/Outlook/Yahoo/Yandex/iCloud) Bağlan → doğrudan sağlayıcının giriş penceresi; "Diğer e-posta" yeni eklenemez (yalnız eski hesap
   kaldırılır). Şifreyle bağlanmış eski e-posta hesapları `restart(id, {browserLogin:true})` (registry/server/api) ile token'ı bırakıp giriş
   penceresine geçer ("Giriş ekranını aç" / uyarıdaki "<Sağlayıcı> ile giriş yap"). Kalan tek formlar: pazaryeri API anahtarları ("API anahtarı",
-  "şifre" değil) + Telegram 2FA parolası (QR sonrası Telegram istiyor). Orijinal logolar: `apps/web/src/brand-icons.ts` (landing dock SVG'leri,
+  "şifre" değil) + Telegram 2FA parolası (QR sonrası Telegram istiyor). (08.10: iCloud uygulamaya özel parola + Diğer e-posta formu resmi yol olarak geri geldi; bkz. Resmi giriş.) Orijinal logolar: `apps/web/src/brand-icons.ts` (landing dock SVG'leri,
   19 platform; Trendyol/n11/Shopier PNG) → `Chip` her yerde. Ayarlar → Hesap ve veriler'deki Çıkış yap satırı kaldırıldı (menüdeki kalır).
 - **Medya (30.09)**: video tam ekran düğmesi requestFullscreen → webkitRequestFullscreen → video.webkitEnterFullscreen → olmazsa uygulama içi
   Lightbox (`.lightbox.full`, Esc önce tam ekrandan çıkar); simgeler `maximize`/`minimize`. Bağlantı/medya/ek/paylaşım kartı/MsgLink/e-posta
@@ -897,6 +897,49 @@ Dil: arayüz ve yorumlar Türkçe.
   `prefs.dnd {on,from,to,weekend}` / `prefs.focus {on,platforms}`, `quietReason(platform)` App message.upsert bildirim koşulunda (kart/ses yok,
   rozet ve liste güncellenir); Ayarlar → Bildirimler `QuietHours` (saat aralığı, hafta sonu, uygulama çipleri). Test: star-unread-mute.test.ts.
 - **Dokümantasyon** `docs/dokumantasyon.html` → `docs/Mivelo-Dokumantasyon.pdf` (`CHROMIUM=<chrome yolu> node docs/build-pdf.mjs`); özellik eklenince güncelle.
+
+## 08.10 Resmi giriş (Kaan: "mailleri orijinal resmi girişlerle yap; Telegram/Slack resmi değilse resmi yap; resmi API/giriş sağlayan varsa onları da")
+- **Altyapı** `packages/core/src/oauth/`: `index.ts` SPECS (google/microsoft/yahoo/yandex/slack/instagram/facebook), giriş sayfası VARSAYILAN TARAYICIDA
+  (`openExternal`, RFC 8252; Playwright penceresi değil), PKCE, `oauthConfig()` = istemci kimlikleri mivelo.app `api/oauth.php?action=config`'ten (6 sa önbellek +
+  `~/.mivelo/oauth-config.json`; ortam `MIVELO_OAUTH_CONFIG` JSON/yol, `MIVELO_OAUTH_<P>_ID`, `MIVELO_OAUTH_REMOTE=0`, `MIVELO_OAUTH_BROKER`/`_BOUNCE`).
+  Geri dönüş: google `http://127.0.0.1:<port>/oauth/callback`, microsoft `http://localhost:<port>/oauth/callback` (yerel değişim, gizisiz), diğerleri
+  `https://mivelo.app/api/oauth-cb.php` → state `<rastgele>.<port>` ile yerel `/oauth/callback`'e 302. Gizi gerekenlerde değişim/yenileme aracıda (`?action=token|refresh`).
+  `refreshToken` (instagram gizisiz graph.instagram.com), `OAuthError.revoked` (invalid_grant/invalid_refresh_token/revoked…), `mailIdentity` (id_token/userinfo/Yandex info).
+  Facebook `configId` varsa kapsam yerine `config_id` (İşletmeler için Facebook Girişi). `callback.ts` bekleyen girişler (mail.ts yeniden dışa aktarır).
+  `flows.ts`: `/api/oauth/providers` (etkin platformlar), `POST /api/oauth/start {platform, loginHint}` → akış (hesap ÖNCE açılmaz; belirteç → token dosyası →
+  `registry.add`), `GET /api/oauth/flows/:id`, `/open`, `/cancel`. Token dosyaları: e-posta `{user, oauth, accessToken, refreshToken, expiresAt}`, Slack
+  `{token, oauth:'slack', team, historyLimited…}`, Instagram `{official:'instagram', accessToken(60 gün), userId, username}`, Facebook `{official:'facebook', userToken, pages:[{id,name,token}]}`.
+  Registry: resmi Graph token → `MetaGraphConnector` (köprüye gitmez), `Account.official` (list + durum olayları), bağlantı yolu değişince (köprü/tarayıcı → resmi)
+  eski sohbetler bir kez silinir (`engineOf`), aynı adresli tarayıcı e-posta hesabının yerine geçer. "oturumu sona erdi / yeniden giriş yap" kendiliğinden
+  iyileşmede KALICI (`transient` hard). Sağlayıcı yapılandırılmadıysa eski yollar (tarayıcı/köprü) AYNEN. Test: oauth-core, official-flag.
+- **E-posta** (mail.ts): `oauth` alanı → IMAP/SMTP XOAUTH2 (gmail/outlook/yahoo/yandex ön ayarları), `ensureToken` ≤60 sn kala yenileme (tek uçuş), her IMAP
+  bağlantısından önce; XOAUTH2/SMTP reddinde bir kez zorla yenile; IDLE belirteç bitmeden ≈5 dk önce yeniden kurulur. Revoked → "<Sağlayıcı> oturumu sona erdi —
+  yeniden giriş yap", authFailed. iCloud = uygulamaya özel parola (resmi yol; Connect formu + Apple Hesabı düğmesi), "Diğer e-posta" adres+şifre formu geri geldi
+  (30.09'daki "şifre formu yok" kuralının istisnası: resmi yol bu). Hata metinleri iCloud/IMAP'e özel. Eski Gmail istemci/Outlook cihaz kodu/uygulama şifresi yolları sürer. Test: mail-oauth.
+- **Slack** (slack.ts): resmi girişte `historyLimited` (Marketplace dışı uygulama, Mayıs 2025 kuralı: history/replies dakikada 1, ≤15 mesaj): değişiklik
+  `users.conversations` (10 dk) + `conversations.info` (`latest` hemen önizleme/son mesaj, okundu eşitleme) ile; history/replies tek kuyrukta ≥61 sn, öncelik
+  açık sohbet > okunmamış birebir > küçük grup > kanal > boşluk > ilk geçmiş > iş parçacığı; 429 Retry-After; Socket Mode YOK. Belirteç döndürme 10 dk önce.
+  Aynı çalışma alanındaki tüm Mivelo kullanıcıları dakikada 1 hakkı paylaşır → Slack Marketplace onayı alınınca Admin'de işaretle (historyLimited=false). Test: slack-official.
+- **Meta resmi** (`connectors/meta-graph.ts`): Instagram profesyonel (graph.instagram.com `me/conversations?platform=instagram`, POST `me/messages`) + Facebook
+  Sayfası Messenger (`{sayfa}/conversations?platform=messenger`, POST `{sayfa}/messages` RESPONSE, sayfa belirteci; sohbet kimliği `sayfa:konuşma`). Yoklama odakta
+  30/boşta 120 sn, okuma ≥550 ms arayla, 24 sa penceresi hatası → "Meta kuralı: kişi son 24 saatte yazmadıysa yanıt gönderilemez", 190 → oturumu sona erdi,
+  Instagram belirteci <10 gün kala yenilenir, yalnız metin gönderimi, ekler /api/media vekilinden. Webhook YOK. Test: meta-graph. Gerçek hesapla DOĞRULANMADI.
+- **Telegram** (zaten resmi MTProto): QR'a ek "Telefon numarasıyla giriş yap" (`restart {phone:true}` → `signInWithPhone`, teleproto signInUser: numara → kod → 2FA;
+  `normalizePhone` TR varsayılan; `tgAuthError` Türkçe; kayıtsız numarada hesap AÇILMAZ; stop() bekleyen soruları reddeder). Test: telegram-phone.
+- **Aracı (mivelo.app)** `apps/landing/api/oauth.php` + `lib-oauth.php` + `oauth-cb.php`: config (gizi ASLA), token/refresh POST JSON ≤8 KB, yalnız HTTPS, IP başına
+  saatte 60/300, belirteç saklanmaz/günlüğe yazılmaz, Instagram/Facebook kısa→uzun takas aracıda, Microsoft aracıdan geçmez; redirect izin listesi. Gizler
+  `~/mivelo-data/oauth-clients.json` (0600) ← **Admin → Ayarlar → "Resmi giriş uygulamaları"** (kimlik, gizi maskeli, Slack Marketplace kutusu, Meta Graph sürümü +
+  config_id, geri dönüş adresleri, kurulum adımları). Yerel test `MV_OAUTH_TEST_BASE` (yalnız yerel adres). Apache günlüğü oauth-cb kodunu yazar (tek kullanımlık).
+- **Arayüz** (Connect.tsx): açılışta `/api/oauth/providers?force=1`; açık olan Gmail/Outlook/Yahoo/Yandex/Slack'te Bağlan → `<p>:oauth` paneli (1 sn'de bir akış;
+  bitince hesap paneli + pencere öne `focus_window`; kapanınca iptal). Instagram/Messenger'da kişisel / işletme (Sayfa) seçimi. `/oturumu sona erdi|yeniden giriş yap/i`
+  → "Yeniden giriş yap" (loginHint e-posta), eski e-posta hesabında "Resmi girişe geç". Resmi hesaplarda "Giriş ekranını aç" yok (`Account.official`, yedek
+  localStorage `mivelo.officialAccounts`). Demo eski akışta (oauthProviders → []), iCloud/IMAP formu demo-form ile bağlanır.
+- **Kaan'ın yapacakları** (sağlayıcı konsolları; adımlar Admin panelinde): Google (OAuth istemcisi "Masaüstü", kapsam https://mail.google.com/ KISITLI → doğrulama +
+  CASA; o zamana dek ≤100 test kullanıcısı), Microsoft Entra (kişisel+kurumsal, "Mobil ve masaüstü" `http://localhost/oauth/callback`, genel istemci akışları,
+  IMAP.AccessAsUser.All + SMTP.Send + offline_access), Yahoo (Mail API mail-w başvurusu), Yandex (oauth.yandex.com), Slack (User Token Scopes, Public Distribution,
+  sonra Marketplace), Meta (Instagram API with Instagram Login + Messenger, uygulama incelemesi + işletme doğrulaması). Geri dönüş adresi (Google/Microsoft dışı):
+  `https://mivelo.app/api/oauth-cb.php`. Yapılmayan resmi yollar: X API (ücretli kullanım başına, XChat şifreli DM'ler API'de yok), WhatsApp Business Cloud API
+  (yalnız işletme numarası + webhook sunucusu + Meta ücretleri), LinkedIn (üye mesaj API'si yok), TikTok (kişisel DM API'si yok).
 
 ## Sunucu/arayüz sözleşmesi
 - CORS: localhost/127.0.0.1/tauri.localhost/tauri://localhost ve WKWebView'ın `null` kaynağı (paketli uygulama!).

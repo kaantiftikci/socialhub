@@ -643,7 +643,17 @@ export const staticApi = {
     await new Promise((r) => setTimeout(r, 900));
     await completeDemoLogin(id);
   },
-  restartAccount: async (id: string, _opts?: { browserLogin?: boolean }) => {
+  // resmi giriş (OAuth) demoda yok: Bağlan eski akışla (giriş penceresi / form) kalır
+  oauthProviders: async (_force?: boolean): Promise<Platform[]> => [],
+  oauthStart: async (_platform: Platform, _loginHint?: string): Promise<import('./api').FlowView> => {
+    throw new Error('Demoda resmi giriş yok');
+  },
+  oauthFlow: async (_id: string): Promise<import('./api').FlowView> => {
+    throw new Error('Giriş bulunamadı');
+  },
+  oauthOpen: async (_id: string) => ({ ok: false }),
+  oauthCancel: async (_id: string) => ({ ok: false }),
+  restartAccount: async (id: string, _opts?: { browserLogin?: boolean; phone?: boolean }) => {
     // X'in PIN uyarısı: gerçek uygulamada görünür pencere açılır, kullanıcı PIN'i girer; demoda 2 sn sonra girilmiş sayılır
     const a = accounts.find((x) => x.id === id);
     if (a?.platform === 'x' && !demoPinDone) {

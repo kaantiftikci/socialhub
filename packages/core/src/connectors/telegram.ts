@@ -9,7 +9,7 @@ import { TelegramClient, Api } from 'teleproto';
 import { StringSession } from 'teleproto/sessions/index.js';
 import { NewMessage, Raw, EditedMessage, DeletedMessage, type NewMessageEvent, type EditedMessageEvent, type DeletedMessageEvent } from 'teleproto/events/index.js';
 import { getPeerId } from 'teleproto/Utils.js';
-import { BaseConnector, type OutFile, type SendOptions } from './base.js';
+import { BaseConnector, type OutFile, type SendOptions, type StartOptions } from './base.js';
 import type { Reaction, ReplyRef } from '../model.js';
 import { bus } from '../bus.js';
 import { FFMPEG_HINT } from '../platform.js';
@@ -23,6 +23,7 @@ import type { Attachment, ChatKind } from '../model.js';
 import type { Entity } from 'teleproto/define.js';
 import type { Dialog } from 'teleproto/tl/custom/dialog.js';
 import { installMessageBehaviour } from 'teleproto/tl/custom/message.js';
+import type { UserAuthParams } from 'teleproto/client/auth.js';
 
 // teleproto mesaj yardımcılarını (m.sender, m.out…) ilk istemci oluşturulunca kurar; ingest istemciden bağımsız da çalışsın
 installMessageBehaviour();
@@ -34,7 +35,8 @@ const GAP_PAGE = 100;
 const GAP_PAGES = 5;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-type Pending = { resolve: (v: string) => void };
+type AuthKind = 'phone' | 'code' | 'password';
+type Pending = { resolve: (v: string) => void; reject: (e: Error) => void };
 
 /**
  * Telegram: resmi MTProto istemcisi (GramJS). Kullanıcının kendi hesabı; bot değil.
@@ -42,7 +44,7 @@ type Pending = { resolve: (v: string) => void };
  */
 export class TelegramConnector extends BaseConnector {
   private client?: TelegramClient;
-  private pending = new Map<'phone' | 'code' | 'password', Pending>();
+  private pending = new Map<AuthKind, Pending>();
   private entities = new Map<string, Entity>();
   private meId = '';
   private watchTimer?: NodeJS.Timeout;
@@ -58,7 +60,7 @@ export class TelegramConnector extends BaseConnector {
     return path.join(sessionDir(this.account.id), 'session.txt');
   }
 
-  async start(): Promise<void> {
+  async start(opts?: StartOptions): Promise<void> {
     // api_id / api_hash: Bağlan penceresinden girilen değerler (token dosyası) ya da ortam değişkenleri
     let apiId = TELEGRAM_API_ID;
     let apiHash = TELEGRAM_API_HASH;
@@ -96,7 +98,14 @@ export class TelegramConnector extends BaseConnector {
 
     try {
       await client.connect();
-      if (!(await client.checkAuthorization())) {
+      // durdurulduysa ya da yeni istemci kurulduysa giriş adımları beklemesin (bekleyen soru reddedilir)
+      const cancelled = () => this.stopped || this.client !== client;
+      const authorized = await client.checkAuthorization();
+      if (!authorized && opts?.phone) {
+        // Telefonla resmi giriş: numara → Telegram uygulamasına/SMS'e gelen kod → (varsa) 2FA parolası
+        this.setStatus('pairing', 'Telefon numaranla giriş yap');
+        await signInWithPhone(client, { apiId, apiHash }, { ask: (k, m) => (cancelled() ? Promise.reject(authCancelled()) : this.ask(k, m)), cancelled });
+      } else if (!authorized) {
         // WhatsApp gibi: QR üret (tg://login?token=…), telefondaki Telegram → Ayarlar → Cihazlar → Masaüstü cihazı bağla ile okutulur.
         // 2FA parolası varsa arayüzden istenir. QR ~30 sn'de bir yenilenir; GramJS bunu kendisi yapar.
         this.setStatus('pairing', 'Telefondaki Telegram → Ayarlar → Cihazlar → “Masaüstü Cihazı Bağla” ile QR’ı okut');
@@ -108,8 +117,9 @@ export class TelegramConnector extends BaseConnector {
               const qrDataUrl = await QRCode.toDataURL(url, { margin: 1, width: 320 });
               bus.emit({ type: 'account.qr', accountId: this.account.id, qrDataUrl });
             },
-            password: () => this.ask('password', 'İki adımlı doğrulama parolanı gir'),
+            password: () => (cancelled() ? Promise.reject(authCancelled()) : this.ask('password', 'İki adımlı doğrulama parolanı gir')),
             onError: async (e) => {
+              if (cancelled()) return true; // durduruldu: döngüde yeniden sorma
               bus.log('error', `Telegram: ${e.message}`);
               return false;
             },
@@ -271,6 +281,9 @@ export class TelegramConnector extends BaseConnector {
 
   async stop(): Promise<void> {
     this.stopped = true;
+    // giriş sorusu bekleyen start() askıda kalmasın
+    for (const p of this.pending.values()) p.reject(authCancelled());
+    this.pending.clear();
     if (this.presenceTimer) clearTimeout(this.presenceTimer);
     if (this.watchTimer) clearInterval(this.watchTimer);
     this.watchTimer = undefined;
@@ -300,7 +313,7 @@ export class TelegramConnector extends BaseConnector {
     }
   }
 
-  provideInput(kind: 'phone' | 'code' | 'password', value: string): void {
+  provideInput(kind: AuthKind, value: string): void {
     const p = this.pending.get(kind);
     if (p) {
       this.pending.delete(kind);
@@ -555,10 +568,12 @@ export class TelegramConnector extends BaseConnector {
     this.upsertChat({ remoteId: rid, name: chat.name, unread });
   }
 
-  private ask(kind: 'phone' | 'code' | 'password', message: string): Promise<string> {
+  private ask(kind: AuthKind, message: string): Promise<string> {
     this.setStatus('pairing', message);
     bus.emit({ type: 'account.prompt', accountId: this.account.id, prompt: kind, message });
-    return new Promise((resolve) => this.pending.set(kind, { resolve }));
+    // aynı türde bekleyen eski soru varsa bırakılır (yeni soru onun yerine geçer)
+    this.pending.get(kind)?.reject(authCancelled());
+    return new Promise((resolve, reject) => this.pending.set(kind, { resolve, reject }));
   }
 
   private async backfill(client: TelegramClient): Promise<void> {
@@ -884,6 +899,175 @@ export class TelegramConnector extends BaseConnector {
     if (media instanceof Api.MessageMediaGeo || media instanceof Api.MessageMediaGeoLive || media instanceof Api.MessageMediaVenue) return [{ kind: 'other', name: 'Konum' }];
     if (media instanceof Api.MessageMediaPoll) return [{ kind: 'other', name: 'Anket' }];
     return [{ kind: 'other', name: 'Medya' }];
+  }
+}
+
+// ── Telefonla resmi giriş (teleproto signInUser) ──────────────────────────────────────────────────────────
+
+/** Telefonla girişte ilk sorular */
+export const PHONE_ASK = 'Telegram telefon numaranı uluslararası biçimde gir (+90…)';
+const CODE_ASK_APP = 'Telegram uygulamana gelen kodu gir';
+const CODE_ASK_SMS = 'Telefonuna SMS ile gelen kodu gir';
+const CODE_ASK_EMAIL = 'Telegram doğrulama kodunu e-posta adresine gönderdi; onu gir';
+const PASSWORD_ASK = 'İki adımlı doğrulama parolanı gir';
+/** Süresi dolan kod için aynı numaraya en çok bu kadar yeni kod istenir (sonra giriş biter) */
+const MAX_RESEND = 3;
+
+/** Giriş iptal edildi (bağlantı durduruldu / yeni giriş başladı) */
+function authCancelled(): Error {
+  return Object.assign(new Error('AUTH_USER_CANCEL'), { errorMessage: 'AUTH_USER_CANCEL' });
+}
+/** teleproto'nun tanıdığı biçimde hata (errorMessage alanı) */
+function tgErr(code: string): Error {
+  return Object.assign(new Error(code), { errorMessage: code });
+}
+
+/** Telefonla girişte hata → kullanıcı metni; `retry` = aynı adım yeniden sorulur, `resend` = aynı numaraya yeni kod; ikisi de yoksa giriş biter */
+export interface TgAuthError {
+  code: string;
+  text: string;
+  retry?: AuthKind;
+  resend?: boolean;
+}
+
+/** Telegram/teleproto giriş hatasını kullanıcı diline çevirir (içerik yok; yalnız hata kodu) */
+export function tgAuthError(e: unknown): TgAuthError {
+  const err = (e ?? {}) as { errorMessage?: unknown; message?: unknown; seconds?: unknown };
+  const raw = String(err.errorMessage ?? err.message ?? '');
+  const msg = String(err.message ?? '');
+  // FLOOD_WAIT_X: teleproto FloodWaitError (errorMessage 'FLOOD', seconds) ya da ham kod
+  const fw = /FLOOD_(?:PREMIUM_)?WAIT_(\d+)/.exec(raw) ?? /FLOOD_(?:PREMIUM_)?WAIT_(\d+)/.exec(msg);
+  const secs = fw ? Number(fw[1]) : raw === 'FLOOD' && Number(err.seconds) > 0 ? Number(err.seconds) : 0;
+  if (secs > 0) {
+    const wait = secs < 7200 ? `${Math.max(1, Math.ceil(secs / 60))} dk` : `${Math.ceil(secs / 3600)} sa`;
+    return { code: 'FLOOD_WAIT', text: `Çok fazla deneme; ${wait} sonra tekrar dene` };
+  }
+  const code = /^[A-Z0-9_]+$/.test(raw) ? raw : '';
+  switch (code) {
+    case 'PHONE_NUMBER_INVALID':
+      return { code, text: 'Telefon numarası geçersiz; ülke koduyla yeniden gir (+90…)', retry: 'phone' };
+    case 'PHONE_CODE_INVALID':
+      return { code, text: 'Kod hatalı, yeniden gir', retry: 'code' };
+    case 'PHONE_CODE_EMPTY':
+      return { code, text: 'Kodu gir', retry: 'code' };
+    case 'PHONE_CODE_EXPIRED':
+    case 'PHONE_CODE_HASH_EMPTY':
+    case 'PHONE_HASH_EXPIRED':
+      return { code, text: 'Kodun süresi doldu', resend: true };
+    case 'PASSWORD_HASH_INVALID':
+      return { code, text: 'Parola hatalı, yeniden gir', retry: 'password' };
+    case 'PHONE_NUMBER_BANNED':
+      return { code, text: 'Bu numara Telegram tarafından engellenmiş' };
+    case 'PHONE_NUMBER_FLOOD':
+      return { code, text: 'Bu numaraya çok fazla kod istendi; bir süre sonra tekrar dene' };
+    case 'FLOOD':
+      return { code, text: 'Çok fazla deneme; bir süre sonra tekrar dene' };
+    case 'PHONE_PASSWORD_FLOOD':
+      return { code, text: 'Çok fazla hatalı parola denemesi; bir süre sonra tekrar dene' };
+    case 'PHONE_NUMBER_UNOCCUPIED':
+    case 'PHONE_NUMBER_APP_SIGNUP_FORBIDDEN':
+      return { code, text: 'Bu numarayla Telegram hesabı yok; önce telefonda Telegram’a kaydol' };
+    case 'SEND_CODE_UNAVAILABLE':
+    case 'UPDATE_APP_TO_LOGIN':
+      return { code, text: 'Telegram şu an kod gönderemiyor; QR koduyla bağlan' };
+    case 'AUTH_USER_CANCEL':
+      return { code, text: 'Giriş iptal edildi' };
+  }
+  // teleproto'nun kendi (kodsuz) hataları
+  if (raw === 'Code is empty') return { code: 'PHONE_CODE_EMPTY', text: 'Kodu gir', retry: 'code' };
+  if (raw === 'Password is empty') return { code: 'PASSWORD_EMPTY', text: 'Parolayı gir', retry: 'password' };
+  if (/^Email (verification required|code sent)/.test(raw)) return { code: 'EMAIL_REQUIRED', text: 'Telegram bu numara için e-posta doğrulaması istiyor; QR koduyla bağlan' };
+  return { code: code || 'UNKNOWN', text: `Telegram girişi başarısız${code ? ` (${code})` : ''}` };
+}
+
+/** Kullanıcının yazdığı numarayı uluslararası biçime getirir (+905…); geçersizse undefined. Ülke kodu yoksa Türkiye varsayılır. */
+export function normalizePhone(input: string): string | undefined {
+  let s = String(input ?? '').trim().replace(/[\s().\- ]/g, '');
+  if (s.startsWith('00')) s = '+' + s.slice(2);
+  if (!s.startsWith('+')) {
+    if (/^0\d{10}$/.test(s)) s = '+90' + s.slice(1); // 05xx xxx xx xx
+    else if (/^5\d{9}$/.test(s)) s = '+90' + s; // 5xx xxx xx xx
+    else s = '+' + s;
+  }
+  return /^\+[1-9]\d{6,14}$/.test(s) ? s : undefined;
+}
+
+/** Telefonla giriş adımlarının arayüz tarafı: soru sor (account.prompt) ve iptal denetimi */
+export interface PhoneLoginIO {
+  ask(kind: AuthKind, message: string): Promise<string>;
+  cancelled(): boolean;
+}
+
+/**
+ * Telefonla resmi giriş: numara → Telegram uygulamasına (ya da SMS'e) gelen kod → (varsa) 2FA parolası.
+ * Hatalı numara/kod/parolada aynı adım hata metniyle yeniden sorulur; süresi dolan kodda aynı numaraya yeni kod istenir;
+ * diğer hatalarda (FLOOD_WAIT, engelli numara…) kullanıcı dilinde Error fırlatılır. Yeni hesap AÇILMAZ (kayıtlı olmayan numara hata).
+ */
+export async function signInWithPhone(
+  client: { signInUser(creds: { apiId: number; apiHash: string }, params: UserAuthParams): Promise<unknown> },
+  creds: { apiId: number; apiHash: string },
+  io: PhoneLoginIO,
+): Promise<void> {
+  let phone = '';
+  let resend = false;
+  let resends = 0;
+  let failure: string | undefined;
+  /** hata sonrası bir sonraki sorunun metni */
+  const next: Partial<Record<AuthKind, string>> = {};
+  const take = (k: AuthKind, def: string): string => {
+    const m = next[k];
+    delete next[k];
+    return m ?? def;
+  };
+  const params: UserAuthParams = {
+    phoneNumber: async () => {
+      // süresi dolan kod: aynı numaraya yeniden gönder (numara yeniden sorulmaz)
+      if (resend && phone) {
+        resend = false;
+        return phone;
+      }
+      const v = normalizePhone(await io.ask('phone', take('phone', PHONE_ASK)));
+      if (!v) throw tgErr('PHONE_NUMBER_INVALID');
+      phone = v;
+      return v;
+    },
+    phoneCode: async (viaApp?: boolean) => {
+      // teleproto RESTART_AUTH'ta girişi baştan başlatır → phoneNumber aynı numarayı döndürür → yeni kod gider
+      if (resend) throw tgErr('RESTART_AUTH');
+      return (await io.ask('code', take('code', viaApp === false ? CODE_ASK_SMS : CODE_ASK_APP))).replace(/[\s-]/g, '');
+    },
+    password: async () => io.ask('password', take('password', PASSWORD_ASK)),
+    // kayıtlı olmayan numarada teleproto "first name" adıyla hesap açardı: açma, hata ver
+    firstAndLastNames: async () => {
+      throw tgErr('PHONE_NUMBER_UNOCCUPIED');
+    },
+    // kod numaranın e-postasına gittiyse (Telegram bazı hesaplarda) aynı kod alanından sorulur
+    emailVerification: async () => ({ type: 'code', code: (await io.ask('code', take('code', CODE_ASK_EMAIL))).trim() }),
+    onError: async (e: Error) => {
+      if (io.cancelled()) return true;
+      const info = tgAuthError(e);
+      // yalnız hata kodu; bilinmeyen hatada kısa ileti (numara benzeri rakam dizileri gizlenir)
+      const why = info.code === 'UNKNOWN' ? ` — ${String(e?.message ?? '').replace(/\+?\d[\d\s-]{5,}\d/g, '…').slice(0, 120)}` : '';
+      bus.log('warn', `Telegram telefonla giriş: ${info.code}${why}`);
+      if (info.resend && phone && resends < MAX_RESEND) {
+        resends++;
+        resend = true;
+        next.code = `${info.text}; yeni kod gönderildi, onu gir`;
+        return false;
+      }
+      if (info.retry) {
+        next[info.retry] = info.text;
+        return false;
+      }
+      failure = info.text;
+      return true;
+    },
+  };
+  try {
+    await client.signInUser(creds, params);
+  } catch (e) {
+    if (io.cancelled()) throw authCancelled();
+    throw new Error(failure ?? tgAuthError(e).text);
   }
 }
 

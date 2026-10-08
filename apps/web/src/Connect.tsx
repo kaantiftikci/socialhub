@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type InputHTMLAttributes } from 'react';
 import { clearOpening, markOpening } from './login-opening';
-import { api, USE_STATIC } from './api';
+import { api, USE_STATIC, type FlowView } from './api';
+import { isTauri, openExternal } from './desktop';
 import { DEMO_OFFLINE, STATIC_DEMO } from './profile';
 import { openDemoLoginWindow, staticApi } from './static-demo';
 import { MAC_ONLY, MAIL_LOGIN_WHO, PLATFORMS, type Account, type CoreOs, type Platform } from './types';
@@ -10,13 +11,31 @@ import { EASE, animate, reducedMotion } from './motion/motion';
 const ORDER: Platform[] = ['whatsapp', 'telegram', 'slack', 'imessage', 'linkedin', 'x', 'instagram', 'messenger', 'tiktok'];
 const MAIL_ORDER: Platform[] = ['gmail', 'outlook', 'yahoo', 'yandex', 'icloud', 'imap'];
 /**
- * Bağlan akışı: uygulamaya kullanıcı adı / şifre YAZILMAZ (Kaan, 29.09). Sosyal medya ve e-posta kendi giriş penceresinde
- * (tarayıcı girişi) ya da QR ile bağlanır; ara form, seçim kutusu ve "Gelişmiş" yollar yok. Yalnız pazaryerlerinin API'si
- * satıcı panelindeki entegrasyon bilgileriyle (API anahtarı) çalışır: o formlar kalır.
+ * Bağlan akışı: sağlayıcının resmi girişi açıksa (Gmail/Outlook/Yahoo/Yandex, Slack, Instagram/Messenger profesyonel) giriş
+ * sağlayıcının kendi sayfasında, varsayılan tarayıcıda yapılır; hesap giriş bitince eklenir. Kapalıysa eski yol: tarayıcı girişi
+ * ya da QR. Şifre yalnız iCloud (uygulamaya özel parola) ve Diğer e-posta (IMAP) formunda, pazaryerlerinde API bilgileri.
  */
 const SHOP_ORDER: Platform[] = ['trendyol', 'hepsiburada', 'n11', 'pttavm', 'etsy', 'shopify', 'amazon'];
 /** Pazaryeri formlarının zorunlu alanları (satıcı panelindeki entegrasyon bilgileri) */
 const SHOP_FIELDS: Partial<Record<Platform, string[]>> = { trendyol: ['sellerId', 'apiKey', 'apiSecret'], hepsiburada: ['merchantId', 'serviceKey', 'userAgent'], etsy: ['keystring', 'sharedSecret'], shopify: ['shop'], n11: ['appKey', 'appSecret'], pttavm: ['username', 'password'], amazon: ['clientId', 'clientSecret', 'refreshToken'] };
+/** Resmi giriş (OAuth) adayı uygulamalar → giriş sayfasının sahibi; hangilerinin açık olduğunu çekirdek söyler (/api/oauth/providers) */
+const OFFICIAL_WHO: Partial<Record<Platform, string>> = { gmail: 'Google', outlook: 'Microsoft', yahoo: 'Yahoo', yandex: 'Yandex', slack: 'Slack', instagram: 'Instagram', messenger: 'Facebook' };
+/** Resmi giriş açıkken iki yol sunulanlar: kişisel hesap (eski akış) ya da profesyonel hesap / Facebook Sayfası (resmi) */
+const OFFICIAL_CHOICE = new Set<Platform>(['instagram', 'messenger']);
+/** Adres + parolayla bağlanan e-posta: iCloud (uygulamaya özel parola), Diğer e-posta (IMAP; sunucu çekirdekte bulunur) */
+const PASS_MAIL = new Set<Platform>(['icloud', 'imap']);
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const APPLE_PW_URL = 'https://account.apple.com/account/manage/section/security';
+/**
+ * Resmi girişli hesap yeniden giriş istiyor: çekirdek "<Sağlayıcı> oturumu sona erdi — yeniden giriş yap" ya da (Meta) "… erişim izni
+ * yok — yeniden giriş yapıp izin ver" yazar. Yalnız resmi girişi olan uygulamalarda (öteki kanallarda oauthStart yok).
+ */
+export const RELOGIN_RE = /oturumu sona erdi|yeniden giriş yap/i;
+export function needsRelogin(a: Pick<Account, 'platform' | 'detail'>): boolean {
+  return !!OFFICIAL_WHO[a.platform] && RELOGIN_RE.test(a.detail ?? '');
+}
+/** Arayüzdeki resmi giriş akışı: 'starting' = çekirdek giriş adresini hazırlıyor; from = akış bir hesabın panelinden başladıysa o hesap */
+type UiFlow = Partial<Omit<FlowView, 'state'>> & { platform: Platform; state: FlowView['state'] | 'starting'; from?: string | null; hint?: string };
 
 export function ConnectModal({
   accounts,
@@ -44,11 +63,16 @@ export function ConnectModal({
   notify: (t: string, err?: boolean) => void;
   onChanged: () => Promise<void>;
 }) {
-  // focus "edit:<hesap>" → pazaryeri hesabının entegrasyon bilgileri formu (API anahtarı yenileme)
-  const editOf = focus?.startsWith('edit:') ? accounts.find((a) => a.id === focus.slice(5) && PLATFORMS[a.platform].category === 'shop') : undefined;
+  // focus "edit:<hesap>" → pazaryeri hesabının entegrasyon bilgileri formu (API anahtarı yenileme) ya da iCloud/IMAP şifre formu
+  const editOf = focus?.startsWith('edit:') ? accounts.find((a) => a.id === focus.slice(5) && (PLATFORMS[a.platform].category === 'shop' || PASS_MAIL.has(a.platform))) : undefined;
   const [active, setActive] = useState<string | null>(editOf ? `${editOf.platform}:new` : focus?.startsWith('edit:') ? focus.slice(5) : (focus ?? null)); // account id
-  /** pazaryeri hesabının API bilgilerini yeniden gir: yeni hesap formu açılır (kaydedince çekirdek var olan hesabı günceller) */
-  const editCredentials = (a: Account) => setActive(`${a.platform}:new`);
+  /** Form açılınca dolu gelecek alanlar (iCloud/IMAP şifre güncelleme: e-posta adresi) */
+  const prefill = useRef<Record<string, string>>(editOf && PASS_MAIL.has(editOf.platform) ? { user: mailOf(editOf) ?? '' } : {});
+  /** Bilgileri yeniden gir: yeni hesap formu açılır (kaydedince çekirdek aynı adresli / aynı mağazalı var olan hesabı günceller) */
+  const editCredentials = (a: Account) => {
+    if (PASS_MAIL.has(a.platform)) prefill.current = { user: mailOf(a) ?? '' };
+    setActive(`${a.platform}:new`);
+  };
   const [pat, setPat] = useState('');
   /** Pazar yeri formları (Trendyol/Hepsiburada/Etsy/Shopify): alan adı → değer */
   const [shop, setShop] = useState<Record<string, string>>({});
@@ -58,6 +82,121 @@ export function ConnectModal({
   const [busy, setBusy] = useState(false);
 
   const activeAccount = accounts.find((a) => a.id === active);
+
+  // ---- resmi giriş (OAuth) ----
+  const [official, setOfficial] = useState<Set<Platform>>(() => new Set());
+  const officialP = useRef<Promise<Set<Platform>> | null>(null);
+  useEffect(() => {
+    if (USE_STATIC) return; // demo eski akışla
+    const p = api
+      .oauthProviders(true)
+      .then((l) => new Set(l))
+      .catch(() => new Set<Platform>());
+    officialP.current = p;
+    void p.then(setOfficial);
+  }, []);
+  /** Bağlan'a liste gelmeden basıldıysa en çok 5 sn bekle (gelmezse eski akış) */
+  const officialNow = (): Promise<Set<Platform>> =>
+    officialP.current ? Promise.race([officialP.current, new Promise<Set<Platform>>((r) => window.setTimeout(() => r(official), 5000))]) : Promise.resolve(official);
+  const [flow, setFlow] = useState<UiFlow | null>(null);
+  const flowRef = useRef(flow);
+  flowRef.current = flow;
+  const closedRef = useRef(false);
+  /** Resmi girişi başlat: panel hemen açılır, çekirdek giriş sayfasını varsayılan tarayıcıda açınca akış izlenir */
+  async function startOfficial(platform: Platform, opts: { hint?: string; from?: string | null } = {}) {
+    const prev = flowRef.current;
+    if (prev?.id && prev.state === 'waiting' && prev.platform !== platform) void api.oauthCancel(prev.id).catch(() => undefined);
+    const base: UiFlow = { platform, state: 'starting', from: opts.from ?? null, hint: opts.hint };
+    flowRef.current = base;
+    setFlow(base);
+    setActive(`${platform}:oauth`);
+    try {
+      const f = await api.oauthStart(platform, opts.hint);
+      // bu arada iptal edildi / pencere kapandı / başka akış başladı: tarayıcıda bekleyen giriş bırakılır
+      if (closedRef.current || flowRef.current !== base) {
+        if (f.state === 'waiting') void api.oauthCancel(f.id).catch(() => undefined);
+        return;
+      }
+      setFlow({ ...base, ...f });
+    } catch (e) {
+      if (!closedRef.current && flowRef.current === base) setFlow({ ...base, state: 'error', error: (e as Error).message });
+    }
+  }
+  const cancelFlow = () => {
+    const f = flowRef.current;
+    if (f?.id && (f.state === 'waiting' || f.state === 'exchanging')) void api.oauthCancel(f.id).catch(() => undefined);
+    flowRef.current = null;
+    setFlow(null);
+    setActive(f?.from ?? null);
+  };
+  /** Oturumu düşen / eski yolla bağlı hesabı resmi girişle yeniden bağla (çekirdek aynı adresli hesabın yerine geçirir) */
+  const relogin = (a: Account) => void startOfficial(a.platform, { hint: mailOf(a), from: a.id });
+  // akışı saniyede bir izle (geçici ağ hatası akışı bitirmez; 404 = akış yok)
+  useEffect(() => {
+    const id = flow?.id;
+    if (!id || (flow.state !== 'waiting' && flow.state !== 'exchanging')) return;
+    let inflight = false;
+    let fails = 0;
+    const t = window.setInterval(() => {
+      if (inflight) return;
+      inflight = true;
+      api
+        .oauthFlow(id)
+        .then((v) => ((fails = 0), setFlow((cur) => (cur?.id === id ? { ...cur, ...v } : cur))))
+        .catch((e: Error) => {
+          if (++fails >= 5 || /bulunamad/i.test(e.message)) setFlow((cur) => (cur?.id === id ? { ...cur, state: 'error', error: e.message } : cur));
+        })
+        .finally(() => (inflight = false));
+    }, 1000);
+    return () => window.clearInterval(t);
+  }, [flow?.id, flow?.state]);
+  // bitti → hesabın paneli + pencere öne; iptal (başka yerden) → panel kapanır
+  useEffect(() => {
+    const f = flow;
+    if (!f) return;
+    if (f.state === 'done' && f.accountId) {
+      const id = f.accountId;
+      rememberOfficial(id, true);
+      flowRef.current = null;
+      setFlow(null);
+      if (active === `${f.platform}:oauth`) setActive(id);
+      else notify(`${PLATFORMS[f.platform].name} bağlandı`);
+      void onChanged();
+      void bringToFront();
+    } else if (f.state === 'cancelled') {
+      flowRef.current = null;
+      setFlow(null);
+      setActive((cur) => (cur === `${f.platform}:oauth` ? (f.from ?? null) : cur));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flow?.state]);
+  // pencere kapanınca tarayıcıda bekleyen giriş iptal (bağlanmakta olan sürer); StrictMode'un deneme sökümünden sonra yeniden açık sayılır
+  useEffect(() => {
+    closedRef.current = false;
+    return () => {
+      closedRef.current = true;
+      const f = flowRef.current;
+      if (f?.id && f.state === 'waiting') void api.oauthCancel(f.id).catch(() => undefined);
+    };
+  }, []);
+
+  // ---- Telegram: QR ya da telefon numarası + kod ----
+  /** hesap → giriş yolu; geçişte o anki istem eskimiş sayılır (App istemleri silmez, eski "telefon" istemi QR'da görünmesin) */
+  const [tgMode, setTgMode] = useState<Record<string, 'qr' | 'phone'>>({});
+  const stalePrompt = useRef<Record<string, unknown>>({});
+  const tgPrompt = activeAccount?.platform === 'telegram' && prompts[activeAccount.id] !== stalePrompt.current[activeAccount.id] ? prompts[activeAccount.id] : undefined;
+  /** Telefonla giriş: seçildiyse ya da (pencere yeniden açıldı) çekirdek telefon/kod istiyorsa; QR yolunda yalnız 2FA parolası istenir */
+  const tgPhone = !!activeAccount && activeAccount.platform === 'telegram' && (tgMode[activeAccount.id] ?? (tgPrompt && tgPrompt.prompt !== 'password' ? 'phone' : 'qr')) === 'phone';
+  // bağlanan hesabın son istemi eskidir: sonraki eşleşmede (QR) görünmesin
+  useEffect(() => {
+    for (const a of accounts) if (a.platform === 'telegram' && a.status === 'connected' && prompts[a.id]) stalePrompt.current[a.id] = prompts[a.id];
+  }, [accounts, prompts]);
+  const tgRestart = (a: Account, mode: 'qr' | 'phone') => {
+    stalePrompt.current[a.id] = prompts[a.id];
+    setTgMode((m) => ({ ...m, [a.id]: mode }));
+    setInput('');
+    api.restartAccount(a.id, mode === 'phone' ? { phone: true } : undefined).catch((e) => notify(e.message, true));
+  };
 
   // ---- hareket (s11 + s4b): pencere yükselerek açılır, kartlar dalga halinde; kapanışta hızlanarak iner ----
   const ovRef = useRef<HTMLDivElement>(null);
@@ -123,9 +262,10 @@ export function ConnectModal({
     },
     [],
   );
-  // Başka bir pazaryerinin formuna geçince alanlar sıfırlansın ve açılan panel görünür alana kaydırılsın
+  // Başka bir pazaryerinin formuna geçince alanlar sıfırlansın (şifre güncellemede e-posta dolu) ve açılan panel görünür alana kaydırılsın
   useEffect(() => {
-    setShop({});
+    setShop(prefill.current);
+    prefill.current = {};
     setPat('');
     if (!active) return;
     requestAnimationFrame(() => document.querySelector('.overlay .pairbox')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
@@ -138,12 +278,38 @@ export function ConnectModal({
   const macOnlyOff = (p: Platform) => MAC_ONLY.has(p) && !!coreOs && coreOs !== 'darwin';
 
   /**
-   * Bağlan: WhatsApp/Telegram QR, sosyal medya ve e-posta sağlayıcıları kendi giriş penceresi (hemen açılır), iMessage bu Mac.
-   * Pazaryerleri: önce entegrasyon bilgileri formu, doldurulunca bağlanır.
+   * Bağlan: resmi girişi açık olanlar sağlayıcının sayfasında (Instagram/Messenger'da önce kişisel / profesyonel seçimi);
+   * WhatsApp/Telegram QR, diğer sosyal medya ve e-posta kendi giriş penceresi, iMessage bu Mac.
+   * iCloud / Diğer e-posta ve pazaryerleri: önce form, doldurulunca bağlanır. personal: Instagram/Messenger kişisel hesap (eski akış).
    */
-  async function add(platform: Platform) {
+  async function add(platform: Platform, opts: { personal?: boolean } = {}) {
     setBusy(true);
     try {
+      if (!USE_STATIC && OFFICIAL_WHO[platform] && !opts.personal) {
+        const off = await officialNow();
+        if (off.has(platform)) {
+          if (OFFICIAL_CHOICE.has(platform)) setActive(`${platform}:choose`);
+          else await startOfficial(platform);
+          return;
+        }
+      }
+      // iCloud: uygulamaya özel parola; Diğer e-posta: adres + şifre (IMAP/SMTP sunucusu çekirdekte bulunur)
+      const mailUser = sf('user').trim();
+      const mailPass = platform === 'icloud' ? sf('pass').replace(/\s+/g, '') : sf('pass');
+      if (PASS_MAIL.has(platform)) {
+        if (active !== `${platform}:new`) {
+          setActive(`${platform}:new`);
+          return;
+        }
+        if (!EMAIL_RE.test(mailUser)) {
+          notify('Geçerli bir e-posta adresi gir', true);
+          return;
+        }
+        if (!mailPass) {
+          notify(platform === 'icloud' ? 'Uygulamaya özel parolayı yapıştır' : 'Şifreni gir', true);
+          return;
+        }
+      }
       if (platform === 'shopier' && (active !== 'shopier:new' || !pat.trim())) {
         setActive('shopier:new');
         return;
@@ -160,7 +326,7 @@ export function ConnectModal({
       }
       // Demo sitesi: pazaryeri formu doldurulunca hesap örnek veriyle bağlanır (girilenler saklanmaz); diğerlerinde QR / giriş penceresi
       if (USE_STATIC) {
-        const filled = !!shopFields || platform === 'shopier';
+        const filled = !!shopFields || platform === 'shopier' || PASS_MAIL.has(platform);
         const a = await api.addAccount(platform, filled ? 'demo-form' : undefined);
         if (a.status !== 'connected') startedHere.current.add(a.id);
         setActive(a.id);
@@ -173,6 +339,7 @@ export function ConnectModal({
       }
       let token: string | undefined;
       if (platform === 'shopier') token = pat.trim();
+      if (PASS_MAIL.has(platform)) token = JSON.stringify({ user: mailUser, pass: mailPass });
       if (shopFields) {
         const cfg: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(shop)) if (v.trim()) cfg[k] = v.trim();
@@ -205,6 +372,7 @@ export function ConnectModal({
     try {
       // çekirdek hesabı hemen listeden kaldırıp yanıt verir (çıkış/silme arka planda); account.removed olayı kartı günceller
       await api.removeAccount(id);
+      rememberOfficial(id, false);
       if (active === id) setActive(null);
       notify('Kaldırıldı');
       void onChanged();
@@ -217,7 +385,7 @@ export function ConnectModal({
 
   async function sendInput() {
     if (!activeAccount) return;
-    const p = prompts[activeAccount.id];
+    const p = tgPrompt;
     if (!p || !input.trim()) return;
     try {
       await api.accountInput(activeAccount.id, p.prompt, input.trim());
@@ -226,6 +394,10 @@ export function ConnectModal({
       notify((e as Error).message, true);
     }
   }
+
+  /** Resmi girişli hesap yeniden giriş istiyor (oturum sona erdi / izin eksik; bkz. RELOGIN_RE) */
+  const expired = !!activeAccount && activeAccount.status !== 'connected' && needsRelogin(activeAccount);
+  const offAcc = !!activeAccount && isOfficialAccount(activeAccount);
 
   // Etkin kartın hemen altında açılan panel (form / QR / durum) — kullanıcı aşağı kaydırmak zorunda kalmasın
   const panel = (
@@ -358,9 +530,143 @@ export function ConnectModal({
           ) : null,
         )}
 
+        {flow && active === `${flow.platform}:oauth` && (
+          <div className="pairbox">
+            <div style={{ flexGrow: 1, minWidth: 0 }}>
+              <h3>{OFFICIAL_WHO[flow.platform]} ile giriş</h3>
+              {flow.state === 'error' ? (
+                <p className="cn-err">
+                  <Icon name="alert" size={15} sw={2.2} />
+                  <span>Giriş tamamlanamadı{flow.error ? `: ${flow.error}` : ''}</span>
+                </p>
+              ) : (
+                <p className="cn-wait">
+                  <span className="spin" />
+                  <span>
+                    {flow.state === 'starting'
+                      ? 'Giriş sayfası açılıyor…'
+                      : flow.state === 'exchanging' || flow.state === 'done'
+                        ? 'Hesap bağlanıyor…'
+                        : `${OFFICIAL_WHO[flow.platform]} giriş sayfası tarayıcında açıldı. Girişi orada tamamla; hesap burada kendiliğinden görünür.`}
+                  </span>
+                </p>
+              )}
+              <div className="cn-row">
+                {flow.state === 'error' ? (
+                  <button className="btn primary sm b" onClick={() => void startOfficial(flow.platform, { hint: flow.hint, from: flow.from })}>
+                    <Icon name="refresh" size={14} sw={2} /> Tekrar dene
+                  </button>
+                ) : (
+                  <button className="btn sm b b2" disabled={flow.state !== 'waiting'} onClick={() => flow.id && api.oauthOpen(flow.id).catch((e) => notify(e.message, true))}>
+                    <Icon name="external" size={13} sw={2} /> Sayfayı tekrar aç
+                  </button>
+                )}
+                <button className="btn sm b ghost" onClick={cancelFlow}>
+                  {flow.state === 'error' ? 'Kapat' : 'İptal'}
+                </button>
+              </div>
+              <p className="cn-note">
+                <Icon name="shield" size={14} sw={1.8} /> Şifren Mivelo’ya yazılmaz; giriş doğrudan {OFFICIAL_WHO[flow.platform]} sayfasında yapılır.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {(['instagram', 'messenger'] as Platform[]).map((p) =>
+          active === `${p}:choose` ? (
+            <div className="pairbox" key={p}>
+              <div style={{ flexGrow: 1, minWidth: 0 }}>
+                <h3>Hangi {PLATFORMS[p].name} hesabı?</h3>
+                <div className="cn-choices">
+                  <button className="cn-choice" disabled={busy} onClick={() => void add(p, { personal: true })}>
+                    <span className="ic">
+                      <Icon name="user" size={17} sw={2} />
+                    </span>
+                    <span>
+                      <b>{p === 'instagram' ? 'Kişisel hesap' : 'Kişisel Messenger'}</b>
+                      <small>Kendi hesabınla giriş</small>
+                    </span>
+                  </button>
+                  <button className="cn-choice" disabled={busy} onClick={() => void startOfficial(p)}>
+                    <span className="ic">
+                      <Icon name="shield" size={17} sw={2} />
+                    </span>
+                    <span>
+                      <b>{p === 'instagram' ? 'İşletme ya da içerik üretici hesabı' : 'Facebook Sayfası'}</b>
+                      <small>{p === 'instagram' ? 'Resmi Instagram girişi' : 'Resmi Facebook girişi'}</small>
+                    </span>
+                  </button>
+                </div>
+                <p className="cn-note">
+                  Resmi giriş yalnız {p === 'instagram' ? 'profesyonel hesabın' : 'Sayfanın'} mesajlarını getirir; kişi son 24 saatte yazmadıysa yanıt gönderilemez.
+                </p>
+              </div>
+            </div>
+          ) : null,
+        )}
+
+        {(['icloud', 'imap'] as Platform[]).map((p) =>
+          active === `${p}:new` ? (
+            <div className="pairbox" key={p}>
+              <div style={{ flexGrow: 1, minWidth: 0 }}>
+                <h3>{p === 'icloud' ? 'iCloud Mail’i bağla' : 'E-posta hesabını bağla'}</h3>
+                <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.5 }}>
+                  {p === 'icloud' ? (
+                    <>
+                      Apple, e-posta uygulamaları için <b>uygulamaya özel parola</b> ister. Bir kez oluştur, buraya yapıştır.
+                    </>
+                  ) : (
+                    <>E-posta adresini ve şifreni gir; sunucu ayarları kendiliğinden bulunur.</>
+                  )}
+                </p>
+                {p === 'icloud' && (
+                  <>
+                    <button className="btn sm b b2" style={{ marginTop: 12 }} onClick={() => void openExternal(APPLE_PW_URL)}>
+                      <Icon name="external" size={13} sw={2} /> Apple Hesabı’nda parola oluştur
+                    </button>
+                    {/* li esnek kutu: metin tek span'de (yoksa kalın kısmın iki yanında boşluk açılır) */}
+                    <ol>
+                      <li>
+                        <span>
+                          Apple Hesabı’nda <b>Giriş ve Güvenlik</b>’e gir
+                        </span>
+                      </li>
+                      <li>
+                        <span>
+                          <b>Uygulamaya özel parolalar</b>’dan yeni bir parola oluştur
+                        </span>
+                      </li>
+                      <li>
+                        <span>Parolayı kopyalayıp aşağıya yapıştır</span>
+                      </li>
+                    </ol>
+                  </>
+                )}
+                <div className="field cn-mailform">
+                  <input type="email" value={sf('user')} onChange={(e) => setSf('user', e.target.value)} placeholder="E-posta adresin" autoComplete="off" autoFocus={!sf('user')} />
+                  <PasswordInput
+                    value={sf('pass')}
+                    onChange={(e) => setSf('pass', e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && void add(p)}
+                    placeholder={p === 'icloud' ? 'Uygulamaya özel parola' : 'Şifre'}
+                    autoComplete="off"
+                    autoFocus={!!sf('user')}
+                  />
+                  <button className="btn lime b" onClick={() => void add(p)} disabled={busy || !sf('user').trim() || !sf('pass')}>
+                    Bağlan
+                  </button>
+                </div>
+                <p style={{ margin: '8px 0 0', fontSize: 12.5, color: 'var(--text3)', lineHeight: 1.5 }}>
+                  {p === 'icloud' ? 'Bu parola yalnız e-postana erişir; Apple Hesabı şifren değildir.' : 'Sağlayıcın uygulama şifresi istiyorsa onu gir.'} Yalnız bu bilgisayarda saklanır.
+                </p>
+              </div>
+            </div>
+          ) : null,
+        )}
+
         {activeAccount && (
           <div className="pairbox">
-            {(activeAccount.platform === 'whatsapp' || activeAccount.platform === 'telegram') && qr[activeAccount.id] && activeAccount.status === 'pairing' && (
+            {(activeAccount.platform === 'whatsapp' || (activeAccount.platform === 'telegram' && !tgPhone && !tgPrompt)) && qr[activeAccount.id] && activeAccount.status === 'pairing' && (
               <div className="qr">
                 <img src={qr[activeAccount.id]} alt="Eşleştirme kodu" />
               </div>
@@ -390,18 +696,47 @@ export function ConnectModal({
                 <DemoQrDone account={activeAccount} onDone={onChanged} />
               )}
 
-              {activeAccount.platform === 'telegram' && activeAccount.status === 'pairing' && !prompts[activeAccount.id] && (
-                <ol>
-                  <li>Telefonunda Telegram’ı aç</li>
-                  <li>
-                    <b>Ayarlar → Cihazlar → Masaüstü Cihazı Bağla</b>
-                  </li>
-                  <li>Kamerayı bu koda tut</li>
-                </ol>
+              {activeAccount.platform === 'telegram' && activeAccount.status === 'pairing' && !tgPrompt && !tgPhone && (
+                <>
+                  <ol>
+                    <li>Telefonunda Telegram’ı aç</li>
+                    <li>
+                      <b>Ayarlar → Cihazlar → Masaüstü Cihazı Bağla</b>
+                    </li>
+                    <li>Kamerayı bu koda tut</li>
+                  </ol>
+                  {!USE_STATIC && (
+                    <button className="cn-link" onClick={() => tgRestart(activeAccount, 'phone')}>
+                      <Icon name="phone" size={14} sw={2} /> Telefon numarasıyla giriş yap
+                    </button>
+                  )}
+                </>
+              )}
+              {tgPhone && activeAccount.status !== 'connected' && !tgPrompt && (
+                <p className="cn-wait" style={{ marginTop: 10 }}>
+                  <span className="spin" />
+                  <span>Telefon numarası isteniyor…</span>
+                </p>
+              )}
+              {/* resmi girişli hesabın oturumu düştü (yenileme belirteci geçersiz): sağlayıcının sayfasında yeniden giriş */}
+              {expired && (
+                <div className="cn-row">
+                  <button className="btn primary sm b" onClick={() => relogin(activeAccount)}>
+                    <Icon name="refresh" size={14} sw={2} /> Yeniden giriş yap
+                  </button>
+                </div>
+              )}
+              {/* iCloud: uygulamaya özel parolayla (IMAP) bağlanır; tarayıcıyla bağlanmış eski hesap da bu yola geçebilir */}
+              {activeAccount.platform === 'icloud' && activeAccount.status !== 'connected' && !(DEMO_OFFLINE && activeAccount.status === 'pairing') && (
+                <div className="cn-row">
+                  <button className="btn primary sm b" onClick={() => editCredentials(activeAccount)}>
+                    <Icon name="lock" size={14} sw={2} /> Uygulamaya özel parolayla bağlan
+                  </button>
+                </div>
               )}
 
               {DEMO_OFFLINE && PLATFORMS[activeAccount.platform].mode === 'browser' && activeAccount.status === 'pairing' && <DemoLogin account={activeAccount} onDone={onChanged} />}
-              {!DEMO_OFFLINE && PLATFORMS[activeAccount.platform].mode === 'browser' && activeAccount.status !== 'connected' && (
+              {!DEMO_OFFLINE && PLATFORMS[activeAccount.platform].mode === 'browser' && activeAccount.status !== 'connected' && !expired && !offAcc && (activeAccount.platform !== 'icloud' || activeAccount.status === 'pairing') && (
                 <>
                   {(activeAccount.detail ?? '').includes('Yeniden bağlan') ? (
                     <p style={{ margin: '6px 0 10px', fontSize: 13.5 }}>
@@ -438,15 +773,16 @@ export function ConnectModal({
                   <li>Mivelo'yu yeniden başlatıp <b>Yeniden dene</b>'ye bas</li>
                 </ol>
               )}
-              {activeAccount.platform === 'telegram' && prompts[activeAccount.id] && activeAccount.status === 'pairing' && (
+              {activeAccount.platform === 'telegram' && tgPrompt && (activeAccount.status === 'pairing' || activeAccount.status === 'connecting') && (
                 <div style={{ marginTop: 12 }}>
-                  <p style={{ margin: '0 0 8px', fontSize: 13.5 }}>{prompts[activeAccount.id].message}</p>
+                  <p style={{ margin: '0 0 8px', fontSize: 13.5 }}>{tgPrompt.message}</p>
                   <div className="field">
                     <InputOrPassword
-                      password={prompts[activeAccount.id].prompt === 'password'}
+                      key={tgPrompt.prompt}
+                      password={tgPrompt.prompt === 'password'}
                       value={input}
                       onChange={(e) => setInput(e.target.value)}
-                      placeholder={prompts[activeAccount.id].prompt === 'phone' ? '+90…' : prompts[activeAccount.id].prompt === 'code' ? '12345' : '••••••'}
+                      placeholder={tgPrompt.prompt === 'phone' ? '+90…' : tgPrompt.prompt === 'code' ? '12345' : '••••••'}
                       onKeyDown={(e) => e.key === 'Enter' && sendInput()}
                       autoFocus
                     />
@@ -457,14 +793,38 @@ export function ConnectModal({
                 </div>
               )}
 
-              {(activeAccount.status === 'error' || activeAccount.status === 'disconnected') && (
+              {/* telefonla girişten QR'a dönüş (istem kutusunun altında) */}
+              {tgPhone && activeAccount.status !== 'connected' && (
+                <button className="cn-link" onClick={() => tgRestart(activeAccount, 'qr')}>
+                  <Icon name="grid" size={14} sw={2} /> QR ile giriş yap
+                </button>
+              )}
+              {(activeAccount.status === 'error' || activeAccount.status === 'disconnected') && !expired && (
                 <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   {PLATFORMS[activeAccount.platform].category === 'shop' && (
                     <button className="btn primary b" onClick={() => editCredentials(activeAccount)}>
                       <Icon name="lock" size={14} sw={2} /> API bilgilerini güncelle
                     </button>
                   )}
-                  <button className="btn darksec b" onClick={() => api.restartAccount(activeAccount.id).catch((e) => notify(e.message, true))}>
+                  {activeAccount.platform === 'imap' && (
+                    <button className="btn primary b" onClick={() => editCredentials(activeAccount)}>
+                      <Icon name="lock" size={14} sw={2} /> Şifreyi güncelle
+                    </button>
+                  )}
+                  {offAcc && (
+                    <button className="btn primary b" onClick={() => relogin(activeAccount)}>
+                      <Icon name="refresh" size={14} sw={2} /> Yeniden giriş yap
+                    </button>
+                  )}
+                  <button
+                    className="btn darksec b"
+                    onClick={() => {
+                      // Telegram telefonla girişteyse yine telefonla (yeni istem gelecek: eskisi gizlensin)
+                      const phone = tgPhone;
+                      if (phone) stalePrompt.current[activeAccount.id] = prompts[activeAccount.id];
+                      api.restartAccount(activeAccount.id, phone ? { phone: true } : undefined).catch((e) => notify(e.message, true));
+                    }}
+                  >
                     <Icon name="refresh" size={14} sw={2} /> Yeniden dene
                   </button>
                 </div>
@@ -476,6 +836,15 @@ export function ConnectModal({
               )}
               {activeAccount.status === 'connected' && !activeAccount.attention && (
                 <p style={{ margin: '10px 0 0', fontSize: 13.5, color: 'var(--text2)' }}>Bağlı. {PLATFORMS[activeAccount.platform].category === 'shop' ? 'Siparişler ve müşteri soruları' : 'Sohbetler'} gelen kutusuna geliyor.</p>
+              )}
+              {/* tarayıcıyla / uygulama şifresiyle bağlı e-posta hesabı: resmi giriş açıksa ona geçebilir (aynı adresli hesap güncellenir) */}
+              {!expired && !offAcc && PLATFORMS[activeAccount.platform].category === 'mail' && official.has(activeAccount.platform) && (
+                <div className="cn-switch">
+                  <button className="btn sm b b2" onClick={() => relogin(activeAccount)}>
+                    <Icon name="shield" size={14} sw={2} /> Resmi girişe geç
+                  </button>
+                  <span>{OFFICIAL_WHO[activeAccount.platform]} sayfasıyla giriş; e-postalar doğrudan sunucudan gelir, arka planda tarayıcı çalışmaz.</span>
+                </div>
               )}
             </div>
           </div>
@@ -503,10 +872,8 @@ export function ConnectModal({
             const meta = PLATFORMS[p];
             // kartın durumu en iyi durumdaki hesaptan (bağlı olan önde); ilk kaydı göstermek bağlı hesabın yanında "Bağlı değil" yazıyordu
             const acc = accounts.filter((a) => a.platform === p).sort((x, y) => STATUS_RANK[x.status] - STATUS_RANK[y.status]);
-            // Diğer e-posta (IMAP): web girişi yok, şifre uygulamaya yazılmaz → yeni bağlantı yok; eskiden kalan hesap kaldırılabilsin
-            if (p === 'imap' && acc.length === 0) return null;
             const isConn = connected.includes(p);
-            const isActive = acc.some((a) => a.id === active) || active === `${p}:new`;
+            const isActive = acc.some((a) => a.id === active) || active === `${p}:new` || active === `${p}:oauth` || active === `${p}:choose`;
             const macOnly = macOnlyOff(p);
             // yalnız Mac kanalı: yeni bağlantı kapalı; eskiden kalan hesap varsa kaldırılabilsin
             const available = meta.available && (!macOnly || acc.length > 0);
@@ -575,7 +942,7 @@ export function ConnectModal({
                     </>
                   )}
                   {available && acc.length === 0 && (
-                    <button className="btn sm primary b" onClick={() => add(p)} disabled={busy}>
+                    <button className="btn sm primary b" onClick={() => add(p)} disabled={busy || (flow?.platform === p && flow.state !== 'error')}>
                       Bağlan
                     </button>
                   )}
@@ -647,6 +1014,66 @@ function celebrate(card: HTMLElement): void {
 /** Hata: kart ±8 px kısa sallanır (360 ms; yalnız transform, taşma yok) */
 function shake(card: HTMLElement): void {
   animate(card, [{ transform: 'none' }, { transform: 'translateX(-8px)' }, { transform: 'translateX(8px)' }, { transform: 'translateX(-6px)' }, { transform: 'translateX(4px)' }, { transform: 'none' }], { duration: 360, easing: 'ease-in-out' });
+}
+
+/**
+ * Resmi girişle bağlanan hesaplar (bu cihazda hatırlanır; çekirdek Account.official gönderirse o geçerli): bunlarda "Giriş ekranını aç"
+ * (tarayıcı girişine geçirir) gösterilmez, sorun olunca "Yeniden giriş yap" resmi girişi açar.
+ */
+const OFFICIAL_KEY = 'mivelo.officialAccounts';
+let officialCache: Set<string> | null = null;
+function officialIds(): Set<string> {
+  if (officialCache) return officialCache;
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(OFFICIAL_KEY) || '[]');
+    officialCache = new Set(Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+  } catch {
+    officialCache = new Set();
+  }
+  return officialCache;
+}
+function rememberOfficial(id: string, on: boolean): void {
+  const ids = new Set(officialIds());
+  if (on) ids.add(id);
+  else ids.delete(id);
+  officialCache = ids;
+  try {
+    localStorage.setItem(OFFICIAL_KEY, JSON.stringify([...ids].slice(-50)));
+  } catch {
+    /* depolama kapalı: bu oturumda bellekte */
+  }
+}
+export function isOfficialAccount(a: Account): boolean {
+  return a.official ?? officialIds().has(a.id);
+}
+
+/** Hesabın e-posta adresi (resmi girişte loginHint, şifre formunda dolu alan) */
+function mailOf(a: Account): string | undefined {
+  const l = accountLabel(a);
+  return l && EMAIL_RE.test(l) ? l : undefined;
+}
+
+/** Resmi giriş tamamlandı: kullanıcı tarayıcıdan Mivelo'ya dönsün (masaüstünde pencere öne gelir) */
+async function bringToFront(): Promise<void> {
+  if (!isTauri) {
+    try {
+      window.focus();
+    } catch {
+      /* yok */
+    }
+    return;
+  }
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('focus_window');
+  } catch {
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      await getCurrentWindow().setFocus();
+    } catch {
+      /* eski kabuk */
+    }
+  }
 }
 
 /** Eski sürümlerin yazdığı hatalı etiketler (Facebook hata sayfası başlığı, Outlook localStorage anahtarı) */

@@ -88,8 +88,18 @@ const liveApi = {
   accounts: () => call<Account[]>('GET', '/accounts'),
   addAccount: (platform: Platform, token?: string) => call<Account>('POST', '/accounts', { platform, token }),
   removeAccount: (id: string) => call('DELETE', `/accounts/${enc(id)}`),
-  /** browserLogin: e-posta hesabını sağlayıcının kendi giriş penceresiyle yeniden bağla (uygulama şifreli eski hesap da geçer) */
-  restartAccount: (id: string, opts?: { browserLogin?: boolean }) => call('POST', `/accounts/${enc(id)}/restart`, opts),
+  /** browserLogin: e-posta hesabını sağlayıcının kendi giriş penceresiyle yeniden bağla (uygulama şifreli eski hesap da geçer);
+   *  phone: Telegram'da QR yerine telefon numarası + kodla giriş */
+  restartAccount: (id: string, opts?: { browserLogin?: boolean; phone?: boolean }) => call('POST', `/accounts/${enc(id)}/restart`, opts),
+  // ---- resmi giriş (OAuth): sağlayıcının kendi giriş sayfası varsayılan tarayıcıda açılır; şifre Mivelo'ya girilmez ----
+  /** Resmi girişi açık platformlar (force: çekirdeğin önbelleğini atla) */
+  oauthProviders: (force = false) => call<{ platforms?: Platform[] }>('GET', `/oauth/providers${force ? '?force=1' : ''}`).then((r) => r.platforms ?? []),
+  /** Girişi başlat: tarayıcı açılınca döner; loginHint = yeniden girişte hesabın e-posta adresi */
+  oauthStart: (platform: Platform, loginHint?: string) => call<FlowView>('POST', '/oauth/start', { platform, ...(loginHint ? { loginHint } : {}) }),
+  oauthFlow: (id: string) => call<FlowView>('GET', `/oauth/flows/${enc(id)}`),
+  /** Giriş sayfasını tarayıcıda yeniden aç */
+  oauthOpen: (id: string) => call<{ ok: boolean }>('POST', `/oauth/flows/${enc(id)}/open`),
+  oauthCancel: (id: string) => call<{ ok: boolean }>('POST', `/oauth/flows/${enc(id)}/cancel`),
   messageHtml: (messageId: string) => call<{ html: string }>('GET', `/messages/${enc(messageId)}/html`),
   loginInput: (id: string, events: LoginInput[]) => call('POST', `/accounts/${enc(id)}/login-input`, { events }),
   loginCancel: (id: string) => call('POST', `/accounts/${enc(id)}/login-cancel`),
@@ -160,6 +170,18 @@ const liveApi = {
   setMarketDigest: (s: Partial<MarketDigest>) => call<MarketDigest>('POST', '/market/digest', s),
   questionDraft: (chatId: string) => call<QuestionDraftResult>('POST', `/chats/${enc(chatId)}/question-draft`),
 };
+/** Resmi giriş akışı (çekirdek oauth/flows.ts FlowView ile aynı) */
+export type FlowState = 'waiting' | 'exchanging' | 'done' | 'error' | 'cancelled';
+export interface FlowView {
+  id: string;
+  platform: Platform;
+  provider: string;
+  state: FlowState;
+  url?: string;
+  accountId?: string;
+  error?: string;
+}
+
 /** Gün sonu özeti bildirimi ayarı (çekirdek ~/.mivelo/market-digest.json; demoda localStorage) */
 export interface MarketDigest {
   enabled: boolean;

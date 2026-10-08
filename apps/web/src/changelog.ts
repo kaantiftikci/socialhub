@@ -16,6 +16,29 @@ export interface ChangeEntry {
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    id: '2026-10-08a',
+    date: '2026-10-08',
+    title: 'Resmi girişle bağlan',
+    items: [
+      {
+        title: 'E-posta, sağlayıcının kendi girişiyle',
+        text: 'Gmail, Outlook, Yahoo ve Yandex hesabını Google, Microsoft, Yahoo ya da Yandex’in kendi giriş sayfasıyla bağlarsın; sayfa varsayılan tarayıcında açılır, şifren Mivelo’ya hiç yazılmaz. Her sağlayıcının onayı tamamlandıkça Bağlan ekranında kendiliğinden açılır.',
+      },
+      {
+        title: 'iCloud ve diğer e-postalar',
+        text: 'iCloud Mail, Apple’ın resmi yolu olan uygulamaya özel parolayla bağlanır; Bağlan ekranındaki düğme parolayı oluşturacağın Apple sayfasını açar. Kendi alan adındaki e-posta da adres ve şifreyle yeniden eklenebiliyor.',
+      },
+      {
+        title: 'Slack, Instagram işletme ve Facebook Sayfası',
+        text: 'Slack resmi Slack girişiyle bağlanabilir. İşletme ya da içerik üretici Instagram hesabı ve Facebook Sayfası mesajları da Meta’nın resmi girişiyle gelir; kişisel hesaplar eskisi gibi bağlanır.',
+      },
+      {
+        title: 'Telegram’a telefon numarasıyla giriş',
+        text: 'QR okutamıyorsan Telegram kartındaki “Telefon numarasıyla giriş yap” ile numaranı, gelen kodu ve varsa iki adımlı doğrulama parolanı girerek bağlanırsın.',
+      },
+    ],
+  },
+  {
     id: '2026-10-01g',
     date: '2026-10-01',
     title: 'Küçük ama sevilen şeyler',

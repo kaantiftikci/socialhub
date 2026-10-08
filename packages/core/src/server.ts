@@ -14,7 +14,8 @@ import { markActive } from './activity.js';
 import type { Store } from './store.js';
 import type { Registry } from './registry.js';
 import type { Connector, LoginInput } from './connectors/base.js';
-import { resolveOAuth } from './connectors/mail.js';
+import { resolveOAuth } from './oauth/callback.js';
+import { OFFICIAL_PROVIDER, cancelFlow, getFlow, officialPlatforms, reopenFlow, startFlow } from './oauth/flows.js';
 import { bus } from './bus.js';
 import { sidecar } from './connectors/mautrix/sidecar.js';
 import { AiError, aiEnabled, aiKey, aiKeySource, draftReply, isAiTone, setAiKey } from './ai.js';
@@ -388,8 +389,37 @@ export function createServer(store: Store, registry: Registry, port: number): ht
     localOnly(r);
     if (!store.getAccount(dec(p.id))) throw new HttpError(404, 'Hesap yok');
     // browserLogin: e-posta hesabı sağlayıcının giriş penceresiyle yeniden bağlanır (uygulama şifreli eski hesap da)
-    await registry.restart(dec(p.id), { browserLogin: (body as { browserLogin?: unknown } | undefined)?.browserLogin === true });
+    const b = (body ?? {}) as { browserLogin?: unknown; phone?: unknown };
+    // phone: Telegram'da QR yerine telefon numarası + kodla resmi giriş
+    await registry.restart(dec(p.id), { browserLogin: b.browserLogin === true, phone: b.phone === true });
     return { ok: true };
+  });
+  // ───── Resmi giriş (OAuth): sağlayıcının kendi giriş sayfası varsayılan tarayıcıda; şifre Mivelo'ya girilmez ─────
+  route('GET', '/api/oauth/providers', async (r) => {
+    const force = new URL(r.url ?? '/', 'http://x').searchParams.get('force') === '1';
+    return { platforms: await officialPlatforms(force) };
+  });
+  route('POST', '/api/oauth/start', async (r, _s, _p, body) => {
+    localOnly(r);
+    const b = (body ?? {}) as { platform?: unknown; loginHint?: unknown };
+    const platform = String(b.platform ?? '') as Platform;
+    if (!OFFICIAL_PROVIDER[platform]) throw new HttpError(400, 'Bu uygulamada resmi giriş yok');
+    if (!(await officialPlatforms()).includes(platform)) throw new HttpError(409, 'Resmi giriş henüz etkin değil');
+    const hint = typeof b.loginHint === 'string' && b.loginHint.length < 200 ? b.loginHint : undefined;
+    return startFlow(platform, { add: (pl, o) => registry.add(pl, o) }, { loginHint: hint });
+  });
+  route('GET', '/api/oauth/flows/:id', async (_r, _s, p) => {
+    const f = getFlow(dec(p.id));
+    if (!f) throw new HttpError(404, 'Giriş bulunamadı');
+    return f;
+  });
+  route('POST', '/api/oauth/flows/:id/open', async (r, _s, p) => {
+    localOnly(r);
+    return { ok: reopenFlow(dec(p.id)) };
+  });
+  route('POST', '/api/oauth/flows/:id/cancel', async (r, _s, p) => {
+    localOnly(r);
+    return { ok: cancelFlow(dec(p.id)) };
   });
   // Mivelo içi giriş ekranı: fare/klavye girdisi, iptal, ayrı pencereye geçiş
   route('POST', '/api/accounts/:id/login-input', async (_r, _s, p, body) => {
@@ -1134,10 +1164,17 @@ export function createServer(store: Store, registry: Registry, port: number): ht
         return void res.end(JSON.stringify({ error: 'Lisans gerekli', license: true }));
       }
       if (req.method === 'GET' && url.pathname === '/oauth/callback') {
-        const ok = resolveOAuth(url.searchParams.get('state') ?? '', { code: url.searchParams.get('code') ?? undefined, error: url.searchParams.get('error') ?? undefined });
-        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        const q = url.searchParams;
+        const err = q.get('error') ? (q.get('error_description') || q.get('error') || undefined) : undefined;
+        // Instagram kodun sonuna "#_" ekleyebilir (parça tarayıcıda kalır; yine de temizle)
+        const code = (q.get('code') ?? '').replace(/#_$/, '') || undefined;
+        const ok = resolveOAuth(q.get('state') ?? '', { code, error: err ?? (code ? undefined : 'Giriş iptal edildi') });
+        const good = ok && !!code;
+        const title = good ? 'Giriş tamamlandı' : ok ? 'Giriş tamamlanmadı' : 'Bu giriş artık beklenmiyor';
+        const text = good ? 'Mivelo hesabını bağlıyor. Bu sekmeyi kapatıp Mivelo’ya dönebilirsin.' : ok ? 'İzin verilmedi ya da giriş iptal edildi. Mivelo’dan yeniden deneyebilirsin.' : 'Bağlantı zaman aşımına uğramış olabilir. Mivelo’da Bağlan’a yeniden bas.';
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
         return void res.end(
-          `<!doctype html><meta charset="utf-8"><body style="font-family:-apple-system,Inter,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#f7f6fa;color:#111016"><div style="text-align:center"><div style="font-size:40px">${ok ? '✅' : '⚠️'}</div><h2 style="margin:8px 0">${ok ? 'Bağlandı' : 'Bekleyen giriş yok'}</h2><p style="color:#6b6878">Bu pencere kendiliğinden kapanır; kapanmazsa kapatabilirsin.</p></div><script>setTimeout(()=>window.close(),1200)</script>`,
+          `<!doctype html><html lang="tr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mivelo</title><style>body{font-family:-apple-system,BlinkMacSystemFont,Inter,Segoe UI,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;background:#f7f6fa;color:#16131f}@media(prefers-color-scheme:dark){body{background:#131118;color:#f1eff6}p{color:#a29db0!important}}.c{text-align:center;max-width:420px;padding:24px}.m{width:56px;height:56px;border-radius:16px;background:#6c47ff;display:inline-grid;place-items:center;margin-bottom:14px}h1{font-size:22px;margin:0 0 8px}p{color:#6b6878;line-height:1.5;margin:0}</style><div class="c"><div class="m"><svg width="30" height="30" viewBox="0 0 28 28"><path d="M8 8c4.5 0 6 3 6 6s1.5 6 6 6M8 20c4.5 0 6-3 6-6" stroke="#fff" stroke-width="2.3" fill="none" stroke-linecap="round"/><circle cx="20" cy="8" r="2.5" fill="#D4FF3F"/></svg></div><h1>${title}</h1><p>${text}</p></div>${good ? '<script>setTimeout(()=>{try{window.close()}catch(e){}},1500)</script>' : ''}</html>`,
         );
       }
       // Medya vekili: /api/media/<hesap>?u=<uzak adres> — çerezli oturumla indirir, önbelleğe alır

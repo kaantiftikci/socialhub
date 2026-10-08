@@ -320,6 +320,26 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
 #smtpForm{max-width:none}
 .sm-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px 12px}.sm-grid .sm-host{grid-column:span 2}.sm-grid label{display:block;margin-bottom:4px}.sm-grid .input{width:100%;box-sizing:border-box}
 @media (max-width:760px){.sm-grid{grid-template-columns:1fr 1fr}.sm-grid .sm-host{grid-column:span 2}}
+/* resmi giriş uygulamaları */
+#oaCard{min-width:0}
+.oa{border-top:1px solid var(--line-2)}.oa:first-child{border-top:0}
+.oa>summary{list-style:none;display:flex;align-items:center;gap:10px;padding:12px 2px;cursor:pointer}
+.oa>summary::-webkit-details-marker{display:none}
+.oa>summary b{font-size:14px;flex:none}.oa>summary .muted{font-size:12.5px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.oa>summary .chip{flex:none}
+.oa>summary .acc-chev{margin-left:auto}
+.oa[open]>summary .acc-chev{transform:rotate(180deg)}
+.oa-body{padding:0 2px 16px;display:flex;flex-direction:column;gap:12px}
+.oa-sw{display:inline-flex;align-items:center;gap:8px;font-weight:500;cursor:pointer;color:var(--ink)!important;font-size:13.5px!important}
+.oa-sw input{width:18px;height:18px}
+.oa-cb{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px}
+.oa-cb code{background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:5px 9px;font-size:12.5px;word-break:break-all}
+.oa-steps{margin:0;padding-left:20px;font-size:13px;line-height:1.55;color:var(--ink-2)}
+.oa-steps li{margin:3px 0}.oa-steps code{background:var(--bg-2);border-radius:5px;padding:1px 5px;font-size:12px}
+.oa-note{font-size:12.5px;line-height:1.5}
+.oa-acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.st-off{background:var(--bg-2);color:var(--ink-3)}
+.st-warn{background:var(--warn-soft);color:var(--warn)}
 </style>
 </head>
 <body>
@@ -538,6 +558,11 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
             <pre id="smLog" class="muted" style="display:none;white-space:pre-wrap;font-size:11.5px;max-height:220px;overflow:auto;background:var(--bg-2);padding:10px;border-radius:10px;margin:0"></pre>
           </form>
         </div>
+        <div class="card" style="grid-column:1/-1" id="oaCard">
+          <h3>Resmi giriş uygulamaları <span class="sub" id="oaState"></span></h3>
+          <p class="muted" style="margin:0 0 6px;font-size:13px;line-height:1.5">Masaüstü uygulaması e-posta, Slack, Instagram ve Messenger hesaplarını sağlayıcının <b>kendi giriş sayfasıyla</b> bağlar. Burada Mivelo'nun sağlayıcılarda açtığın uygulamalarının bilgileri durur: istemci gizi yalnız bu sunucuda kalır, uygulamalara yalnız istemci kimliği gider (<code>api/oauth.php?action=config</code>). Kapalı ya da eksik sağlayıcıda uygulama eski giriş yolunu kullanır. Değişiklik uygulamalara Bağlan penceresi açılınca, en geç 6 saatte ulaşır.</p>
+          <div id="oaBox"><div class="empty">Yükleniyor…</div></div>
+        </div>
         <div class="card">
           <h3>Sistem</h3>
           <dl class="kv" id="sysBox"></dl>
@@ -659,7 +684,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   }
   function load(id,force){
     if(loaded[id] && !force) return; loaded[id]=true;
-    ({genel:loadOverview,liste:loadList,uye:loadPeople,trafik:loadOverview,demo:loadDemo,lisans:loadLic,geri:loadFb,gorev:loadTasks,ayar:function(){ loadSystem(); loadSmtp(); }})[id]();
+    ({genel:loadOverview,liste:loadList,uye:loadPeople,trafik:loadOverview,demo:loadDemo,lisans:loadLic,geri:loadFb,gorev:loadTasks,ayar:function(){ loadSystem(); loadSmtp(); loadOAuth(); }})[id]();
   }
   window.addEventListener('hashchange',route);
 
@@ -1084,6 +1109,89 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     api('smtp_probe',{}).then(function(r){ var t=r.verdict+'\n\n'+r.report+(r.ticket?'\n\n——— Destek talebine yapıştır ———\n'+r.ticket:''); $('#smLog').textContent=t; $('#smLog').style.display='block';
       if(r.ticket&&navigator.clipboard) navigator.clipboard.writeText(r.ticket).then(function(){ toast('Tanı tamam; destek metni panoya kopyalandı'); },function(){ toast('Tanı tamam'); }); else toast('Tanı tamam'); })
       .catch(function(x){ toast(x.message,true); }).then(function(){ b.disabled=false; b.textContent='Sunucu bağlantı tanısı'; }); });
+  /* ---------- resmi giriş uygulamaları (OAuth aracısı) ---------- */
+  var OA_SLACK_SCOPES='channels:history, groups:history, im:history, mpim:history, channels:read, groups:read, im:read, mpim:read, users:read, chat:write, reactions:read, reactions:write, files:read, files:write, channels:write, groups:write, im:write, mpim:write';
+  var OA_INFO={
+    google:{what:'Gmail',link:'https://console.cloud.google.com/auth/clients',cb:null,
+      cbNote:'Kayıt gerekmez: "Masaüstü uygulaması" türü istemci yerel geri dönüşe (<code>http://127.0.0.1:&lt;port&gt;/oauth/callback</code>) kendiliğinden izin verir.',
+      steps:['Google Cloud Console → yeni proje → <b>Google Auth Platform</b> (OAuth izin ekranı): Harici, uygulama adı Mivelo, ana sayfa <code>https://mivelo.app</code>, gizlilik <code>https://mivelo.app/gizlilik.html</code>, yetkili alan adı <code>mivelo.app</code>.',
+        'Veri erişimi (kapsamlar): <code>openid</code>, <code>email</code>, <code>https://mail.google.com/</code>. Son kapsam <b>kısıtlı</b>: herkese açmak için Google doğrulaması + güvenlik değerlendirmesi (CASA) gerekir. O zamana dek yalnız eklediğin test kullanıcıları (≤100) girebilir ve test modunda oturum 7 günde düşer.',
+        'İstemciler → İstemci oluştur → uygulama türü <b>Masaüstü uygulaması</b> → istemci kimliği ve gizini buraya yapıştır.']},
+    microsoft:{what:'Outlook, Hotmail, Microsoft 365',link:'https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade',cb:['http://localhost/oauth/callback'],
+      cbNote:'Port yazma: Microsoft localhost adresinde portu yok sayar.',
+      steps:['Microsoft Entra → Uygulama kayıtları → Yeni kayıt: ad Mivelo, desteklenen hesap türü <b>herhangi bir kuruluş dizinindeki hesaplar ve kişisel Microsoft hesapları</b>.',
+        'Kimlik doğrulama → Platform ekle → <b>Mobil ve masaüstü uygulamaları</b> → yönlendirme adresi yukarıdaki; <b>Genel istemci akışlarına izin ver: Evet</b>.',
+        'API izinleri → Microsoft Graph → Temsilci: <code>IMAP.AccessAsUser.All</code>, <code>SMTP.Send</code>, <code>offline_access</code>, <code>openid</code>, <code>email</code>, <code>profile</code>.',
+        'Genel bakıştaki <b>Uygulama (istemci) kimliği</b>ni buraya yapıştır. Gizi oluşturma: Mivelo genel istemcidir (PKCE), değişim kullanıcının bilgisayarında yapılır. Kurumsal hesaplarda kiracı yöneticisinin onayı ve SMTP AUTH gerekebilir.']},
+    yahoo:{what:'Yahoo Mail',link:'https://developer.yahoo.com/apps/',cb:'bounce',
+      steps:['developer.yahoo.com → My Apps → Create an App: Application Type <b>Web Application</b>, Redirect URI(s) yukarıdaki adres.',
+        'API Permissions → OpenID Connect: <b>Email</b>. Posta erişimi (<code>mail-w</code>) listede yok: Yahoo\'nun <b>Mail API erişimi</b> başvuru formunu doldur; onay gelene dek giriş "invalid_scope" verir.',
+        'Client ID (Consumer Key) ve Client Secret (Consumer Secret) buraya.']},
+    yandex:{what:'Yandex Mail',link:'https://oauth.yandex.com/client/new',cb:'bounce',
+      steps:['oauth.yandex.com → uygulama oluştur: platform <b>Web hizmetleri</b>, Redirect URI yukarıdaki adres.',
+        'Erişimler: Yandex ID → e-posta adresi (<code>login:email</code>) ve ad (<code>login:info</code>); Yandex Mail → IMAP ile posta (<code>mail:imap_full</code>) ve SMTP ile gönderim (<code>mail:smtp</code>).',
+        'ClientID ve Client secret buraya. Kullanıcının Yandex Posta ayarlarında IMAP erişimi açık olmalı.']},
+    slack:{what:'Slack',link:'https://api.slack.com/apps',cb:'bounce',
+      steps:['api.slack.com/apps → Create New App → From scratch (ad Mivelo).',
+        'OAuth &amp; Permissions → Redirect URLs: yukarıdaki adres. <b>User Token Scopes</b> (bot kapsamı ekleme): <code>'+OA_SLACK_SCOPES+'</code>.',
+        'Manage Distribution → <b>Activate Public Distribution</b> (yoksa uygulama yalnız kendi çalışma alanına kurulur). Token Rotation isteğe bağlı (açıksa uygulama 12 saatte bir kendisi yeniler).',
+        'Basic Information → App Credentials: Client ID ve Client Secret buraya.',
+        'Slack Marketplace onayı yoksa Slack geçmiş isteklerini dakikada 1 ve ≤15 mesajla sınırlar; onay gelince yukarıdaki <b>Marketplace onaylı</b> kutusunu işaretle.']},
+    instagram:{what:'Instagram (işletme / içerik üretici hesapları)',link:'https://developers.facebook.com/apps/',cb:'bounce',
+      steps:['developers.facebook.com → Uygulama oluştur → kullanım alanı <b>Instagram\'da mesajları ve içeriği yönet</b>.',
+        'Instagram → <b>Instagram girişiyle API kurulumu</b> → İşletme girişi ayarları → OAuth yönlendirme URI\'leri: yukarıdaki adres.',
+        'Aynı sayfadaki <b>Instagram uygulama kimliği</b> ve <b>Instagram uygulama gizi</b>ni buraya yapıştır (Meta uygulama kimliği DEĞİL).',
+        'Uygulama incelemesi: <code>instagram_business_basic</code>, <code>instagram_business_manage_messages</code> (gelişmiş erişim) + işletme doğrulaması, sonra Canlı mod. O zamana dek yalnız uygulamada rolü olan hesaplar girebilir.']},
+    facebook:{what:'Messenger (Facebook Sayfası mesajları)',link:'https://developers.facebook.com/apps/',cb:'bounce',
+      steps:['Aynı Meta uygulamasına <b>Messenger\'da müşterilerle etkileşim kur</b> kullanım alanını ve Facebook Girişi ürününü ekle.',
+        'Facebook Girişi → Ayarlar → <b>Geçerli OAuth Yönlendirme URI\'leri</b>: yukarıdaki adres (Web OAuth girişi ve HTTPS zorunlu açık).',
+        'Uygulama ayarları → Temel: <b>Uygulama kimliği</b> ve <b>Uygulama gizi</b> buraya.',
+        'Uygulama incelemesi: <code>pages_show_list</code>, <code>pages_messaging</code>, <code>pages_manage_metadata</code>, <code>pages_read_engagement</code> (gelişmiş erişim) + işletme doğrulaması, sonra Canlı mod. Kişisel Messenger değil, yalnız Sayfa mesajları.']}
+  };
+  var OA=null;
+  function oaChip(c){ return c.live?'<span class="chip st-joined"><i></i>Açık</span>':c.enabled?'<span class="chip st-warn"><i></i>Eksik</span>':'<span class="chip st-off"><i></i>Kapalı</span>'; }
+  function renderOAuth(open){
+    var ps=OA.providers, ks=Object.keys(ps), live=ks.filter(function(k){ return ps[k].live; }).length;
+    $('#oaState').textContent=live?live+' / '+ks.length+' sağlayıcı açık':'hiçbiri açık değil';
+    $('#oaBox').innerHTML=ks.map(function(k){
+      var c=ps[k], info=OA_INFO[k]||{steps:[]}, cbs=info.cb==='bounce'?[OA.bounce]:(info.cb||[]);
+      var sec=c.needsSecret?'<div class="sm-host"><label for="oaS-'+k+'">İstemci gizi</label><input class="input" id="oaS-'+k+'" name="clientSecret" type="password" autocomplete="new-password" placeholder="'+(c.hasSecret?'kayıtlı '+esc(c.secretHint)+' — değiştirmeyeceksen boş bırak':'istemci gizi')+'"></div>':'';
+      var extra='';
+      if(k==='slack') extra='<div class="sm-host" style="display:flex;align-items:flex-end"><label class="oa-sw" title="Slack Marketplace\'te onaylı uygulamada geçmiş sınırı yok"><input type="checkbox" name="market"'+(c.historyLimited===false?' checked':'')+'> Marketplace onaylı</label></div>';
+      if(k==='instagram'||k==='facebook') extra='<div><label for="oaG-'+k+'">Graph sürümü</label><input class="input" id="oaG-'+k+'" name="graphVersion" value="'+esc(c.graphVersion||'v23.0')+'" placeholder="v23.0"></div>';
+      if(k==='facebook') extra+='<div><label for="oaC-'+k+'">Yapılandırma kimliği (config_id, İşletmeler için Facebook Girişi kullanıyorsan)</label><input class="input" id="oaC-'+k+'" name="configId" value="'+esc(c.configId||'')+'" placeholder="boş: klasik Facebook Girişi" inputmode="numeric"></div>';
+      return '<details class="oa" data-p="'+k+'"'+(open===k?' open':'')+'><summary><b>'+esc(c.name)+'</b><span class="muted">'+esc(info.what||'')+'</span>'+oaChip(c)+'<span class="acc-chev">'+I.chev+'</span></summary>'+
+        '<form class="oa-body" data-p="'+k+'" autocomplete="off">'+
+          '<label class="oa-sw"><input type="checkbox" name="enabled"'+(c.enabled?' checked':'')+'> Etkin (uygulamalar bu girişi kullanır)</label>'+
+          '<div class="sm-grid"><div class="sm-host"><label for="oaI-'+k+'">İstemci kimliği</label><input class="input" id="oaI-'+k+'" name="clientId" value="'+esc(c.clientId)+'" spellcheck="false"></div>'+sec+extra+'</div>'+
+          '<div class="oa-cb"><span class="muted">Geri dönüş adresi:</span>'+(cbs.length?cbs.map(function(u){ return '<code>'+esc(u)+'</code><button class="btn sm" type="button" data-copy="'+esc(u)+'">Kopyala</button>'; }).join(''):'')+(info.cbNote?'<span class="muted oa-note">'+info.cbNote+'</span>':'')+'</div>'+
+          '<ol class="oa-steps">'+info.steps.map(function(s){ return '<li>'+s+'</li>'; }).join('')+'</ol>'+
+          '<div class="oa-acts"><button class="btn dark" type="submit">Kaydet</button>'+(c.needsSecret&&c.hasSecret?'<button class="btn danger" type="button" data-oa-clear>Gizi sil</button>':'')+
+            '<a class="btn" href="'+esc(info.link||'#')+'" target="_blank" rel="noopener noreferrer">Sağlayıcı konsolu ↗</a>'+
+            '<span class="muted" style="font-size:12px">'+(c.updatedAt?'son değişiklik '+ago(c.updatedAt):'henüz kaydedilmedi')+'</span></div>'+
+        '</form></details>';
+    }).join('');
+  }
+  function loadOAuth(open){ api('oauth_get').then(function(d){ OA=d; renderOAuth(open); }).catch(function(e){ $('#oaBox').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; }); }
+  function saveOAuth(f,clear){
+    var k=f.dataset.p, g=function(n){ var el=f.elements[n]; return el?el:null; };
+    var body={provider:k,enabled:g('enabled').checked,clientId:g('clientId').value.trim()};
+    if(g('clientSecret')) body.clientSecret=g('clientSecret').value.trim();
+    if(g('market')) body.historyLimited=!g('market').checked;
+    if(g('graphVersion')) body.graphVersion=g('graphVersion').value.trim();
+    if(g('configId')) body.configId=g('configId').value.trim();
+    if(clear){ body.clearSecret=true; body.enabled=false; }
+    var b=f.querySelector('[type=submit]'); b.disabled=true;
+    api('oauth_set',body).then(function(d){ OA=d; renderOAuth(k); var c=d.providers[k]; toast(clear?'Gizi silindi; '+c.name+' kapatıldı':(c.live?c.name+' resmi girişi açık':c.name+' kaydedildi (kapalı)')); })
+      .catch(function(x){ toast(x.message,true); b.disabled=false; });
+  }
+  $('#oaBox').addEventListener('submit',function(e){ var f=e.target.closest('form.oa-body'); if(!f) return; e.preventDefault(); saveOAuth(f,false); });
+  $('#oaBox').addEventListener('click',function(e){
+    var cp=e.target.closest('[data-copy]');
+    if(cp){ var v=cp.dataset.copy; (navigator.clipboard?navigator.clipboard.writeText(v):Promise.reject()).then(function(){ toast('Kopyalandı'); },function(){ toast(v); }); return; }
+    var cl=e.target.closest('[data-oa-clear]');
+    if(cl){ if(cl.dataset.armed){ saveOAuth(cl.closest('form'),true); return; } cl.dataset.armed='1'; cl.textContent='Emin misin? Gizi sil'; setTimeout(function(){ if(cl.isConnected){ delete cl.dataset.armed; cl.textContent='Gizi sil'; } },4000); }
+  });
   $('#pwForm').addEventListener('submit',function(e){ e.preventDefault();
     api('password',{current:$('#pwCur').value,next:$('#pwNew').value}).then(function(){ $('#pwCur').value=''; $('#pwNew').value=''; toast('Şifre değiştirildi'); loaded.ayar=false; load('ayar'); }).catch(function(x){ toast(x.message,true); }); });
 

@@ -37,6 +37,8 @@ import { MAIL_PLATFORMS } from './model.js';
 import { bootOrder, bootSlots, type BootInfo } from './boot-plan.js';
 import { MautrixConnector, MAUTRIX_NET } from './connectors/mautrix/connector.js';
 import { ensureBinary, sidecar } from './connectors/mautrix/sidecar.js';
+import { MetaGraphConnector } from './connectors/meta-graph.js';
+import { officialKind } from './oauth/flows.js';
 
 /** Hesap ↔ connector eşlemesi. Açılışta kayıtlı hesapları kaldırır, yenilerini oluşturur. */
 /** Asılı kalan stop()/logout() HTTP isteğini sonsuza dek bekletmesin */
@@ -76,7 +78,7 @@ export class Registry {
   private transient(a: Account): boolean {
     const d = (a.detail ?? '').replace(/\s+/g, ' ');
     const hard =
-      /reddedildi|şifre|parola|kimlik doğrulama|yetkisiz|unauthori[sz]ed|invalid|authenticationfailed|login failed|auth(entication)? failed|\b40[1-6]\b|api anahtar|girilmedi|yalnızca macos|bulunamadı|tam disk|playwright paketi|kısıtlan|başka bir yerde|giriş yapılmadı|iptal|doğrulanamadı|captcha|güvenlik doğrulaması|lisans/i;
+      /reddedildi|şifre|parola|kimlik doğrulama|yetkisiz|unauthori[sz]ed|invalid|authenticationfailed|login failed|auth(entication)? failed|\b40[1-6]\b|api anahtar|girilmedi|yalnızca macos|bulunamadı|tam disk|playwright paketi|kısıtlan|başka bir yerde|giriş yapılmadı|iptal|doğrulanamadı|captcha|güvenlik doğrulaması|lisans|sona erdi|yeniden giriş yap/i; // resmi girişte oturum düştü: kullanıcı yeniden giriş yapmalı (ölü belirteçle aracıya tekrar gidilmez)
     if (a.status === 'error') return !hard.test(d);
     if (a.status === 'disconnected') return !!d && !hard.test(d);
     // açılışta ya da yoklamada "giriş gerekli / oturum düştü" (sayfa geç çizildi, ağ koptu): yalnız tarayıcı kanallarında, penceresiz yeniden denetim
@@ -224,7 +226,8 @@ export class Registry {
       const att = (this.connectors.get(a.id) as { attention?: string } | undefined)?.attention;
       const h = this.heal.get(a.id);
       const retry = a.status !== 'connected' && !!h?.timer && !h.visible;
-      return att || retry ? { ...a, ...(att ? { attention: att } : {}), ...(retry ? { autoRetry: true } : {}) } : a;
+      const official = this.officialIds.has(a.id);
+      return att || retry || official ? { ...a, ...(att ? { attention: att } : {}), ...(retry ? { autoRetry: true } : {}), ...(official ? { official: true } : {}) } : a;
     });
   }
 
@@ -275,6 +278,12 @@ export class Registry {
     bus.emit({ type: 'account.status', account: next });
   }
 
+  /** Hesabın bağlantı yolu değişti: eski yolun sohbetlerini bir kez sil (yeni yol kendi kimlikleriyle yeniden eşitler, kopya olmaz) */
+  private dropForEngineSwitch(a: Account): void {
+    const n = this.store.dropAccountChats(a.id);
+    if (n) bus.log('info', `${a.id}: bağlantı yolu değişti (resmi giriş), ${n} sohbet yeniden eşitlenecek`);
+  }
+
   add(platform: Platform, opts: { token?: string; label?: string } = {}): Promise<Account> {
     // aynı platforma eşzamanlı iki "Bağlan": ikincisi birincinin açtığı hesabı görsün (kopya hesap açılmasın)
     return this.serial(`add:${platform}`, () => this.addNow(platform, opts));
@@ -285,7 +294,11 @@ export class Registry {
     const SINGLE: Platform[] = ['whatsapp', 'telegram', 'slack', 'imessage', 'linkedin', 'x', 'instagram', 'messenger', 'tiktok', 'shopier', 'trendyol', 'hepsiburada', 'etsy', 'shopify', 'n11', 'amazon', 'pttavm', 'mivelo'];
     const existing = SINGLE.includes(platform) ? this.list().find((a) => a.platform === platform) : undefined;
     if (existing) {
-      if (opts.token) fs.writeFileSync(path.join(sessionDir(existing.id), 'token'), opts.token, { mode: 0o600 });
+      if (opts.token) {
+        // bağlantı yolu değişti (köprü/tarayıcı → resmi API ya da tersi): sohbet kimlikleri farklı, eskiler bir kez silinip yeniden eşitlenir
+        if (engineOf(platform, readToken(existing.id)) !== engineOf(platform, opts.token)) this.dropForEngineSwitch(existing);
+        fs.writeFileSync(path.join(sessionDir(existing.id), 'token'), opts.token, { mode: 0o600 });
+      }
       await this.restart(existing.id);
       return existing;
     }
@@ -314,9 +327,12 @@ export class Registry {
       const next = parseJson(opts.token);
       const user = String(next.user ?? '').trim().toLowerCase();
       const same = user
-        ? this.list().find((a) => a.platform === platform && String(parseJson(readToken(a.id)).user ?? a.label ?? '').trim().toLowerCase() === user)
+        ? (this.list().find((a) => a.platform === platform && String(parseJson(readToken(a.id)).user ?? a.label ?? '').trim().toLowerCase() === user) ??
+          // resmi giriş: aynı adresin tarayıcıyla bağlanmış (token'sız) eski hesabı yerine geçer
+          (next.oauth ? this.list().find((a) => a.platform === platform && readToken(a.id) === undefined && String(a.label ?? '').toLowerCase().includes(user)) : undefined))
         : undefined;
       if (same) {
+        if (engineOf(platform, readToken(same.id)) !== engineOf(platform, opts.token)) this.dropForEngineSwitch(same);
         const merged = { ...parseJson(readToken(same.id)) };
         for (const [k, v] of Object.entries(next)) if (v !== undefined && v !== null && v !== '') merged[k] = v;
         fs.writeFileSync(path.join(sessionDir(same.id), 'token'), JSON.stringify(merged), { mode: 0o600 });
@@ -422,7 +438,7 @@ export class Registry {
    * opts.browserLogin: e-posta sağlayıcısının kendi giriş penceresiyle yeniden bağlan — uygulama şifresiyle (eski IMAP yolu, token
    * dosyası) bağlanmış hesap da token'ı bırakıp tarayıcı girişine geçer (arayüzde artık şifre formu yok; Kaan 29.09).
    */
-  restart(id: string, opts: { external?: boolean; browserLogin?: boolean } = {}): Promise<void> {
+  restart(id: string, opts: { external?: boolean; browserLogin?: boolean; phone?: boolean } = {}): Promise<void> {
     return this.serial(id, () => this.restartNow(id, opts));
   }
 
@@ -435,7 +451,7 @@ export class Registry {
     this.heal.delete(id);
   }
 
-  private async restartNow(id: string, opts: { external?: boolean; browserLogin?: boolean } = {}): Promise<void> {
+  private async restartNow(id: string, opts: { external?: boolean; browserLogin?: boolean; phone?: boolean } = {}): Promise<void> {
     this.stopHeal(id);
     const a = this.store.getAccount(id);
     if (!a) throw new Error('Hesap yok');
@@ -455,7 +471,7 @@ export class Registry {
       this.connectors.delete(id);
       await withTimeout(c.stop(), 15_000).catch(() => undefined);
     }
-    await this.spawn(a, true, window, !!opts.external, login);
+    await this.spawn(a, true, window, !!opts.external, login, !!opts.phone);
   }
 
   /** Bir düzeltmeden sonra hesabın sohbetlerini bir kez silip yeniden eşitlet (işaret dosyası hesabın oturum klasöründe) */
@@ -467,13 +483,28 @@ export class Registry {
     fs.writeFileSync(file, '');
   }
 
-  private async spawn(account: Account, interactive = true, window = false, external = false, login = false): Promise<void> {
+  /** Resmi girişle (OAuth) bağlı hesaplar: list() ve durum olaylarında `official` */
+  private officialIds = new Set<string>();
+
+  private async spawn(account: Account, interactive = true, window = false, external = false, login = false, phone = false): Promise<void> {
     let c: Connector | undefined;
+    if (isOfficialToken(readToken(account.id))) {
+      this.officialIds.add(account.id);
+      account.official = true;
+    } else {
+      this.officialIds.delete(account.id);
+      delete account.official;
+    }
     // Beeper (mautrix) köprüleri: WhatsApp, Instagram, Messenger, X, LinkedIn, Slack — ikili yoksa eski bağlayıcılar
     if (mautrixWanted(account)) {
       const bin = await ensureBinary();
       if (bin) c = new MautrixConnector(account, this.store);
       else bus.log('warn', `${account.platform}: köprü bileşeni yok, eski bağlayıcı kullanılıyor`);
+    }
+    // Meta resmi Graph API (Instagram profesyonel hesap / Facebook Sayfası Messenger): resmi girişle gelen belirteç dosyası
+    if (!c && (account.platform === 'instagram' || account.platform === 'messenger')) {
+      const kind = officialKind(readToken(account.id));
+      if (kind) c = new MetaGraphConnector(account, this.store, kind);
     }
     if (!c) switch (account.platform) {
       case 'whatsapp':
@@ -487,7 +518,7 @@ export class Registry {
         const tokenFile = path.join(sessionDir(account.id), 'token');
         // belirteç dosyası: düz xoxp (eski) ya da {token, appToken} (Bağlan → Slack uygulaması; appToken varsa Socket Mode)
         const tok = fs.existsSync(tokenFile) ? parseSlackToken(fs.readFileSync(tokenFile, 'utf8')) : undefined;
-        c = tok ? new SlackConnector(account, this.store, tok.token, tok.appToken) : new BrowserConnector(account, this.store, slackStrategy, 30_000, { keepOpen: 'whileActive', rtSlowdown: 3, backfillMs: 8_000 }); // Mivelo öndeyken web istemcisi açık + kendi soketi dinlenir (anlık), boşta sayfasız 30 sn
+        c = tok ? new SlackConnector(account, this.store, tok.token, tok.appToken, { historyLimited: tok.historyLimited === true, refresh: tok.refreshToken ? { token: tok.refreshToken, expiresAt: tok.expiresAt } : undefined, official: tok.oauth === 'slack', team: tok.team }) : new BrowserConnector(account, this.store, slackStrategy, 30_000, { keepOpen: 'whileActive', rtSlowdown: 3, backfillMs: 8_000 }); // Mivelo öndeyken web istemcisi açık + kendi soketi dinlenir (anlık), boşta sayfasız 30 sn
         break;
       }
       case 'demo':
@@ -631,7 +662,7 @@ export class Registry {
     }
     this.connectors.set(account.id, c);
     // start() uzun sürebilir (QR bekleme vb.); arka planda çalışsın
-    void c.start({ interactive, window, external, login }).catch((e) => bus.log('error', `${account.platform} hata: ${(e as Error).message}`));
+    void c.start({ interactive, window, external, login, ...(phone ? { phone } : {}) }).catch((e) => bus.log('error', `${account.platform} hata: ${(e as Error).message}`));
   }
 
   async stopAll(): Promise<void> {
@@ -652,6 +683,8 @@ const MAIL_BROWSER_LOGIN: Platform[] = ['gmail', 'outlook', 'yahoo', 'yandex', '
 function mautrixWanted(a: Account): boolean {
   if (!MAUTRIX_NET[a.platform] || process.env.MIVELO_ENGINE === 'legacy') return false;
   if (a.platform === 'slack' && readToken(a.id) !== undefined) return false;
+  // resmi Graph girişi (Instagram profesyonel / Facebook Sayfası) köprüye gitmez
+  if ((a.platform === 'instagram' || a.platform === 'messenger') && officialKind(readToken(a.id))) return false;
   return true;
 }
 
@@ -661,11 +694,12 @@ function isBrowserAccount(a: Account): boolean {
   const hasToken = readToken(a.id) !== undefined;
   switch (a.platform) {
     case 'linkedin':
-    case 'instagram':
     case 'x':
-    case 'messenger':
     case 'tiktok':
       return true;
+    case 'instagram':
+    case 'messenger':
+      return !officialKind(readToken(a.id));
     case 'slack':
     case 'gmail':
     case 'outlook':
@@ -676,6 +710,19 @@ function isBrowserAccount(a: Account): boolean {
     default:
       return false;
   }
+}
+
+/** Token dosyası resmi girişten mi (e-posta/Slack `oauth`, Meta `official`) */
+function isOfficialToken(raw: string | undefined): boolean {
+  if (!raw || !raw.trim().startsWith('{')) return false;
+  const j = parseJson(raw);
+  return typeof j.oauth === 'string' || j.official === 'instagram' || j.official === 'facebook';
+}
+
+/** Hesabın bağlantı yolu (sohbet kimlik şeması): değişince eski sohbetler bir kez silinir */
+function engineOf(platform: Platform, token: string | undefined): string {
+  if (platform === 'instagram' || platform === 'messenger') return officialKind(token) ?? 'bridge';
+  return token !== undefined && token.trim() !== '' ? 'token' : 'session';
 }
 
 function parseJson(t: string | undefined): Record<string, unknown> {

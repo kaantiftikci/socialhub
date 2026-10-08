@@ -637,10 +637,11 @@
     <tr><td><b>Protokol kütüphanesi</b></td><td>Platformun resmi istemci API'si (MTProto) kendi uygulama kimliğiyle.</td><td>Telegram</td></tr>
     <tr><td><b>Tarayıcı köprüsü</b></td><td>Mivelo'ya özel kalıcı Chromium profilinde kullanıcı bir kez giriş yapar; sonra aynı profil görünmez modda arka planda yoklanır; sayfa yapısı (DOM) okunur. Köprü ikilisi yoksa yukarıdaki kanalların da yedek yolu.</td><td>TikTok, Gmail, Outlook, Yahoo, iCloud, Yandex</td></tr>
     <tr><td><b>Yerel veritabanı</b></td><td>İşletim sisteminin kendi uygulamasının veritabanı salt okunur açılır; gönderim sistem otomasyonuyla.</td><td>iMessage (yalnız macOS)</td></tr>
+    <tr><td><b>Resmi giriş (OAuth 2.0)</b></td><td>Hesap sağlayıcının kendi giriş sayfasıyla, kullanıcının varsayılan tarayıcısında bağlanır (RFC 8252); şifre Mivelo'ya yazılmaz. İstemci kimlikleri mivelo.app'ten okunur; istemci gizi gereken sağlayıcılarda kod → belirteç değişimi mivelo.app aracısında yapılır, belirteç orada saklanmaz. E-posta IMAP/SMTP XOAUTH2 ile, Slack/Meta resmi Web/Graph API ile çalışır. Sağlayıcı onayı tamamlanmadıysa eski yol kullanılır.</td><td>Gmail, Outlook, Yahoo, Yandex, Slack, Instagram (işletme/içerik üretici), Messenger (Facebook Sayfası)</td></tr>
     <tr><td><b>Resmi API</b></td><td>Platformun belgelenmiş API'si, satıcı panelinden alınan entegrasyon bilgileriyle.</td><td>Trendyol, Hepsiburada, n11, ePttAVM, Amazon, Etsy, Shopify, Shopier; Slack (eski xoxp yolu)</td></tr>
   </tbody>
 </table>
-<div class="callout"><b>Bağlanma ilkesi (30.09 itibarıyla).</b> Uygulamada kullanıcı adı/şifre formu yoktur. Mesajlaşma ve e-postada kullanıcı platformun kendi giriş penceresinde ya da QR ile giriş yapar; şifre Mivelo'dan geçmez. Kalan tek formlar pazaryeri API anahtarları ve Telegram'ın istediği iki adımlı doğrulama parolasıdır.</div>
+<div class="callout"><b>Bağlanma ilkesi (08.10 itibarıyla).</b> Her kanal, sağlayıcının sunduğu resmi giriş yoluyla bağlanır: Google, Microsoft, Yahoo, Yandex, Slack ve Meta (işletme hesapları) için OAuth; Telegram için QR ya da telefon numarası + kod (MTProto); iCloud için Apple'ın uygulamaya özel parolası; kendi alan adlı e-postalarda IMAP adresi ve şifre; pazaryerlerinde satıcı panelinin API bilgileri. Resmi API'si olmayan kişisel hesaplar (WhatsApp, kişisel Instagram/Messenger, X, LinkedIn, TikTok) köprü ya da tarayıcı yoluyla kalır.</div>
 
 <h2 id="s6-2">Yetenek matrisi</h2>
 <p class="small muted"><span class="dot"></span> destekleniyor · <span class="dot half"></span> kısmen · <span class="none">–</span> yok. "Geçmiş" = yukarı kaydırınca eski mesaj yükleme.</p>
@@ -656,7 +657,7 @@
     <tr><td>X</td><td>Köprü</td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="badge b-warn">Yeni altyapı</span></td></tr>
     <tr><td>LinkedIn</td><td>Köprü</td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="badge b-warn">Yeni altyapı</span></td></tr>
     <tr><td>TikTok</td><td>Tarayıcı</td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="none">–</span></td><td><span class="none">–</span></td><td><span class="none">–</span></td><td><span class="none">–</span></td><td><span class="dot half"></span></td><td><span class="none">–</span></td><td><span class="badge b-warn">Doğrulanmadı</span></td></tr>
-    <tr><td>E-posta (5 sağlayıcı)</td><td>Tarayıcı</td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot half"></span></td><td><span class="none">–</span></td><td><span class="dot"></span></td><td><span class="none">–</span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="badge b-ok">Kararlı</span>*</td></tr>
+    <tr><td>E-posta (5 sağlayıcı)</td><td>Resmi giriş / IMAP</td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot half"></span></td><td><span class="none">–</span></td><td><span class="dot"></span></td><td><span class="none">–</span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="badge b-ok">Kararlı</span>*</td></tr>
     <tr><td>Pazaryerleri</td><td>Resmi API</td><td><span class="dot"></span></td><td><span class="dot half"></span></td><td><span class="none">–</span></td><td><span class="none">–</span></td><td><span class="none">–</span></td><td><span class="none">–</span></td><td><span class="none">–</span></td><td><span class="dot"></span></td><td>Kanala göre</td></tr>
   </tbody>
 </table>
@@ -673,7 +674,7 @@
 
 <div class="plat"><div class="plat-h"><h4><span class="sw" style="background:#1B7FB8"></span>Telegram</h4><span class="badge b-ok">Kararlı</span></div><dl>
   <dt>Yöntem</dt><dd>MTProto, teleproto (GramJS'in bakımı süren çatalı; GramJS Temmuz 2026'da arşivlendi). Mivelo'nun kendi uygulama kimliğiyle.</dd>
-  <dt>Bağlanma</dt><dd>Bağlan → QR (<code>tg://login</code>) → telefonda Ayarlar › Cihazlar › Masaüstü Cihazı Bağla. İki adımlı doğrulama varsa parola sorulur.</dd>
+  <dt>Bağlanma</dt><dd>Bağlan → QR (<code>tg://login</code>) → telefonda Ayarlar › Cihazlar › Masaüstü Cihazı Bağla. Ya da "Telefon numarasıyla giriş yap": numara → Telegram'a gelen kod. İki adımlı doğrulama varsa parola sorulur.</dd>
   <dt>Destek</dt><dd>Metin, dosya, medya, tepki, yanıt, düzenleme (48 sa), herkesten silme, okundu (karşı tarafın okuma noktası), canlı düzenleme/silme olayları, kopmada kaçan güncellemelerin telafisi (getDifference).</dd>
   <dt>Sınırlar</dt><dd>Bekçi 60 sn; tam sohbet taraması 10 dakikada bir; ilk temas günde 50, toplam 2500.</dd>
 </dl></div>
@@ -687,21 +688,21 @@
 
 <div class="plat"><div class="plat-h"><h4><span class="sw" style="background:#4A154B"></span>Slack</h4><span class="badge b-warn">İzleniyor</span></div><dl>
   <dt>Yöntem</dt><dd>Tarayıcı köprüsü: web istemcisinin oturum anahtarı (xoxc) + çerez ile Slack Web API'si; sayfanın RTM soketi pasif dinlenir. Eski kurulumlarda xoxp belirteçli resmi yol (Socket Mode ile) sürer.</dd>
-  <dt>Bağlanma</dt><dd>Bağlan → Slack giriş penceresi → kullanıcı listeden çalışma alanını açar (oturum çerezi ancak o zaman yazılır).</dd>
+  <dt>Bağlanma</dt><dd>Resmi giriş açıksa: Bağlan → Slack'in izin sayfası (tarayıcıda) → kullanıcı belirteciyle resmi Web API. Mivelo uygulaması Slack Marketplace'te değilken geçmiş istekleri dakikada 1 ile sınırlı; yeni mesajlar sohbet bilgisinden hemen görünür, eski mesajlar sırayla gelir. Kapalıysa: Slack giriş penceresi → çalışma alanını aç.</dd>
   <dt>Destek</dt><dd>Kanallar, DM'ler, iş parçacığı yanıtları, dosya gönder/indir, tepki, düzenle/sil, okundu (conversations.mark), eski mesajlar.</dd>
   <dt>Sınırlar</dt><dd>Yoklama 30 sn; sayfa yalnız Mivelo öndeyken açık tutulur. İlk temas 300, toplam 5000/gün. 30.09'da "kişiler geliyor, mesaj gelmiyor" sorunu için beş düzeltme yapıldı; kök neden kesinleşmedi.</dd>
 </dl></div>
 
 <div class="plat"><div class="plat-h"><h4><span class="sw" style="background:#C13584"></span>Instagram</h4><span class="badge b-ok">Kararlı</span></div><dl>
   <dt>Yöntem</dt><dd>Tarayıcı köprüsü; web istemcisinin <code>direct_v2</code> uçları. Anlık sinyal: sayfanın kendi lightspeed WebSocket'i pasif dinlenir.</dd>
-  <dt>Bağlanma</dt><dd>Bağlan → Instagram giriş penceresi (2FA dahil) → giriş algılanınca pencere kapanır, arka planda görünmez devam eder.</dd>
+  <dt>Bağlanma</dt><dd>Kişisel hesap: Bağlan → Instagram giriş penceresi (2FA dahil). İşletme/içerik üretici hesabı: resmi Instagram girişi (Instagram API, yalnız metin; kişi son 24 saatte yazmadıysa yanıt gönderilemez).</dd>
   <dt>Destek</dt><dd>Metin, fotoğraf/video (çerezli vekil + önbellek), paylaşılan gönderi/reel/hikaye önizlemesi, tepki, alıntılı yanıt, geri alma (unsend), görüldü bilgisi.</dd>
   <dt>Sınırlar</dt><dd>Odakta 30 sn, boşta 120 sn; anlık sinyal canlıysa seyrekleşir (yedek 5 dk). İlk temas 80, toplam 600/gün.</dd>
 </dl></div>
 
 <div class="plat"><div class="plat-h"><h4><span class="sw" style="background:#0866FF"></span>Messenger</h4><span class="badge b-warn">Kısmen doğrulandı</span></div><dl>
   <dt>Yöntem</dt><dd>Tarayıcı köprüsü, sayfa yapısı (DOM) okuma: önce facebook.com/messages, olmazsa messenger.com. Lightspeed soketi anlık sinyal için pasif dinlenir. En kırılgan kanal.</dd>
-  <dt>Bağlanma</dt><dd>Bağlan → Facebook giriş penceresi. Şifreli sohbet PIN'i istenirse kanal satırında "PIN'i gir" uyarısı.</dd>
+  <dt>Bağlanma</dt><dd>Kişisel Messenger: Bağlan → Facebook giriş penceresi; şifreli sohbet PIN'i istenirse "PIN'i gir" uyarısı. Facebook Sayfası: resmi Facebook girişi (Messenger Platform; birden çok Sayfa, 24 saat kuralı).</dd>
   <dt>Destek</dt><dd>Metin okuma/gönderme, görüldü, tepki rozetlerinin gösterimi. Tepki gönderme yok.</dd>
   <dt>Sınırlar</dt><dd>30 sn yoklama. İlk temas 80, toplam 600/gün. facebook.com düzeni gerçek hesapla henüz doğrulanmadı.</dd>
 </dl></div>
@@ -732,11 +733,11 @@
 <table>
   <thead><tr><th class="w-name">Sağlayıcı</th><th>Yöntem</th><th>Yoklama / açık tutma</th><th>Durum</th></tr></thead>
   <tbody>
-    <tr><td>Gmail</td><td>Tarayıcı: Google girişi, Gmail web sayfası okunur, yanıt Gmail düzenleyicisiyle. Eski hesaplarda IMAP/OAuth.</td><td>Odakta 30 sn, boşta 90 sn; sayfa yalnız odaktayken açık</td><td><span class="badge b-ok">Kararlı</span></td></tr>
-    <tr><td>Outlook</td><td>Tarayıcı: Microsoft girişi, Outlook web.</td><td>90 sn; sayfa sürekli açık, canlı liste izleyici ile 270 sn</td><td><span class="badge b-ok">Kararlı</span></td></tr>
-    <tr><td>Yahoo Mail</td><td>Tarayıcı (mail.yahoo.com); Yahoo birçok hesapta uygulama şifresini kapattı.</td><td>Odak durumuna göre</td><td><span class="badge b-warn">Doğrulanmadı</span></td></tr>
-    <tr><td>iCloud Mail</td><td>Tarayıcı: Apple girişi, icloud.com/mail.</td><td>Odakta 30 sn, boşta 90 sn</td><td><span class="badge b-ok">Kararlı</span></td></tr>
-    <tr><td>Yandex Mail</td><td>Tarayıcı: passport.yandex girişi, mail.yandex.com.</td><td>Odak durumuna göre</td><td><span class="badge b-ok">Kararlı</span></td></tr>
+    <tr><td>Gmail</td><td>Resmi Google girişi → IMAP/SMTP (XOAUTH2, IDLE ile anlık). Onay tamamlanana dek tarayıcı yolu.</td><td>Odakta 30 sn, boşta 90 sn; sayfa yalnız odaktayken açık</td><td><span class="badge b-ok">Kararlı</span></td></tr>
+    <tr><td>Outlook</td><td>Resmi Microsoft girişi (genel istemci + PKCE) → IMAP/SMTP XOAUTH2. Onay tamamlanana dek Outlook web.</td><td>90 sn; sayfa sürekli açık, canlı liste izleyici ile 270 sn</td><td><span class="badge b-ok">Kararlı</span></td></tr>
+    <tr><td>Yahoo Mail</td><td>Resmi Yahoo girişi (Mail API onayı gerekir) → IMAP/SMTP XOAUTH2; onay gelene dek tarayıcı (mail.yahoo.com).</td><td>Odak durumuna göre</td><td><span class="badge b-warn">Doğrulanmadı</span></td></tr>
+    <tr><td>iCloud Mail</td><td>Apple'ın resmi yolu: uygulamaya özel parola + IMAP/SMTP (imap.mail.me.com). Eski tarayıcıyla bağlı hesaplar sürer.</td><td>Odakta 30 sn, boşta 90 sn</td><td><span class="badge b-ok">Kararlı</span></td></tr>
+    <tr><td>Yandex Mail</td><td>Resmi Yandex girişi → IMAP/SMTP XOAUTH2; onay gelene dek tarayıcı (mail.yandex.com).</td><td>Odak durumuna göre</td><td><span class="badge b-ok">Kararlı</span></td></tr>
     <tr><td>Diğer IMAP</td><td>Yalnız mevcut eski hesaplar (yeni eklenemez): imapflow + IDLE, nodemailer SMTP, otomatik sunucu bulma.</td><td>IDLE ile anlık; yedek 10 dk</td><td><span class="badge b-plan">Eski yol</span></td></tr>
   </tbody>
 </table>

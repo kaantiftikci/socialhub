@@ -8,12 +8,16 @@ import { type ComposeDraft, BaseConnector, type StartOptions } from './base.js';
 import { bus } from '../bus.js';
 import { sessionDir } from '../config.js';
 import { cleanMailHtml } from './mail-html.js';
+import { failAllOAuth, waitOAuth } from '../oauth/callback.js';
+import { OAuthError, PROVIDER_NAME, refreshToken, type OAuthProvider } from '../oauth/index.js';
 import type { Attachment, Chat, Participant, Platform } from '../model.js';
 
 /**
- * E-posta: IMAP (okuma) + SMTP (gönderme). Gmail / Yahoo / iCloud / özel sunucu için
- * uygulama şifresiyle; Outlook / Microsoft 365 için ücretsiz Azure uygulama kimliğiyle
- * "cihaz kodu" OAuth akışı (Microsoft kişisel hesaplarda şifreyle IMAP'ı kapattı).
+ * E-posta: IMAP (okuma) + SMTP (gönderme).
+ * - Resmi giriş (`oauth`: Google / Microsoft / Yahoo / Yandex): sağlayıcının kendi giriş sayfasıyla alınan belirteçle
+ *   IMAP + SMTP XOAUTH2; erişim belirteci merkezi modülle (oauth/index.ts) yenilenir, şifre Mivelo'da hiç tutulmaz.
+ * - Uygulama şifresi (iCloud, "Diğer e-posta", eski Gmail/Yahoo/Yandex hesapları).
+ * - Eski yollar: kendi Google Cloud istemcili Gmail OAuth, Azure kimlikli Outlook "cihaz kodu" akışı.
  *
  * Her e-posta konuşması (thread) bir sohbet, her e-posta bir mesajdır. Yanıt, son gelen
  * e-postaya In-Reply-To/References ile SMTP üzerinden gönderilir.
@@ -32,6 +36,8 @@ export interface MailConfig {
   refreshToken?: string;
   accessToken?: string;
   expiresAt?: number;
+  /** Resmi giriş sağlayıcısı (oauth/flows buildAccountToken yazar): belirteçler merkezi modülle yenilenir */
+  oauth?: OAuthProvider;
 }
 
 const PRESETS: Partial<Record<Platform, Required<Pick<MailConfig, 'host' | 'port' | 'secure' | 'smtpHost' | 'smtpPort' | 'smtpSecure'>>>> = {
@@ -63,25 +69,8 @@ const GOOGLE_TOKEN = 'https://oauth2.googleapis.com/token';
 const GOOGLE_SCOPE = 'https://mail.google.com/';
 const CALLBACK = `http://127.0.0.1:${process.env.KAVSAK_PORT ?? 7788}/oauth/callback`;
 
-/** Bekleyen OAuth geri dönüşleri: state → çözücü. Sunucu /oauth/callback ile çağırır. */
-const pendingOAuth = new Map<string, (r: { code?: string; error?: string }) => void>();
-export function resolveOAuth(state: string, r: { code?: string; error?: string }): boolean {
-  const fn = pendingOAuth.get(state);
-  if (!fn) return false;
-  pendingOAuth.delete(state);
-  fn(r);
-  return true;
-}
-
-/** Diğer OAuth akışları (Etsy vb.) için: /oauth/callback'e gelen code/error'u bekle (10 dk). */
-export function waitOAuth(state: string, timeoutMs = 600_000): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
-    pendingOAuth.set(state, (r) => (r.code ? resolve(r.code) : reject(new Error(r.error ?? 'Giriş iptal edildi'))));
-    setTimeout(() => {
-      if (pendingOAuth.delete(state)) reject(new Error('Giriş zaman aşımına uğradı'));
-    }, timeoutMs).unref?.();
-  });
-}
+// Bekleyen OAuth geri dönüşleri tek tabloda (oauth/callback.ts); eski Etsy/Gmail akışları için yeniden dışa aktarılır
+export { resolveOAuth, waitOAuth } from '../oauth/callback.js';
 export const OAUTH_CALLBACK = CALLBACK;
 
 /** Görünür bir Chromium penceresi aç; `done` çözülünce kapat. Kullanıcı yalnızca giriş yapar. */
@@ -98,7 +87,7 @@ export async function withAuthWindow<T>(url: string, done: Promise<T>): Promise<
     const page = await browser.newPage({ viewport: { width: 540, height: 720 } });
     await page.goto(url, { waitUntil: 'domcontentloaded' }).catch(() => undefined);
     close = () => browser.close().catch(() => undefined);
-    browser.on('disconnected', () => pendingOAuth.forEach((fn, k) => (pendingOAuth.delete(k), fn({ error: 'Pencere kapatıldı' }))));
+    browser.on('disconnected', () => failAllOAuth('Pencere kapatıldı'));
   } catch (e) {
     bus.log('warn', `Giriş penceresi açılamadı (${(e as Error).message.split('\n')[0]}); adresi kendin aç: ${url}`);
   }
@@ -129,6 +118,31 @@ const addrs = (a: AddressObject | AddressObject[] | undefined): Array<{ address:
   return list.flatMap((x) => x.value.map((v) => ({ address: (v.address ?? '').toLowerCase(), name: v.name || v.address || '' })));
 };
 
+/**
+ * imapflow hatasının türü: 'limit' (sağlayıcı sınırı: eşzamanlı oturum, bant genişliği) ya da 'auth' (kimlik reddi).
+ * Sınır kalıbı kimlik denetiminden ÖNCE: imapflow LOGIN'e gelen her NO'da authenticationFailed koyar → Gmail'in
+ * "NO [ALERT] Too many simultaneous connections" yanıtı yanlış şifre sanılıyordu. Yalın [ALERT] burada sayılmaz
+ * (Gmail yanlış şifre/web girişi uyarılarında da [ALERT] kullanıyor); classify onu kimlik denetiminden sonra ele alır.
+ */
+export function imapErrorKind(e: unknown): { kind?: 'limit' | 'auth'; text: string } {
+  const err = (e ?? {}) as { authenticationFailed?: boolean; message?: string; response?: unknown; responseText?: string; reason?: string; serverResponseCode?: string };
+  // imapflow çoğu komutta response'u metne çevirir; çevirmediği yollarda ayrıştırılmış nesne kalır ("[object Object]" olmasın)
+  const resp = typeof err.response === 'string' ? err.response : '';
+  const sec = (err.response as { attributes?: { section?: { value?: unknown }[] }[] } | undefined)?.attributes?.[0]?.section?.[0]?.value;
+  const rcode = String(err.serverResponseCode ?? (typeof sec === 'string' ? sec : '')).toUpperCase().trim();
+  // reason: karşılama/BYE ile kapanan bağlantıda sunucu metni ("* BYE Too many simultaneous connections") yalnız burada
+  const text = `${err.message ?? ''} ${resp} ${err.responseText ?? ''} ${err.reason ?? ''}`;
+  if (rcode === 'LIMIT' || /\[LIMIT\]|Too many simultaneous|too many connections|bandwidth limits/i.test(text)) return { kind: 'limit', text };
+  if (err.authenticationFailed || /AUTHENTICATIONFAILED|Invalid credentials|Web login required|LOGIN failed|Authentication failed|incorrect (username|password)/i.test(text)) return { kind: 'auth', text };
+  return { text };
+}
+
+/** nodemailer kimlik reddi (EAUTH / 535): kimlik doğrulama MAIL FROM'dan önce → e-posta gönderilmemiştir, yeniden denenebilir */
+function smtpAuthRejected(e: unknown): boolean {
+  const err = (e ?? {}) as { code?: string; responseCode?: number };
+  return err.code === 'EAUTH' || err.responseCode === 535 || err.responseCode === 534;
+}
+
 export class MailConnector extends BaseConnector {
   private cfg: MailConfig;
   private timer?: NodeJS.Timeout;
@@ -154,6 +168,10 @@ export class MailConnector extends BaseConnector {
   private pauseUntil = 0;
   /** Kimlik reddedildi: otomatik deneme yok (tekrarlı başarısız giriş "Too many login failures" kilidine götürür) */
   private authFailed = false;
+  /** Resmi giriş oturumu düştü (yenileme belirteci geçersiz): kullanıcı yeniden giriş yapana dek sağlayıcıya istek yok */
+  private expired = false;
+  /** Süren belirteç yenilemesi (tek uçuş: IDLE, yoklama ve gönderim aynı anda yenilemesin) */
+  private refreshing?: Promise<void>;
 
   /** Registry kendiliğinden iyileşmede okur: sağlayıcının istediği bekleme (ms) — yeni oturum bundan önce açılmasın */
   get retryAfterMs(): number {
@@ -207,6 +225,7 @@ export class MailConnector extends BaseConnector {
   async start(_opts: StartOptions = {}): Promise<void> {
     this.stopping = false;
     this.authFailed = false; // kullanıcı yeniden bağladı
+    this.expired = false;
     this.pauseUntil = 0;
     this.account.label = this.cfg.user || this.account.platform;
     if (!this.cfg.user) return this.setStatus('error', 'E-posta adresi girilmedi');
@@ -219,7 +238,18 @@ export class MailConnector extends BaseConnector {
         this.saveCfg();
         bus.log('info', `${this.account.platform}: sunucu bulundu ${this.cfg.host} / ${this.cfg.smtpHost}`);
       }
-      if (this.account.platform === 'outlook' || (!this.cfg.pass && this.cfg.clientId)) await this.ensureOAuth();
+      if (this.cfg.oauth) {
+        // Resmi giriş: eski etkileşimli akışlar (Google penceresi / Microsoft cihaz kodu) ÇALIŞMAZ; kalıcı oturum yoksa yeniden giriş.
+        // Aynı adresin eski uygulama şifresi/istemci bilgileri (registry birleştirmesinden kalan) dosyada tutulmaz.
+        if (this.cfg.pass || this.cfg.clientId || this.cfg.clientSecret) {
+          delete this.cfg.pass;
+          delete this.cfg.clientId;
+          delete this.cfg.clientSecret;
+          this.saveCfg();
+        }
+        if (!this.cfg.refreshToken) return this.sessionExpired();
+        await this.ensureToken();
+      } else if (this.account.platform === 'outlook' || (!this.cfg.pass && this.cfg.clientId)) await this.ensureOAuth();
       else if (this.cfg.pass && this.cfg.accessToken) this.cfg.accessToken = undefined;
       else if (!this.cfg.pass) return this.setStatus('error', 'Şifre gerekli');
       if (this.stopping) return;
@@ -231,6 +261,7 @@ export class MailConnector extends BaseConnector {
       // İlk girişteki hata da sınıflandırılsın: şifre reddi → "Giriş reddedildi…" (arayüz "Şifreyi güncelle" gösterir); imapflow'un
       // genel "Command failed" metnine sunucunun asıl açıklaması (responseText) eklenir — eskiden yalnız "Command failed" görünüyordu
       const err = e as { message?: string; responseText?: string; reason?: string; authenticationFailed?: boolean };
+      if (this.stopping) return; // açılış sürerken durduruldu: hata değil
       this.classify(e);
       if (this.authFailed) return;
       const msg = String(err.message ?? e).split('\n')[0];
@@ -246,6 +277,7 @@ export class MailConnector extends BaseConnector {
     if (this.timer) clearTimeout(this.timer);
     if (this.idleRetry) clearTimeout(this.idleRetry);
     if (this.idleDebounce) clearTimeout(this.idleDebounce);
+    if (this.idleRecycle) clearTimeout(this.idleRecycle);
     const t = this.tmpClient;
     this.tmpClient = undefined;
     if (t) {
@@ -288,6 +320,10 @@ export class MailConnector extends BaseConnector {
   private idleFails = 0;
   private idleRetry?: NodeJS.Timeout;
   private idleDebounce?: NodeJS.Timeout;
+  /** IDLE oturumu açılıyor (belirteç yenilemesi/bağlantı sürerken ikinci oturum açılmasın) */
+  private idleStarting = false;
+  /** Resmi girişte IDLE oturumu belirteç bitmeden yenilenir (Microsoft süresi dolan oturumu BYE ile düşürür) */
+  private idleRecycle?: NodeJS.Timeout;
 
   /** IDLE için ayrı, uzun ömürlü IMAP oturumu açar (testler ezer: gerçek sunucuya bağlanılmasın) */
   protected createIdleClient(): ImapFlow {
@@ -296,89 +332,186 @@ export class MailConnector extends BaseConnector {
     return new ImapFlow({ host: this.cfg.host!, port: this.cfg.port!, secure: this.cfg.secure ?? true, auth: this.auth(), logger: false, maxIdleTime: 20 * 60_000, missingIdleCommand: 'STATUS' });
   }
 
+  /** IDLE istemcisi + olay dinleyicileri (bağlanmadan önce kurulur) */
+  private idleSession(): ImapFlow {
+    const c = this.createIdleClient();
+    c.on('exists', (d: { count?: number; prevCount?: number }) => {
+      if ((d.count ?? 0) <= (d.prevCount ?? 0)) return; // silme/taşıma
+      if (this.idleDebounce) clearTimeout(this.idleDebounce);
+      this.idleDebounce = setTimeout(() => void this.poll(false), 1000);
+    });
+    // başka cihazda okundu/okunmadı (\\Seen) → kısa yoklama: okunmamış sayacı eşitlensin (bkz. syncSeen)
+    c.on('flags', () => {
+      if (this.idleDebounce) clearTimeout(this.idleDebounce);
+      this.idleDebounce = setTimeout(() => void this.poll(false), 1000);
+    });
+    c.on('close', () => {
+      if (this.idleClient !== c) return;
+      // kurulu IDLE oturumu sunucu BYE'ıyla kapandıysa ("Too many simultaneous connections") gerekçe sınıflandırılsın:
+      // yoksa 5 sn sonra yeniden bağlanıp sınırı zorluyordu
+      const bye = (c as unknown as { byeReason?: string }).byeReason;
+      if (bye) this.classify({ reason: bye });
+      this.idleClient = undefined;
+      this.idleUp = false;
+      if (this.idleRecycle) clearTimeout(this.idleRecycle);
+      this.retryIdle();
+    });
+    c.on('error', () => undefined); // 'close' ardından gelir; yeniden bağlanma orada
+    return c;
+  }
+
   /**
    * INBOX'ı seçili tutan ikinci oturum: imapflow boştayken kendiliğinden IDLE'a geçer; sunucu yeni e-posta bildirince
    * ('exists') 1 sn içinde normal yoklama çalışır (yalnız yeni UID'ler çekilir). Sunucu IDLE desteklemiyorsa imapflow
    * NOOP ile yoklar, 'exists' yine gelir. Kopmada üstel yeniden bağlanma (5 sn → ≤5 dk, sapmalı); OAuth belirteci yenilenir.
    */
   private async startIdle(): Promise<void> {
-    if (this.stopping || this.idleClient || this.authFailed) return;
+    if (this.stopping || this.idleClient || this.idleStarting || this.authFailed) return;
+    this.idleStarting = true;
     let client: ImapFlow | undefined;
     try {
-      if (this.cfg.accessToken) await this.ensureOAuth();
-      client = this.createIdleClient();
-      this.idleClient = client;
+      client = await this.openImap(
+        () => this.idleSession(),
+        (x, on) => {
+          if (on) this.idleClient = x;
+          else if (this.idleClient === x) this.idleClient = undefined;
+        },
+      );
       const c = client;
-      c.on('exists', (d: { count?: number; prevCount?: number }) => {
-        if ((d.count ?? 0) <= (d.prevCount ?? 0)) return; // silme/taşıma
-        if (this.idleDebounce) clearTimeout(this.idleDebounce);
-        this.idleDebounce = setTimeout(() => void this.poll(false), 1000);
-      });
-      // başka cihazda okundu/okunmadı (\\Seen) → kısa yoklama: okunmamış sayacı eşitlensin (bkz. syncSeen)
-      c.on('flags', () => {
-        if (this.idleDebounce) clearTimeout(this.idleDebounce);
-        this.idleDebounce = setTimeout(() => void this.poll(false), 1000);
-      });
-      c.on('close', () => {
-        if (this.idleClient !== c) return;
-        // kurulu IDLE oturumu sunucu BYE'ıyla kapandıysa ("Too many simultaneous connections") gerekçe sınıflandırılsın:
-        // yoksa 5 sn sonra yeniden bağlanıp sınırı zorluyordu
-        const bye = (c as unknown as { byeReason?: string }).byeReason;
-        if (bye) this.classify({ reason: bye });
-        this.idleClient = undefined;
-        this.idleUp = false;
-        this.retryIdle();
-      });
-      c.on('error', () => undefined); // 'close' ardından gelir; yeniden bağlanma orada
-      await c.connect();
       await c.mailboxOpen('INBOX');
-      if (this.stopping || this.idleClient !== c) return;
+      if (this.stopping || !this.idleIs(c)) return;
       if (!this.idleUp) bus.log('info', `${this.account.platform}: anlık e-posta bildirimi (IMAP IDLE) açık`);
       this.idleUp = true;
       this.idleFails = 0;
+      this.planIdleRecycle(c);
       this.schedule(); // yoklama yedeğe insin
       void this.poll(false); // bağlantı arası kaçan e-postalar
     } catch (e) {
-      if (client && this.idleClient === client) {
+      if (client && this.idleIs(client)) {
         this.idleClient = undefined;
         client.removeAllListeners();
         client.close();
       }
       this.idleUp = false;
+      if (this.stopping) return;
       this.classify(e);
+      if (this.authFailed) return;
       if (this.idleFails === 0) bus.log('warn', `${this.account.platform}: IMAP IDLE açılamadı (${(e as Error).message.split('\n')[0]}); dakikalık yoklamayla devam`);
       this.retryIdle();
+    } finally {
+      this.idleStarting = false;
     }
+  }
+
+  /** Bu istemci hâlâ geçerli IDLE oturumu mu (geri çağırmalarla değişen alan; TS daraltması yanıltmasın) */
+  private idleIs(c: ImapFlow): boolean {
+    return this.idleClient === c;
+  }
+
+  /**
+   * Resmi girişte IDLE oturumunu belirtecin bitmesinden ≈5 dk önce yenile (≈1 sa'lik Google/Microsoft belirteçlerinde
+   * ≈55 dk'da bir). Çok uzun ömürlü belirteçte (Yandex) 6 sa'de bir yalnız yeniden bakılır.
+   */
+  private planIdleRecycle(c: ImapFlow): void {
+    if (this.idleRecycle) clearTimeout(this.idleRecycle);
+    this.idleRecycle = undefined;
+    if (!this.cfg.oauth || this.stopping) return;
+    const left = (this.cfg.expiresAt ?? 0) - Date.now();
+    const ms = Math.min(6 * 3600_000, Math.max(60_000, left - 5 * 60_000));
+    this.idleRecycle = setTimeout(() => void this.recycleIdle(c), ms);
+    this.idleRecycle.unref?.();
+  }
+
+  private async recycleIdle(c: ImapFlow): Promise<void> {
+    this.idleRecycle = undefined;
+    if (this.stopping || this.authFailed || this.idleClient !== c) return;
+    if ((this.cfg.expiresAt ?? 0) - Date.now() > 10 * 60_000) return this.planIdleRecycle(c);
+    if (this.polling) {
+      // süren yoklama aynı oturumu kullanıyor olabilir: bitince
+      this.idleRecycle = setTimeout(() => void this.recycleIdle(c), 30_000);
+      this.idleRecycle.unref?.();
+      return;
+    }
+    try {
+      await this.ensureToken(true);
+    } catch (e) {
+      this.classify(e);
+      // ağ hatası: eski oturum sürsün, az sonra yeniden denensin (oturum düşerse 'close' yolu zaten yeniden bağlanır)
+      if (!this.authFailed && this.idleClient === c) this.planIdleRecycle(c);
+      return;
+    }
+    if (this.stopping || this.authFailed || this.idleClient !== c) return;
+    this.idleClient = undefined;
+    this.idleUp = false;
+    c.removeAllListeners();
+    c.on('error', () => undefined);
+    await c.logout().catch(() => undefined);
+    c.close();
+    void this.startIdle(); // yeni belirteçle
   }
 
   /**
    * imapflow hata sınıfları (postalsys/imapflow errors.ts): authenticationFailed → dur, kullanıcı yeniden bağlasın;
    * ETHROTTLE → throttleReset kadar bekle; [ALERT]/[LIMIT]/çok fazla eşzamanlı bağlantı → 15 dk bekle.
+   * Resmi girişte yenileme belirteci geçersizse (OAuthError.revoked) ya da XOAUTH2 yenilenmiş belirteçle de reddedildiyse
+   * oturum düşmüş sayılır: "<Sağlayıcı> oturumu sona erdi — yeniden giriş yap" (otomatik deneme yok).
    */
   private classify(e: unknown): void {
-    const err = e as { authenticationFailed?: boolean; code?: string; throttleReset?: number; message?: string; response?: unknown; responseText?: string; reason?: string; serverResponseCode?: string };
-    // imapflow çoğu komutta response'u metne çevirir; çevirmediği yollarda ayrıştırılmış nesne kalır ("[object Object]" olmasın)
-    const resp = typeof err.response === 'string' ? err.response : '';
-    const sec = (err.response as { attributes?: { section?: { value?: unknown }[] }[] } | undefined)?.attributes?.[0]?.section?.[0]?.value;
-    const rcode = String(err.serverResponseCode ?? (typeof sec === 'string' ? sec : '')).toUpperCase().trim();
-    // reason: karşılama/BYE ile kapanan bağlantıda sunucu metni ("* BYE Too many simultaneous connections") yalnız burada
-    const text = `${err.message ?? ''} ${resp} ${err.responseText ?? ''} ${err.reason ?? ''}`;
-    // Sınır kalıbı kimlik denetiminden ÖNCE: imapflow LOGIN'e gelen her NO'da authenticationFailed koyar → Gmail'in
-    // "NO [ALERT] Too many simultaneous connections" yanıtı yanlış şifre sanılıyordu. Yalın [ALERT] burada sayılmaz
-    // (Gmail yanlış şifre/web girişi uyarılarında da [ALERT] kullanıyor); o, kimlik denetiminden sonra.
-    if (rcode === 'LIMIT' || /\[LIMIT\]|Too many simultaneous|too many connections|bandwidth limits/i.test(text)) {
+    if (e instanceof OAuthError) {
+      if (e.revoked && this.cfg.oauth) this.sessionExpired();
+      return; // aracı yanıt vermedi / resmi giriş kapalı: geçici
+    }
+    const err = e as { code?: string; throttleReset?: number };
+    const { kind, text } = imapErrorKind(e);
+    if (kind === 'limit') {
       this.limitPause();
       return;
     }
-    if (err.authenticationFailed || /AUTHENTICATIONFAILED|Invalid credentials|Web login required|LOGIN failed|Authentication failed|incorrect (username|password)/i.test(text)) {
+    if (kind === 'auth') {
+      if (this.cfg.oauth) {
+        bus.log('warn', `${this.account.platform}: ${PROVIDER_NAME[this.cfg.oauth]} erişim belirteci IMAP'te reddedildi (${text.replace(/\s+/g, ' ').trim().slice(0, 160)})`);
+        this.sessionExpired();
+        return;
+      }
       this.authFailed = true;
       if (this.timer) clearTimeout(this.timer);
       if (this.idleRetry) clearTimeout(this.idleRetry);
-      this.setStatus('error', 'Giriş reddedildi: uygulama şifresini kontrol edip "Şifreyi güncelle" ile yeniden gir (tekrarlı deneme hesabı kilitleyebileceği için otomatik denenmiyor)');
+      this.setStatus('error', this.authFailText());
       return;
     }
     if (err.code === 'ETHROTTLE') this.pauseUntil = Date.now() + Math.max(err.throttleReset ?? 60_000, 30_000);
     else if (/\[ALERT\]/i.test(text)) this.limitPause();
+  }
+
+  /** Şifre/uygulama parolası reddinin kullanıcı metni (arayüz "Şifreyi güncelle" gösterir) */
+  private authFailText(): string {
+    if (this.account.platform === 'icloud') return "Apple uygulamaya özel parola reddedildi — appleid.apple.com'da yeni parola oluşturup yeniden gir";
+    if (this.account.platform === 'imap') return 'Giriş reddedildi — e-posta ve şifreyi kontrol et';
+    return 'Giriş reddedildi: uygulama şifresini kontrol edip "Şifreyi güncelle" ile yeniden gir (tekrarlı deneme hesabı kilitleyebileceği için otomatik denenmiyor)';
+  }
+
+  /** Resmi giriş oturumu düştü: tüm zamanlayıcılar ve IDLE kapanır, kullanıcı yeniden giriş yapana dek istek yok */
+  private sessionExpired(): void {
+    const p = this.cfg.oauth;
+    if (!p || this.expired) return; // zaten düştü (aynı durum yeniden yayılmasın)
+    this.expired = true;
+    this.authFailed = true;
+    if (this.timer) clearTimeout(this.timer);
+    if (this.idleRetry) clearTimeout(this.idleRetry);
+    if (this.idleRecycle) clearTimeout(this.idleRecycle);
+    const c = this.idleClient;
+    this.idleClient = undefined;
+    this.idleUp = false;
+    if (c) {
+      c.removeAllListeners();
+      c.on('error', () => undefined);
+      void c
+        .logout()
+        .catch(() => undefined)
+        .finally(() => c.close());
+    }
+    bus.log('warn', `${this.account.platform}: ${PROVIDER_NAME[p]} oturumu sona erdi; yeniden giriş gerekli`);
+    this.setStatus('error', `${PROVIDER_NAME[p]} oturumu sona erdi — yeniden giriş yap`);
   }
 
   private limitPause(): void {
@@ -393,6 +526,68 @@ export class MailConnector extends BaseConnector {
     if (this.idleRetry) clearTimeout(this.idleRetry);
     this.idleRetry = setTimeout(() => void this.startIdle(), ms);
     this.idleRetry.unref?.();
+  }
+
+  // ---------- Resmi giriş (oauth/index.ts) ----------
+  /**
+   * Erişim belirteci geçerli olsun: resmi girişte merkezi modülle (≤60 sn kala ya da `force`), eski OAuth yolunda
+   * ensureOAuth; uygulama şifreli hesapta iş yok. Yenileme belirteci geçersizse OAuthError.revoked (classify → oturum düştü).
+   */
+  private async ensureToken(force = false): Promise<void> {
+    const p = this.cfg.oauth;
+    if (!p) {
+      if (this.cfg.accessToken) await this.ensureOAuth();
+      return;
+    }
+    if (this.expired) throw new OAuthError(`${PROVIDER_NAME[p]} oturumu sona erdi`, 'invalid_grant');
+    if (!force && this.cfg.accessToken && (this.cfg.expiresAt ?? 0) > Date.now() + 60_000) return;
+    this.refreshing ??= this.refreshOfficial(p).finally(() => (this.refreshing = undefined));
+    return this.refreshing;
+  }
+
+  private async refreshOfficial(p: OAuthProvider): Promise<void> {
+    if (!this.cfg.refreshToken) throw new OAuthError(`${PROVIDER_NAME[p]} kalıcı oturumu yok`, 'invalid_grant');
+    let t: Awaited<ReturnType<typeof refreshToken>>;
+    try {
+      t = await refreshToken(p, this.cfg.refreshToken);
+    } catch (e) {
+      if (e instanceof OAuthError) throw e;
+      // ağ/zaman aşımı: geçici (kendiliğinden iyileşme yeniden dener)
+      throw new Error(`${PROVIDER_NAME[p]} oturumu yenilenemedi: bağlantı kurulamadı`);
+    }
+    this.cfg.accessToken = t.accessToken;
+    // Google/Microsoft yeni yenileme belirteci döndürebilir (Microsoft döndürür): eskisinin yerine
+    if (t.refreshToken) this.cfg.refreshToken = t.refreshToken;
+    // süre bildirilmediyse 1 sa sayılır (erken yenileme zararsız; geç yenileme XOAUTH2 reddi demek)
+    this.cfg.expiresAt = t.expiresAt ?? Date.now() + 3600_000;
+    this.saveCfg();
+  }
+
+  /**
+   * IMAP oturumu aç. Belirteç istemci kurulmadan ÖNCE tazelenir (ImapFlow auth nesnesini kurulurken alır). Resmi girişte
+   * XOAUTH2 reddedilirse erişim belirteci erken geçersizleşmiş olabilir: bir kez zorla yenilenip yeniden denenir.
+   * `track`: istemci bağlanırken stop() kapatabilsin diye çağıranın alanına yazılır.
+   */
+  private async openImap(make: () => ImapFlow, track: (c: ImapFlow, on: boolean) => void = () => undefined): Promise<ImapFlow> {
+    for (let attempt = 0; ; attempt++) {
+      await this.ensureToken(attempt > 0);
+      if (this.stopping) throw new Error('Bağlantı durduruldu');
+      const c = make();
+      c.on('error', () => undefined); // bağlandıktan sonraki soket hatası işlenmemiş 'error' olayıyla süreci düşürmesin
+      track(c, true);
+      try {
+        await c.connect();
+        return c;
+      } catch (e) {
+        track(c, false);
+        c.close();
+        if (attempt === 0 && this.cfg.oauth && !this.stopping && imapErrorKind(e).kind === 'auth') {
+          bus.log('warn', `${this.account.platform}: ${PROVIDER_NAME[this.cfg.oauth]} erişim belirteci reddedildi; yenilenip bir kez yeniden deneniyor`);
+          continue;
+        }
+        throw e;
+      }
+    }
   }
 
   // ---------- Microsoft OAuth (cihaz kodu) ----------
@@ -436,12 +631,7 @@ export class MailConnector extends BaseConnector {
       `${GOOGLE_AUTH}?` +
       new URLSearchParams({ client_id: this.cfg.clientId, redirect_uri: CALLBACK, response_type: 'code', scope: GOOGLE_SCOPE, access_type: 'offline', prompt: 'consent', state, login_hint: this.cfg.user }).toString();
     this.setStatus('pairing', 'Açılan pencerede Google hesabınla giriş yap ve izin ver');
-    const code = new Promise<string>((resolve, reject) => {
-      pendingOAuth.set(state, (r) => (r.code ? resolve(r.code) : reject(new Error(r.error ?? 'Google girişi iptal edildi'))));
-      setTimeout(() => {
-        if (pendingOAuth.delete(state)) reject(new Error('Google girişi zaman aşımına uğradı'));
-      }, 600_000);
-    });
+    const code = waitOAuth(state);
     const c = await withAuthWindow(url, code);
     const ok = await this.googleToken({ grant_type: 'authorization_code', code: c, redirect_uri: CALLBACK });
     if (ok !== true) throw new Error(String(ok));
@@ -482,8 +672,9 @@ export class MailConnector extends BaseConnector {
     return j.error_description ?? j.error ?? 'token alınamadı';
   }
 
+  /** IMAP kimliği: belirteç varsa (resmi giriş her zaman) XOAUTH2/OAUTHBEARER, yoksa şifre */
   private auth(): { user: string; pass?: string; accessToken?: string } {
-    return this.cfg.accessToken ? { user: this.cfg.user, accessToken: this.cfg.accessToken } : { user: this.cfg.user, pass: this.cfg.pass };
+    return this.cfg.oauth || this.cfg.accessToken ? { user: this.cfg.user, accessToken: this.cfg.accessToken ?? '' } : { user: this.cfg.user, pass: this.cfg.pass };
   }
 
   // ---------- IMAP ----------
@@ -501,11 +692,14 @@ export class MailConnector extends BaseConnector {
       }
     }
     // Belirteç istemci kurulmadan ÖNCE tazelenir: ImapFlow auth nesnesini kurulurken alır (sonra tazelenen belirteci görmez)
-    if (this.cfg.accessToken) await this.ensureOAuth();
-    const client = this.createImapClient();
-    this.tmpClient = client;
+    const client = await this.openImap(
+      () => this.createImapClient(),
+      (c, on) => {
+        if (on) this.tmpClient = c;
+        else if (this.tmpClient === c) this.tmpClient = undefined;
+      },
+    );
     try {
-      await client.connect();
       const lock = await client.getMailboxLock('INBOX');
       try {
         return await fn(client);
@@ -567,7 +761,7 @@ export class MailConnector extends BaseConnector {
   static CHUNK = 100;
 
   private async poll(first: boolean): Promise<void> {
-    if (this.stopping) return;
+    if (this.stopping || this.expired) return; // oturum düştü: kullanıcı yeniden giriş yapana dek istek yok
     if (this.polling) {
       if (!first) this.pollAgain = true;
       return;
@@ -743,11 +937,9 @@ export class MailConnector extends BaseConnector {
     const idle = this.idleClient;
     const shared = !!(idle && this.idleUp && idle.usable);
     let client: ImapFlow;
+    // ortak değilse yeni oturum: belirteç istemciden önce tazelenir (bkz. withInbox)
     if (shared) client = idle!;
-    else {
-      if (this.cfg.accessToken) await this.ensureOAuth(); // istemciden önce (bkz. withInbox)
-      client = this.createImapClient();
-    }
+    else client = await this.openImap(() => this.createImapClient());
     // ortak oturumda kutu değişirken gelen kutusu IDLE'da değil ('exists' gelmez): dönüşte uidNext büyüdüyse bir tur daha
     type Mb = { path?: string; uidNext?: number | bigint } | false | undefined;
     const inboxNext = (): number => {
@@ -756,7 +948,6 @@ export class MailConnector extends BaseConnector {
     };
     const nextBefore = shared ? inboxNext() : 0;
     try {
-      if (!shared) await client.connect();
       const boxes = await client.list();
       const pick = (use: string, re: RegExp) => boxes.find((b) => (b as { specialUse?: string }).specialUse === use) ?? boxes.find((b) => re.test(b.path));
       const targets: Array<['sent' | 'junk', string | undefined]> = [
@@ -904,8 +1095,35 @@ export class MailConnector extends BaseConnector {
       host: this.cfg.smtpHost,
       port: this.cfg.smtpPort,
       secure: this.cfg.smtpSecure ?? false,
-      auth: this.cfg.accessToken ? { type: 'OAuth2', user: this.cfg.user, accessToken: this.cfg.accessToken } : { user: this.cfg.user, pass: this.cfg.pass ?? '' },
+      // XOAUTH2 (belirteç modülde tazelenir; nodemailer'ın kendi yenilemesi kullanılmaz)
+      auth: this.cfg.oauth || this.cfg.accessToken ? { type: 'OAuth2', user: this.cfg.user, accessToken: this.cfg.accessToken ?? '' } : { user: this.cfg.user, pass: this.cfg.pass ?? '' },
     });
+  }
+
+  /**
+   * SMTP gönderimi: belirteç önce tazelenir. Resmi girişte sunucu belirteci reddederse (EAUTH; kimlik doğrulama MAIL FROM'dan
+   * önce → e-posta gitmemiştir) belirteç bir kez zorla yenilenip yeniden denenir. Yalnız SMTP reddi oturumu düşürmez
+   * (ör. kurumda SMTP AUTH kapalı); yenileme belirteci geçersizse düşer.
+   */
+  private async smtpSend(opts: SendMailOptions): Promise<{ messageId?: string }> {
+    const p = this.cfg.oauth;
+    try {
+      await this.ensureToken();
+      try {
+        return await this.createTransport().sendMail(opts);
+      } catch (e) {
+        if (!p || !smtpAuthRejected(e)) throw e;
+        bus.log('warn', `${this.account.platform}: SMTP belirteci reddetti; yenilenip bir kez yeniden deneniyor`);
+        await this.ensureToken(true);
+        return await this.createTransport().sendMail(opts);
+      }
+    } catch (e) {
+      if (p && e instanceof OAuthError && e.revoked) {
+        this.sessionExpired(); // zaten düştüyse bir şey yapmaz
+        throw new Error(`${PROVIDER_NAME[p]} oturumu sona erdi — yeniden giriş yap`);
+      }
+      throw e;
+    }
   }
 
   /** Sohbetin (thread) son gelen e-postasına yanıt: alıcılar katılımcılardan, konu Re:, In-Reply-To/References son gelen mesaj */
@@ -918,8 +1136,7 @@ export class MailConnector extends BaseConnector {
     const lastFrom = last?.senderId && last.senderId.includes('@') && last.senderId !== me ? last.senderId : undefined;
     const to = chat.kind === 'direct' && lastFrom ? [lastFrom] : (chat.participants ?? []).map((p) => p.id).filter((a) => a !== me);
     if (!to.length) throw new Error('Alıcı yok');
-    if (this.cfg.accessToken) await this.ensureOAuth();
-    const info = await this.createTransport().sendMail({
+    const info = await this.smtpSend({
       from: this.cfg.user,
       to,
       subject: chat.name === '(konu yok)' ? '' : /^(re|ynt):/i.test(chat.name) ? chat.name : `Re: ${chat.name}`,
@@ -957,8 +1174,7 @@ export class MailConnector extends BaseConnector {
   async compose(d: ComposeDraft): Promise<Chat> {
     const to = d.to.trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) throw new Error('Geçerli bir e-posta adresi yaz');
-    if (this.cfg.accessToken) await this.ensureOAuth();
-    const info = await this.createTransport().sendMail({ from: this.cfg.user, to, subject: d.subject.trim(), text: d.text });
+    const info = await this.smtpSend({ from: this.cfg.user, to, subject: d.subject.trim(), text: d.text });
     const id = info.messageId ?? `<local-${Date.now()}@mivelo>`;
     const thread = `msg:${id}`;
     this.threadOf.set(id, thread);

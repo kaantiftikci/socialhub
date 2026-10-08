@@ -14,6 +14,8 @@ export interface Account {
   attention?: string;
   /** çekirdek geçici sorunda arka planda yeniden deniyor: uyarı gösterilmez */
   autoRetry?: boolean;
+  /** Resmi girişle (OAuth) bağlı (çekirdek gönderirse; yoksa Connect.tsx bu cihazda hatırlar) */
+  official?: boolean;
 }
 
 export interface Chat {
@@ -236,8 +238,8 @@ export const PLATFORMS: Record<Platform, { name: string; code: string; color: st
   outlook: { name: 'Outlook', code: 'OL', color: '#0F6CBD', method: 'Microsoft hesabınla giriş', available: true, mode: 'browser', category: 'mail' },
   yahoo: { name: 'Yahoo Mail', code: 'YH', color: '#6001D2', method: 'Yahoo hesabınla giriş', available: true, mode: 'browser', category: 'mail' },
   yandex: { name: 'Yandex Mail', code: 'YA', color: '#FC3F1D', method: 'Yandex hesabınla giriş', available: true, mode: 'browser', category: 'mail' },
-  icloud: { name: 'iCloud Mail', code: 'IC', color: '#3693F3', method: 'Apple hesabınla giriş', available: true, mode: 'browser', category: 'mail' },
-  imap: { name: 'Diğer e-posta', code: '@', color: '#4A4757', method: 'IMAP hesabı', available: true, mode: 'mail', category: 'mail' },
+  icloud: { name: 'iCloud Mail', code: 'IC', color: '#3693F3', method: 'Uygulamaya özel parolayla', available: true, mode: 'browser', category: 'mail' },
+  imap: { name: 'Diğer e-posta', code: '@', color: '#4A4757', method: 'E-posta adresi ve şifreyle', available: true, mode: 'mail', category: 'mail' },
   pttavm: { name: 'ePttAVM', code: 'PT', color: '#FFC20E', method: 'Siparişler', available: true, mode: 'token', category: 'shop' },
   shopier: { name: 'Shopier', code: 'SH', color: '#1F2A44', method: 'Siparişler', available: false, mode: 'token', category: 'shop' },
   trendyol: { name: 'Trendyol', code: 'TY', color: '#F27A1A', method: 'Siparişler ve müşteri soruları', available: true, mode: 'token', category: 'shop' },

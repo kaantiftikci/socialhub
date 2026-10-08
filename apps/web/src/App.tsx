@@ -17,7 +17,7 @@ import { pushMlEvent } from './ml-client';
 import { MAIL_LOGIN_WHO, PLATFORMS, ORDER_Q_PLATFORMS, isOrderPage, questionOrderRef, shopKind, shopPending, shopTabOf, type Account, type Chat, type ChatFlags, type CoreEvent, type Message, type Platform, type ShopTab, DEFAULT_TAGS } from './types';
 import { Avatar, Chip, Icon, IconText, stripLeadIcon, Logo, Resizer, SyncBar, syncPercent, Tag, ago, fmtTime, loadPaneSizes, useClosing } from './ui';
 import { Conversation, REACT_TEXT, refreshScheduled, startScheduledSends, statusIcon } from './Conversation';
-import { ConnectModal } from './Connect';
+import { ConnectModal, isOfficialAccount, needsRelogin } from './Connect';
 import { Focus } from './Focus';
 import { onThemeChange, resolvedTheme, setThemePref } from './theme';
 import { SettingsModal, type SettingsTab } from './Settings';
@@ -1920,6 +1920,10 @@ export default function App() {
                     setConnectOpen(true);
                     notify(is.done);
                     api.restartAccount(a.id).catch((e) => notify(e.message, true));
+                  } else if (is.action === 'relogin') {
+                    // resmi girişli hesabın oturumu düştü: Bağlan o hesapta açılır, "Yeniden giriş yap" sağlayıcının sayfasını açar
+                    setConnectFocus(a.id);
+                    setConnectOpen(true);
                   } else if (is.action === 'connect') {
                     setConnectFocus(a.id);
                     setConnectOpen(true);
@@ -2173,17 +2177,36 @@ function statusText(s: Account['status']): string {
  */
 /** Giriş bilgisi reddi (yanlış/süresi dolmuş şifre, geçersiz API anahtarı): aynı bilgiyle yeniden denemek işe yaramaz */
 const AUTH_FAIL = /giriş reddedildi|uygulama şifresi|şifre|parola|kimlik doğrulama|yetkisiz|unauthori[sz]ed|invalid (credentials|api ?key|token)|authenticationfailed|login failed|auth(entication)? failed|\b40[13]\b|api anahtar|kimlik bilgileri|gizli anahtar|servis anahtar/i;
-/** API bilgileri Bağlan formundan yeniden girilebilen kanallar (yalnız pazaryerleri; başka hiçbir uygulamada şifre formu yok) */
+/** API bilgileri Bağlan formundan yeniden girilebilen kanallar (pazaryerleri; iCloud/Diğer e-posta şifre formu accountIssue'da ayrı) */
 const credentialForm = (a: Account) => PLATFORMS[a.platform].category === 'shop';
 /** Sessiz yeniden deneme yetmeyen, hata olunca Bağlan paneli açılan kanallar: pazaryerleri + eski IMAP (Diğer e-posta) hesabı */
 const panelChannel = (a: Account) => credentialForm(a) || PLATFORMS[a.platform].mode === 'mail';
 
-function accountIssue(a: Account): { title: string; how: string; label: string; action: 'reconnect' | 'connect' | 'credentials' | 'panel' | 'mailLogin'; done: string } | null {
+function accountIssue(a: Account): { title: string; how: string; label: string; action: 'reconnect' | 'connect' | 'credentials' | 'panel' | 'mailLogin' | 'relogin'; done: string } | null {
   const name = PLATFORMS[a.platform].name;
   const browser = PLATFORMS[a.platform].mode === 'browser';
   const detail = (a.detail ?? '').replace(/\s+/g, ' ').trim();
   // geçici kopma: çekirdek arka planda kendiliğinden yeniden deniyor (registry heal) — denemeler bitmeden uyarı yok
   if (a.autoRetry && a.status !== 'connected') return null;
+  // Resmi girişli hesabın oturumu sona erdi / izin eksik (Meta) ya da giriş reddedildi: aynı belirteçle yeniden denemek işe yaramaz,
+  // tarayıcı girişi de resmi bağlantıyı bozar → Bağlan'da o hesap açılır, "Yeniden giriş yap" sağlayıcının sayfasını açar
+  if ((a.status === 'error' || a.status === 'disconnected') && (needsRelogin(a) || (isOfficialAccount(a) && AUTH_FAIL.test(detail))))
+    return {
+      title: needsRelogin(a) ? detail.split(' — ')[0] : `${name} girişi yenilenmeli`,
+      how: /izin/i.test(detail) ? 'Hesabına yeniden giriş yap ve istenen izinleri ver; giriş sayfası tarayıcında açılır.' : 'Hesabına yeniden giriş yap; giriş sayfası tarayıcında açılır.',
+      label: 'Yeniden giriş yap',
+      action: 'relogin',
+      done: '',
+    };
+  // iCloud (uygulamaya özel parola) / Diğer e-posta şifresi reddedildi: Bağlan'da e-posta adresi dolu şifre formu açılır
+  if ((a.platform === 'icloud' || a.platform === 'imap') && (a.status === 'error' || a.status === 'disconnected') && AUTH_FAIL.test(detail))
+    return {
+      title: a.platform === 'icloud' ? 'iCloud parolası reddedildi' : 'E-posta şifresi reddedildi',
+      how: a.platform === 'icloud' ? 'Apple Hesabı’nda yeni bir uygulamaya özel parola oluşturup gir.' : 'Şifreni kontrol edip yeniden gir.',
+      label: 'Şifreyi güncelle',
+      action: 'credentials',
+      done: '',
+    };
   // Şifre/anahtar reddedildiyse "Yeniden bağlan" aynı bilgiyle tekrar dener ve sessizce yine düşer → bilgileri güncelleme formunu aç
   // E-posta (Gmail/Outlook/Yahoo/Yandex/iCloud) giriş reddi: eski uygulama şifresi yolu bırakılır, sağlayıcının kendi giriş penceresi açılır.
   // Aynı şifreyle yeniden deneme yok (kilitlenme riski); şifre Mivelo'ya yazılmaz.

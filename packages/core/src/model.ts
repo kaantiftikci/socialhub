@@ -21,6 +21,8 @@ export interface Account {
   attention?: string;
   /** Geçici bağlantı sorunu: çekirdek arka planda kendiliğinden yeniden deniyor (arayüz uyarı göstermez); denemeler bitince kalkar */
   autoRetry?: boolean;
+  /** Hesap sağlayıcının resmi girişiyle (OAuth) bağlandı: arayüz tarayıcı girişi yerine "Yeniden giriş yap" gösterir */
+  official?: boolean;
 }
 
 export type ChatKind = 'direct' | 'group' | 'channel';
