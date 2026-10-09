@@ -81,3 +81,4 @@ jobs:
         with:
           name: smoke-logs
           path: smoke/
+          retention-days: 7

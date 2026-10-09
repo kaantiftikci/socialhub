@@ -171,6 +171,8 @@ jobs:
           name: mivelo-${{ matrix.name }}
           path: out/*
           if-no-files-found: error
+          # yalnız publish işine aktarım içindir (paketler mivelo.app/indir'de): depo özelken 90 günlük birikim kotayı dolduruyordu
+          retention-days: 1
 
   publish:
     needs: [version, build]

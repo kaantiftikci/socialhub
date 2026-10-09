@@ -175,7 +175,8 @@ Dil: arayüz ve yorumlar Türkçe.
   sürüm YAYINLAMAZ. **Sürümü Claude otomatik çıkarır (Kaan, 29.09: "sen otomatik yap sürüm işlerini")**: doğrulanmış her iş turu main'e
   itildikten sonra. Depo 29.09'dan beri HERKESE AÇIK → standart GitHub Actions makineleri ücretsiz ve kotasız (özelken macOS ×10 dakika
   sayılıyordu; takılan 0.1.7 derlemesi 2.000 dk'lık kotanın %90'ını bitirmişti). Depo yeniden özele dönerse kota kuralı geri gelir: en çok
-  günde bir sürüm, GitHub kota uyarısında sürüm çıkarma. Tetik: GitHub MCP `actions_run_trigger run_workflow build-desktop.yml ref main`
+  günde bir sürüm, GitHub kota uyarısında sürüm çıkarma. **09.10: depo yeniden ÖZEL** → 0.1.48 "Artifact storage quota has been hit" ile düştü
+  (90 günlük 121 paket çıktısı ≈7,4 GB); eskiler silindi, paket çıktısı `retention-days: 1`, smoke-logs 7. Kota 6-12 sa'de yeniden hesaplanır. Tetik: GitHub MCP `actions_run_trigger run_workflow build-desktop.yml ref main`
   (etiket itmek bu ortamda proxy 403 veriyor; sürüm 0.1.<run>), sonucu kontrol et; takılırsa HEMEN iptal et. Birim testleri yalnız ayrı
   `test` işinde (ubuntu, 1×, ≤10 dk; sonucu paketlemeyi durdurmaz), `build` işi ≤30 dk; `npm test` `--test-force-exit --test-timeout=120000`. Sürüm 0.1.<run> (etikette
   etiketinki), `--config {"version"}` ile. Matris: mac-arm64 (macos-14), mac-intel (macos-14 + x64 Node/Rosetta + x86_64-apple-darwin), windows-x64 (NSIS).
