@@ -179,7 +179,9 @@ Dil: arayüz ve yorumlar Türkçe.
   (90 günlük 121 paket çıktısı ≈7,4 GB); eskiler silindi ama kota 6-12 sa'de yeniden hesaplandığı için 0.1.49 da düştü → build-desktop
   ARTIK upload-artifact KULLANMAZ: her build işi `out/*` + `meta-<ad>.json` (size+sha256) dosyalarını curl FTPS ile web kökü dışındaki
   `~/mivelo-staging/<run_id>/`e yükler (meta EN SON); publish üç meta'yı okur, latest.json yazar, paketleri `RNFR/RNTO` ile `mivelo.app/indir/files/`a
-  taşır (DELE önce), latest.json EN SON; sonra tüm `mivelo-staging/<sayı>` klasörleri silinir. Duman testi DMG'yi mivelo.app'ten indirir. Tetik: GitHub MCP `actions_run_trigger run_workflow build-desktop.yml ref main`
+  taşır (DELE önce), latest.json EN SON; sonra tüm `mivelo-staging/<sayı>` klasörleri silinir. FTP TLS `scripts/ci/ftp.sh` (kaynak: `CURL` dizisi + `FTP_URL`): sunucu sertifikası
+  kaantiftikci.com adına DEĞİL (0.1.50 curl 60) → sertifikadaki adlarla `--connect-to` + doğrulama; tutmazsa `::warning::` + `-k` (eski FTP-Deploy-Action varsayılan
+  `security: loose` zaten doğrulamıyordu). Duman testi DMG'yi mivelo.app'ten indirir. Tetik: GitHub MCP `actions_run_trigger run_workflow build-desktop.yml ref main`
   (etiket itmek bu ortamda proxy 403 veriyor; sürüm 0.1.<run>), sonucu kontrol et; takılırsa HEMEN iptal et. Birim testleri yalnız ayrı
   `test` işinde (ubuntu, 1×, ≤10 dk; sonucu paketlemeyi durdurmaz), `build` işi ≤30 dk; `npm test` `--test-force-exit --test-timeout=120000`. Sürüm 0.1.<run> (etikette
   etiketinki), `--config {"version"}` ile. Matris: mac-arm64 (macos-14), mac-intel (macos-14 + x64 Node/Rosetta + x86_64-apple-darwin), windows-x64 (NSIS).

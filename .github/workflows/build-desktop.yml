@@ -182,7 +182,8 @@ jobs:
             fs.writeFileSync(process.argv[1], JSON.stringify(out));
           ' "meta-${{ matrix.name }}.json"
           cat "meta-${{ matrix.name }}.json"
-          up() { curl -sS --ssl-reqd --ftp-create-dirs --retry 4 --retry-delay 10 --retry-all-errors -u "kaa300ftikcicom:$FTP_PASSWORD" -T "$1" "ftp://kaantiftikci.com/mivelo-staging/$GITHUB_RUN_ID/"; }
+          . scripts/ci/ftp.sh
+          up() { "${CURL[@]}" --ftp-create-dirs --retry 4 --retry-delay 10 --retry-all-errors -T "$1" "$FTP_URL/mivelo-staging/$GITHUB_RUN_ID/"; }
           for f in out/*; do up "$f"; echo "yüklendi: $f"; done
           # bilgi dosyası EN SON: publish onu bulabiliyorsa paketler eksiksiz yüklenmiştir
           up "meta-${{ matrix.name }}.json"
@@ -194,7 +195,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
-      FTP: ftp://kaantiftikci.com
       STAGE: mivelo-staging/${{ github.run_id }}
       DEST: mivelo.app/indir/files
     steps:
@@ -203,8 +203,9 @@ jobs:
         run: |
           set -e
           mkdir -p files meta
+          . scripts/ci/ftp.sh
           for n in mac-arm64 mac-intel windows-x64; do
-            curl -sS --ssl-reqd --retry 4 --retry-all-errors -u "kaa300ftikcicom:$FTP_PASSWORD" -o "meta/$n.json" "$FTP/$STAGE/meta-$n.json"
+            "${CURL[@]}" --retry 4 --retry-all-errors -o "meta/$n.json" "$FTP_URL/$STAGE/meta-$n.json"
           done
           node -e '
             const fs=require("fs"); const v=process.argv[1]; const files={};
@@ -220,20 +221,22 @@ jobs:
       - name: Yayınla — mivelo.app/indir/files (FTP + TLS)
         run: |
           set -e
-          C=(curl -sS --ssl-reqd --retry 4 --retry-all-errors -u "kaa300ftikcicom:$FTP_PASSWORD")
+          . scripts/ci/ftp.sh
+          C=("${CURL[@]}" --retry 4 --retry-all-errors)
           # paketler aynı sunucuda yer değiştirir (yeniden yükleme yok); latest.json EN SON → güncelleme yeni dosyaları ancak hazırken görür
           q=()
           while read -r f; do [ -n "$f" ] || continue; q+=(-Q "*DELE $DEST/$f" -Q "RNFR $STAGE/$f" -Q "RNTO $DEST/$f"); done < names.txt
-          "${C[@]}" -l -o /dev/null "${q[@]}" "$FTP/"
-          "${C[@]}" -T files/.htaccess "$FTP/$DEST/"
-          "${C[@]}" -T files/latest.json "$FTP/$DEST/"
+          "${C[@]}" -l -o /dev/null "${q[@]}" "$FTP_URL/"
+          "${C[@]}" -T files/.htaccess "$FTP_URL/$DEST/"
+          "${C[@]}" -T files/latest.json "$FTP_URL/$DEST/"
           curl -sS "https://mivelo.app/indir/files/latest.json?t=$GITHUB_RUN_ID" | head -c 200; echo
       - name: Geçici klasörleri temizle
         if: always()
         run: |
-          C=(curl -sS --ssl-reqd -u "kaa300ftikcicom:$FTP_PASSWORD")
+          . scripts/ci/ftp.sh
+          C=("${CURL[@]}")
           # bu çalıştırmanın ve eski (başarısız) çalıştırmaların artıkları
-          for d in $("${C[@]}" -l "$FTP/mivelo-staging/" 2>/dev/null | tr -d '\r' | sed 's#.*/##' | grep -E '^[0-9]+$'); do
-            q=(); for f in $("${C[@]}" -l "$FTP/mivelo-staging/$d/" 2>/dev/null | tr -d '\r' | sed 's#.*/##' | grep -v '^\.*$'); do q+=(-Q "*DELE mivelo-staging/$d/$f"); done
-            "${C[@]}" -l -o /dev/null "${q[@]}" -Q "*RMD mivelo-staging/$d" "$FTP/" && echo "silindi: $d" || true
+          for d in $("${C[@]}" -l "$FTP_URL/mivelo-staging/" 2>/dev/null | tr -d '\r' | sed 's#.*/##' | grep -E '^[0-9]+$'); do
+            q=(); for f in $("${C[@]}" -l "$FTP_URL/mivelo-staging/$d/" 2>/dev/null | tr -d '\r' | sed 's#.*/##' | grep -v '^\.*$'); do q+=(-Q "*DELE mivelo-staging/$d/$f"); done
+            "${C[@]}" -l -o /dev/null "${q[@]}" -Q "*RMD mivelo-staging/$d" "$FTP_URL/" && echo "silindi: $d" || true
           done
