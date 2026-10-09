@@ -214,27 +214,11 @@ function seed(): void {
   messages = [];
   seedK = 0;
   // yeni üye: ASLA örnek veri yok (bağladığı uygulamalar boş kanal olarak görünür)
-  seedNotes(now);
+  // "Kendime not" kaldırıldı (09.10): eski oturumdan kalan not hesabı listeden düşer
+  accounts = accounts.filter((a) => a.platform !== 'mivelo');
   if (freshUser) return;
   for (const acc of accounts) if (acc.status === 'connected') seedAccount(acc, now);
   seedScheduled(now);
-}
-
-/** "Kendime not" (çekirdekteki connectors/notes.ts gibi): hesap listesinde görünmez (category 'self'), sol menüden açılır */
-const NOTES_ACC = 'notes';
-export const NOTES_CHAT_ID = `${NOTES_ACC}/notes`;
-function seedNotes(now: number): void {
-  if (!accounts.some((a) => a.id === NOTES_ACC)) accounts = [...accounts, { id: NOTES_ACC, platform: 'mivelo', label: 'Kendime not', status: 'connected', createdAt: 1_750_000_000_000 }];
-  const chat: Chat = { id: NOTES_CHAT_ID, accountId: NOTES_ACC, platform: 'mivelo', remoteId: 'notes', name: 'Kendime not', kind: 'direct', unread: 0, lastMessageAt: 0, lastPreview: '', lastFromMe: true, tags: [], handle: 'Yalnız sende' };
-  chats.push(chat);
-  if (freshUser) return;
-  const lines = ['Kargo firması: 0850 … (müşteri hizmetleri) — iade kodu 4 gün geçerli', 'Perşembe toplantı notları: fiyat listesini güncelle, Ayşe’ye kataloğu gönder', 'https://mivelo.app/indir'];
-  lines.forEach((text, i) => {
-    const ts = now - (lines.length - i) * 5 * 3_600_000;
-    messages.push({ id: `${chat.id}#n${i}`, chatId: chat.id, remoteId: `n${i}`, senderId: 'me', senderName: 'Ben', fromMe: true, text, ts, status: 'read' });
-    chat.lastMessageAt = ts;
-    chat.lastPreview = text;
-  });
 }
 
 /**
@@ -382,7 +366,7 @@ export function loadDemoAccounts(list: Array<Record<string, unknown>>, opts: { f
   freshUser = !!opts.fresh;
   calEvents = freshUser ? [] : null;
   accounts = list
-    .filter((a) => PLATFORMS[a.platform as Platform])
+    .filter((a) => PLATFORMS[a.platform as Platform] && a.platform !== 'mivelo')
     .map((a) => ({
       id: String(a.id),
       platform: a.platform as Platform,

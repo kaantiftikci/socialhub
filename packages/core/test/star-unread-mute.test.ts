@@ -9,7 +9,6 @@ process.env.KAVSAK_DATA_DIR = tmp;
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
 const { Store } = await import('../src/store.js');
-const { NotesConnector } = await import('../src/connectors/notes.js');
 
 let n = 0;
 function setup() {
@@ -65,23 +64,4 @@ test('süreli sessiz: mutedUntil saklanır, süre dolunca okurken muted kalkar; 
   c = store.setFlags(cid, { muted: false })!;
   assert.equal(c.muted, undefined);
   assert.equal(c.mutedUntil, undefined);
-});
-
-test('Kendime not: tek sohbet, gönderilen metin fromMe + read olarak yazılır', async () => {
-  const store = new Store(path.join(tmp, 'notes.db'));
-  const account = { id: 'mivelo:1', platform: 'mivelo' as const, label: 'Kendime not', status: 'disconnected' as const, createdAt: 1 };
-  store.upsertAccount(account);
-  const c = new NotesConnector(account, store);
-  await c.start();
-  const chats = store.listChats().filter((x) => x.accountId === account.id);
-  assert.equal(chats.length, 1);
-  assert.equal(chats[0].name, 'Kendime not');
-  const r = await c.sendText(chats[0].remoteId, 'kargo kodu 1234');
-  const m = store.listMessages(chats[0].id, 10);
-  assert.equal(m.length, 1);
-  assert.equal(m[0].remoteId, r.remoteId);
-  assert.equal(m[0].fromMe, true);
-  assert.equal(m[0].status, 'read');
-  assert.equal(store.getChat(chats[0].id)?.unread, 0);
-  await c.stop();
 });

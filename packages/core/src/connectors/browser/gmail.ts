@@ -298,6 +298,7 @@ async function openThread(page: Page, id: string): Promise<boolean> {
 
 export const gmail: Strategy = {
   unloadWhenIdle: true,
+  readsOnOpen: true,
   // canlı liste izleme (bridge watchDom): sayfa açıkken yeni e-posta satırı düşünce birkaç sn içinde yoklama
   watchSelector: 'tr.zA',
   home: HOME,

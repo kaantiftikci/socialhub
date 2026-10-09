@@ -355,6 +355,7 @@ export function outlookRow(r: OutlookRawRow, now = new Date()): { subject: strin
 
 export const outlook: Strategy = {
   unloadWhenIdle: true,
+  readsOnOpen: true,
   // canlı liste izleme (bridge watchDom): sayfa açıkken yeni e-posta satırı düşünce birkaç sn içinde yoklama
   watchSelector: LIST,
   home: HOME,

@@ -893,8 +893,6 @@ export default function App() {
    */
   const inboxChats = useMemo(() => activeChats.filter((c) => !c.meta?.archived && !c.muted && !c.hidden && !(c.platform === 'imessage' && c.meta?.folder === 'junk') && !(PLATFORMS[c.platform].category === 'mail' && (c.meta?.folder === 'junk' || c.meta?.folder === 'sent'))), [activeChats]);
   /** Sessiz / Gizli görünümleri (yerel bayraklar) */
-  /** "Kendime not" sohbeti (çekirdek connectors/notes.ts; demoda static-demo seedNotes) */
-  const notesChat = useMemo(() => allChats.find((c) => c.platform === 'mivelo') ?? null, [allChats]);
   const flagged = useMemo(() => {
     const by = (k: 'muted' | 'hidden') => allChats.filter((c) => c[k]).sort((a, b) => b.lastMessageAt - a.lastMessageAt);
     return { muted: by('muted'), hidden: by('hidden') };
@@ -1416,9 +1414,6 @@ export default function App() {
           <NavItem icon="chart" label="Miveloji" title="Mesajlaşma alışkanlıklarının aylık ve yıllık raporu (yalnız bu cihazda hesaplanır)" count={0} active={view === 'wrapped'} onClick={() => setView('wrapped')} />
           <NavItem icon="image" label="Medya" title="Tüm uygulamalardan fotoğraf, video, dosya ve bağlantılar" count={0} active={view === 'media'} onClick={() => setView('media')} />
           <NavItem icon="star" label="İşaretliler" title="Yıldızladığın mesajlar (tüm uygulamalardan)" count={0} active={view === 'starred'} onClick={() => setView('starred')} />
-          {notesChat && (
-            <NavItem icon="note" label="Kendime not" title="Yalnız bu cihazda duran not sohbeti: bağlantı, kod, hatırlatma" count={0} active={view === 'inbox' && selected === notesChat.id} onClick={() => (setView('inbox'), selectPlatform(null), setSelected(notesChat.id))} />
-          )}
           {FLAG_VIEWS.filter((f) => f.view === 'muted' || flagged[f.flag].length > 0).map((f) => (
             <NavItem key={f.view} icon={f.icon} label={f.label} count={flagged[f.flag].length} active={view === f.view} onClick={() => setView(f.view)} />
           ))}

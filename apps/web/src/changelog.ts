@@ -16,6 +16,21 @@ export interface ChangeEntry {
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    id: '2026-10-09a',
+    date: '2026-10-09',
+    title: 'Okunmamış e-postalar yerinde',
+    items: [
+      {
+        title: 'Okunmamış sekmesi e-postada dolu',
+        text: 'Gmail, Yahoo, Outlook, iCloud ve Yandex’te Mivelo e-postayı okumak için açtığında sağlayıcı onu okundu sayıyordu; Okunmamış sekmesi bu yüzden boş kalıyordu. Artık sen Mivelo’da açana ya da yeni e-posta gelene dek okunmamış kalır.',
+      },
+      {
+        title: 'Kendime not kaldırıldı',
+        text: 'Sol menüdeki Kendime not sohbeti kaldırıldı; eski not kanalı ilk açılışta kendiliğinden silinir.',
+      },
+    ],
+  },
+  {
     id: '2026-10-08a',
     date: '2026-10-08',
     title: 'Resmi girişle bağlan',
@@ -46,10 +61,6 @@ export const CHANGELOG: ChangeEntry[] = [
       {
         title: 'Gönderimi geri al',
         text: 'Enter’a bastıktan sonra 5 saniye içinde “Geri al” dersen mesaj gitmez, yazma alanına döner. Süreyi Ayarlar → Genel’den 10 saniye yapabilir ya da kapatabilirsin.',
-      },
-      {
-        title: 'Kendime not',
-        text: 'Sol menüde yeni bir sohbet: bağlantı, kod, hatırlatma… ne yazarsan yalnız bu cihazda durur, hiçbir uygulamaya gitmez.',
       },
       {
         title: 'Yıldızla ve İşaretliler',

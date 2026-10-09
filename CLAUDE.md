@@ -400,6 +400,11 @@ Dil: arayüz ve yorumlar Türkçe.
   `pttStatus` (toLocaleLowerCase('tr'): JS /i "İptal"i tanımaz) → Created/Shipped/Delivered/Cancelled/Returned. TLS doğrulaması KAPATILMAZ
   (resmi istemciler kapatıyor). REST (integration-api.pttavm.com, Api-Key+access-token) tek kaynaklı → kullanılmadı. Gerçek hesapla doğrulanmadı.
   `ORDER_ONLY_PLATFORMS`'ta (sipariş sayfası). Test: pttavm.test.ts.
+- **Tarayıcı e-posta okunmamışı (09.10, Kaan: Gmail/Yahoo Okunmamış sekmesi boş)**: kök neden — köprü mesajları almak için diziyi web arayüzünde
+  AÇIYOR, sağlayıcı okundu sayıyor; stratejinin "okunmadı geri al"ı (Gmail Shift+U kısayolu varsayılan kapalı, düğme seçicileri kırılgan) tutmayınca
+  sonraki yoklama okunmamışı 0 yazıyordu (sunucuda da okundu kalıyordu). Şimdi `Strategy.readsOnOpen` (gmail/yahoo/outlook/icloud/yandex): köprü
+  okunmamışken açtığı diziyi `selfOpened`'a yazar (kalıcı meta `selfread:<hesap>`, ≤500); platform yeniden okunmamış diyene, yeni etkinlik gelene ya
+  da Mivelo'da okunana (`markRead`) dek platformun "okundu"su depodaki okunmamışı silmez. Test: mail-unread-selfopen.test.ts.
 - **E-posta girişi**: Gmail/iCloud Bağlan → önce "Google/Apple ile giriş yap" (tarayıcı, normal şifre; `:choose` pairbox), uygulama şifresi
   "gelişmiş". Yandex ayrı platform (`yandex`, imap.yandex.com, uygulama şifresi). "Diğer e-posta" yalnız e-posta+şifre: sunucu
   `mail-discover.ts` (bilinen sağlayıcılar → Thunderbird autoconfig → imap.<alan>); elle giriş "gelişmiş". Yahoo "Command failed": OBJECTID
@@ -884,9 +889,9 @@ Dil: arayüz ve yorumlar Türkçe.
   Düğme/bağlantı/girdi/rol öğeleri, `.grip`, `.no-drag` ve açılır pencere (`[role=dialog]`) içi sürüklemez. Gerçek Mac'te DOĞRULANMADI.
 - **7 sevilen küçük özellik (01.10, Kaan: "ilk 7 uygula")**: (1) **Gönderimi geri al** `Conversation.tsx` `undo` state: Enter'da iyimser balon
   hemen, `api.send` `prefs.undoSec` (0/5/10, vars. 5) sn gecikir; `.undo-bar` "Geri al" (⌘Z boş yazma alanında) metni ve yanıt hedefini geri getirir,
-  "Hemen gönder"/yeni gönderim/sohbet değişimi `flushUndo`. (2) **Kendime not** `connectors/notes.ts` `NotesConnector` (platform `mivelo`,
-  category `self`; index.ts bootAll sonrası yoksa `registry.add('mivelo')`; SINGLE; yalnız metin, `canMedia` kapalı; demoda `seedNotes`
-  `NOTES_CHAT_ID`); arayüzde hesap listesinde görünmez (`realAccounts` boş durum için), sol menü "Kendime not" (`notesChat`). (3) **Yıldız**
+  "Hemen gönder"/yeni gönderim/sohbet değişimi `flushUndo`. (2) ~~Kendime not~~ **KALDIRILDI (09.10, Kaan)**: notes.ts/seedNotes/menü
+  silindi; index.ts bootAll'dan ÖNCE eski `mivelo` platformlu hesabı `registry.remove` eder, demo listeden atar (`Platform 'mivelo'` ve `category 'self'`
+  süzgeçleri yalnız eski veri için duruyor). (3) **Yıldız**
   `messages.starred` sütunu + kısmi indeks, `store.setStarred/listStarred`, `POST /api/messages/:id/star`, `GET /api/starred`; balon üstü
   `.rtrig` yıldız (`act.star`, `popStar`), saatte `.bt-star`; görünüm `Starred.tsx` (`view 'starred'`, `starRev` message.upsert'te artar).
   (4) **Sesli mesaj hızı** `AudioClip` 1×/1,5×/2× (`mivelo.voiceRate`, tüm sesli mesajlarda ortak). (5) **Okunmadı olarak işaretle**

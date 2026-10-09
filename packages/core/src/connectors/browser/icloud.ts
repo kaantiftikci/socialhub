@@ -60,6 +60,7 @@ async function ensureInbox(page: Page): Promise<Frame | undefined> {
 
 export const icloud: Strategy = {
   unloadWhenIdle: true,
+  readsOnOpen: true,
   // canlı liste izleme (bridge watchDom): sayfa açıkken yeni e-posta satırı düşünce birkaç sn içinde yoklama
   watchSelector: '[role="listbox"] [role="option"], [role="list"] [role="listitem"], [role="grid"] [role="row"]',
   home: HOME,

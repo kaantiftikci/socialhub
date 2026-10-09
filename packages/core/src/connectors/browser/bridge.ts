@@ -116,6 +116,12 @@ export interface Strategy {
   viewport?: { width: number; height: number };
   /** Yoklama bitince sayfayı about:blank'e al (ağır siteler boşta bellek tutmasın); strateji her çağrıda kendi sayfasına döner */
   unloadWhenIdle?: boolean;
+  /**
+   * messages() diziyi web arayüzünde AÇAR ve sağlayıcı bunu okundu sayar (tarayıcı e-posta yolları). Strateji sonra "okunmadı"
+   * yapmayı dener ama düğme/kısayol kırılgan: başarısız olunca sonraki yoklama okunmamışı 0 yazıyor, Okunmamış sekmesi boşalıyordu.
+   * Köprü bu dizileri hatırlar: yeni etkinlik ya da Mivelo'da okuma olmadan platformun "okundu"su Mivelo'nun okunmamışını silmez.
+   */
+  readsOnOpen?: boolean;
   /** send() opts.replyTo ile alıntılı yanıt gönderebilir (Instagram) */
   canReply?: boolean;
   /** Giriş yapılmış mı? (çerezler Node tarafında okunur, sayfa da verilir) */
@@ -332,6 +338,40 @@ export class BrowserConnector extends BaseConnector {
    * LinkedIn read:false, Messenger kalın satır) yeni etkinlik gelene dek Mivelo'da okunmamış artmaz.
    */
   private reactionOnly = new Map<string, number>();
+  /**
+   * readsOnOpen: okunmamışken mesajlarını almak için köprünün açtığı diziler → o andaki lastTs. Kalıcı (meta `selfread:<hesap>`):
+   * çekirdek yeniden başlayınca da ilk turun platform "okundu"su (kendi açmamız) okunmamışı silmesin.
+   */
+  private selfOpenedMap?: Map<string, number>;
+  private selfOpenedDirty = false;
+  private get selfOpened(): Map<string, number> {
+    if (!this.selfOpenedMap) {
+      this.selfOpenedMap = new Map();
+      try {
+        const raw = this.store.meta(`selfread:${this.account.id}`);
+        if (raw) for (const [k, v] of JSON.parse(raw) as Array<[string, number]>) this.selfOpenedMap.set(k, Number(v) || 0);
+      } catch {
+        /* bozuk kayıt: boş başla */
+      }
+    }
+    return this.selfOpenedMap;
+  }
+  private markSelfOpened(id: string, ts: number | undefined): void {
+    if (ts === undefined) {
+      if (this.selfOpened.delete(id)) this.selfOpenedDirty = true;
+      return;
+    }
+    this.selfOpened.delete(id);
+    this.selfOpened.set(id, ts);
+    // sınır: en eski kayıtlar düşer (500 okunmamış dizi yeter)
+    while (this.selfOpened.size > 500) this.selfOpened.delete(this.selfOpened.keys().next().value!);
+    this.selfOpenedDirty = true;
+  }
+  private saveSelfOpened(): void {
+    if (!this.selfOpenedDirty) return;
+    this.selfOpenedDirty = false;
+    this.store.setFlag(`selfread:${this.account.id}`, JSON.stringify([...this.selfOpened]));
+  }
   /** Mesajları henüz alınmamış önemli sohbet sayısı (ilk eşitleme sürüyor): sıradaki tur backfillMs ile öne çekilir */
   private backlogLeft = 0;
 
@@ -1198,6 +1238,10 @@ export class BrowserConnector extends BaseConnector {
   async markRead(remoteChatId: string): Promise<void> {
     const chat = this.store.getChat(chatId(this.account.id, remoteChatId));
     this.localRead.set(remoteChatId, { at: Date.now(), lastTs: chat?.lastMessageAt ?? Date.now(), retries: 0 });
+    if (this.strategy.readsOnOpen) {
+      this.markSelfOpened(remoteChatId, undefined);
+      this.saveSelfOpened();
+    }
     if (!this.strategy.markRead || (!this.pageless && !(await this.ensureOpen()))) return;
     // hızlı gezinmede aynı sohbet için birden çok okundu gezinmesi kuyruğa girmesin
     if (this.pendingRead.has(remoteChatId)) return;
@@ -1423,7 +1467,15 @@ export class BrowserConnector extends BaseConnector {
         const rxAt = this.reactionOnly.get(t.id);
         if (rxAt !== undefined && t.lastTs > rxAt) this.reactionOnly.delete(t.id);
         const quiet = this.reactionOnly.has(t.id) || !!t.reactionPreview;
-        const unread = quiet ? Math.min(t.unread, ex?.unread ?? 0) : t.unread;
+        // köprünün kendi açtığı (readsOnOpen) dizi: platform yeniden "okunmamış" diyene, yeni etkinlik gelene ya da Mivelo'da
+        // okunana dek platformun "okundu"su bizim açmamızdan → depodaki okunmamış korunur
+        const so = this.strategy.readsOnOpen ? this.selfOpened.get(t.id) : undefined;
+        let selfRead = false;
+        if (so !== undefined) {
+          if (t.unread > 0 || (t.lastTs && t.lastTs > so) || this.localRead.has(t.id)) this.markSelfOpened(t.id, undefined);
+          else selfRead = true;
+        }
+        const unread = selfRead ? (ex?.unread ?? 0) : quiet ? Math.min(t.unread, ex?.unread ?? 0) : t.unread;
         prevUnread.set(t.id, ex?.unread ?? 0);
         const lr = this.localRead.get(t.id);
         if (lr) {
@@ -1498,6 +1550,8 @@ export class BrowserConnector extends BaseConnector {
             tried.add(t.id);
             try {
               const limit = first ? 25 : 15;
+              // okunmamış diziyi açmadan önce kaydet (açma sağlayıcıda okundu yapar; mesaj alımı yarıda kalsa da)
+              if (this.strategy.readsOnOpen && t.unread > 0 && !this.localRead.has(t.id)) this.markSelfOpened(t.id, t.lastTs || this.store.getChatLite(chatId(this.account.id, t.id))?.lastMessageAt || 0);
               const msgs = await withTimeout(this.strategy.messages(page, cookies, t.id, limit), 60_000, 'mesajlar');
               this.turnReacted.delete(t.id);
               this.turnIncoming.delete(t.id);
@@ -1525,6 +1579,7 @@ export class BrowserConnector extends BaseConnector {
         );
         if (fatalErr) break; // hız sınırı/doğrulamada kalan sohbetlere istek atma
       }
+      this.saveSelfOpened();
       // denenmeden kalanlar (hız sınırı/doğrulama sonrası): deneme sayılmadan bekleyen listesinde kalsın
       for (const t of batch) if (!tried.has(t.id) && !this.pendingFetch.has(t.id)) this.pendingFetch.set(t.id, { tries: 0, next: 0 });
       // aynı hata her sohbet için ayrı satır basmasın: yoklama başına tek özet

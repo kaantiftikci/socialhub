@@ -259,6 +259,7 @@ async function clickSend(page: Page): Promise<void> {
 
 export const yandex: Strategy = {
   unloadWhenIdle: true,
+  readsOnOpen: true,
   watchSelector: ROW_SEL,
   home: HOME,
   loginUrl: LOGIN_URL,

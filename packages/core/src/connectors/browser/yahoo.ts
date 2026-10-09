@@ -184,6 +184,7 @@ async function clickSend(page: Page): Promise<void> {
 
 export const yahoo: Strategy = {
   unloadWhenIdle: true,
+  readsOnOpen: true,
   watchSelector: ROW_SEL,
   home: HOME,
   loginHint: 'Açılan pencerede Yahoo hesabına normal şifrenle gir (doğrulama isterse tamamla; "Oturumumu açık tut" işaretli olsun); gelen kutusu görününce pencere kendiliğinden kapanır',
