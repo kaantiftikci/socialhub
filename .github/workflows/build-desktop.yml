@@ -166,49 +166,74 @@ jobs:
           ext=""; [ "${{ matrix.goos }}" = windows ] && ext=".exe"
           cp "apps/desktop/src-tauri/core-bundle/bin/mivelo-bridge$ext" "out/mivelo-bridge-${{ matrix.goos }}-${{ matrix.goarch }}$ext"
           ls -la out
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mivelo-${{ matrix.name }}
-          path: out/*
-          if-no-files-found: error
-          # yalnız publish işine aktarım içindir (paketler mivelo.app/indir'de): depo özelken 90 günlük birikim kotayı dolduruyordu
-          retention-days: 1
+      # GitHub çıktı deposu (upload-artifact) KULLANILMAZ: depo özelken kotası doluyor ("Artifact storage quota has been hit", 09.10;
+      # 6-12 sa'de bir yeniden hesaplanıyor). Her iş paketini sunucuda web kökü dışındaki geçici klasöre yükler; publish yalnız üç iş
+      # de başarılıysa dosyaları yerine taşır ve latest.json'u yazar (yarım sürüm yayınlanmaz).
+      - name: Sunucuya yükle (geçici klasör)
+        shell: bash
+        env:
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          set -e
+          node -e '
+            const fs=require("fs"); const crypto=require("crypto"); const out={};
+            // sha256: uygulama içi güncelleme (updater.ts) ve köprü indirmesi (sidecar.ts) indirdiği dosyayı bununla doğrular
+            for (const f of fs.readdirSync("out")) { const b=fs.readFileSync("out/"+f); out[f]={size:b.length, sha256:crypto.createHash("sha256").update(b).digest("hex")}; }
+            fs.writeFileSync(process.argv[1], JSON.stringify(out));
+          ' "meta-${{ matrix.name }}.json"
+          cat "meta-${{ matrix.name }}.json"
+          up() { curl -sS --ssl-reqd --ftp-create-dirs --retry 4 --retry-delay 10 --retry-all-errors -u "kaa300ftikcicom:$FTP_PASSWORD" -T "$1" "ftp://kaantiftikci.com/mivelo-staging/$GITHUB_RUN_ID/"; }
+          for f in out/*; do up "$f"; echo "yüklendi: $f"; done
+          # bilgi dosyası EN SON: publish onu bulabiliyorsa paketler eksiksiz yüklenmiştir
+          up "meta-${{ matrix.name }}.json"
 
   publish:
     needs: [version, build]
-    # yalnız üç paket de başarılıysa: eşitleme, yerelde olmayan (başarısız) paketin eski sürümünü sunucudan silerdi
+    # yalnız üç paket de başarılıysa: yarım sürüm (bir platform yeni, latest.json eski) yayınlanmaz
     if: needs.build.result == 'success'
     runs-on: ubuntu-latest
+    env:
+      FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+      FTP: ftp://kaantiftikci.com
+      STAGE: mivelo-staging/${{ github.run_id }}
+      DEST: mivelo.app/indir/files
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          path: dl
-          merge-multiple: true
-      - name: Dosyalar + latest.json
+      - name: Paket bilgileri + latest.json
         run: |
-          mkdir -p files
-          cp dl/* files/ 2>/dev/null || true
-          ls -la files
-          [ -n "$(ls files)" ] || { echo "yüklenecek paket yok"; exit 1; }
+          set -e
+          mkdir -p files meta
+          for n in mac-arm64 mac-intel windows-x64; do
+            curl -sS --ssl-reqd --retry 4 --retry-all-errors -u "kaa300ftikcicom:$FTP_PASSWORD" -o "meta/$n.json" "$FTP/$STAGE/meta-$n.json"
+          done
           node -e '
-            const fs=require("fs"); const crypto=require("crypto"); const v=process.argv[1];
-            // sha256: uygulama içi güncelleme (updater.ts) indirdiği paketi bununla doğrular
-            const files={}; for (const f of fs.readdirSync("files")) files[f]={size:fs.statSync("files/"+f).size, sha256:crypto.createHash("sha256").update(fs.readFileSync("files/"+f)).digest("hex")};
+            const fs=require("fs"); const v=process.argv[1]; const files={};
+            for (const f of fs.readdirSync("meta")) Object.assign(files, JSON.parse(fs.readFileSync("meta/"+f, "utf8")));
+            if (!Object.keys(files).length) { console.error("yüklenecek paket yok"); process.exit(1); }
             // köprü ikilileri: "darwin-arm64" → {file, size, sha256} (sidecar.ts indirirken doğrular)
             const bridge={}; for (const [f,x] of Object.entries(files)) { const m=/^mivelo-bridge-(\w+-\w+?)(?:\.exe)?$/.exec(f); if (m) bridge[m[1]]={file:f, ...x}; }
             fs.writeFileSync("files/latest.json", JSON.stringify({version:v, date:new Date().toISOString(), files, bridge}, null, 2));
+            fs.writeFileSync("names.txt", Object.keys(files).join("\n") + "\n");
           ' "${{ needs.version.outputs.v }}"
           cp deploy/indir/.htaccess files/.htaccess
           cat files/latest.json
-      - name: FTP (TLS) ile yükle — mivelo.app/indir/files
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
-        with:
-          server: kaantiftikci.com
-          username: kaa300ftikcicom
-          password: ${{ secrets.FTP_PASSWORD }}
-          protocol: ftps
-          local-dir: files/
-          server-dir: mivelo.app/indir/files/
-          state-name: .ftp-deploy-sync-state.json
-          timeout: 600000
+      - name: Yayınla — mivelo.app/indir/files (FTP + TLS)
+        run: |
+          set -e
+          C=(curl -sS --ssl-reqd --retry 4 --retry-all-errors -u "kaa300ftikcicom:$FTP_PASSWORD")
+          # paketler aynı sunucuda yer değiştirir (yeniden yükleme yok); latest.json EN SON → güncelleme yeni dosyaları ancak hazırken görür
+          q=()
+          while read -r f; do [ -n "$f" ] || continue; q+=(-Q "*DELE $DEST/$f" -Q "RNFR $STAGE/$f" -Q "RNTO $DEST/$f"); done < names.txt
+          "${C[@]}" -l -o /dev/null "${q[@]}" "$FTP/"
+          "${C[@]}" -T files/.htaccess "$FTP/$DEST/"
+          "${C[@]}" -T files/latest.json "$FTP/$DEST/"
+          curl -sS "https://mivelo.app/indir/files/latest.json?t=$GITHUB_RUN_ID" | head -c 200; echo
+      - name: Geçici klasörleri temizle
+        if: always()
+        run: |
+          C=(curl -sS --ssl-reqd -u "kaa300ftikcicom:$FTP_PASSWORD")
+          # bu çalıştırmanın ve eski (başarısız) çalıştırmaların artıkları
+          for d in $("${C[@]}" -l "$FTP/mivelo-staging/" 2>/dev/null | tr -d '\r' | sed 's#.*/##' | grep -E '^[0-9]+$'); do
+            q=(); for f in $("${C[@]}" -l "$FTP/mivelo-staging/$d/" 2>/dev/null | tr -d '\r' | sed 's#.*/##' | grep -v '^\.*$'); do q+=(-Q "*DELE mivelo-staging/$d/$f"); done
+            "${C[@]}" -l -o /dev/null "${q[@]}" -Q "*RMD mivelo-staging/$d" "$FTP/" && echo "silindi: $d" || true
+          done

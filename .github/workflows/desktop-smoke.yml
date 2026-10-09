@@ -30,12 +30,13 @@ jobs:
           id="${{ github.event.workflow_run.id || inputs.run_id }}"
           if [ -z "$id" ]; then id=$(gh run list -R "$GITHUB_REPOSITORY" -w build-desktop -s success -L 1 --json databaseId -q '.[0].databaseId'); fi
           echo "id=$id" >> "$GITHUB_OUTPUT"; echo "derleme: $id"
-      - uses: actions/download-artifact@v4
-        with:
-          name: mivelo-mac-arm64
-          path: dmg
-          run-id: ${{ steps.run.outputs.id }}
-          github-token: ${{ github.token }}
+      # yayınlanan DMG (build-desktop artık GitHub çıktı deposunu kullanmıyor; depo özelken kotası doluyordu)
+      - name: Yayınlanan DMG'yi indir
+        run: |
+          mkdir -p dmg
+          curl -fsSL -o dmg/Mivelo-mac-arm64.dmg "https://mivelo.app/indir/files/Mivelo-mac-arm64.dmg?r=${{ steps.run.outputs.id }}"
+          curl -fsS "https://mivelo.app/indir/files/latest.json?r=${{ steps.run.outputs.id }}" | head -c 120; echo
+          ls -la dmg
       - name: DMG'yi kur (kullanıcı gibi) + karantinayı kaldır ("Yine de Aç")
         run: |
           set -e
@@ -78,6 +79,8 @@ jobs:
           echo "--- core.log (uygulama) ---"; tail -30 ~/.mivelo/core.log 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         if: always()
+        # özel depoda çıktı kotası dolabilir: günlükler iş çıktısında da var
+        continue-on-error: true
         with:
           name: smoke-logs
           path: smoke/
