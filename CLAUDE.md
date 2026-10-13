@@ -277,8 +277,8 @@ Dil: arayüz ve yorumlar Türkçe.
   üst gezinme + altbilgi. Ünvan (07.10): Mivelo Spor Malzemeleri Ticaret ve Limited Şirketi (tescil 6 Ekim 2026) kosullar/kvkk + tüm landing altbilgilerinde (© 2026 <ünvan>). Kalan yer tutucular: [Açık adres], [KEP adresi, varsa], [İl], [Tutar]. Sürüm `2026-10-01` şu yerlerde AYNI
   kalmalı: core `consent.ts CONSENT_VERSIONS`, web `consent-store.ts`, `lib-members.php MV_TERMS_VERSION/MV_KVKK_VERSION`, `waitlist.php KVKK_VERSION`,
   indir `CONSENT`, landing `KVKK_VERSION` (değişince uygulama + indirme sayfası yeniden sorar). Onaylar: indirme kaydı iki zorunlu kutu (koşullar kabul,
-  aydınlatma "okudum"; önceden işaretli değil) → register.php onaysız 400, üyede `consent{terms,kvkk,at}`; bekleme listesi aydınlatma kutusu → waitlist.php
-  onaysız 400, kayıtta `consent{kvkk,at}`; geri bildirim kısa aydınlatma satırı; demo girişinde bağlantılar. Masaüstü: LicenseGate lisans ekranında
+  aydınlatma "okudum"; önceden işaretli değil) → register.php onaysız 400, üyede `consent{terms,kvkk,at}`; bekleme listesi: ana sayfa üst formunda kutu YOK (13.10 Kaan; alttaki formda var) → waitlist.php
+  onay isteğe bağlı (gelirse sürüm eşleşmeli, kayıtta `consent{kvkk,at}`); geri bildirim kısa aydınlatma satırı; demo girişinde bağlantılar. Masaüstü: LicenseGate lisans ekranında
   3 zorunlu kutu (koşullar, KVKK, risk) etkinleştirmeden önce; lisans geçerli ama sürüm eskiyse `ConsentScreen`. Çekirdek `consent.ts`
   `~/.mivelo/consent.json` 0600, `GET/POST /api/consent` (lisanssızken de açık; "Tüm verileri sil" dokunmaz), license.ts activate/check'e `terms` sürümü
   → license.php etkinleştirmede `terms/termsAt`. AI açık rızası `requireAiConsent()` (Conversation taslak/özet, Focus, QuestionDraft, Ayarlar AI anahtarı;

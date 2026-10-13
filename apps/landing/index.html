@@ -435,6 +435,7 @@ footer .legal{margin-top:18px;font-size:12px;line-height:1.5;color:var(--ink-4);
 
 /* Hero: Dockset düzeni — başlık, açıklama, tek CTA, iki satır küçük bilgi, ok */
 .intro .form button svg{width:15px;height:15px;margin-top:-2px}
+.intro .form button svg+svg{margin-left:-4px;width:13px;height:13px;margin-top:0}
 .intro .note{display:flex;flex-direction:column;align-items:center;gap:7px;margin-top:16px;font-size:13px}
 .intro .note-link{color:var(--ink-2,var(--ink));text-decoration:underline;text-decoration-color:var(--ink-4);text-underline-offset:4px}
 .intro .note-link:hover{text-decoration-color:currentColor}
@@ -697,12 +698,11 @@ footer .legal{margin-top:18px;font-size:12px;line-height:1.5;color:var(--ink-4);
       <form class="form" id="f1" novalidate aria-label="Bekleme listesi">
         <label for="e1" class="sr">E-posta</label>
         <input id="e1" type="email" name="email" placeholder="E-posta adresin" autocomplete="email" required><input class="hp" type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
-        <button type="submit"><svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04c-2.04.027-3.91 1.183-4.961 3.014c-2.117 3.675-.546 9.103 1.519 12.09c1.013 1.454 2.208 3.09 3.792 3.039c1.52-.065 2.09-.987 3.935-.987c1.831 0 2.35.987 3.96.948c1.637-.026 2.676-1.48 3.676-2.948c1.156-1.688 1.636-3.325 1.662-3.415c-.039-.013-3.182-1.221-3.22-4.857c-.026-3.04 2.48-4.494 2.597-4.559c-1.429-2.09-3.623-2.324-4.39-2.376c-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83c-1.207.052-2.662.805-3.532 1.818c-.78.896-1.454 2.338-1.273 3.714c1.338.104 2.715-.688 3.559-1.701"/></svg>Erken erişim</button>
+        <button type="submit"><svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04c-2.04.027-3.91 1.183-4.961 3.014c-2.117 3.675-.546 9.103 1.519 12.09c1.013 1.454 2.208 3.09 3.792 3.039c1.52-.065 2.09-.987 3.935-.987c1.831 0 2.35.987 3.96.948c1.637-.026 2.676-1.48 3.676-2.948c1.156-1.688 1.636-3.325 1.662-3.415c-.039-.013-3.182-1.221-3.22-4.857c-.026-3.04 2.48-4.494 2.597-4.559c-1.429-2.09-3.623-2.324-4.39-2.376c-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83c-1.207.052-2.662.805-3.532 1.818c-.78.896-1.454 2.338-1.273 3.714c1.338.104 2.715-.688 3.559-1.701"/></svg><svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5.1l7.4-1v7.2H3zm0 13.8l7.4 1v-7.1H3zm8.3 1.1L21 21.4v-8.6h-9.7zm0-15.9v7.3H21V2.6z"/></svg>Erken erişim</button>
       </form>
-      <label class="wl-chk" id="c1"><input type="checkbox" name="kvkk"> <span>Kişisel verilerimin işlenmesine ilişkin <a href="kvkk.html" target="_blank" rel="noopener">KVKK Aydınlatma Metni</a>'ni okudum, bilgilendim.</span></label>
       <div class="err" id="err1" role="alert"></div>
       <div class="done" id="done1" aria-live="polite"></div>
-      <div class="note" id="note1"><span id="countLine">Mac ve Windows için kapalı beta · Beta boyunca ücretsiz</span><a class="note-link" href="indir/">Davetin geldiyse uygulamayı indir</a></div>
+      <div class="note" id="note1"><a class="note-link" href="indir/">Davetin geldiyse uygulamayı indir</a></div>
       <a class="scroll-cue" href="#uygulamalar" aria-label="Aşağı kaydır"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg></a>
     </div>
 
@@ -1454,7 +1454,7 @@ var AV = {"kerem": "data:image/webp;base64,UklGRsIHAABXRUJQVlA4ILYHAAAQHgCdASpgA
 
   /* ---------- counter ---------- */
   var joined=parseInt(store('mv_joined')||'0',10)||0;
-  if(BASE_COUNT>0){ document.getElementById('countLine').textContent=(BASE_COUNT+joined).toLocaleString('tr-TR')+' kişi sırada · Spam yok'; }
+  if(BASE_COUNT>0&&document.getElementById('countLine')){ document.getElementById('countLine').textContent=(BASE_COUNT+joined).toLocaleString('tr-TR')+' kişi sırada · Spam yok'; }
 
   /* ---------- forms ---------- */
   var refIn=new URLSearchParams(location.search).get('ref')||'';
@@ -1492,7 +1492,7 @@ var AV = {"kerem": "data:image/webp;base64,UklGRsIHAABXRUJQVlA4ILYHAAAQHgCdASpgA
       }
       var code=Math.random().toString(36).slice(2,8);
       if(WAITLIST_ENDPOINT){
-        fetch(WAITLIST_ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email,ref:refIn,src:SRC,website:(f.querySelector('.hp')||{}).value||'',consent:{kvkk:KVKK_VERSION}})})
+        fetch(WAITLIST_ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email,ref:refIn,src:SRC,website:(f.querySelector('.hp')||{}).value||'',consent:(cb&&cb.checked)?{kvkk:KVKK_VERSION}:undefined})})
           .then(function(r){ if(!r.ok) throw 0; return r.json().catch(function(){ return {}; }); })
           .then(function(d){ finish(d.position||0,d.code||code); })
           .catch(function(){ btn.disabled=false; btn.innerHTML=old; err.textContent='Bir sorun oldu, lütfen tekrar dene.'; });
