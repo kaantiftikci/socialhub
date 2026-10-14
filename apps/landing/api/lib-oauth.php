@@ -15,7 +15,8 @@ declare(strict_types=1);
 if (!function_exists('mv_oauth_providers')) {
     define('MV_OAUTH_BOUNCE', 'https://mivelo.app/api/oauth-cb.php');
     define('MV_OAUTH_GRAPH_DEFAULT', 'v23.0');
-    define('MV_OAUTH_NAMES', ['google' => 'Google', 'microsoft' => 'Microsoft', 'yahoo' => 'Yahoo', 'yandex' => 'Yandex', 'slack' => 'Slack', 'instagram' => 'Instagram', 'facebook' => 'Facebook']);
+    define('MV_OAUTH_NAMES', ['google' => 'Google', 'microsoft' => 'Microsoft', 'yahoo' => 'Yahoo', 'yandex' => 'Yandex', 'slack' => 'Slack', 'instagram' => 'Instagram', 'facebook' => 'Facebook', 'whatsapp' => 'WhatsApp']);
+    define('MV_WA_WEBHOOK', 'https://mivelo.app/api/wa-webhook.php');
 
     /** @return string[] */
     function mv_oauth_providers(): array
@@ -127,10 +128,20 @@ if (!function_exists('mv_oauth_providers')) {
         return is_string($v) && preg_match('/^v\d{1,2}\.\d$/', $v) ? $v : MV_OAUTH_GRAPH_DEFAULT;
     }
 
-    /** Sağlayıcı kullanıma hazır mı: etkin + istemci kimliği (+ gizi gerekenlerde gizi) */
+    /** Sağlayıcı kullanıma hazır mı: etkin + istemci kimliği (+ gizi gerekenlerde gizi; WhatsApp'ta Embedded Signup config_id de) */
     function mv_oauth_ready(string $p, array $c): bool
     {
+        if ($p === 'whatsapp' && (string) ($c['configId'] ?? '') === '') {
+            return false;
+        }
         return !empty($c['enabled']) && (string) ($c['clientId'] ?? '') !== '' && (!mv_oauth_needs_secret($p) || (string) ($c['clientSecret'] ?? '') !== '');
+    }
+
+    /** WhatsApp webhook doğrulama belirteci (Meta uygulama panosuna yapıştırılır); yoksa üretilir */
+    function mv_wa_verify_token(array $c): string
+    {
+        $v = (string) ($c['webhookVerifyToken'] ?? '');
+        return preg_match('/^[A-Za-z0-9]{24,64}$/', $v) ? $v : '';
     }
 
     /** Herkese açık yapılandırma (?action=config): yalnız hazır sağlayıcılar; GİZ ASLA eklenmez */
@@ -146,11 +157,11 @@ if (!function_exists('mv_oauth_providers')) {
             if ($p === 'slack') {
                 $pc['historyLimited'] = ($c['historyLimited'] ?? true) !== false;
             }
-            if ($p === 'instagram' || $p === 'facebook') {
+            if ($p === 'instagram' || $p === 'facebook' || $p === 'whatsapp') {
                 $pc['graphVersion'] = mv_oauth_graph_version($c['graphVersion'] ?? null);
             }
-            // İşletmeler için Facebook Girişi: kapsam yerine yapılandırma kimliği (config_id)
-            if ($p === 'facebook' && !empty($c['configId'])) {
+            // İşletmeler için Facebook Girişi / WhatsApp Embedded Signup: kapsam yerine yapılandırma kimliği (config_id)
+            if (($p === 'facebook' || $p === 'whatsapp') && !empty($c['configId'])) {
                 $pc['configId'] = (string) $c['configId'];
             }
             $out[$p] = $pc;
@@ -178,11 +189,15 @@ if (!function_exists('mv_oauth_providers')) {
             if ($p === 'slack') {
                 $out[$p]['historyLimited'] = ($c['historyLimited'] ?? true) !== false;
             }
-            if ($p === 'instagram' || $p === 'facebook') {
+            if ($p === 'instagram' || $p === 'facebook' || $p === 'whatsapp') {
                 $out[$p]['graphVersion'] = mv_oauth_graph_version($c['graphVersion'] ?? null);
             }
-            if ($p === 'facebook') {
+            if ($p === 'facebook' || $p === 'whatsapp') {
                 $out[$p]['configId'] = (string) ($c['configId'] ?? '');
+            }
+            if ($p === 'whatsapp') {
+                $out[$p]['webhookVerifyToken'] = mv_wa_verify_token($c);
+                $out[$p]['webhookUrl'] = MV_WA_WEBHOOK;
             }
         }
         return $out;
@@ -217,19 +232,27 @@ if (!function_exists('mv_oauth_providers')) {
         if ($p === 'slack') {
             $c['historyLimited'] = ($in['historyLimited'] ?? true) !== false;
         }
-        if ($p === 'instagram' || $p === 'facebook') {
+        if ($p === 'instagram' || $p === 'facebook' || $p === 'whatsapp') {
             $gv = trim($str('graphVersion'));
             if ($gv !== '' && !preg_match('/^v\d{1,2}\.\d$/', $gv)) {
                 return 'Graph sürümü v23.0 biçiminde olmalı';
             }
             $c['graphVersion'] = $gv !== '' ? $gv : MV_OAUTH_GRAPH_DEFAULT;
         }
-        if ($p === 'facebook') {
+        if ($p === 'facebook' || $p === 'whatsapp') {
             $cid = trim($str('configId'));
             if ($cid !== '' && !preg_match('/^\d{5,30}$/', $cid)) {
                 return 'Yapılandırma kimliği (config_id) yalnız rakam olmalı';
             }
             $c['configId'] = $cid;
+        }
+        if ($p === 'whatsapp') {
+            // webhook doğrulama belirteci bir kez üretilir, sonra korunur ("yenile" isteğinde yenisi)
+            $old_vt = mv_wa_verify_token($old);
+            $c['webhookVerifyToken'] = !empty($in['newVerifyToken']) || $old_vt === '' ? bin2hex(random_bytes(16)) : $old_vt;
+            if ($c['enabled'] && $c['configId'] === '') {
+                return 'Etkinleştirmek için Embedded Signup yapılandırma kimliği (config_id) gerekli';
+            }
         }
         if ($c['enabled'] && $id === '') {
             return 'Etkinleştirmek için istemci kimliği gerekli';
@@ -491,6 +514,25 @@ if (!function_exists('mv_oauth_providers')) {
                     $out['permissions'] = is_array($short['permissions']) ? implode(',', $short['permissions']) : (string) $short['permissions'];
                 }
                 return [200, $out];
+            case 'whatsapp':
+                // Embedded Signup kodu: redirect_uri YOK; yanıt işletme sistem kullanıcısı belirteci (süresiz) ya da süreli kullanıcı belirteci
+                $v = mv_oauth_graph_version($c['graphVersion'] ?? null);
+                $r = mv_oauth_call('GET', "https://graph.facebook.com/$v/oauth/access_token", ['client_id' => $id, 'client_secret' => $sec, 'code' => $code]);
+                if (!mv_oauth_ok($p, $r)) {
+                    return mv_oauth_error($p, $r);
+                }
+                $out = ['access_token' => $r['j']['access_token'], 'token_type' => (string) ($r['j']['token_type'] ?? 'bearer')];
+                if (isset($r['j']['expires_in']) && (int) $r['j']['expires_in'] > 0) {
+                    // süreli kullanıcı belirteci → uzun ömürlü (~60 gün); olmazsa kısa olanla devam
+                    $r2 = mv_oauth_fb_long($c, (string) $r['j']['access_token']);
+                    if (mv_oauth_ok($p, $r2)) {
+                        $out['access_token'] = $r2['j']['access_token'];
+                        $out['expires_in'] = (int) ($r2['j']['expires_in'] ?? 0);
+                    } else {
+                        $out['expires_in'] = (int) $r['j']['expires_in'];
+                    }
+                }
+                return [200, $out];
             case 'facebook':
                 $v = mv_oauth_graph_version($c['graphVersion'] ?? null);
                 $r = mv_oauth_call('GET', "https://graph.facebook.com/$v/oauth/access_token", ['client_id' => $id, 'redirect_uri' => $redirect,
@@ -534,6 +576,7 @@ if (!function_exists('mv_oauth_providers')) {
                 $r = mv_oauth_call('POST', 'https://slack.com/api/oauth.v2.access', ['client_id' => $id, 'client_secret' => $sec, 'grant_type' => 'refresh_token', 'refresh_token' => $refresh]);
                 break;
             case 'facebook':
+            case 'whatsapp':
                 // Meta'da yenileme belirteci yok: geçerli uzun ömürlü belirteç yeniden takas edilir (süresi dolmuşsa 190 → yeniden giriş)
                 $r = mv_oauth_fb_long($c, $refresh);
                 if (!mv_oauth_ok($p, $r)) {

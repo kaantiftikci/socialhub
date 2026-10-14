@@ -3,15 +3,24 @@
  * (Google, Microsoft…) ya da mivelo.app'teki HTTPS geri dönüş sayfası (Slack, Meta, Yahoo, Yandex) kullanıcıyı buraya yönlendirir.
  * Eski Gmail/Etsy akışları da aynı tabloyu kullanır (mail.ts yeniden dışa aktarır).
  */
-type Result = { code?: string; error?: string };
+type Result = { code?: string; error?: string; extra?: Record<string, string> };
 const pending = new Map<string, (r: Result) => void>();
+/** Geri dönüşle gelen ek alanlar (WhatsApp Embedded Signup: phone_number_id, waba_id); kod çözüldükten sonra authorize alır */
+const extras = new Map<string, Record<string, string>>();
 
 export function resolveOAuth(state: string, r: Result): boolean {
   const fn = pending.get(state);
   if (!fn) return false;
   pending.delete(state);
+  if (r.extra && Object.keys(r.extra).length) extras.set(state, r.extra);
   fn(r);
   return true;
+}
+
+export function takeOAuthExtra(state: string): Record<string, string> | undefined {
+  const e = extras.get(state);
+  extras.delete(state);
+  return e;
 }
 
 /** /oauth/callback'e gelen code/error'u bekle (varsayılan 10 dk). signal iptal edilirse "iptal edildi" hatası. */

@@ -1168,7 +1168,13 @@ export function createServer(store: Store, registry: Registry, port: number): ht
         const err = q.get('error') ? (q.get('error_description') || q.get('error') || undefined) : undefined;
         // Instagram kodun sonuna "#_" ekleyebilir (parça tarayıcıda kalır; yine de temizle)
         const code = (q.get('code') ?? '').replace(/#_$/, '') || undefined;
-        const ok = resolveOAuth(q.get('state') ?? '', { code, error: err ?? (code ? undefined : 'Giriş iptal edildi') });
+        // WhatsApp Embedded Signup: seçilen numara/hesap kimlikleri (yalnız rakam; başka alan alınmaz)
+        const extra: Record<string, string> = {};
+        for (const k of ['phone_number_id', 'waba_id']) {
+          const v = q.get(k) ?? '';
+          if (/^\d{5,30}$/.test(v)) extra[k] = v;
+        }
+        const ok = resolveOAuth(q.get('state') ?? '', { code, error: err ?? (code ? undefined : 'Giriş iptal edildi'), extra });
         const good = ok && !!code;
         const title = good ? 'Giriş tamamlandı' : ok ? 'Giriş tamamlanmadı' : 'Bu giriş artık beklenmiyor';
         const text = good ? 'Mivelo hesabını bağlıyor. Bu sekmeyi kapatıp Mivelo’ya dönebilirsin.' : ok ? 'İzin verilmedi ya da giriş iptal edildi. Mivelo’dan yeniden deneyebilirsin.' : 'Bağlantı zaman aşımına uğramış olabilir. Mivelo’da Bağlan’a yeniden bas.';

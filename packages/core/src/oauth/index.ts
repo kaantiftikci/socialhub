@@ -4,7 +4,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { DATA_DIR, PORT } from '../config.js';
 import { bus } from '../bus.js';
 import { openExternal } from '../platform.js';
-import { waitOAuth } from './callback.js';
+import { takeOAuthExtra, waitOAuth } from './callback.js';
 
 /**
  * Resmi giriş (OAuth 2.0): hesaplar sağlayıcının KENDİ giriş sayfasıyla, kullanıcının varsayılan tarayıcısında bağlanır
@@ -19,11 +19,16 @@ import { waitOAuth } from './callback.js';
  * (Slack, Meta, Yahoo, Yandex) önce `https://mivelo.app/api/oauth-cb.php`'ye döner, o sayfa kodu yerel `/oauth/callback`'e
  * yönlendirir (state'in sonundaki port ile). Kod tek başına işe yaramaz (gizi/PKCE gerekir).
  */
-export type OAuthProvider = 'google' | 'microsoft' | 'yahoo' | 'yandex' | 'slack' | 'instagram' | 'facebook';
-export const OAUTH_PROVIDERS: OAuthProvider[] = ['google', 'microsoft', 'yahoo', 'yandex', 'slack', 'instagram', 'facebook'];
+export type OAuthProvider = 'google' | 'microsoft' | 'yahoo' | 'yandex' | 'slack' | 'instagram' | 'facebook' | 'whatsapp';
+export const OAUTH_PROVIDERS: OAuthProvider[] = ['google', 'microsoft', 'yahoo', 'yandex', 'slack', 'instagram', 'facebook', 'whatsapp'];
 
 export const OAUTH_BROKER = process.env.MIVELO_OAUTH_BROKER ?? 'https://mivelo.app/api/oauth.php';
 export const OAUTH_BOUNCE = process.env.MIVELO_OAUTH_BOUNCE ?? 'https://mivelo.app/api/oauth-cb.php';
+/**
+ * WhatsApp Business (Cloud API) girişi = Meta "Embedded Signup": Facebook JS SDK'sı ister → mivelo.app'teki sayfa açılır; sayfa numara
+ * seçimini (phone_number_id, waba_id) ve yetki kodunu yerel /oauth/callback'e taşır (state'teki port). Belirteç değişimi aracıda.
+ */
+export const WA_SIGNUP = process.env.MIVELO_WA_SIGNUP ?? 'https://mivelo.app/api/wa-signup.php';
 /** Meta Graph API sürümü (yapılandırmadan değiştirilebilir) */
 export const DEFAULT_GRAPH_VERSION = 'v23.0';
 
@@ -36,6 +41,7 @@ export const PROVIDER_NAME: Record<OAuthProvider, string> = {
   slack: 'Slack',
   instagram: 'Instagram',
   facebook: 'Facebook',
+  whatsapp: 'WhatsApp',
 };
 
 export interface ProviderSpec {
@@ -128,6 +134,14 @@ export const SPECS: Record<OAuthProvider, ProviderSpec> = {
     exchange: 'broker',
     pkce: false,
   },
+  // WhatsApp Business Platform (Cloud API): Embedded Signup sayfası mivelo.app'te (kapsamlar Meta'daki yapılandırmada, config_id)
+  whatsapp: {
+    authUrl: WA_SIGNUP,
+    scopes: [],
+    redirect: 'bounce',
+    exchange: 'broker',
+    pkce: false,
+  },
 };
 
 // ───────────── Yapılandırma (mivelo.app) ─────────────
@@ -140,7 +154,7 @@ export interface ProviderConfig {
   graphVersion?: string;
   /** Slack: uygulama Slack Marketplace'te değil → conversations.history/replies dakikada 1 istek, ≤15 mesaj */
   historyLimited?: boolean;
-  /** Facebook: "İşletmeler için Facebook Girişi" yapılandırma kimliği (varsa kapsam yerine config_id gönderilir) */
+  /** Facebook: "İşletmeler için Facebook Girişi" yapılandırma kimliği (varsa kapsam yerine config_id gönderilir); WhatsApp: Embedded Signup yapılandırması */
   configId?: string;
 }
 export type OAuthConfig = Partial<Record<OAuthProvider, ProviderConfig>>;
@@ -264,6 +278,8 @@ export function buildAuthUrl(p: OAuthProvider, cfg: ProviderConfig, o: { state: 
   const s = SPECS[p];
   const scopes = cfg.scopes?.length ? cfg.scopes : s.scopes;
   const base = p === 'facebook' && cfg.graphVersion ? s.authUrl.replace(DEFAULT_GRAPH_VERSION, cfg.graphVersion) : s.authUrl;
+  // WhatsApp: Embedded Signup sayfası uygulama kimliği/yapılandırmayı sunucudan okur; yalnız state (içinde yerel port) taşınır
+  if (p === 'whatsapp') return `${base}?${new URLSearchParams({ state: o.state }).toString()}`;
   const q = new URLSearchParams({ client_id: cfg.clientId, redirect_uri: redirectUri(p, o.port), response_type: 'code', state: o.state });
   // İşletmeler için Facebook Girişi: izinler Meta'daki yapılandırmada; kapsam yerine config_id
   if (p === 'facebook' && cfg.configId) q.set('config_id', cfg.configId);
@@ -432,5 +448,8 @@ export async function authorize(p: OAuthProvider, o: AuthorizeOptions = {}): Pro
   if (!o.noBrowser) openExternal(url);
   const c = await code;
   o.onExchange?.();
-  return exchangeCode(p, cfg, c, SPECS[p].pkce ? verifier : undefined);
+  const t = await exchangeCode(p, cfg, c, SPECS[p].pkce ? verifier : undefined);
+  // geri dönüşle gelen ek alanlar (WhatsApp Embedded Signup: phone_number_id, waba_id) belirteç yanıtının yanına
+  const extra = takeOAuthExtra(state);
+  return extra ? { ...t, raw: { ...t.raw, ...extra } } : t;
 }

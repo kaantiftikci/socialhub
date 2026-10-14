@@ -560,7 +560,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
         </div>
         <div class="card" style="grid-column:1/-1" id="oaCard">
           <h3>Resmi giriş uygulamaları <span class="sub" id="oaState"></span></h3>
-          <p class="muted" style="margin:0 0 6px;font-size:13px;line-height:1.5">Masaüstü uygulaması e-posta, Slack, Instagram ve Messenger hesaplarını sağlayıcının <b>kendi giriş sayfasıyla</b> bağlar. Burada Mivelo'nun sağlayıcılarda açtığın uygulamalarının bilgileri durur: istemci gizi yalnız bu sunucuda kalır, uygulamalara yalnız istemci kimliği gider (<code>api/oauth.php?action=config</code>). Kapalı ya da eksik sağlayıcıda uygulama eski giriş yolunu kullanır. Değişiklik uygulamalara Bağlan penceresi açılınca, en geç 6 saatte ulaşır.</p>
+          <p class="muted" style="margin:0 0 6px;font-size:13px;line-height:1.5">Masaüstü uygulaması e-posta, Slack, Instagram, Messenger ve WhatsApp Business hesaplarını sağlayıcının <b>kendi giriş sayfasıyla</b> bağlar. Burada Mivelo'nun sağlayıcılarda açtığın uygulamalarının bilgileri durur: istemci gizi yalnız bu sunucuda kalır, uygulamalara yalnız istemci kimliği gider (<code>api/oauth.php?action=config</code>). Kapalı ya da eksik sağlayıcıda uygulama eski giriş yolunu kullanır. Değişiklik uygulamalara Bağlan penceresi açılınca, en geç 6 saatte ulaşır.</p>
           <div id="oaBox"><div class="empty">Yükleniyor…</div></div>
         </div>
         <div class="card">
@@ -1146,7 +1146,15 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
       steps:['Aynı Meta uygulamasına <b>Messenger\'da müşterilerle etkileşim kur</b> kullanım alanını ve Facebook Girişi ürününü ekle.',
         'Facebook Girişi → Ayarlar → <b>Geçerli OAuth Yönlendirme URI\'leri</b>: yukarıdaki adres (Web OAuth girişi ve HTTPS zorunlu açık).',
         'Uygulama ayarları → Temel: <b>Uygulama kimliği</b> ve <b>Uygulama gizi</b> buraya.',
-        'Uygulama incelemesi: <code>pages_show_list</code>, <code>pages_messaging</code>, <code>pages_manage_metadata</code>, <code>pages_read_engagement</code> (gelişmiş erişim) + işletme doğrulaması, sonra Canlı mod. Kişisel Messenger değil, yalnız Sayfa mesajları.']}
+        'Uygulama incelemesi: <code>pages_show_list</code>, <code>pages_messaging</code>, <code>pages_manage_metadata</code>, <code>pages_read_engagement</code> (gelişmiş erişim) + işletme doğrulaması, sonra Canlı mod. Kişisel Messenger değil, yalnız Sayfa mesajları.']},
+    whatsapp:{what:'WhatsApp Business (Cloud API, Embedded Signup)',link:'https://developers.facebook.com/apps/',cb:'webhook',
+      cbNote:'Geri dönüş adresi gerekmez: giriş <code>mivelo.app/api/wa-signup.php</code> sayfasındaki Meta penceresinde yapılır. Yukarıdaki adres Meta\'nın <b>webhook</b> adresidir.',
+      steps:['Aynı Meta uygulamasına <b>WhatsApp</b> ürününü ekle; Meta İşletme Yöneticisi\'nde işletme doğrulamasını tamamla (doğrulamasız günde 250 kişiye sınırlı).',
+        'Facebook Girişi → <b>İşletmeler için Facebook Girişi → Yapılandırmalar → Oluştur</b>: giriş türü <b>WhatsApp Embedded Signup</b>, belirteç <b>Sistem kullanıcısı erişim belirteci (süresiz)</b>, izinler <code>whatsapp_business_management</code> + <code>whatsapp_business_messaging</code> (+ <code>business_management</code>); yapılandırma kimliğini (config_id) buraya yapıştır. Coexistence (WhatsApp Business uygulamasındaki numarayla) için yapılandırmada <b>WhatsApp Business App Onboarding</b> özelliği açık olmalı.',
+        'Facebook Girişi → Ayarlar → İzin verilen alan adları: <code>https://mivelo.app</code> (JavaScript SDK girişi açık).',
+        'WhatsApp → Yapılandırma → <b>Webhook</b>: adres yukarıdaki, doğrulama belirteci aşağıdaki; alanlar <code>messages</code>, <code>smb_message_echoes</code>, <code>smb_app_state_sync</code>, <code>history</code> abone. Meta webhook\'u yalnız bu uygulamanın gizi ile imzalar; aktarıcı imzayı doğrular.',
+        'Uygulama ayarları → Temel: <b>Uygulama kimliği</b> ve <b>Uygulama gizi</b> buraya (Instagram/Messenger ile aynı uygulamaysa aynı değerler). Uygulama incelemesi + Canlı mod; Tech Provider (çözüm ortağı) kaydı Embedded Signup için gerekir.',
+        'Ücret: kullanıcı başlattığı sohbete 24 saat içindeki yanıtlar ücretsiz; Mivelo şablon mesaj (ücretli) göndermez. Kişisel WhatsApp numarası bu yola giremez (WhatsApp Business uygulaması ya da yeni numara).']}
   };
   var OA=null;
   function oaChip(c){ return c.live?'<span class="chip st-joined"><i></i>Açık</span>':c.enabled?'<span class="chip st-warn"><i></i>Eksik</span>':'<span class="chip st-off"><i></i>Kapalı</span>'; }
@@ -1154,12 +1162,14 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     var ps=OA.providers, ks=Object.keys(ps), live=ks.filter(function(k){ return ps[k].live; }).length;
     $('#oaState').textContent=live?live+' / '+ks.length+' sağlayıcı açık':'hiçbiri açık değil';
     $('#oaBox').innerHTML=ks.map(function(k){
-      var c=ps[k], info=OA_INFO[k]||{steps:[]}, cbs=info.cb==='bounce'?[OA.bounce]:(info.cb||[]);
+      var c=ps[k], info=OA_INFO[k]||{steps:[]}, cbs=info.cb==='bounce'?[OA.bounce]:info.cb==='webhook'?[c.webhookUrl||'https://mivelo.app/api/wa-webhook.php']:(info.cb||[]);
       var sec=c.needsSecret?'<div class="sm-host"><label for="oaS-'+k+'">İstemci gizi</label><input class="input" id="oaS-'+k+'" name="clientSecret" type="password" autocomplete="new-password" placeholder="'+(c.hasSecret?'kayıtlı '+esc(c.secretHint)+' — değiştirmeyeceksen boş bırak':'istemci gizi')+'"></div>':'';
       var extra='';
       if(k==='slack') extra='<div class="sm-host" style="display:flex;align-items:flex-end"><label class="oa-sw" title="Slack Marketplace\'te onaylı uygulamada geçmiş sınırı yok"><input type="checkbox" name="market"'+(c.historyLimited===false?' checked':'')+'> Marketplace onaylı</label></div>';
-      if(k==='instagram'||k==='facebook') extra='<div><label for="oaG-'+k+'">Graph sürümü</label><input class="input" id="oaG-'+k+'" name="graphVersion" value="'+esc(c.graphVersion||'v23.0')+'" placeholder="v23.0"></div>';
+      if(k==='instagram'||k==='facebook'||k==='whatsapp') extra='<div><label for="oaG-'+k+'">Graph sürümü</label><input class="input" id="oaG-'+k+'" name="graphVersion" value="'+esc(c.graphVersion||'v23.0')+'" placeholder="v23.0"></div>';
       if(k==='facebook') extra+='<div><label for="oaC-'+k+'">Yapılandırma kimliği (config_id, İşletmeler için Facebook Girişi kullanıyorsan)</label><input class="input" id="oaC-'+k+'" name="configId" value="'+esc(c.configId||'')+'" placeholder="boş: klasik Facebook Girişi" inputmode="numeric"></div>';
+      if(k==='whatsapp') extra+='<div><label for="oaC-'+k+'">Embedded Signup yapılandırma kimliği (config_id, zorunlu)</label><input class="input" id="oaC-'+k+'" name="configId" value="'+esc(c.configId||'')+'" placeholder="İşletmeler için Facebook Girişi → Yapılandırmalar" inputmode="numeric"></div>'+
+        '<div class="sm-host"><label>Webhook doğrulama belirteci (Meta → WhatsApp → Yapılandırma)</label><div style="display:flex;gap:6px;align-items:center"><code style="flex:1;overflow:auto">'+(c.webhookVerifyToken?esc(c.webhookVerifyToken):'kaydedince üretilir')+'</code>'+(c.webhookVerifyToken?'<button class="btn sm" type="button" data-copy="'+esc(c.webhookVerifyToken)+'">Kopyala</button><button class="btn sm" type="button" data-oa-newvt title="Yeni belirteç üretir; Meta panosunda da güncellemen gerekir">Yenile</button>':'')+'</div></div>';
       return '<details class="oa" data-p="'+k+'"'+(open===k?' open':'')+'><summary><b>'+esc(c.name)+'</b><span class="muted">'+esc(info.what||'')+'</span>'+oaChip(c)+'<span class="acc-chev">'+I.chev+'</span></summary>'+
         '<form class="oa-body" data-p="'+k+'" autocomplete="off">'+
           '<label class="oa-sw"><input type="checkbox" name="enabled"'+(c.enabled?' checked':'')+'> Etkin (uygulamalar bu girişi kullanır)</label>'+
@@ -1173,9 +1183,10 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
     }).join('');
   }
   function loadOAuth(open){ api('oauth_get').then(function(d){ OA=d; renderOAuth(open); }).catch(function(e){ $('#oaBox').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; }); }
-  function saveOAuth(f,clear){
+  function saveOAuth(f,clear,newVt){
     var k=f.dataset.p, g=function(n){ var el=f.elements[n]; return el?el:null; };
     var body={provider:k,enabled:g('enabled').checked,clientId:g('clientId').value.trim()};
+    if(newVt) body.newVerifyToken=true;
     if(g('clientSecret')) body.clientSecret=g('clientSecret').value.trim();
     if(g('market')) body.historyLimited=!g('market').checked;
     if(g('graphVersion')) body.graphVersion=g('graphVersion').value.trim();
@@ -1189,6 +1200,8 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   $('#oaBox').addEventListener('click',function(e){
     var cp=e.target.closest('[data-copy]');
     if(cp){ var v=cp.dataset.copy; (navigator.clipboard?navigator.clipboard.writeText(v):Promise.reject()).then(function(){ toast('Kopyalandı'); },function(){ toast(v); }); return; }
+    var nv=e.target.closest('[data-oa-newvt]');
+    if(nv){ if(nv.dataset.armed){ saveOAuth(nv.closest('form'),false,true); return; } nv.dataset.armed='1'; nv.textContent='Emin misin? Yenile'; setTimeout(function(){ if(nv.isConnected){ delete nv.dataset.armed; nv.textContent='Yenile'; } },4000); return; }
     var cl=e.target.closest('[data-oa-clear]');
     if(cl){ if(cl.dataset.armed){ saveOAuth(cl.closest('form'),true); return; } cl.dataset.armed='1'; cl.textContent='Emin misin? Gizi sil'; setTimeout(function(){ if(cl.isConnected){ delete cl.dataset.armed; cl.textContent='Gizi sil'; } },4000); }
   });

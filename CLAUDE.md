@@ -935,6 +935,26 @@ Dil: arayüz ve yorumlar Türkçe.
   Sayfası Messenger (`{sayfa}/conversations?platform=messenger`, POST `{sayfa}/messages` RESPONSE, sayfa belirteci; sohbet kimliği `sayfa:konuşma`). Yoklama odakta
   30/boşta 120 sn, okuma ≥550 ms arayla, 24 sa penceresi hatası → "Meta kuralı: kişi son 24 saatte yazmadıysa yanıt gönderilemez", 190 → oturumu sona erdi,
   Instagram belirteci <10 gün kala yenilenir, yalnız metin gönderimi, ekler /api/media vekilinden. Webhook YOK. Test: meta-graph. Gerçek hesapla DOĞRULANMADI.
+- **WhatsApp Business resmi (14.10, Kaan: "tamam business'a al hepsini")** `connectors/whatsapp-cloud.ts` `WhatsAppCloudConnector` — Cloud API.
+  Giriş = Meta **Embedded Signup** (FB JS SDK ister) → `oauth/index.ts` sağlayıcı `whatsapp` (`WA_SIGNUP` = `mivelo.app/api/wa-signup.php?state=<rastgele>.<port>`,
+  `MIVELO_WA_SIGNUP`): sayfa config_id ile `FB.login` açar (düğmeler: WhatsApp Business uygulamasındaki numarayla = featureType `whatsapp_business_app_onboarding`
+  "coexistence" / yeni numara), `WA_EMBEDDED_SIGNUP` mesajından phone_number_id + waba_id, yetki kodunu `http://127.0.0.1:<port>/oauth/callback?code&phone_number_id&waba_id`
+  ile yerel çekirdeğe taşır (server.ts yalnız rakamlı bu iki alanı `extra` olarak alır → `callback.ts takeOAuthExtra` → TokenSet.raw). Aracı `oauth.php` whatsapp:
+  kod değişimi redirect_uri'siz (`GET oauth/access_token?client_id&client_secret&code`), süreli gelirse fb_exchange_token; refresh = facebook gibi. `buildAccountToken('whatsapp')`:
+  `GET /{numara}` doğrulama + `POST /{waba}/subscribed_apps` + aktarıcı kaydı → token `{official:'whatsapp', accessToken, phoneNumberId, wabaId, displayPhone, pullKey, graphVersion}`.
+  **Gelen mesaj yalnız webhook'la** (Meta yoklama ucu vermez) → aktarıcı `apps/landing/api/wa-webhook.php`: Meta doğrulaması (`hub.verify_token` = admin'de üretilen
+  `webhookVerifyToken`), POST `X-Hub-Signature-256` (uygulama gizi) doğrulanır, `object=whatsapp_business_account` + alanlar messages/smb_message_echoes/smb_app_state_sync/history,
+  YALNIZ kayıtlı numara `~/mivelo-data/wa-relay/<numara>/events.ndjson` (seq, ≤2000 olay/3 gün); `?action=register {phone_number_id, waba_id, access_token}` belirteci Graph'ta BİR KEZ
+  doğrular (saklamaz), `pullKey` (sha256 özeti saklanır) döner; `?action=pull&phone_number_id&after` başlık `X-Mivelo-Key`; `unregister`. Çekirdek `PollTimer` odakta ≈4 sn / boşta ≈20 sn
+  (`MIVELO_WA_RELAY`); 404/401'de belirteçle bir kez yeniden kayıt. Olaylar: messages (text/image/video/audio/document/sticker/location/contacts/reaction/button/interactive, context
+  → replyTo, forwarded), statuses (sent/delivered/read/failed; geri gitmez, read → outgoingRead), smb_message_echoes (telefondaki WhatsApp Business uygulamasından gönderilenler = benden),
+  smb_app_state_sync (rehber adı > profil adı; meta `wa_cloud:<hesap>` lastSeq+names), history (coexistence geçmişi, canlı değil). Gönderim `POST /{numara}/messages` (text preview_url,
+  context, reaction, medya: `/media` multipart → id; sınırlar görsel 5/ses-video 16/belge 100 MB), okundu `status:'read'` son gelen wamid, medya `wamedia:<id>` → `GET /{id}` imzalı adres +
+  Bearer (lookaside.fbsbx.com/fbcdn/whatsapp.net) önbellek. Hatalar `waErrorText`: 131047 = `WA_WINDOW_TEXT` (24 sa penceresi, şablon gerekir — Mivelo şablon GÖNDERMEZ), 131026/131030
+  ulaşılamıyor/test listesi, 131042 ödeme, 190 oturum, 130429 hız. Eski mesaj/grup YOK (`loadHistory` unavailable). Kişisel numara giremez. Registry: `officialKind` 'whatsapp' →
+  köprüye/Baileys'e gitmez, `engineOf` 'whatsapp'|'session' (yol değişince eski sohbetler bir kez silinir). Admin → Resmi giriş → WhatsApp: config_id (zorunlu), Graph sürümü, webhook adresi +
+  doğrulama belirteci (Kopyala/Yenile). Arayüz: Bağlan → WhatsApp/Instagram/Messenger `:choose` panelinde İŞLETME yolu önde `.cn-choice.primary` "Önerilen", kişisel (QR/köprü) ikinci
+  (`CHOICE_TEXT`). Testler: whatsapp-cloud.test.ts (sahte Graph + aktarıcı + giriş akışı), PHP aktarıcı yerel `php -S` + sahte Graph ile sınandı. Gerçek Meta hesabıyla DOĞRULANMADI.
 - **Telegram** (zaten resmi MTProto): QR'a ek "Telefon numarasıyla giriş yap" (`restart {phone:true}` → `signInWithPhone`, teleproto signInUser: numara → kod → 2FA;
   `normalizePhone` TR varsayılan; `tgAuthError` Türkçe; kayıtsız numarada hesap AÇILMAZ; stop() bekleyen soruları reddeder). Test: telegram-phone.
 - **Aracı (mivelo.app)** `apps/landing/api/oauth.php` + `lib-oauth.php` + `oauth-cb.php`: config (gizi ASLA), token/refresh POST JSON ≤8 KB, yalnız HTTPS, IP başına
@@ -949,8 +969,9 @@ Dil: arayüz ve yorumlar Türkçe.
   CASA; o zamana dek ≤100 test kullanıcısı), Microsoft Entra (kişisel+kurumsal, "Mobil ve masaüstü" `http://localhost/oauth/callback`, genel istemci akışları,
   IMAP.AccessAsUser.All + SMTP.Send + offline_access), Yahoo (Mail API mail-w başvurusu), Yandex (oauth.yandex.com), Slack (User Token Scopes, Public Distribution,
   sonra Marketplace), Meta (Instagram API with Instagram Login + Messenger, uygulama incelemesi + işletme doğrulaması). Geri dönüş adresi (Google/Microsoft dışı):
-  `https://mivelo.app/api/oauth-cb.php`. Yapılmayan resmi yollar: X API (ücretli kullanım başına, XChat şifreli DM'ler API'de yok), WhatsApp Business Cloud API
-  (yalnız işletme numarası + webhook sunucusu + Meta ücretleri), LinkedIn (üye mesaj API'si yok), TikTok (kişisel DM API'si yok).
+  `https://mivelo.app/api/oauth-cb.php`. WhatsApp (14.10): aynı Meta uygulamasına WhatsApp ürünü + İşletmeler için Facebook Girişi → Embedded Signup yapılandırması
+  (sistem kullanıcısı belirteci, whatsapp_business_management + whatsapp_business_messaging, coexistence için WhatsApp Business App Onboarding) + webhook (adres/belirteç Admin'de) +
+  Tech Provider kaydı. Yapılmayan resmi yollar: X API (ücretli kullanım başına, XChat şifreli DM'ler API'de yok), LinkedIn (üye mesaj API'si yok), TikTok (kişisel DM API'si yok).
 
 ## Sunucu/arayüz sözleşmesi
 - CORS: localhost/127.0.0.1/tauri.localhost/tauri://localhost ve WKWebView'ın `null` kaynağı (paketli uygulama!).

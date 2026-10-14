@@ -16,6 +16,21 @@ export interface ChangeEntry {
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    id: '2026-10-14a',
+    date: '2026-10-14',
+    title: 'Meta uygulamaları resmi işletme yoluyla',
+    items: [
+      {
+        title: 'WhatsApp Business resmi bağlantı',
+        text: 'Bağlan → WhatsApp’ta artık ilk seçenek WhatsApp Business: Meta’nın kendi penceresinde numaranı seçersin, Mivelo resmi Cloud API ile çalışır. WhatsApp Business uygulamasındaki numaran telefonda da kullanılmaya devam eder. Kişisel numara için QR seçeneği duruyor.',
+      },
+      {
+        title: 'Instagram ve Messenger’da işletme önde',
+        text: 'Instagram ve Messenger bağlarken işletme / Sayfa girişi artık ilk ve önerilen seçenek; kişisel hesap ikinci sırada.',
+      },
+    ],
+  },
+  {
     id: '2026-10-09a',
     date: '2026-10-09',
     title: 'Okunmamış e-postalar yerinde',

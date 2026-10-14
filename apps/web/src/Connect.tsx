@@ -19,9 +19,17 @@ const SHOP_ORDER: Platform[] = ['trendyol', 'hepsiburada', 'n11', 'pttavm', 'ets
 /** Pazaryeri formlarının zorunlu alanları (satıcı panelindeki entegrasyon bilgileri) */
 const SHOP_FIELDS: Partial<Record<Platform, string[]>> = { trendyol: ['sellerId', 'apiKey', 'apiSecret'], hepsiburada: ['merchantId', 'serviceKey', 'userAgent'], etsy: ['keystring', 'sharedSecret'], shopify: ['shop'], n11: ['appKey', 'appSecret'], pttavm: ['username', 'password'], amazon: ['clientId', 'clientSecret', 'refreshToken'] };
 /** Resmi giriş (OAuth) adayı uygulamalar → giriş sayfasının sahibi; hangilerinin açık olduğunu çekirdek söyler (/api/oauth/providers) */
-const OFFICIAL_WHO: Partial<Record<Platform, string>> = { gmail: 'Google', outlook: 'Microsoft', yahoo: 'Yahoo', yandex: 'Yandex', slack: 'Slack', instagram: 'Instagram', messenger: 'Facebook' };
-/** Resmi giriş açıkken iki yol sunulanlar: kişisel hesap (eski akış) ya da profesyonel hesap / Facebook Sayfası (resmi) */
-const OFFICIAL_CHOICE = new Set<Platform>(['instagram', 'messenger']);
+const OFFICIAL_WHO: Partial<Record<Platform, string>> = { gmail: 'Google', outlook: 'Microsoft', yahoo: 'Yahoo', yandex: 'Yandex', slack: 'Slack', instagram: 'Instagram', messenger: 'Facebook', whatsapp: 'Meta' };
+/**
+ * Resmi giriş açıkken iki yol sunulanlar (Meta uygulamaları): İŞLETME yolu önde ve varsayılan (Kaan, 14.10: "hepsini business'a al") —
+ * Instagram profesyonel hesap, Facebook Sayfası, WhatsApp Business (Cloud API); kişisel hesap ikinci seçenek (eski akış: köprü / QR).
+ */
+const OFFICIAL_CHOICE = new Set<Platform>(['instagram', 'messenger', 'whatsapp']);
+const CHOICE_TEXT: Partial<Record<Platform, { biz: string; bizSub: string; personal: string; personalSub: string; note: string }>> = {
+  instagram: { biz: 'İşletme ya da içerik üretici hesabı', bizSub: 'Resmi Instagram girişi', personal: 'Kişisel hesap', personalSub: 'Kendi hesabınla giriş', note: 'Resmi giriş yalnız profesyonel hesabın mesajlarını getirir; kişi son 24 saatte yazmadıysa yanıt gönderilemez.' },
+  messenger: { biz: 'Facebook Sayfası', bizSub: 'Resmi Facebook girişi', personal: 'Kişisel Messenger', personalSub: 'Kendi hesabınla giriş', note: 'Resmi giriş yalnız Sayfanın mesajlarını getirir; kişi son 24 saatte yazmadıysa yanıt gönderilemez.' },
+  whatsapp: { biz: 'WhatsApp Business', bizSub: 'Resmi Meta girişi (Cloud API)', personal: 'Kişisel hesap', personalSub: 'Telefondan QR okutarak', note: 'WhatsApp Business uygulamasındaki numara ya da yeni bir numara bağlanır; kişisel numara giremez. Eski mesajlar gelmez; kişi son 24 saatte yazmadıysa serbest mesaj gönderilemez (Meta ücretsiz pencere).' },
+};
 /** Adres + parolayla bağlanan e-posta: iCloud (uygulamaya özel parola), Diğer e-posta (IMAP; sunucu çekirdekte bulunur) */
 const PASS_MAIL = new Set<Platform>(['icloud', 'imap']);
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -572,34 +580,32 @@ export function ConnectModal({
           </div>
         )}
 
-        {(['instagram', 'messenger'] as Platform[]).map((p) =>
+        {[...OFFICIAL_CHOICE].map((p) =>
           active === `${p}:choose` ? (
             <div className="pairbox" key={p}>
               <div style={{ flexGrow: 1, minWidth: 0 }}>
                 <h3>Hangi {PLATFORMS[p].name} hesabı?</h3>
                 <div className="cn-choices">
+                  <button className="cn-choice primary" disabled={busy} onClick={() => void startOfficial(p)}>
+                    <span className="ic">
+                      <Icon name="shield" size={17} sw={2} />
+                    </span>
+                    <span>
+                      <b>{CHOICE_TEXT[p]!.biz}</b>
+                      <small>{CHOICE_TEXT[p]!.bizSub}</small>
+                    </span>
+                  </button>
                   <button className="cn-choice" disabled={busy} onClick={() => void add(p, { personal: true })}>
                     <span className="ic">
                       <Icon name="user" size={17} sw={2} />
                     </span>
                     <span>
-                      <b>{p === 'instagram' ? 'Kişisel hesap' : 'Kişisel Messenger'}</b>
-                      <small>Kendi hesabınla giriş</small>
-                    </span>
-                  </button>
-                  <button className="cn-choice" disabled={busy} onClick={() => void startOfficial(p)}>
-                    <span className="ic">
-                      <Icon name="shield" size={17} sw={2} />
-                    </span>
-                    <span>
-                      <b>{p === 'instagram' ? 'İşletme ya da içerik üretici hesabı' : 'Facebook Sayfası'}</b>
-                      <small>{p === 'instagram' ? 'Resmi Instagram girişi' : 'Resmi Facebook girişi'}</small>
+                      <b>{CHOICE_TEXT[p]!.personal}</b>
+                      <small>{CHOICE_TEXT[p]!.personalSub}</small>
                     </span>
                   </button>
                 </div>
-                <p className="cn-note">
-                  Resmi giriş yalnız {p === 'instagram' ? 'profesyonel hesabın' : 'Sayfanın'} mesajlarını getirir; kişi son 24 saatte yazmadıysa yanıt gönderilemez.
-                </p>
+                <p className="cn-note">{CHOICE_TEXT[p]!.note}</p>
               </div>
             </div>
           ) : null,

@@ -37,6 +37,7 @@ import { bootOrder, bootSlots, type BootInfo } from './boot-plan.js';
 import { MautrixConnector, MAUTRIX_NET } from './connectors/mautrix/connector.js';
 import { ensureBinary, sidecar } from './connectors/mautrix/sidecar.js';
 import { MetaGraphConnector } from './connectors/meta-graph.js';
+import { WhatsAppCloudConnector } from './connectors/whatsapp-cloud.js';
 import { officialKind } from './oauth/flows.js';
 
 /** Hesap ↔ connector eşlemesi. Açılışta kayıtlı hesapları kaldırır, yenilerini oluşturur. */
@@ -503,8 +504,10 @@ export class Registry {
     // Meta resmi Graph API (Instagram profesyonel hesap / Facebook Sayfası Messenger): resmi girişle gelen belirteç dosyası
     if (!c && (account.platform === 'instagram' || account.platform === 'messenger')) {
       const kind = officialKind(readToken(account.id));
-      if (kind) c = new MetaGraphConnector(account, this.store, kind);
+      if (kind === 'instagram' || kind === 'facebook') c = new MetaGraphConnector(account, this.store, kind);
     }
+    // WhatsApp Business Platform (Cloud API, Embedded Signup belirteci): QR/Baileys yerine resmi yol
+    if (!c && account.platform === 'whatsapp' && officialKind(readToken(account.id)) === 'whatsapp') c = new WhatsAppCloudConnector(account, this.store);
     if (!c) switch (account.platform) {
       case 'whatsapp':
         c = new WhatsAppConnector(account, this.store);
@@ -679,8 +682,8 @@ const MAIL_BROWSER_LOGIN: Platform[] = ['gmail', 'outlook', 'yahoo', 'yandex', '
 function mautrixWanted(a: Account): boolean {
   if (!MAUTRIX_NET[a.platform] || process.env.MIVELO_ENGINE === 'legacy') return false;
   if (a.platform === 'slack' && readToken(a.id) !== undefined) return false;
-  // resmi Graph girişi (Instagram profesyonel / Facebook Sayfası) köprüye gitmez
-  if ((a.platform === 'instagram' || a.platform === 'messenger') && officialKind(readToken(a.id))) return false;
+  // resmi Meta girişi (Instagram profesyonel / Facebook Sayfası / WhatsApp Business) köprüye gitmez
+  if ((a.platform === 'instagram' || a.platform === 'messenger' || a.platform === 'whatsapp') && officialKind(readToken(a.id))) return false;
   return true;
 }
 
@@ -712,12 +715,13 @@ function isBrowserAccount(a: Account): boolean {
 function isOfficialToken(raw: string | undefined): boolean {
   if (!raw || !raw.trim().startsWith('{')) return false;
   const j = parseJson(raw);
-  return typeof j.oauth === 'string' || j.official === 'instagram' || j.official === 'facebook';
+  return typeof j.oauth === 'string' || j.official === 'instagram' || j.official === 'facebook' || j.official === 'whatsapp';
 }
 
 /** Hesabın bağlantı yolu (sohbet kimlik şeması): değişince eski sohbetler bir kez silinir */
 function engineOf(platform: Platform, token: string | undefined): string {
   if (platform === 'instagram' || platform === 'messenger') return officialKind(token) ?? 'bridge';
+  if (platform === 'whatsapp') return officialKind(token) ?? 'session';
   return token !== undefined && token.trim() !== '' ? 'token' : 'session';
 }
 

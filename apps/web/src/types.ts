@@ -225,7 +225,7 @@ export interface CalEvent {
 }
 
 export const PLATFORMS: Record<Platform, { name: string; code: string; color: string; method: string; available: boolean; mode: 'native' | 'browser' | 'token' | 'mail' | 'demo'; category?: Category }> = {
-  whatsapp: { name: 'WhatsApp', code: 'WA', color: '#0E8A45', method: 'QR ile bağlı cihaz', available: true, mode: 'native' },
+  whatsapp: { name: 'WhatsApp', code: 'WA', color: '#0E8A45', method: 'WhatsApp Business ya da QR', available: true, mode: 'native' },
   telegram: { name: 'Telegram', code: 'TG', color: '#1B7FB8', method: 'QR ile giriş', available: true, mode: 'token' },
   slack: { name: 'Slack', code: 'SL', color: '#4A154B', method: 'Slack hesabınla', available: true, mode: 'browser' },
   imessage: { name: 'iMessage', code: 'IM', color: '#1C8C3A', method: 'Bu Mac’teki Mesajlar', available: true, mode: 'native' },

@@ -3,6 +3,7 @@ import type { Account, Platform } from '../model.js';
 import { bus } from '../bus.js';
 import { openExternal } from '../platform.js';
 import { DEFAULT_GRAPH_VERSION, OAuthError, PROVIDER_NAME, authorize, mailIdentity, oauthConfig, type OAuthProvider, type TokenSet } from './index.js';
+import { graphGet, graphPost, relayRegister } from '../connectors/whatsapp-cloud.js';
 
 /**
  * Bağlan → "resmi giriş" akışı: hesap ÖNCE açılmaz; sağlayıcıda giriş tamamlanınca belirteçten hesap yapılandırması kurulur ve
@@ -16,6 +17,7 @@ export const OFFICIAL_PROVIDER: Partial<Record<Platform, OAuthProvider>> = {
   slack: 'slack',
   instagram: 'instagram',
   messenger: 'facebook',
+  whatsapp: 'whatsapp',
 };
 
 /** Resmi girişi açık (Mivelo uygulaması sağlayıcıda kayıtlı ve mivelo.app yapılandırmasında) platformlar */
@@ -165,6 +167,22 @@ export interface FacebookPagesToken {
   graphVersion?: string;
 }
 
+/**
+ * WhatsApp Business Platform (Cloud API): Embedded Signup ile seçilen numara. Belirteç işletme sistem kullanıcısı (süresiz) ya da uzun
+ * ömürlü kullanıcı belirteci (expiresAt; aracı yeniler). pullKey: mivelo.app webhook aktarıcısından olay çekme anahtarı (hesaba özel).
+ */
+export interface WhatsAppCloudToken {
+  official: 'whatsapp';
+  accessToken: string;
+  expiresAt?: number;
+  phoneNumberId: string;
+  wabaId: string;
+  displayPhone?: string;
+  verifiedName?: string;
+  pullKey: string;
+  graphVersion?: string;
+}
+
 export async function buildAccountToken(platform: Platform, provider: OAuthProvider, t: TokenSet): Promise<{ token: string; label?: string }> {
   const cfg = (await oauthConfig())[provider];
   switch (provider) {
@@ -227,15 +245,44 @@ export async function buildAccountToken(platform: Platform, provider: OAuthProvi
       const tok: FacebookPagesToken = { official: 'facebook', userToken: t.accessToken, expiresAt: t.expiresAt, pages, graphVersion: v };
       return { token: JSON.stringify(tok), label: pages.length === 1 ? pages[0]!.name : `${pages[0]!.name} +${pages.length - 1}` };
     }
+    case 'whatsapp': {
+      const v = cfg?.graphVersion ?? DEFAULT_GRAPH_VERSION;
+      const pn = String(t.raw.phone_number_id ?? '');
+      const waba = String(t.raw.waba_id ?? '');
+      if (!/^\d{5,30}$/.test(pn)) throw new OAuthError('WhatsApp numarası seçilmedi; girişi yeniden başlatıp numarayı seç');
+      // numara bu belirteçle okunabiliyor mu (yanlış hesap/yetki yoksa burada düşer)
+      const info = await graphGet(v, t.accessToken, pn, 'id,display_phone_number,verified_name');
+      // webhook'lar bu uygulamaya aksın (idempotent; yetki yoksa Meta hata döner)
+      if (/^\d{5,30}$/.test(waba)) {
+        try {
+          await graphPost(v, t.accessToken, `${waba}/subscribed_apps`, {});
+        } catch (e) {
+          throw new OAuthError(`WhatsApp hesabına bildirim aboneliği yapılamadı: ${(e as Error).message}`);
+        }
+      }
+      const pullKey = await relayRegister(pn, waba, t.accessToken);
+      const tok: WhatsAppCloudToken = {
+        official: 'whatsapp',
+        accessToken: t.accessToken,
+        expiresAt: t.expiresAt,
+        phoneNumberId: pn,
+        wabaId: waba,
+        displayPhone: typeof info.display_phone_number === 'string' ? info.display_phone_number : undefined,
+        verifiedName: typeof info.verified_name === 'string' ? info.verified_name : undefined,
+        pullKey,
+        graphVersion: v,
+      };
+      return { token: JSON.stringify(tok), label: tok.displayPhone ?? tok.verifiedName ?? 'WhatsApp Business' };
+    }
   }
 }
 
-/** Belirteç dosyası resmi Graph girişi mi (Instagram profesyonel / Facebook Sayfası) */
-export function officialKind(raw: string | undefined): 'instagram' | 'facebook' | undefined {
+/** Belirteç dosyası resmi Meta girişi mi (Instagram profesyonel / Facebook Sayfası / WhatsApp Business) */
+export function officialKind(raw: string | undefined): 'instagram' | 'facebook' | 'whatsapp' | undefined {
   if (!raw || !raw.trim().startsWith('{')) return undefined;
   try {
     const k = (JSON.parse(raw) as { official?: unknown }).official;
-    return k === 'instagram' || k === 'facebook' ? k : undefined;
+    return k === 'instagram' || k === 'facebook' || k === 'whatsapp' ? k : undefined;
   } catch {
     return undefined;
   }
