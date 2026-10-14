@@ -225,14 +225,14 @@ export interface CalEvent {
 }
 
 export const PLATFORMS: Record<Platform, { name: string; code: string; color: string; method: string; available: boolean; mode: 'native' | 'browser' | 'token' | 'mail' | 'demo'; category?: Category }> = {
-  whatsapp: { name: 'WhatsApp', code: 'WA', color: '#0E8A45', method: 'WhatsApp Business ya da QR', available: true, mode: 'native' },
+  whatsapp: { name: 'WhatsApp', code: 'WA', color: '#0E8A45', method: 'WhatsApp Business hesabınla (resmi)', available: true, mode: 'native' },
   telegram: { name: 'Telegram', code: 'TG', color: '#1B7FB8', method: 'QR ile giriş', available: true, mode: 'token' },
   slack: { name: 'Slack', code: 'SL', color: '#4A154B', method: 'Slack hesabınla', available: true, mode: 'browser' },
   imessage: { name: 'iMessage', code: 'IM', color: '#1C8C3A', method: 'Bu Mac’teki Mesajlar', available: true, mode: 'native' },
   linkedin: { name: 'LinkedIn', code: 'LI', color: '#0A66C2', method: 'Hesabınla giriş', available: true, mode: 'browser' },
   x: { name: 'X', code: 'X', color: '#2B2833', method: 'Hesabınla giriş', available: true, mode: 'browser' },
-  instagram: { name: 'Instagram', code: 'IG', color: '#C13584', method: 'Hesabınla giriş', available: true, mode: 'browser' },
-  messenger: { name: 'Messenger', code: 'MS', color: '#0866FF', method: 'Hesabınla giriş', available: true, mode: 'browser' },
+  instagram: { name: 'Instagram', code: 'IG', color: '#C13584', method: 'İşletme hesabınla (resmi)', available: true, mode: 'browser' },
+  messenger: { name: 'Messenger', code: 'MS', color: '#0866FF', method: 'Facebook Sayfanla (resmi)', available: true, mode: 'browser' },
   tiktok: { name: 'TikTok', code: 'TT', color: '#111111', method: 'Hesabınla giriş', available: true, mode: 'browser' },
   gmail: { name: 'Gmail', code: 'GM', color: '#EA4335', method: 'Google hesabınla giriş', available: true, mode: 'browser', category: 'mail' },
   outlook: { name: 'Outlook', code: 'OL', color: '#0F6CBD', method: 'Microsoft hesabınla giriş', available: true, mode: 'browser', category: 'mail' },

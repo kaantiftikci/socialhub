@@ -560,7 +560,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
         </div>
         <div class="card" style="grid-column:1/-1" id="oaCard">
           <h3>Resmi giriş uygulamaları <span class="sub" id="oaState"></span></h3>
-          <p class="muted" style="margin:0 0 6px;font-size:13px;line-height:1.5">Masaüstü uygulaması e-posta, Slack, Instagram, Messenger ve WhatsApp Business hesaplarını sağlayıcının <b>kendi giriş sayfasıyla</b> bağlar. Burada Mivelo'nun sağlayıcılarda açtığın uygulamalarının bilgileri durur: istemci gizi yalnız bu sunucuda kalır, uygulamalara yalnız istemci kimliği gider (<code>api/oauth.php?action=config</code>). Kapalı ya da eksik sağlayıcıda uygulama eski giriş yolunu kullanır. Değişiklik uygulamalara Bağlan penceresi açılınca, en geç 6 saatte ulaşır.</p>
+          <p class="muted" style="margin:0 0 6px;font-size:13px;line-height:1.5">Masaüstü uygulaması e-posta, Slack, Instagram, Messenger ve WhatsApp Business hesaplarını sağlayıcının <b>kendi giriş sayfasıyla</b> bağlar. Burada Mivelo'nun sağlayıcılarda açtığın uygulamalarının bilgileri durur: istemci gizi yalnız bu sunucuda kalır, uygulamalara yalnız istemci kimliği gider (<code>api/oauth.php?action=config</code>). Kapalı ya da eksik e-posta/Slack sağlayıcısında uygulama eski giriş yolunu kullanır; Meta uygulamalarında (WhatsApp, Instagram, Messenger) başka yol yok. Değişiklik uygulamalara Bağlan penceresi açılınca, en geç 6 saatte ulaşır.</p>
           <div id="oaBox"><div class="empty">Yükleniyor…</div></div>
         </div>
         <div class="card">
@@ -1158,6 +1158,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   };
   var OA=null;
   function oaChip(c){ return c.live?'<span class="chip st-joined"><i></i>Açık</span>':c.enabled?'<span class="chip st-warn"><i></i>Eksik</span>':'<span class="chip st-off"><i></i>Kapalı</span>'; }
+  /* Meta sağlayıcıları (Instagram, Facebook, WhatsApp): açma-kapama yok; bilgiler doluysa uygulama yalnız bu yolu kullanır */
   function renderOAuth(open){
     var ps=OA.providers, ks=Object.keys(ps), live=ks.filter(function(k){ return ps[k].live; }).length;
     $('#oaState').textContent=live?live+' / '+ks.length+' sağlayıcı açık':'hiçbiri açık değil';
@@ -1172,7 +1173,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
         '<div class="sm-host"><label>Webhook doğrulama belirteci (Meta → WhatsApp → Yapılandırma)</label><div style="display:flex;gap:6px;align-items:center"><code style="flex:1;overflow:auto">'+(c.webhookVerifyToken?esc(c.webhookVerifyToken):'kaydedince üretilir')+'</code>'+(c.webhookVerifyToken?'<button class="btn sm" type="button" data-copy="'+esc(c.webhookVerifyToken)+'">Kopyala</button><button class="btn sm" type="button" data-oa-newvt title="Yeni belirteç üretir; Meta panosunda da güncellemen gerekir">Yenile</button>':'')+'</div></div>';
       return '<details class="oa" data-p="'+k+'"'+(open===k?' open':'')+'><summary><b>'+esc(c.name)+'</b><span class="muted">'+esc(info.what||'')+'</span>'+oaChip(c)+'<span class="acc-chev">'+I.chev+'</span></summary>'+
         '<form class="oa-body" data-p="'+k+'" autocomplete="off">'+
-          '<label class="oa-sw"><input type="checkbox" name="enabled"'+(c.enabled?' checked':'')+'> Etkin (uygulamalar bu girişi kullanır)</label>'+
+          (c.alwaysOn?'<p class="muted" style="margin:0 0 8px;font-size:12.5px">Açma-kapama yok: bilgiler doluysa uygulama <b>yalnız</b> bu kurumsal girişi kullanır (kişisel hesap/QR yolu yok); eksikse kullanıcı "henüz hazır değil" görür.</p>':'<label class="oa-sw"><input type="checkbox" name="enabled"'+(c.enabled?' checked':'')+'> Etkin (uygulamalar bu girişi kullanır)</label>')+
           '<div class="sm-grid"><div class="sm-host"><label for="oaI-'+k+'">İstemci kimliği</label><input class="input" id="oaI-'+k+'" name="clientId" value="'+esc(c.clientId)+'" spellcheck="false"></div>'+sec+extra+'</div>'+
           '<div class="oa-cb"><span class="muted">Geri dönüş adresi:</span>'+(cbs.length?cbs.map(function(u){ return '<code>'+esc(u)+'</code><button class="btn sm" type="button" data-copy="'+esc(u)+'">Kopyala</button>'; }).join(''):'')+(info.cbNote?'<span class="muted oa-note">'+info.cbNote+'</span>':'')+'</div>'+
           '<ol class="oa-steps">'+info.steps.map(function(s){ return '<li>'+s+'</li>'; }).join('')+'</ol>'+
@@ -1185,7 +1186,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:poi
   function loadOAuth(open){ api('oauth_get').then(function(d){ OA=d; renderOAuth(open); }).catch(function(e){ $('#oaBox').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; }); }
   function saveOAuth(f,clear,newVt){
     var k=f.dataset.p, g=function(n){ var el=f.elements[n]; return el?el:null; };
-    var body={provider:k,enabled:g('enabled').checked,clientId:g('clientId').value.trim()};
+    var body={provider:k,enabled:g('enabled')?g('enabled').checked:true,clientId:g('clientId').value.trim()};
     if(newVt) body.newVerifyToken=true;
     if(g('clientSecret')) body.clientSecret=g('clientSecret').value.trim();
     if(g('market')) body.historyLimited=!g('market').checked;

@@ -953,8 +953,10 @@ Dil: arayüz ve yorumlar Türkçe.
   Bearer (lookaside.fbsbx.com/fbcdn/whatsapp.net) önbellek. Hatalar `waErrorText`: 131047 = `WA_WINDOW_TEXT` (24 sa penceresi, şablon gerekir — Mivelo şablon GÖNDERMEZ), 131026/131030
   ulaşılamıyor/test listesi, 131042 ödeme, 190 oturum, 130429 hız. Eski mesaj/grup YOK (`loadHistory` unavailable). Kişisel numara giremez. Registry: `officialKind` 'whatsapp' →
   köprüye/Baileys'e gitmez, `engineOf` 'whatsapp'|'session' (yol değişince eski sohbetler bir kez silinir). Admin → Resmi giriş → WhatsApp: config_id (zorunlu), Graph sürümü, webhook adresi +
-  doğrulama belirteci (Kopyala/Yenile). Arayüz: Bağlan → WhatsApp/Instagram/Messenger `:choose` panelinde İŞLETME yolu önde `.cn-choice.primary` "Önerilen", kişisel (QR/köprü) ikinci
-  (`CHOICE_TEXT`). Testler: whatsapp-cloud.test.ts (sahte Graph + aktarıcı + giriş akışı), PHP aktarıcı yerel `php -S` + sahte Graph ile sınandı. Gerçek Meta hesabıyla DOĞRULANMADI.
+  doğrulama belirteci (Kopyala/Yenile). **Meta uygulamalarında YALNIZ kurumsal giriş (14.10 Kaan: "normal girişleri kaldır, açıp kapatılan ayar olmasın")**:
+  Bağlan → WhatsApp/Instagram/Messenger doğrudan resmi akış (`META_ONLY`, Connect.tsx), kişisel hesap/QR/köprü seçeneği ve `:choose` paneli YOK; Meta uygulaması hazır
+  değilse (çekirdek 409) "kurumsal girişi henüz hazır değil" hata paneli, eski yola DÜŞMEZ (statik demoda eski QR sürer). Admin'de Instagram/Facebook/WhatsApp için "Etkin"
+  kutusu yok (`mv_oauth_always_on`: bilgiler doluysa açık). Eskiden bağlanmış kişisel hesaplar (Baileys/köprü) registry'de çalışmaya devam eder. Testler: whatsapp-cloud.test.ts (sahte Graph + aktarıcı + giriş akışı), PHP aktarıcı yerel `php -S` + sahte Graph ile sınandı. Gerçek Meta hesabıyla DOĞRULANMADI.
 - **Telegram** (zaten resmi MTProto): QR'a ek "Telefon numarasıyla giriş yap" (`restart {phone:true}` → `signInWithPhone`, teleproto signInUser: numara → kod → 2FA;
   `normalizePhone` TR varsayılan; `tgAuthError` Türkçe; kayıtsız numarada hesap AÇILMAZ; stop() bekleyen soruları reddeder). Test: telegram-phone.
 - **Aracı (mivelo.app)** `apps/landing/api/oauth.php` + `lib-oauth.php` + `oauth-cb.php`: config (gizi ASLA), token/refresh POST JSON ≤8 KB, yalnız HTTPS, IP başına

@@ -128,13 +128,19 @@ if (!function_exists('mv_oauth_providers')) {
         return is_string($v) && preg_match('/^v\d{1,2}\.\d$/', $v) ? $v : MV_OAUTH_GRAPH_DEFAULT;
     }
 
-    /** Sağlayıcı kullanıma hazır mı: etkin + istemci kimliği (+ gizi gerekenlerde gizi; WhatsApp'ta Embedded Signup config_id de) */
+    /** Meta sağlayıcıları (Instagram, Facebook/Messenger, WhatsApp): açma-kapama anahtarı YOK — bilgiler doluysa açık (Kaan, 14.10) */
+    function mv_oauth_always_on(string $p): bool
+    {
+        return $p === 'instagram' || $p === 'facebook' || $p === 'whatsapp';
+    }
+
+    /** Sağlayıcı kullanıma hazır mı: (Meta dışı: etkin) + istemci kimliği (+ gizi gerekenlerde gizi; WhatsApp'ta Embedded Signup config_id de) */
     function mv_oauth_ready(string $p, array $c): bool
     {
         if ($p === 'whatsapp' && (string) ($c['configId'] ?? '') === '') {
             return false;
         }
-        return !empty($c['enabled']) && (string) ($c['clientId'] ?? '') !== '' && (!mv_oauth_needs_secret($p) || (string) ($c['clientSecret'] ?? '') !== '');
+        return (mv_oauth_always_on($p) || !empty($c['enabled'])) && (string) ($c['clientId'] ?? '') !== '' && (!mv_oauth_needs_secret($p) || (string) ($c['clientSecret'] ?? '') !== '');
     }
 
     /** WhatsApp webhook doğrulama belirteci (Meta uygulama panosuna yapıştırılır); yoksa üretilir */
@@ -178,7 +184,8 @@ if (!function_exists('mv_oauth_providers')) {
             $sec = (string) ($c['clientSecret'] ?? '');
             $out[$p] = [
                 'name' => MV_OAUTH_NAMES[$p],
-                'enabled' => !empty($c['enabled']),
+                'enabled' => mv_oauth_always_on($p) || !empty($c['enabled']),
+                'alwaysOn' => mv_oauth_always_on($p),
                 'live' => mv_oauth_ready($p, $c),
                 'clientId' => (string) ($c['clientId'] ?? ''),
                 'needsSecret' => mv_oauth_needs_secret($p),
@@ -221,7 +228,7 @@ if (!function_exists('mv_oauth_providers')) {
         if ($id !== '' && !preg_match('/^[\x21-\x7e]{4,300}$/', $id)) {
             return 'İstemci kimliği geçersiz (boşluksuz, 4-300 karakter)';
         }
-        $c = ['clientId' => $id, 'enabled' => !empty($in['enabled'])];
+        $c = ['clientId' => $id, 'enabled' => mv_oauth_always_on($p) || !empty($in['enabled'])];
         if (mv_oauth_needs_secret($p)) {
             $sec = trim($str('clientSecret'));
             if ($sec !== '' && !preg_match('/^[\x21-\x7e]{4,300}$/', $sec)) {

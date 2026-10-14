@@ -22,11 +22,11 @@ export const CHANGELOG: ChangeEntry[] = [
     items: [
       {
         title: 'WhatsApp Business resmi bağlantı',
-        text: 'Bağlan → WhatsApp’ta artık ilk seçenek WhatsApp Business: Meta’nın kendi penceresinde numaranı seçersin, Mivelo resmi Cloud API ile çalışır. WhatsApp Business uygulamasındaki numaran telefonda da kullanılmaya devam eder. Kişisel numara için QR seçeneği duruyor.',
+        text: 'Bağlan → WhatsApp artık Meta’nın kendi penceresinde numaranı seçtiğin resmi WhatsApp Business girişiyle çalışır. WhatsApp Business uygulamasındaki numaran telefonda da kullanılmaya devam eder.',
       },
       {
-        title: 'Instagram ve Messenger’da işletme önde',
-        text: 'Instagram ve Messenger bağlarken işletme / Sayfa girişi artık ilk ve önerilen seçenek; kişisel hesap ikinci sırada.',
+        title: 'Meta uygulamalarında yalnız kurumsal giriş',
+        text: 'WhatsApp, Instagram ve Messenger yalnız işletme hesabı / Facebook Sayfası ile bağlanır; kişisel hesap ve QR seçenekleri kaldırıldı. Daha önce bağladığın hesaplar çalışmaya devam eder.',
       },
     ],
   },

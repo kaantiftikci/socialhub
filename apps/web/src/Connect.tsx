@@ -21,15 +21,11 @@ const SHOP_FIELDS: Partial<Record<Platform, string[]>> = { trendyol: ['sellerId'
 /** Resmi giriş (OAuth) adayı uygulamalar → giriş sayfasının sahibi; hangilerinin açık olduğunu çekirdek söyler (/api/oauth/providers) */
 const OFFICIAL_WHO: Partial<Record<Platform, string>> = { gmail: 'Google', outlook: 'Microsoft', yahoo: 'Yahoo', yandex: 'Yandex', slack: 'Slack', instagram: 'Instagram', messenger: 'Facebook', whatsapp: 'Meta' };
 /**
- * Resmi giriş açıkken iki yol sunulanlar (Meta uygulamaları): İŞLETME yolu önde ve varsayılan (Kaan, 14.10: "hepsini business'a al") —
- * Instagram profesyonel hesap, Facebook Sayfası, WhatsApp Business (Cloud API); kişisel hesap ikinci seçenek (eski akış: köprü / QR).
+ * Meta uygulamaları (WhatsApp, Instagram, Messenger) YALNIZ kurumsal/resmi yolla bağlanır (Kaan, 14.10: "normal girişleri kaldır, direkt
+ * kurumsal giriş"): kişisel hesap/QR/köprü seçeneği ve açma-kapama ayarı yok. Mivelo'nun Meta uygulaması henüz hazır değilse düğme hata
+ * paneli gösterir (eski yola DÜŞMEZ). Eskiden bağlanmış kişisel hesaplar çalışmaya devam eder (yalnız yeni bağlantı kapalı).
  */
-const OFFICIAL_CHOICE = new Set<Platform>(['instagram', 'messenger', 'whatsapp']);
-const CHOICE_TEXT: Partial<Record<Platform, { biz: string; bizSub: string; personal: string; personalSub: string; note: string }>> = {
-  instagram: { biz: 'İşletme ya da içerik üretici hesabı', bizSub: 'Resmi Instagram girişi', personal: 'Kişisel hesap', personalSub: 'Kendi hesabınla giriş', note: 'Resmi giriş yalnız profesyonel hesabın mesajlarını getirir; kişi son 24 saatte yazmadıysa yanıt gönderilemez.' },
-  messenger: { biz: 'Facebook Sayfası', bizSub: 'Resmi Facebook girişi', personal: 'Kişisel Messenger', personalSub: 'Kendi hesabınla giriş', note: 'Resmi giriş yalnız Sayfanın mesajlarını getirir; kişi son 24 saatte yazmadıysa yanıt gönderilemez.' },
-  whatsapp: { biz: 'WhatsApp Business', bizSub: 'Resmi Meta girişi (Cloud API)', personal: 'Kişisel hesap', personalSub: 'Telefondan QR okutarak', note: 'WhatsApp Business uygulamasındaki numara ya da yeni bir numara bağlanır; kişisel numara giremez. Eski mesajlar gelmez; kişi son 24 saatte yazmadıysa serbest mesaj gönderilemez (Meta ücretsiz pencere).' },
-};
+const META_ONLY = new Set<Platform>(['instagram', 'messenger', 'whatsapp']);
 /** Adres + parolayla bağlanan e-posta: iCloud (uygulamaya özel parola), Diğer e-posta (IMAP; sunucu çekirdekte bulunur) */
 const PASS_MAIL = new Set<Platform>(['icloud', 'imap']);
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -127,7 +123,9 @@ export function ConnectModal({
       }
       setFlow({ ...base, ...f });
     } catch (e) {
-      if (!closedRef.current && flowRef.current === base) setFlow({ ...base, state: 'error', error: (e as Error).message });
+      // Meta uygulaması henüz onaylı/yapılandırılmış değil (çekirdek 409): eski yola düşülmez, kullanıcıya nedeni söylenir
+      const msg = /etkin değil/i.test((e as Error).message) && META_ONLY.has(platform) ? `${PLATFORMS[platform].name} kurumsal girişi henüz hazır değil; Mivelo’nun Meta uygulaması onaylanınca burada açılacak.` : (e as Error).message;
+      if (!closedRef.current && flowRef.current === base) setFlow({ ...base, state: 'error', error: msg });
     }
   }
   const cancelFlow = () => {
@@ -286,18 +284,17 @@ export function ConnectModal({
   const macOnlyOff = (p: Platform) => MAC_ONLY.has(p) && !!coreOs && coreOs !== 'darwin';
 
   /**
-   * Bağlan: resmi girişi açık olanlar sağlayıcının sayfasında (Instagram/Messenger'da önce kişisel / profesyonel seçimi);
-   * WhatsApp/Telegram QR, diğer sosyal medya ve e-posta kendi giriş penceresi, iMessage bu Mac.
-   * iCloud / Diğer e-posta ve pazaryerleri: önce form, doldurulunca bağlanır. personal: Instagram/Messenger kişisel hesap (eski akış).
+   * Bağlan: Meta uygulamaları her zaman resmi (kurumsal) giriş; resmi girişi açık öteki sağlayıcılar kendi sayfasında;
+   * Telegram QR, diğer sosyal medya ve e-posta kendi giriş penceresi, iMessage bu Mac.
+   * iCloud / Diğer e-posta ve pazaryerleri: önce form, doldurulunca bağlanır.
    */
-  async function add(platform: Platform, opts: { personal?: boolean } = {}) {
+  async function add(platform: Platform) {
     setBusy(true);
     try {
-      if (!USE_STATIC && OFFICIAL_WHO[platform] && !opts.personal) {
+      if (!USE_STATIC && OFFICIAL_WHO[platform]) {
         const off = await officialNow();
-        if (off.has(platform)) {
-          if (OFFICIAL_CHOICE.has(platform)) setActive(`${platform}:choose`);
-          else await startOfficial(platform);
+        if (META_ONLY.has(platform) || off.has(platform)) {
+          await startOfficial(platform);
           return;
         }
       }
@@ -580,37 +577,6 @@ export function ConnectModal({
           </div>
         )}
 
-        {[...OFFICIAL_CHOICE].map((p) =>
-          active === `${p}:choose` ? (
-            <div className="pairbox" key={p}>
-              <div style={{ flexGrow: 1, minWidth: 0 }}>
-                <h3>Hangi {PLATFORMS[p].name} hesabı?</h3>
-                <div className="cn-choices">
-                  <button className="cn-choice primary" disabled={busy} onClick={() => void startOfficial(p)}>
-                    <span className="ic">
-                      <Icon name="shield" size={17} sw={2} />
-                    </span>
-                    <span>
-                      <b>{CHOICE_TEXT[p]!.biz}</b>
-                      <small>{CHOICE_TEXT[p]!.bizSub}</small>
-                    </span>
-                  </button>
-                  <button className="cn-choice" disabled={busy} onClick={() => void add(p, { personal: true })}>
-                    <span className="ic">
-                      <Icon name="user" size={17} sw={2} />
-                    </span>
-                    <span>
-                      <b>{CHOICE_TEXT[p]!.personal}</b>
-                      <small>{CHOICE_TEXT[p]!.personalSub}</small>
-                    </span>
-                  </button>
-                </div>
-                <p className="cn-note">{CHOICE_TEXT[p]!.note}</p>
-              </div>
-            </div>
-          ) : null,
-        )}
-
         {(['icloud', 'imap'] as Platform[]).map((p) =>
           active === `${p}:new` ? (
             <div className="pairbox" key={p}>
@@ -879,7 +845,7 @@ export function ConnectModal({
             // kartın durumu en iyi durumdaki hesaptan (bağlı olan önde); ilk kaydı göstermek bağlı hesabın yanında "Bağlı değil" yazıyordu
             const acc = accounts.filter((a) => a.platform === p).sort((x, y) => STATUS_RANK[x.status] - STATUS_RANK[y.status]);
             const isConn = connected.includes(p);
-            const isActive = acc.some((a) => a.id === active) || active === `${p}:new` || active === `${p}:oauth` || active === `${p}:choose`;
+            const isActive = acc.some((a) => a.id === active) || active === `${p}:new` || active === `${p}:oauth`;
             const macOnly = macOnlyOff(p);
             // yalnız Mac kanalı: yeni bağlantı kapalı; eskiden kalan hesap varsa kaldırılabilsin
             const available = meta.available && (!macOnly || acc.length > 0);
