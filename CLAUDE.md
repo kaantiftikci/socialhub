@@ -175,7 +175,7 @@ Dil: arayüz ve yorumlar Türkçe.
   sürüm YAYINLAMAZ. **Sürümü Claude otomatik çıkarır (Kaan, 29.09: "sen otomatik yap sürüm işlerini")**: doğrulanmış her iş turu main'e
   itildikten sonra. Depo 29.09'dan beri HERKESE AÇIK → standart GitHub Actions makineleri ücretsiz ve kotasız (özelken macOS ×10 dakika
   sayılıyordu; takılan 0.1.7 derlemesi 2.000 dk'lık kotanın %90'ını bitirmişti). Depo yeniden özele dönerse kota kuralı geri gelir: en çok
-  günde bir sürüm, GitHub kota uyarısında sürüm çıkarma. **09.10: depo yeniden ÖZEL** → 0.1.48 "Artifact storage quota has been hit" ile düştü
+  günde bir sürüm, GitHub kota uyarısında sürüm çıkarma. **09.10: depo yeniden ÖZEL (25.11: macOS işleri makine alamayıp anında iptal düştü → Kaan depoyu yeniden HERKESE AÇIK yaptı)** → 0.1.48 "Artifact storage quota has been hit" ile düştü
   (90 günlük 121 paket çıktısı ≈7,4 GB); eskiler silindi ama kota 6-12 sa'de yeniden hesaplandığı için 0.1.49 da düştü → build-desktop
   ARTIK upload-artifact KULLANMAZ: her build işi `out/*` + `meta-<ad>.json` (size+sha256) dosyalarını curl FTPS ile web kökü dışındaki
   `~/mivelo-staging/<run_id>/`e yükler (meta EN SON); publish üç meta'yı okur, latest.json yazar, paketleri `RNFR/RNTO` ile `mivelo.app/indir/files/`a
