@@ -67,9 +67,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: mac-arm64, os: macos-14, arch: arm64, target: aarch64-apple-darwin, bundle: dmg, goos: darwin, goarch: arm64 }
+          # macos-14 imajı artık makine almıyor (25.11: işler anında iptal) → macos-15
+          - { name: mac-arm64, os: macos-15, arch: arm64, target: aarch64-apple-darwin, bundle: dmg, goos: darwin, goarch: arm64 }
           # Intel: Apple Silicon makinesinde x64 Node (Rosetta) + x86_64 Rust hedefi → yerel modüller x64 kurulur
-          - { name: mac-intel, os: macos-14, arch: x64, target: x86_64-apple-darwin, bundle: dmg, goos: darwin, goarch: amd64 }
+          - { name: mac-intel, os: macos-15, arch: x64, target: x86_64-apple-darwin, bundle: dmg, goos: darwin, goarch: amd64 }
           # windows-latest (VS 2026) npm'in node-gyp'inde tanınmıyor → yerel modül derlenemiyor; VS 2022'li imaj
           - { name: windows-x64, os: windows-2022, arch: x64, target: x86_64-pc-windows-msvc, bundle: nsis, goos: windows, goarch: amd64 }
     runs-on: ${{ matrix.os }}

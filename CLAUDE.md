@@ -48,7 +48,7 @@ Dil: arayüz ve yorumlar Türkçe.
   önce denenir; 404/410/556 → bir kez `noOrdersV2`, v1 (günlükte uyarı). v2 yalnız son 1 ay + 10.000 kayıt → ilk eşitleme 2×2 hafta (v1'de 6).
   Geçmiş için `orders/stream` (nextCursor, 3 ay) var — kullanılmadı. Test: trendyol.test.ts.
 - **Masaüstü duman testi** (`.github/workflows/desktop-smoke.yml`, 29.09): build-desktop bitince (workflow_run) ya da elle (`run_id`) GitHub'ın
-  Apple Silicon Mac'inde (macos-14) GERÇEK DMG kurulur, karantina kaldırılır, (1) uygulama açılır + 60 sn çekirdek ölçülür (`scripts/smoke/probe.mjs`:
+  Apple Silicon Mac'inde (macos-15) GERÇEK DMG kurulur, karantina kaldırılır, (1) uygulama açılır + 60 sn çekirdek ölçülür (`scripts/smoke/probe.mjs`:
   health/accounts/chats, ilk dinleme, en uzun yanıt, >3 sn sayısı) + `screencapture`, (2) paketin KENDİ node'u/modülleriyle `scripts/smoke/seed.mjs`
   (şifreli DB, ~250 bin yer tutucu mesaj, Instagram/iMessage/Telegram hesapları + `removing:` bayraklı 100 bin mesajlık hesap) ve çekirdek 120 sn ölçülür.
   Sonuç iş günlüğünde + `smoke-logs` çıktısında (Claude `get_job_logs` ile okur). Gerçek kullanıcı verisi/TCC/Anahtar Zinciri penceresi taklit EDİLMEZ.
@@ -184,7 +184,7 @@ Dil: arayüz ve yorumlar Türkçe.
   `security: loose` zaten doğrulamıyordu). Duman testi DMG'yi mivelo.app'ten indirir. Tetik: GitHub MCP `actions_run_trigger run_workflow build-desktop.yml ref main`
   (etiket itmek bu ortamda proxy 403 veriyor; sürüm 0.1.<run>), sonucu kontrol et; takılırsa HEMEN iptal et. Birim testleri yalnız ayrı
   `test` işinde (ubuntu, 1×, ≤10 dk; sonucu paketlemeyi durdurmaz), `build` işi ≤30 dk; `npm test` `--test-force-exit --test-timeout=120000`. Sürüm 0.1.<run> (etikette
-  etiketinki), `--config {"version"}` ile. Matris: mac-arm64 (macos-14), mac-intel (macos-14 + x64 Node/Rosetta + x86_64-apple-darwin), windows-x64 (NSIS).
+  etiketinki), `--config {"version"}` ile. Matris: mac-arm64 (macos-15), mac-intel (macos-15 + x64 Node/Rosetta + x86_64-apple-darwin), windows-x64 (NSIS).
   DMG'den gizli `.VolumeIcon.icns` + `.fseventsd` CI'da silinir (Finder'da gizli dosyalar açıkken ikinci "amblem" görünüyordu; UDRW → sil → UDZO).
   Mac simgesi `icons/icon.icns` Apple şablonunda (1024 tuval, ortada 824 squircle + gölge; `apps/desktop/scripts/mac-icon.py` → `icon-macos.png`
   → `npx tauri icon` çıktısından YALNIZ icon.icns): macOS 26 şablon dışı (tam kaplayan) simgeyi gri squircle'a koyuyordu. Windows/PNG'ler eski tam kaplayan.
