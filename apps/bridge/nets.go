@@ -37,8 +37,6 @@ var netDefs = map[string]*netDef{
 			"identity_change_notices": false,
 			"enable_status_broadcast": false,
 			"url_previews":            false,
-			// tek seferlik medya: canlıda içerik zaten gelmez; geçmiş eşitlemesindeki içerik normal fotoğraf gibi GÖSTERİLMEZ (29.09 kuralı)
-			"disable_view_once": true,
 			"pinned_tag":              "m.favourite",
 			"archive_tag":             tagArchive,
 			"status_broadcast_tag":    "m.lowpriority",

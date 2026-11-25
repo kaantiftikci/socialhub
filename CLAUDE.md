@@ -311,7 +311,8 @@ Dil: arayüz ve yorumlar Türkçe.
   Paket: `scripts/build-bridge.mjs` (`npm run bridge:build`), bundle-core Go varsa `core/bin`e koyar (CI `MIVELO_BUNDLE_BRIDGE=1`;
   setup-go 1.26, mac-intel `CC="clang -arch x86_64"`, Windows MinGW gcc), CI ayrıca `mivelo-bridge-<os>-<arch>` + latest.json `bridge`.
   Tek seferlik medya (25.11): WhatsApp canlıda içeriği bağlı cihazlara GÖNDERMEZ (WhatsApp Web'de de açılmaz) → yer tutucu; köprüde
-  `disable_view_once: true` (geçmişteki içerik normal foto gibi gösterilmez, 29.09 kuralı); mautrix'in İngilizce bildirimleri `bridgeNotice` ile
+  geçmiş eşitlemesinde İÇERİKLE gelen tek seferlik NORMAL foto/video gibi gösterilir (25.11 Kaan: "normal fotoğraf olarak gözüksün";
+  29.09'daki gizleme kuralı KALDIRILDI, Baileys yolunda da `viewOnceHasMedia`, açılış onarımı silindi); mautrix'in İngilizce bildirimleri `bridgeNotice` ile
   Türkçe, eski kayıtlar bir kez çevrilir (`mx_notice_v1:<hesap>`).
   Testler: `apps/bridge` `go test` (sahte ağla uçtan uca + gerçek 6 bağlayıcı açılışı + çerez adımları), çekirdek
   `mautrix-connector.test.ts` (olay eşleme), `mautrix-e2e.test.ts` (gerçek ikili + `MIVELO_FAKE_NET=1`; Go yoksa atlanır). Gerçek
@@ -702,7 +703,7 @@ Dil: arayüz ve yorumlar Türkçe.
   dizi e-postaları hiç yoktu); ileti görünümü okunamazsa satır özeti tek ileti; `openMail` #message/#thread görünümünde kalmışsa #inbox'a döner;
   avatar satırdaki img ya da avatar/logo kutusunun arka plan görseli (`Thread.avatarUrl`). Tanı günlüğü `threadish`/`avatarish`/`hash` da yazar. Giriş: oturum yokken mail.yandex ana sayfaya atıyor → passive loggedIn passport'a gider (`LOGIN_URL`). Token dosyalı eski IMAP hesapları sürer;
   şifre reddinde "Yandex ile giriş yap" (Yahoo gibi, IMAP hesabı tarayıcı yoluna çevrilir).
-- **WhatsApp tek seferlik (bir kez görüntülenen) medya (29.09, Kaan: "geçmişte gönderilen tek seferlikler normal foto gibi görünüyor, ciddi")**:
+- **(25.11 İPTAL: içerikli tek seferlik artık normal foto) WhatsApp tek seferlik (bir kez görüntülenen) medya (29.09, Kaan: "geçmişte gönderilen tek seferlikler normal foto gibi görünüyor, ciddi")**:
   canlıda içerik bağlı cihazlara GELMEZ (içeriksiz → `VIEW_ONCE_TEXT` yer tutucu), ama geçmiş eşitlemesi sarmallı (viewOnceMessage/V2/V2Extension)
   ya da sarmalsız `imageMessage.viewOnce` bayraklı İÇERİKLE veriyor → `unwrap` sarmalı soyup normal fotoğraf yazıyor, medya indirilip gösteriliyordu.
   Şimdi `isViewOnce` (iç içe sarmallar + image/video/audio/ptv `viewOnce`) → `viewOncePlaceholder`: aynı uyarı metni, ek YOK (`attachments: []` —

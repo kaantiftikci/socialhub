@@ -128,14 +128,15 @@ test('eski fotoğraf tek seferliğe çevrilince aynı gönderimin ikiz yer tutuc
   const ts = 1_700_000_000;
   const history = (msgs: unknown[]) => new Promise<void>((r) => wa.queueHistory(msgs, r));
   const img = { imageMessage: { mimetype: 'image/jpeg', mediaKey: Buffer.from('k').toString('base64'), url: 'https://mmg.whatsapp.net/x' } };
+  const bare = { imageMessage: { mimetype: 'image/jpeg' } }; // içeriği gelmemiş tek seferlik (içerikli olan normal foto sayılır)
   // eski sürüm: aynı gönderim biri yer tutucu (A), biri normal fotoğraf (B, 3 sn sonra)
   await history([
-    { key: { remoteJid: JID, id: 'A', fromMe: false }, message: { viewOnceMessageV2: { message: img } }, messageTimestamp: ts },
+    { key: { remoteJid: JID, id: 'A', fromMe: false }, message: { viewOnceMessageV2: { message: bare } }, messageTimestamp: ts },
     { key: { remoteJid: JID, id: 'B', fromMe: false }, message: img, messageTimestamp: ts + 3 },
   ]);
   assert.equal(store.getMessage(`${cid}#B`)!.attachments?.length, 1);
   // B yeniden tek seferlik olarak gelir → yerinde çevrilir → A ile ikiz → biri silinir
-  await history([{ key: { remoteJid: JID, id: 'B', fromMe: false }, message: { viewOnceMessageV2: { message: img } }, messageTimestamp: ts + 3 }]);
+  await history([{ key: { remoteJid: JID, id: 'B', fromMe: false }, message: { viewOnceMessageV2: { message: bare } }, messageTimestamp: ts + 3 }]);
   const left = ['A', 'B'].filter((id) => store.getMessage(`${cid}#${id}`));
   assert.equal(left.length, 1, 'tek balon kalır');
   store.close();

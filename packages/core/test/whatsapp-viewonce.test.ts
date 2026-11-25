@@ -16,7 +16,6 @@ const JID = '905551112233@s.whatsapp.net';
 const img = (extra: Record<string, unknown> = {}) => ({ imageMessage: { mimetype: 'image/jpeg', fileLength: 1000, mediaKey: Buffer.from('k').toString('base64'), url: 'https://mmg.whatsapp.net/x', ...extra } });
 type Wa = {
   queueHistory: (m: unknown[], done?: () => void) => void;
-  repairViewOnce: () => Promise<number>;
   fetchMedia: (u: string) => Promise<unknown>;
 };
 
@@ -46,64 +45,25 @@ test('tek seferlik medya tespiti: sarmallar (iç içe dahil) ve medya bayrağı;
   assert.equal(isViewOnce(undefined), false);
 });
 
-test('geçmişten İÇERİKLİ gelen tek seferlik fotoğraf normal fotoğraf gibi yazılmaz: uyarı metni, ek yok, medya kaydı yok', async () => {
-  const { store, history, cid, dir } = setup('h');
-  await history([msg('VO1', { viewOnceMessageV2: { message: img({ caption: 'gizli' }) } }), msg('VO2', img({ viewOnce: true }), true, 1_700_000_010), msg('N1', img(), false, 1_700_000_020)]);
-  const vo = store.getMessage(`${cid}#VO1`)!;
-  assert.match(vo.text, /Tek seferlik/);
-  assert.ok(!vo.text.includes('gizli'), 'tek seferlik açıklama gösterilmez');
-  assert.equal(vo.attachments?.length ?? 0, 0, 'ek yok → arayüz görsel göstermez');
-  assert.equal(store.getMessage(`${cid}#VO2`)!.attachments?.length ?? 0, 0, 'kendi gönderdiğim tek seferlik de');
-  assert.equal(store.getMessage(`${cid}#N1`)!.attachments?.[0]?.kind, 'image', 'normal fotoğraf etkilenmez');
-  await new Promise((r) => setTimeout(r, 100)); // medya kaydı yazımı arka planda
-  const files = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
-  assert.ok(files.some((f) => f.includes('N1')), 'normal fotoğrafın kaydı tutulur');
-  assert.ok(!files.some((f) => f.includes('VO1') || f.includes('VO2')), 'tek seferlik medyanın indirme kaydı tutulmaz');
+test('geçmişten İÇERİKLİ gelen tek seferlik fotoğraf normal fotoğraf gibi gösterilir; içeriksiz olan yer tutucu', async () => {
+  const { store, history, cid } = setup('h');
+  await history([
+    msg('VO1', { viewOnceMessageV2: { message: img({ caption: 'not', directPath: '/v/x' }) } }),
+    msg('VO2', img({ viewOnce: true, directPath: '/v/y' }), true, 1_700_000_010),
+    msg('VO3', { viewOnceMessageV2: { message: { imageMessage: { mimetype: 'image/jpeg' } } } }, false, 1_700_000_020),
+  ]);
+  assert.equal(store.getMessage(`${cid}#VO1`)!.attachments?.[0]?.kind, 'image');
+  assert.equal(store.getMessage(`${cid}#VO2`)!.attachments?.[0]?.kind, 'image', 'kendi gönderdiğim de');
+  const vo3 = store.getMessage(`${cid}#VO3`)!;
+  assert.match(vo3.text, /Tek seferlik/);
+  assert.equal(vo3.attachments?.length ?? 0, 0, 'içeriği gelmemişse yer tutucu');
   store.close();
 });
 
-test('eskiden normal fotoğraf olarak yazılmış tek seferlik mesaj yeniden gelince yerinde uyarıya çevrilir (ek silinir)', async () => {
-  const { store, history, cid } = setup('r');
-  // eski sürümün yazdığı hali: aynı kimlik, normal fotoğraf eki
-  await history([msg('OLD', img())]);
-  assert.equal(store.getMessage(`${cid}#OLD`)!.attachments?.length, 1);
-  await history([msg('OLD', { viewOnceMessageV2: { message: img() } })]);
-  const m = store.getMessage(`${cid}#OLD`)!;
-  assert.match(m.text, /Tek seferlik/);
-  assert.equal(m.attachments?.length ?? 0, 0);
-  assert.match(store.getChat(cid)!.lastPreview, /Tek seferlik/, 'sohbetin son mesajıysa önizleme de');
-  store.close();
-});
-
-test('açılış onarımı: medya kaydındaki ham mesajdan tek seferlikler bulunur, çevrilir, medya kaydı ve dosyası silinir; bir kez çalışır', async () => {
-  const { store, wa, history, cid, dir } = setup('fix');
-  await history([msg('PAST', img()), msg('PLAIN', img(), false, 1_700_000_050)]);
-  await new Promise((r) => setTimeout(r, 100)); // medya kaydı yazımı (arka planda)
-  const key = `${JID}__PAST`;
-  // eski sürümde medya kaydına ham (tek seferlik) mesaj yazılmıştı
-  fs.writeFileSync(path.join(dir, key + '.json'), JSON.stringify(msg('PAST', { viewOnceMessageV2: { message: img() } })));
-  const mediaDir = path.join(path.dirname(dir), 'media');
-  fs.mkdirSync(mediaDir, { recursive: true });
-  fs.writeFileSync(path.join(mediaDir, key), 'jpeg');
-  fs.writeFileSync(path.join(mediaDir, key + '.type'), 'image/jpeg');
-  assert.equal(await wa.repairViewOnce(), 1);
-  const m = store.getMessage(`${cid}#PAST`)!;
-  assert.match(m.text, /Tek seferlik/);
-  assert.equal(m.attachments?.length ?? 0, 0);
-  assert.equal(store.getMessage(`${cid}#PLAIN`)!.attachments?.length, 1, 'normal fotoğrafa dokunulmaz');
-  await new Promise((r) => setTimeout(r, 50));
-  assert.equal(fs.existsSync(path.join(dir, key + '.json')), false, 'indirme kaydı silindi');
-  assert.equal(fs.existsSync(path.join(mediaDir, key)), false, 'indirilmiş dosya silindi');
-  assert.equal(await wa.repairViewOnce(), 0, 'ikinci açılışta yeniden taranmaz');
-  store.close();
-});
-
-test('tek seferlik medyanın indirme/önizleme isteği reddedilir', async () => {
+test('içeriksiz tek seferlik medyanın indirme/önizleme isteği reddedilir', async () => {
   const { store, wa, dir } = setup('dl');
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, `${JID}__X1.json`), JSON.stringify(msg('X1', img({ viewOnce: true, jpegThumbnail: Buffer.from('t').toString('base64') }))));
-  await assert.rejects(() => wa.fetchMedia(`wa:${JID}/X1`), /Tek seferlik/);
-  fs.writeFileSync(path.join(dir, `${JID}__X2.json`), JSON.stringify(msg('X2', { viewOnceMessageV2: { message: img() } })));
-  await assert.rejects(() => wa.fetchMedia(`wa-thumb:${JID}/X2`), /Tek seferlik/);
+  fs.writeFileSync(path.join(dir, `${JID}__X2.json`), JSON.stringify(msg('X2', { viewOnceMessageV2: { message: { imageMessage: { mimetype: 'image/jpeg' } } } })));
+  await assert.rejects(() => wa.fetchMedia(`wa:${JID}/X2`), /Tek seferlik/);
   store.close();
 });

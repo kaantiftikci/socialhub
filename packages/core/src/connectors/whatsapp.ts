@@ -441,8 +441,6 @@ export class WhatsAppConnector extends BaseConnector {
         /* yok say; sonraki açılışta yeniden denenir */
       }
     }
-    // eski sürümlerin normal fotoğraf gibi yazdığı tek seferlik medya (hesap başına bir kez, arka planda)
-    void this.repairViewOnce().catch((e) => bus.log('warn', `WhatsApp: tek seferlik medya onarımı yapılamadı: ${(e as Error).message}`));
     this.stopping = false;
     this.historySeen = false;
     this.opened = false;
@@ -1980,8 +1978,8 @@ export class WhatsAppConnector extends BaseConnector {
       throw new Error('medya kaydı yok (mesaj eski olabilir)');
     }
     const msg = JSON.parse(pending ?? fs.readFileSync(idx, 'utf8'), BufferJSON.reviver) as WAMessage;
-    // tek seferlik medya asla indirilmez / gösterilmez (yalnız telefonda bir kez açılır)
-    if (isViewOnce(msg.message)) {
+    // içeriği gelmemiş tek seferlik medya indirilemez (yalnız telefonda açılır); içerikliyse normal medya gibi (25.11 Kaan)
+    if (isViewOnce(msg.message) && !viewOnceHasMedia(msg.message)) {
       this.forgetMedia(jid, id);
       throw new Error('Tek seferlik medya yalnız telefonda açılabilir');
     }
@@ -2088,10 +2086,9 @@ export class WhatsAppConnector extends BaseConnector {
         this.reactionPreview(jid, `${reaction.text} ${name.split(/\s+/)[0]} mesajına tepki verdi`);
       return;
     }
-    // Tek seferlik (bir kez görüntülenen) medya: canlıda WhatsApp içeriği bağlı cihazlara göndermiyor (aşağıdaki içeriksiz yer
-    // tutucu), geçmiş eşitlemesinde ise sarmal/bayrakla İÇERİKLİ gelebiliyor → unwrap sarmalı soyunca normal fotoğraf gibi
-    // yazılıyor, medyası indirilip gösteriliyordu (gönderen tek seferlik gönderdi: ciddi gizlilik sorunu). Her iki yolda aynı uyarı.
-    if (isViewOnce(m.message)) {
+    // Tek seferlik (bir kez görüntülenen) medya: canlıda WhatsApp içeriği bağlı cihazlara göndermiyor (içeriksiz yer tutucu);
+    // geçmiş eşitlemesinde İÇERİKLİ gelirse normal fotoğraf/video gibi gösterilir (25.11 Kaan: "normal fotoğraf olarak gözüksün").
+    if (isViewOnce(m.message) && !viewOnceHasMedia(m.message)) {
       this.viewOncePlaceholder(m, jid, live);
       return;
     }
@@ -2271,59 +2268,6 @@ export class WhatsAppConnector extends BaseConnector {
     this.mediaPending.delete(idx);
     const media = path.join(sessionDir(this.account.id), 'media', key);
     for (const f of [idx, media, media + '.type']) fs.promises.rm(f, { force: true }).catch(() => undefined);
-  }
-
-  /**
-   * Eski sürümler geçmiş eşitlemesindeki tek seferlik medyayı normal fotoğraf/video olarak yazdı. Ham mesajlar medya kaydında
-   * (media-index/<jid>__<id>.json) duruyor: hesap başına BİR KEZ taranır (dilimli, olay döngüsünü kilitlemeden), tek seferlik
-   * olanlar yer tutucuya çevrilir, medya kaydı ve indirilmiş dosya silinir.
-   */
-  private async repairViewOnce(): Promise<number> {
-    const flag = `wa_viewonce_v1:${this.account.id}`;
-    if (this.store.flag(flag)) return 0;
-    const dir = this.mediaIndexDir();
-    let files: string[] = [];
-    try {
-      files = (await fs.promises.readdir(dir)).filter((f) => f.endsWith('.json'));
-    } catch {
-      /* kayıt yok */
-    }
-    let fixed = 0;
-    for (let i = 0; i < files.length; i += 32) {
-      if (this.stopping) return fixed; // hesap kapatıldı: bayrak yazılmaz, sonraki açılışta sürer
-      await Promise.all(
-        files.slice(i, i + 32).map(async (f) => {
-          let raw: string;
-          try {
-            raw = await fs.promises.readFile(path.join(dir, f), 'utf8');
-          } catch {
-            return;
-          }
-          if (!raw.includes('"viewOnce')) return; // ucuz ön eleme: sarmal adları ve bayrak bu dizeyi içerir
-          let msg: WAMessage;
-          try {
-            msg = JSON.parse(raw, BufferJSON.reviver) as WAMessage;
-          } catch {
-            return;
-          }
-          if (!isViewOnce(msg.message)) return;
-          const base = f.slice(0, -5);
-          const sep = base.lastIndexOf('__');
-          if (sep <= 0) return;
-          const jid = base.slice(0, sep);
-          const id = base.slice(sep + 2);
-          this.forgetMedia(jid, id);
-          if (this.rewriteViewOnce(jid, id, false)) fixed++;
-        }),
-      );
-      await new Promise((r) => setImmediate(r));
-    }
-    if (fixed) {
-      bus.log('info', `WhatsApp: ${fixed} tek seferlik medya normal fotoğraf/video gibi görünüyordu; "tek seferlik" uyarısına çevrildi, medyası silindi`);
-      this.sweepTwins();
-    }
-    this.store.setFlag(flag);
-    return fixed;
   }
 
   /**
@@ -2610,6 +2554,13 @@ export function isViewOnce(m: proto.IMessage | null | undefined, depth = 0): boo
   const y = x as typeof x & { groupMentionedMessage?: { message?: proto.IMessage | null } | null; botInvokeMessage?: { message?: proto.IMessage | null } | null };
   const inner = m.ephemeralMessage?.message ?? m.documentWithCaptionMessage?.message ?? x.editedMessage?.message ?? y.groupMentionedMessage?.message ?? y.botInvokeMessage?.message;
   return inner ? isViewOnce(inner, depth + 1) : false;
+}
+
+/** Tek seferlik mesajın indirilebilir içeriği (medya anahtarı + adres) var mı — geçmiş eşitlemesi verebiliyor, canlı vermiyor. */
+export function viewOnceHasMedia(m: proto.IMessage | null | undefined): boolean {
+  const c = unwrap(m);
+  const media = c?.imageMessage ?? c?.videoMessage ?? c?.ptvMessage ?? c?.audioMessage;
+  return !!(media?.mediaKey && (media.directPath || media.url));
 }
 
 function unwrap(m: proto.IMessage | null | undefined): proto.IMessage | undefined {
