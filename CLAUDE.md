@@ -310,6 +310,9 @@ Dil: arayüz ve yorumlar Türkçe.
   yerel yanıt/tepki/düzenle/sil açıldı (types.ts; düzenleme 15 dk, LinkedIn 60 dk), QUOTE_TEXT yalnız TikTok/iMessage.
   Paket: `scripts/build-bridge.mjs` (`npm run bridge:build`), bundle-core Go varsa `core/bin`e koyar (CI `MIVELO_BUNDLE_BRIDGE=1`;
   setup-go 1.26, mac-intel `CC="clang -arch x86_64"`, Windows MinGW gcc), CI ayrıca `mivelo-bridge-<os>-<arch>` + latest.json `bridge`.
+  Tek seferlik medya (25.11): WhatsApp canlıda içeriği bağlı cihazlara GÖNDERMEZ (WhatsApp Web'de de açılmaz) → yer tutucu; köprüde
+  `disable_view_once: true` (geçmişteki içerik normal foto gibi gösterilmez, 29.09 kuralı); mautrix'in İngilizce bildirimleri `bridgeNotice` ile
+  Türkçe, eski kayıtlar bir kez çevrilir (`mx_notice_v1:<hesap>`).
   Testler: `apps/bridge` `go test` (sahte ağla uçtan uca + gerçek 6 bağlayıcı açılışı + çerez adımları), çekirdek
   `mautrix-connector.test.ts` (olay eşleme), `mautrix-e2e.test.ts` (gerçek ikili + `MIVELO_FAKE_NET=1`; Go yoksa atlanır). Gerçek
   hesaplarla DOĞRULANMADI. Lisans: apps/bridge AGPL-3.0 (depo açık). "Tüm verileri sil" köprüyü kapatıp `bridge/` klasörünü de siler.

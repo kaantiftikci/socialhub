@@ -57,6 +57,19 @@ const LOGIN_HINT: Record<string, string> = {
   slack: 'Açılan pencerede Slack çalışma alanına giriş yap ve çalışma alanını aç',
 };
 
+/** WhatsApp tek seferlik medya: içerik bağlı cihazlara GELMEZ (WhatsApp Web'de de açılmaz) → Baileys yolundaki metinle aynı. */
+export const WA_VIEW_ONCE_TEXT = '🔒 Tek seferlik fotoğraf/video — WhatsApp içeriğini bağlı cihazlara göndermiyor; telefonda aç';
+export const WA_VIEW_ONCE_SENT_TEXT = '🔒 Tek seferlik fotoğraf/video gönderdin (başka cihazdan)';
+export const WA_UNDECRYPTABLE_TEXT = '⏳ Mesaj bekleniyor — WhatsApp henüz çözemedi, gönderen cihaz yeniden gönderecek';
+
+/** mautrix'in İngilizce bildirim metinleri (m.notice) → Türkçe. */
+export function bridgeNotice(body: string): string {
+  if (/^You received a view once message/i.test(body)) return WA_VIEW_ONCE_TEXT;
+  if (/^You sent a view once message/i.test(body)) return WA_VIEW_ONCE_SENT_TEXT;
+  if (/^Decrypting message from WhatsApp failed/i.test(body)) return WA_UNDECRYPTABLE_TEXT;
+  return body;
+}
+
 export class MautrixConnector extends BaseConnector {
   private readonly net: string;
   private state: MxState;
@@ -108,6 +121,7 @@ export class MautrixConnector extends BaseConnector {
       return;
     }
     if (this.stopping) return;
+    this.fixNoticesOnce();
     // oturum düştüğü biliniyor ('pairing' iken Yeniden bağlan) → yeniden giriş; yoksa var olan oturumla bağlan
     if (this.state.login && !opts.login) {
       try {
@@ -406,6 +420,28 @@ export class MautrixConnector extends BaseConnector {
     bus.emit({ type: 'chat.delete', chatId: cid });
   }
 
+  /** Eski sürümün İngilizce yazdığı köprü bildirimleri (tek seferlik medya, çözülemeyen mesaj) bir kez Türkçeye çevrilir. */
+  private fixNoticesOnce(): void {
+    const flag = `mx_notice_v1:${this.account.id}`;
+    if (this.store.flag(flag)) return;
+    try {
+      const pairs: [string, string][] = [
+        ['You received a view once message%', WA_VIEW_ONCE_TEXT],
+        ['You sent a view once message%', WA_VIEW_ONCE_SENT_TEXT],
+        ['Decrypting message from WhatsApp failed%', WA_UNDECRYPTABLE_TEXT],
+      ];
+      this.store.transaction(() => {
+        for (const [like, tr] of pairs) {
+          this.store.sql('UPDATE messages SET text = ? WHERE text LIKE ? AND chat_id IN (SELECT id FROM chats WHERE account_id = ?)').run(tr, like, this.account.id);
+          this.store.sql("UPDATE chats SET last_preview = ? WHERE account_id = ? AND (last_preview LIKE ? OR last_preview LIKE '%: ' || ?)").run(tr, this.account.id, like, like);
+        }
+      });
+      this.store.setFlag(flag);
+    } catch (e) {
+      bus.log('warn', `köprü bildirimleri çevrilemedi: ${(e as Error).message}`);
+    }
+  }
+
   private convert(c: MxContent): { text: string; attachments?: Attachment[] } {
     const body = c.body ?? '';
     switch (c.msgtype) {
@@ -426,7 +462,7 @@ export class MautrixConnector extends BaseConnector {
       case 'm.emote':
         return { text: `* ${body}` };
       default:
-        return { text: body };
+        return { text: bridgeNotice(body) };
     }
   }
 

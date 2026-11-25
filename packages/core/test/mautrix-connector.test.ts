@@ -145,3 +145,11 @@ test('başka hesabın olayları işlenmez', async () => {
   await c.stop();
   bus.emit({ type: 'log', level: 'info', text: 'bitti' });
 });
+
+test('köprü bildirimleri Türkçe: tek seferlik medya ve çözülemeyen mesaj', async () => {
+  const { bridgeNotice, WA_VIEW_ONCE_TEXT, WA_VIEW_ONCE_SENT_TEXT, WA_UNDECRYPTABLE_TEXT } = await import('../src/connectors/mautrix/connector.js');
+  assert.equal(bridgeNotice('You received a view once message. For added privacy, you can only open it on the WhatsApp app.'), WA_VIEW_ONCE_TEXT);
+  assert.equal(bridgeNotice('You sent a view once message from another device.'), WA_VIEW_ONCE_SENT_TEXT);
+  assert.equal(bridgeNotice('Decrypting message from WhatsApp failed, waiting for sender to re-send... ([learn more](https://faq.whatsapp.com/x))'), WA_UNDECRYPTABLE_TEXT);
+  assert.equal(bridgeNotice('Merhaba'), 'Merhaba');
+});
