@@ -1,3 +1,4 @@
+import { getPrefs } from './prefs';
 import { useEffect, useLayoutEffect, useRef, useState, type InputHTMLAttributes } from 'react';
 import { clearOpening, markOpening } from './login-opening';
 import { api, USE_STATIC, type FlowView } from './api';
@@ -21,11 +22,18 @@ const SHOP_FIELDS: Partial<Record<Platform, string[]>> = { trendyol: ['sellerId'
 /** Resmi giriş (OAuth) adayı uygulamalar → giriş sayfasının sahibi; hangilerinin açık olduğunu çekirdek söyler (/api/oauth/providers) */
 const OFFICIAL_WHO: Partial<Record<Platform, string>> = { gmail: 'Google', outlook: 'Microsoft', yahoo: 'Yahoo', yandex: 'Yandex', slack: 'Slack', instagram: 'Instagram', messenger: 'Facebook', whatsapp: 'Meta' };
 /**
- * Meta uygulamaları (WhatsApp, Instagram, Messenger) YALNIZ kurumsal/resmi yolla bağlanır (Kaan, 14.10: "normal girişleri kaldır, direkt
- * kurumsal giriş"): kişisel hesap/QR/köprü seçeneği ve açma-kapama ayarı yok. Mivelo'nun Meta uygulaması henüz hazır değilse düğme hata
- * paneli gösterir (eski yola DÜŞMEZ). Eskiden bağlanmış kişisel hesaplar çalışmaya devam eder (yalnız yeni bağlantı kapalı).
+ * Meta uygulamaları (WhatsApp, Instagram, Messenger): kurumsal/resmi yol. Ayarlar → Genel → "Kişisel hesapla giriş" (prefs.personalLogin,
+ * vars. açık; Kaan 25.11) açıkken resmi girişi olan HER uygulamada Bağlan iki seçenek sunar (kurumsal / kişisel = eski QR, köprü ya da giriş
+ * penceresi); resmi yol henüz hazır değilse doğrudan kişisel yola gider. Kapalıyken yalnız kurumsal (Meta hazır değilse hata paneli).
  */
 const META_ONLY = new Set<Platform>(['instagram', 'messenger', 'whatsapp']);
+const CHOICE_TEXT: Partial<Record<Platform, { biz: string; bizSub: string; personal: string; personalSub: string; note?: string }>> = {
+  instagram: { biz: 'İşletme ya da içerik üretici hesabı', bizSub: 'Resmi Instagram girişi', personal: 'Kişisel hesap', personalSub: 'Kendi hesabınla giriş', note: 'Resmi giriş yalnız profesyonel hesabın mesajlarını getirir; kişi son 24 saatte yazmadıysa yanıt gönderilemez.' },
+  messenger: { biz: 'Facebook Sayfası', bizSub: 'Resmi Facebook girişi', personal: 'Kişisel Messenger', personalSub: 'Kendi hesabınla giriş', note: 'Resmi giriş yalnız Sayfanın mesajlarını getirir; kişi son 24 saatte yazmadıysa yanıt gönderilemez.' },
+  whatsapp: { biz: 'WhatsApp Business', bizSub: 'Resmi Meta girişi', personal: 'Kişisel hesap', personalSub: 'Telefondan QR okutarak', note: 'WhatsApp Business uygulamasındaki ya da yeni bir numara bağlanır; kişisel numara için QR’ı seç.' },
+};
+const choiceText = (p: Platform) =>
+  CHOICE_TEXT[p] ?? { biz: 'Resmi giriş', bizSub: `${OFFICIAL_WHO[p] ?? PLATFORMS[p].name} sayfasında giriş`, personal: 'Kişisel giriş', personalSub: 'Mivelo’nun giriş penceresiyle' };
 /** Adres + parolayla bağlanan e-posta: iCloud (uygulamaya özel parola), Diğer e-posta (IMAP; sunucu çekirdekte bulunur) */
 const PASS_MAIL = new Set<Platform>(['icloud', 'imap']);
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -288,12 +296,18 @@ export function ConnectModal({
    * Telegram QR, diğer sosyal medya ve e-posta kendi giriş penceresi, iMessage bu Mac.
    * iCloud / Diğer e-posta ve pazaryerleri: önce form, doldurulunca bağlanır.
    */
-  async function add(platform: Platform) {
+  async function add(platform: Platform, opts: { personal?: boolean } = {}) {
     setBusy(true);
     try {
-      if (!USE_STATIC && OFFICIAL_WHO[platform]) {
+      if (!USE_STATIC && OFFICIAL_WHO[platform] && !opts.personal) {
         const off = await officialNow();
-        if (META_ONLY.has(platform) || off.has(platform)) {
+        if (getPrefs().personalLogin) {
+          // iki yol: resmi hazırsa seçtir, değilse kişisel yoldan devam
+          if (off.has(platform)) {
+            setActive(`${platform}:choose`);
+            return;
+          }
+        } else if (META_ONLY.has(platform) || off.has(platform)) {
           await startOfficial(platform);
           return;
         }
@@ -577,6 +591,37 @@ export function ConnectModal({
           </div>
         )}
 
+        {(Object.keys(OFFICIAL_WHO) as Platform[]).map((p) =>
+          active === `${p}:choose` ? (
+            <div className="pairbox" key={p}>
+              <div style={{ flexGrow: 1, minWidth: 0 }}>
+                <h3>Hangi {PLATFORMS[p].name} hesabı?</h3>
+                <div className="cn-choices">
+                  <button className="cn-choice" disabled={busy} onClick={() => void startOfficial(p)}>
+                    <span className="ic">
+                      <Icon name="shield" size={17} sw={2} />
+                    </span>
+                    <span>
+                      <b>{choiceText(p).biz}</b>
+                      <small>{choiceText(p).bizSub}</small>
+                    </span>
+                  </button>
+                  <button className="cn-choice" disabled={busy} onClick={() => void add(p, { personal: true })}>
+                    <span className="ic">
+                      <Icon name="user" size={17} sw={2} />
+                    </span>
+                    <span>
+                      <b>{choiceText(p).personal}</b>
+                      <small>{choiceText(p).personalSub}</small>
+                    </span>
+                  </button>
+                </div>
+                {choiceText(p).note && <p className="cn-note">{choiceText(p).note}</p>}
+              </div>
+            </div>
+          ) : null,
+        )}
+
         {(['icloud', 'imap'] as Platform[]).map((p) =>
           active === `${p}:new` ? (
             <div className="pairbox" key={p}>
@@ -845,7 +890,7 @@ export function ConnectModal({
             // kartın durumu en iyi durumdaki hesaptan (bağlı olan önde); ilk kaydı göstermek bağlı hesabın yanında "Bağlı değil" yazıyordu
             const acc = accounts.filter((a) => a.platform === p).sort((x, y) => STATUS_RANK[x.status] - STATUS_RANK[y.status]);
             const isConn = connected.includes(p);
-            const isActive = acc.some((a) => a.id === active) || active === `${p}:new` || active === `${p}:oauth`;
+            const isActive = acc.some((a) => a.id === active) || active === `${p}:new` || active === `${p}:oauth` || active === `${p}:choose`;
             const macOnly = macOnlyOff(p);
             // yalnız Mac kanalı: yeni bağlantı kapalı; eskiden kalan hesap varsa kaldırılabilsin
             const available = meta.available && (!macOnly || acc.length > 0);

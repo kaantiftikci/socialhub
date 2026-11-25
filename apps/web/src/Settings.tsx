@@ -26,7 +26,7 @@ type Section = { k: Tab; l: string; ic: string; c: string };
 const SETTINGS_INDEX: Partial<Record<Tab, string[]>> = {
   profile: ['Ad soyad', 'Kullanıcı adı', 'E-posta', 'Telefon', 'Profil fotoğrafı'],
   accounts: ['Uygulama bağla', 'Yeniden bağlan', 'Hesabı kaldır'],
-  general: ['Enter ile gönder', 'Yazım denetimi', 'Gönderimi geri al', 'Gizli okuma', 'Rozet sayısı'],
+  general: ['Enter ile gönder', 'Yazım denetimi', 'Gönderimi geri al', 'Gizli okuma', 'Kişisel hesapla giriş', 'Rozet sayısı'],
   look: ['Tema', 'Gece modu', 'Yazı ve arayüz boyutu', 'Hareketleri azalt'],
   notify: ['Bildirim sesleri', 'Ses düzeyi', 'Masaüstü bildirimleri', 'Deneme bildirimi', 'Grup ve kanal bildirimleri', 'Mivelo öndeyken de bildir', 'Art arda gelenleri birleştir', 'Okunmadıysa yeniden hatırlat', 'Rahatsız etme', 'Belirli saatlerde sessiz', 'Odak modu', 'Gün sonu özeti'],
   apps: ['Zil sesi', 'Uygulama ses düzeyi'],

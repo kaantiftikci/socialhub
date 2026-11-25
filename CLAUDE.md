@@ -953,9 +953,10 @@ Dil: arayüz ve yorumlar Türkçe.
   Bearer (lookaside.fbsbx.com/fbcdn/whatsapp.net) önbellek. Hatalar `waErrorText`: 131047 = `WA_WINDOW_TEXT` (24 sa penceresi, şablon gerekir — Mivelo şablon GÖNDERMEZ), 131026/131030
   ulaşılamıyor/test listesi, 131042 ödeme, 190 oturum, 130429 hız. Eski mesaj/grup YOK (`loadHistory` unavailable). Kişisel numara giremez. Registry: `officialKind` 'whatsapp' →
   köprüye/Baileys'e gitmez, `engineOf` 'whatsapp'|'session' (yol değişince eski sohbetler bir kez silinir). Admin → Resmi giriş → WhatsApp: config_id (zorunlu), Graph sürümü, webhook adresi +
-  doğrulama belirteci (Kopyala/Yenile). **Meta uygulamalarında YALNIZ kurumsal giriş (14.10 Kaan: "normal girişleri kaldır, açıp kapatılan ayar olmasın")**:
-  Bağlan → WhatsApp/Instagram/Messenger doğrudan resmi akış (`META_ONLY`, Connect.tsx), kişisel hesap/QR/köprü seçeneği ve `:choose` paneli YOK; Meta uygulaması hazır
-  değilse (çekirdek 409) "kurumsal girişi henüz hazır değil" hata paneli, eski yola DÜŞMEZ (statik demoda eski QR sürer). Admin'de Instagram/Facebook/WhatsApp için "Etkin"
+  doğrulama belirteci (Kopyala/Yenile). **Kişisel / kurumsal giriş seçimi (25.11 Kaan: "kurumsal olmayanlar da girebilsin, ayarlardan açılıp kapansın"; 14.10'daki "yalnız kurumsal"ın yerine)**:
+  Ayarlar → Genel → Bağlanma → "Kişisel hesapla giriş" (`prefs.personalLogin`, vars. AÇIK). Açıkken resmi girişi HAZIR olan her uygulamada (OFFICIAL_WHO: Meta üçlüsü,
+  Gmail/Outlook/Yahoo/Yandex, Slack) Bağlan → `:choose` paneli (Resmi/kurumsal · Kişisel = eski QR/köprü/giriş penceresi, `choiceText`); resmi yol hazır değilse doğrudan
+  kişisel. Kapalıyken yalnız kurumsal (`META_ONLY` Meta hazır değilse "kurumsal girişi henüz hazır değil" hata paneli; e-posta/Slack resmi kapalıysa eski yol). Statik demoda eski akış. Admin'de Instagram/Facebook/WhatsApp için "Etkin"
   kutusu yok (`mv_oauth_always_on`: bilgiler doluysa açık). Eskiden bağlanmış kişisel hesaplar (Baileys/köprü) registry'de çalışmaya devam eder. Testler: whatsapp-cloud.test.ts (sahte Graph + aktarıcı + giriş akışı), PHP aktarıcı yerel `php -S` + sahte Graph ile sınandı. Gerçek Meta hesabıyla DOĞRULANMADI.
 - **Telegram** (zaten resmi MTProto): QR'a ek "Telefon numarasıyla giriş yap" (`restart {phone:true}` → `signInWithPhone`, teleproto signInUser: numara → kod → 2FA;
   `normalizePhone` TR varsayılan; `tgAuthError` Türkçe; kayıtsız numarada hesap AÇILMAZ; stop() bekleyen soruları reddeder). Test: telegram-phone.

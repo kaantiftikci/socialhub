@@ -29,9 +29,11 @@ export interface Prefs {
   dnd: { on: boolean; from: string; to: string; weekend: boolean };
   /** Odak modu: yalnız seçili uygulamalardan bildirim (boş liste = hepsi) */
   focus: { on: boolean; platforms: string[] };
+  /** Kişisel hesapla giriş: açıkken resmi (kurumsal) girişi olan uygulamalarda Bağlan iki seçenek sunar (kurumsal / kişisel); kapalıyken yalnız kurumsal */
+  personalLogin: boolean;
 }
 
-export const DEFAULT_PREFS: Prefs = { enterSends: true, spellcheck: true, silentRead: false, badge: 'messages', zoom: 100, reduceMotion: false, notifyInFocus: true, batchSec: 0, repeatMin: 0, undoSec: 5, dnd: { on: false, from: '23:00', to: '08:00', weekend: false }, focus: { on: false, platforms: [] } };
+export const DEFAULT_PREFS: Prefs = { enterSends: true, spellcheck: true, silentRead: false, badge: 'messages', zoom: 100, reduceMotion: false, notifyInFocus: true, batchSec: 0, repeatMin: 0, undoSec: 5, dnd: { on: false, from: '23:00', to: '08:00', weekend: false }, focus: { on: false, platforms: [] }, personalLogin: true };
 const KEY = 'mivelo.prefs';
 
 let cache: Prefs | null = null;

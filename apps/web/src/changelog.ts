@@ -16,6 +16,21 @@ export interface ChangeEntry {
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    id: '2026-11-25a',
+    date: '2026-11-25',
+    title: 'Kişisel ya da kurumsal giriş, sen seç',
+    items: [
+      {
+        title: 'Kişisel hesaplar geri döndü',
+        text: 'Bağlan’da WhatsApp, Instagram, Messenger, e-posta ve Slack için kurumsal (resmi) giriş ile kişisel hesap arasında seçim yaparsın; WhatsApp kişisel numaran QR ile bağlanır.',
+      },
+      {
+        title: 'Ayarlardan açıp kapat',
+        text: 'Ayarlar → Genel → “Kişisel hesapla giriş” kapalıyken yalnız kurumsal giriş sunulur. Varsayılan açık.',
+      },
+    ],
+  },
+  {
     id: '2026-10-14a',
     date: '2026-10-14',
     title: 'Meta uygulamaları resmi işletme yoluyla',

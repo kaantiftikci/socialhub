@@ -123,6 +123,12 @@ export function GeneralPane() {
           <Switch label="Gizli okuma" on={p.silentRead} onChange={pref('silentRead')} />
         </Row>
       </div>
+      <GroupTitle>Bağlanma</GroupTitle>
+      <div className="set-group">
+        <Row title="Kişisel hesapla giriş" hint={p.personalLogin ? 'Bağlan’da resmi (kurumsal) giriş ile kişisel hesap girişi arasında seçim yaparsın. WhatsApp kişisel numara (QR), kişisel Instagram/Messenger da bağlanabilir.' : 'Yalnız resmi (kurumsal) giriş: WhatsApp Business, Instagram işletme hesabı, Facebook Sayfası; e-posta ve Slack sağlayıcının kendi sayfasında.'}>
+          <Switch label="Kişisel hesapla giriş" on={p.personalLogin} onChange={pref('personalLogin')} />
+        </Row>
+      </div>
       {isTauri && (
         <>
           <GroupTitle>Uygulama simgesi</GroupTitle>
